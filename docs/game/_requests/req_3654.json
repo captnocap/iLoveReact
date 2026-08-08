@@ -1,0 +1,28 @@
+{
+  "id": "req_3654",
+  "at": "2026-08-02T03:12:05.017Z",
+  "origin": "codex:019fbe1c",
+  "text": "ok.... i made an edit while having them tinted and it wiped it clean",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T03:12:18.971Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T03:21:16.002Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Manual retopology tints now survive the same-document topology compaction used by Delete Faces and welds instead of becoming invalid when triangle counts change. The engine carries every surviving face label in the exact compacted order, records the single band of a uniformly tinted deleted patch, and gives the immediately created replacement face that band. Fresh model loads still clear temporary teaching state. Added focused Zig regressions, updated the Agent Seat skill, and verified the ReleaseFast editor build.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T03:21:16.002Z"
+}

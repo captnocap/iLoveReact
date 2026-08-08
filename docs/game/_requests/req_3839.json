@@ -1,0 +1,36 @@
+{
+  "id": "req_3839",
+  "at": "2026-08-05T07:43:42.078Z",
+  "origin": "session:09dee98c",
+  "text": "yeah so i have the second set picked now",
+  "status": "review",
+  "sessionId": "09dee98c-f214-4806-94c1-8d557ea2f434",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:49:15.792Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:49:23.715Z",
+      "actor": "seat-09de",
+      "kind": "note",
+      "text": "Diagnosed live on Van Seat: create-face bridge rejects the side-edge pair because selectedEdgesReferenceNormalPub (mesh_edit.zig:1656) requires the two selected edges' adjacent authored face normals to agree (dot>0). The hole sits in a recess: left/right neighbors are opposing flank walls, dot=-0.467 -> reject; top/bottom neighbors both face outward, dot=+0.772 -> accept. Same quad either way; the gate samples different neighbors per pair."
+    },
+    {
+      "at": "2026-08-05T08:00:00.613Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed live on the Van Seat model why the same quad bridged from the top/bottom edge pair but not the side pair: selectedEdgesReferenceNormalPub requires the two selected edges' adjacent authored face normals to agree (dot > 0). The hole sits in a recess, so the side pair samples the two opposing flank walls (dot -0.467, rejected) while the top/bottom pair samples the agreeing outward faces (dot +0.772, accepted). Fixed under req_3840 (sha e0595047d) per the user's ruling.",
+  "shas": [
+    "e0595047d"
+  ],
+  "resolvedAt": "2026-08-05T08:00:00.613Z"
+}

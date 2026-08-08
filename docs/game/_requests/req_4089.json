@@ -1,0 +1,17 @@
+{
+  "id": "req_4089",
+  "at": "2026-08-08T13:09:45.660Z",
+  "origin": "one-off",
+  "text": "ok so anyways back to git. lets go through it again, tell me what the approach is going forward to keep it clean and what did we clean up",
+  "status": "new",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T13:10:05.617Z",
+      "actor": "session-c405",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3972",
+  "at": "2026-08-07T03:02:36.536Z",
+  "origin": "one-off",
+  "text": "ok u have 3 background terminals running.. why?",
+  "status": "new",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T03:02:47.010Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

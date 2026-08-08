@@ -1,0 +1,28 @@
+{
+  "id": "req_3614",
+  "at": "2026-08-01T23:25:51.817Z",
+  "origin": "codex:019fbe1c",
+  "text": "also because  not wrapped all the way that sliver does not exist when it gets done all the way around, the problem is that 3 edges cant attach to one edge the verts dont align but thats why you wrap around and then down, and arguably u only have to do half and then mirror clone the other half. so anyways how do we test it. how do i tell an agent to follow my edit(s)",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:26:02.012Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T23:26:55.025Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Defined an honest test for agent-followed quad cleanup and verified the current observation boundary in source. Native action drain reports only action kind/source and before/after vertex/part counts, while the agent elements vocabulary exposes vertices and boundary edges but not selected face IDs, face loops, adjacency, or logical grouping changes; therefore an agent cannot currently reconstruct the user's exact merge examples from screenshots or percepts. Reduced the required feature to a narrow follow recorder: capture baseline triangle/group adjacency plus the exact selected triangles for each native merge, derive the repeated horizontal grouping pattern, preview one unseen continuation, then apply a complete half-shell wrap atomically and mirror it. Frontier slivers are provisional and validation occurs after the band closes; propagation stops for a manual reseed at poles, seams, boundaries, or mismatched cadence. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T23:26:55.024Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_3736",
+  "at": "2026-08-03T06:34:22.202Z",
+  "origin": "session:3ec0e7bf",
+  "text": "Yep. That is it. So for some reason, the moment we gave the skill ability to add in parts, it went to shit. heres how you can tell, look at the radio model. that was the one model made first to prototype any of this skill, and at the time. there was no ability to add a cube or anything. i had to open a cube for them to start from. and they did pretty well. \n\nThe thing about using outliners is that its not to become soup. the largest problem is not that i think its just sloppy i really dont give a shit but it actually makes it fucking painful to uv anything because u end up with a ton of faces that you cant actually see anyways and everything is broken up into pieces where if you look then at something like say the female torso (18) model it has roughly 19k triangles and less uv islands than either moped does",
+  "status": "new",
+  "sessionId": "3ec0e7bf-84a2-4409-93cc-09d9e7361d20",
+  "captureMode": "hook",
+  "events": []
+}

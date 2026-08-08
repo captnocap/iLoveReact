@@ -1,0 +1,28 @@
+{
+  "id": "req_3781",
+  "at": "2026-08-04T20:11:15.097Z",
+  "origin": "codex:019fce59",
+  "text": "what is collapsed or malformed about it? and why would that stop a cut on a completely different part of the mesh? also, it restricts cuts onn any other outliner also, and 3rd it does not present to me in any way shape or form that its a bad edit, so how is anyone suppose to know",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T20:11:28.256Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T20:13:30.283Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the accepted weld → globally disabled Cut path. Weld collapses every affected logical vertex to one centroid, deletes only triangles with two coincident final corners, then rebuilds raw triangle soup while retaining authored group ids; it does not validate that surviving triangles in each multi-triangle authored group still form one simple directed boundary. The demonstrated action 556 changed positions without dropping triangles; action 557 dropped two triangles. The poisoned snapshot was destroyed when the later successful Cut commit cleared redo, and Follow did not capture weld vertex ids, so the exact group/vertex ids are no longer recoverable. Structurally, a same-count weld can identify formerly distinct/non-adjacent boundary vertices, causing buildFaceFromBucket to see repeated outgoing boundary edges or a non-closing/disconnected cycle and return MalformedFaceBoundary. Any Cut calls cloneIndexedEditMeshOrImport over the ENTIRE resident document before applying the active-part selection mask; one malformed group in any Outliner aborts all Cut sessions. The integrity roll call only audits part-range ownership, empty declarations, and exact duplicate faces; it does not test authored-boundary reconstructability/manifoldness or a soup→indexed roundtrip, so Weld is accepted with no alert. The import error is then swallowed by catch null, __mesh_lc_begin returns only {ok:0}, ModelView rewrites it as 'Select a face', and the shell status says only 'Loop Cut - hotkey'. No repository files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T20:13:30.283Z"
+}

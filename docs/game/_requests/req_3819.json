@@ -1,0 +1,28 @@
+{
+  "id": "req_3819",
+  "at": "2026-08-05T03:32:30.251Z",
+  "origin": "session:fc4b5586",
+  "text": "I see so basically what happens is you may script together two or more operations and the first one throws the rest of them off entirely? or ? the one that is hella confusing is this roof of the car honestly like just looking at it you would have to do a lot of dumb shit to make this actually be the way it is because the verts make absolutely no sense in this patch that is somehow onnly on one side of the model [Image #5]",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:33:17.724Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:34:06.394Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the follow-up with the op-by-op replay of the roof patch: right half took 4 cut attempts (ring-rotation coin toss lost each time — dir 0 twice gave x-columns, dir 1 split only the middle column while parking T-verts on the first, then the polluted collinear ring made both directions cut the same axis producing the hair-thin columns), left half won on attempt 1 and was never touched — the asymmetry is a retry counter carved into the mesh. The nonsense diagonals are 5/6-gon rings (absorbed mid-edge verts) fan-triangulated from a corner. General principle: ops don't corrupt each other's execution; each cut rewrites the hidden ring state the next cut's direction argument is interpreted against, and 'looks split' != 'is split' sends the agent back for cuts it didn't need.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T03:34:06.393Z"
+}

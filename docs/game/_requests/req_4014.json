@@ -1,0 +1,28 @@
+{
+  "id": "req_4014",
+  "at": "2026-08-07T23:53:55.288Z",
+  "origin": "codex:019fdda4",
+  "text": "it started, the world is missing. the props loaded in after build pieces did. but the world is completely missing",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T23:54:00.260Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T00:03:15.729Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the missing painted world after restart with a tested latest-request-wins map preparation slot. A second bundle evaluation now supersedes and retires orphaned working or ready results instead of receiving a permanent busy response; the live loader confirms ground seeded with one chunk after the exact-host restart.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T00:03:15.729Z"
+}

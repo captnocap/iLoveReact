@@ -1,0 +1,30 @@
+{
+  "id": "req_3889",
+  "at": "2026-08-05T23:47:04.968Z",
+  "origin": "session:f7c3f9ca",
+  "text": "ok so il just say based on after rebuilding and selecting a face. it would make much more sense  to change this up because i have 1 face selected, it says 1 selected, then it goes on to say this is the headrest_underside which is 2 tris yes but i also have it say 2 tris right above. we just need to be a bit better about our data on screen because we have a lot in the entire app here, right. so like this thing that is saying the same thing literally 3 times isnt going to make beetle juice appear so we can cut it out and maybe find a better way to handle it [Image #4] right",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T23:47:20.004Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T23:52:13.424Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cut the triple-printed counts in the model focus panel. The SEMANTICS block printed saved blob / mount rjmd / resident as three separate rows carrying byte-identical numbers, and the region list beneath them repeated per-region counts that the new NAMES pane already owns — so a single selected quad had its triangle count on screen three times. The three horizons exist to LOCATE a semantic drop, which is information only when they DISAGREE, so a new tested pure function semanticHorizonLines collapses them into one 'saved · mount · live' row whenever all three agree and keeps every horizon the moment any one diverges; the drop case is now the thing that stands out instead of being buried in repetition. The duplicated region list became a one-line pointer that switches to the NAMES pane. In SELECTION, the per-face 'N tris · M verts' detail row is suppressed when exactly one face is selected, because the summary two rows above already stated both numbers — it still appears for multi-face selections where it is genuine per-face detail. Horizon counts are labelled tris rather than faces, continuing the req_3888 vocabulary fix. modelSemanticsFocus.test.ts is 6 passed with a new case covering both collapse and divergence; rjit ship editor builds clean.",
+  "shas": [
+    "97582762a"
+  ],
+  "resolvedAt": "2026-08-05T23:52:13.424Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3884",
+  "at": "2026-08-05T23:00:16.170Z",
+  "origin": "session-f7c3",
+  "text": "and then the semantics, you are going to want to make its own tab like uv has now because were gonna want to be able to see the list of all of them, click them and it selects where they are on the model",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-05T23:07:25.723Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T23:07:25.732Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Gave semantics its own right-rail tab beside Atlas, as asked. NAMES lists every region at once with a filter box, a coverage line (regions, named/total faces, unnamed remainder), and one row per region; clicking a row selects that region's faces on the model and shift-click adds to the selection, with a select-all-named verb in the head. Non-resident rows (mount-only, saved-only, hidden) still appear because they diagnose a semantic drop, but they read dimmed and refuse selection since they own no live faces. Selection routes through the same native region query the Seat's region:<name> selector compiles to, so there is one selection authority rather than a viewer-side copy. The list carries an explicit ScrollView height (flexGrow collapses it — fixed in a follow-up commit after the first build caught it). rjit ship editor compiles clean.",
+  "shas": [
+    "5369a04d4",
+    "06530015f"
+  ],
+  "resolvedAt": "2026-08-05T23:07:25.732Z"
+}

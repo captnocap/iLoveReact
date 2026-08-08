@@ -1,0 +1,30 @@
+{
+  "id": "req_3883",
+  "at": "2026-08-05T22:53:15.069Z",
+  "origin": "session:f7c3f9ca",
+  "text": "OK one other thing can u make it possible for me to clearly see the unreachable and intersecting. the number means nothing if i dont know where it is at, so like target them all or something from a button action",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T22:53:20.965Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T23:07:20.809Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the geometry counts locatable. mesh_audit.zig now takes an optional per-face Marks out-param and records which triangles it counted in the SAME pass that counts them, so a selection can never disagree with the number the panel is showing; over-budget audits clear the marks instead of leaving stale ones from a previous mesh. New host door __mesh_select_audit(kind) re-runs the marked audit (glass still transparent to reachability, matching the counting path), switches to face mode and selects intersecting / unreachable / both. In the UI each SHAPE fact row grew a target verb — shown only when the audit is real and found something — and the section head grew a select-both verb; press it, then F frames the selection. The Agent Seat got select-audit for the same reach. Two new tests cover marks-match-counts and no-stale-marks: tools/zig/zig build test-mesh-audit is 11/11 green, and rjit ship editor compiles clean.",
+  "shas": [
+    "8337ae719"
+  ],
+  "resolvedAt": "2026-08-05T23:07:20.809Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3607",
+  "at": "2026-08-01T22:24:58.848Z",
+  "origin": "codex:019fbf6d",
+  "text": "$agent-seat make a ladder that mounts on a wall",
+  "status": "review",
+  "sessionId": "019fbf6d-2b10-7500-b34f-4a46989644b8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T22:25:03.257Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T22:25:36.638Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built wall-mounted ladder in Agent Seat per request: added 8 named cube parts (2 rails, 5 rungs, wall mounting plate) with explicit metric placement (rails ±0.225m on x, ladder depth 0.05m, rung depth 0.05m, mount board 0.54x2.05x0.05m on z≈0). Used scale contract and explicit moves; save + semantic-status both healthy. No repo files changed; generated model update only via running editor model state.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T22:25:36.637Z"
+}

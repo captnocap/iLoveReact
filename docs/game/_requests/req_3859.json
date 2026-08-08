@@ -1,0 +1,30 @@
+{
+  "id": "req_3859",
+  "at": "2026-08-05T18:56:30.036Z",
+  "origin": "session:2eed946e",
+  "text": "that fix isnt entirely correct, at the right angles you lose the edges of something that is directly in view [Image #3]",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T18:59:16.882Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T19:03:59.571Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Follow-up to req_3856: the occlusion prune derived edge visibility from endpoint vertices alone, so at zoom an edge whose endpoints were off-screen behind other parts vanished while its middle was directly in view. Fix in refreshCameraVisibility (now takes real viewport dims): an edge with both endpoints hidden falls back to occlusion probes sampled across its viewport-clipped on-screen span (near-plane clip + Liang-Barsky + perspective-correct screen-to-world param mapping, one probe per ~48px, max 16) — any clear probe keeps the edge. Silhouette corners additionally get a 3-screen-pixel rescue probe toward the incident face centroid so grazing-angle slivers can't hide markers you can plainly see; a first attempt with a face-proportional nudge was caught by the new regression test as too aggressive and replaced with the pixel-based probe. New inline test reproduces the exact zoom scenario (both endpoints occluded, middle visible: edge draws, endpoint markers stay hidden). 162/162 mesh-edit tests pass. Needs dev-host rebuild.",
+  "shas": [
+    "b8e8bd24d"
+  ],
+  "resolvedAt": "2026-08-05T19:03:59.571Z"
+}

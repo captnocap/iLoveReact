@@ -1,0 +1,30 @@
+{
+  "id": "req_3898",
+  "at": "2026-08-06T00:30:04.026Z",
+  "origin": "session:f7c3f9ca",
+  "text": "ok so removing names after creating them, the last one fucks up and causes a mismatch from the disk to the live state and then u cant do anything. -_- nor save anything",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:30:30.256Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:33:51.990Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the trap my own remove verb walked into. meshDocWouldEraseSemantics was written against a mesh that SILENTLY lost its names — a hydration or mount drop — where saving would cement the loss, so it refuses any save whose resident mesh is anonymous while the durable blob still carries names. Removing the LAST region reaches that same zero deliberately, by an entirely different road, and the guard could not tell the two apart: once the table was emptied every save was refused, leaving the model permanently out of step with disk and the user unable to commit anything. Emptying the table now requires the same one-shot capability a destructive part-count change already requires — allowSemanticClear, minted only when a real Remove fires in the NAMES pane and threaded through writeModelArtifacts into writeMeshDoc. Hydration, paint saves and autosave still cannot mint it, so the accidental-drop case is refused exactly as before; meshDoc.test.ts now covers both directions and is 14 passed. The refusal message also names the missing authorization instead of just stating the mismatch. rjit ship editor builds clean.",
+  "shas": [
+    "f45730e3f"
+  ],
+  "resolvedAt": "2026-08-06T00:33:51.990Z"
+}

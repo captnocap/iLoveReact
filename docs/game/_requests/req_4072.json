@@ -1,0 +1,17 @@
+{
+  "id": "req_4072",
+  "at": "2026-08-08T10:54:09.062Z",
+  "origin": "one-off",
+  "text": "u can clear all of zig out i just use the dev build anyways",
+  "status": "new",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T10:54:17.399Z",
+      "actor": "claude-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

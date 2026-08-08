@@ -1,0 +1,30 @@
+{
+  "id": "req_3801",
+  "at": "2026-08-05T00:40:02.949Z",
+  "origin": "session:bae7e49e",
+  "text": "ok. tap into the follow mode in the /agent-seat ive got 2 things to show that the behavior is completely wrong",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T00:40:13.737Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T00:59:04.157Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Tapped into agent-seat follow mode as asked and observed both live demonstrations end to end: the extrude-edge fusion (req_3802/3803) and the twin-as-same-face identity bug (req_3804). Both were diagnosed from the follow firehose + topology inspects, fixed in framework/gpu/3d.zig, proven headlessly on the rebuilt binary, and committed as ee7776f06. Follow session stopped and drained cleanly.",
+  "shas": [
+    "ee7776f06"
+  ],
+  "resolvedAt": "2026-08-05T00:59:04.157Z"
+}

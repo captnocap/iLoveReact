@@ -1,0 +1,57 @@
+{
+  "id": "req_4009",
+  "at": "2026-08-07T21:59:36.938Z",
+  "origin": "codex:019fdda4",
+  "text": "actually, i would say go for in process hot swap because at worst you still just have to restart for it to relink anyways and at best it works",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:59:45.350Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T22:03:37.257Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-07T22:07:43.156Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User approved the reviewed in-process hot-swap plan and requested implementation."
+    },
+    {
+      "at": "2026-08-07T22:07:43.165Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T22:07:43.174Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implementation started. Preserving the dirty worktree and building the ABI/load-test seam before switching the live dev path."
+    },
+    {
+      "at": "2026-08-07T23:36:56.581Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Implemented modular native development builds with a stable cold core, content-addressed Scene3D and Game shared libraries, frame-boundary Scene3D hot swap, exact-child restart and session replay fallback, independent caches and fingerprints, failure-safe publication, IPC observability, and cold-core import auditing. Verified live Scene3D commit, Game restart/replay, ABI tests, import audit, and a final static ReleaseFast editor ship. The architectural speedup is real, but the measured LLVM hot compiles remain 15.9 seconds for Game and 30.2 seconds for Scene3D, so the sub-five-second performance gate is explicitly still open rather than claimed complete."
+    }
+  ],
+  "resolution": "Revised the native dev-module architecture to make in-process hot swap the primary adoption path, with automatic supervised process restart as the fallback. The plan keeps each old content-addressed shared object mapped until the replacement passes ABI validation, initializes, restores a host-owned versioned snapshot, switches dispatch at a frame boundary, drains GPU/background work, resets the V8 context so no callback retains old code, and then retires the old module. Load/init failures leave the old module active; quiesce, snapshot, restore, or post-commit failures trigger restart.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T22:03:37.257Z"
+}

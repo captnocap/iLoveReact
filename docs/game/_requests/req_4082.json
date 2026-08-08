@@ -1,0 +1,18 @@
+{
+  "id": "req_4082",
+  "at": "2026-08-08T12:12:51.280Z",
+  "origin": "session:ae84f281",
+  "text": "yep thats my bad i have only ever known that directory to open into bin and not the other 4 so when i said clear it out i meant yes clear out the built binaries",
+  "status": "doing",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:13:02.220Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

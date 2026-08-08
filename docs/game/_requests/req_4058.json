@@ -1,0 +1,18 @@
+{
+  "id": "req_4058",
+  "at": "2026-08-08T08:58:29.606Z",
+  "origin": "session:3eb73457",
+  "text": "that icon isnt sdf is it. i can tell because my fps is tanked to 150fps",
+  "status": "doing",
+  "sessionId": "3eb73457-b787-4144-98bc-0991c2502838",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T08:58:46.016Z",
+      "actor": "opus-hud",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

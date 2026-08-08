@@ -1,0 +1,28 @@
+{
+  "id": "req_3653",
+  "at": "2026-08-02T02:56:35.589Z",
+  "origin": "codex:019fbe1c",
+  "text": "so how do i tinnt it because thats too many times wrong for what is a straight line. so how do i tint it",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T02:56:41.426Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T03:01:59.672Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added inspectable manual retopology tinting: current face selection can be assigned to temporary color ids 0..11, erased selectively, read back as exact face masks, and reselected later. Untinted faces retain normal editor wash; no material, UV, semantic, journal, or saved model data changes. Added native exact-mask helper/door, Seat operations, tests, and skill instructions; built the ReleaseFast editor binary.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T03:01:59.672Z"
+}

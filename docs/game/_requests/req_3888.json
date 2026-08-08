@@ -1,0 +1,30 @@
+{
+  "id": "req_3888",
+  "at": "2026-08-05T23:32:33.153Z",
+  "origin": "session:f7c3f9ca",
+  "text": "why is it saying 2 faces when i select just one face ?",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T23:32:46.531Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T23:38:41.553Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed the miscount. meshSemanticAssignSelection built its mask over triangles (g_edit_count/3) and returned the changed TRIANGLE count, which the Name Faces status line printed next to the word 'faces' — so naming one quad announced 'named 2 faces'. selCount() has always reported authored faces in face mode, so the dialog header and the status line disagreed about the same selection. The grouping rule countSelectedAuthoredFaces already implemented is now pub as mesh_edit.authoredFacesInMask — one definition of how many faces a triangle set is, quad counts once, a loose ungrouped triangle counts as its own — and the assign door runs it over the changed mask instead of returning a raw triangle tally. The semantics ROWS are a genuinely different number: the percept aggregates regions per triangle, so rather than fake a conversion the NAMES pane and the Model pane's semantics list now label those counts 'tris'. rjit ship editor builds clean and test-mesh-audit stays 11/11.",
+  "shas": [
+    "9c6f59df9"
+  ],
+  "resolvedAt": "2026-08-05T23:38:41.553Z"
+}

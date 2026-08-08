@@ -1,0 +1,30 @@
+{
+  "id": "req_3774",
+  "at": "2026-08-04T07:19:37.958Z",
+  "origin": "session:a023d12b",
+  "text": "uh also even tho u just found it. i will say, so i have it open right, now file -> new mesh -> cube for a 3rd time. this gives me a fresh stage. i click the tab that has the one i tried to get rid of, and now this stage has 2 outliners and also says no visible parts.",
+  "status": "review",
+  "sessionId": "a023d12b-0027-49b7-8939-e9fb73c25f4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T07:19:53.884Z",
+      "actor": "fable-newmesh",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T07:31:18.091Z",
+      "actor": "fable-newmesh",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same root cause as req_3773 and fixed by the same commit aaba78eba: the duplicate outliner and 'no visible parts' are what identity reuse looks like once BOTH documents are open at the same time. The closed doc's id (primitive:cube:1) was re-minted for the next New Mesh, so two workspace documents shared one identity — one modelParts bucket, one React key, and an outliner reconciling its rows against a resident mesh belonging to the other document, which is why the stage showed two outliners and then no visible parts. Retiring every minted identity for the session (docSession ledger) makes two live documents on one id impossible, and releasing the host live-mesh lease when a document closes stops the mesh itself from crossing documents. Verified with the same suite run and the headless boot described on req_3773.",
+  "shas": [
+    "aaba78eba"
+  ],
+  "resolvedAt": "2026-08-04T07:31:18.091Z"
+}

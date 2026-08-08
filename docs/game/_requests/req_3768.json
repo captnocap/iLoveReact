@@ -1,0 +1,30 @@
+{
+  "id": "req_3768",
+  "at": "2026-08-04T04:45:16.097Z",
+  "origin": "session:d6ae2229",
+  "text": "what model are you even looking at lol? [Image #2] [Image #3] do you see why this is problematic. I literally can only make out one side of the head and not the other without uding vert/face/edge overlays",
+  "status": "review",
+  "sessionId": "d6ae2229-3ef4-4c5e-ac78-4f804fd2f2b5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T04:46:05.719Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T04:50:15.406Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the one-side-reads-one-side-doesn't asymmetry from the user's two HEAD_ONE screenshots: the old shading was world-anchored (one fixed sun diagonal), so the side of the head facing the sun showed facets while the far side collapsed to flat ambient; also owned that my earlier demo used a library asset, not the user's model. The matcap (9fd84db53) is camera-anchored — the shading ramp always spans whatever faces the viewport — so every orbit angle reads equally. User restarted their dev host onto the new build and confirmed live on HEAD_ONE: the previously featureless side view now shows full faceting with warm/cool separation. User's words: 'yeah thats much better'.",
+  "shas": [
+    "9fd84db53"
+  ],
+  "resolvedAt": "2026-08-04T04:50:15.406Z"
+}

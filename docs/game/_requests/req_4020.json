@@ -1,0 +1,28 @@
+{
+  "id": "req_4020",
+  "at": "2026-08-08T01:15:21.349Z",
+  "origin": "codex:019fda1a",
+  "text": "seems to only do vertical rows. is that true?",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T01:15:26.774Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T01:16:01.889Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed Align Loop's apparent vertical-only behavior. The implementation chooses the globally smallest X/Y/Z coordinate span, including axes whose span is already zero because a selected row lies on a planar surface. It then rejects that zero-span axis as already flat, so a horizontal planar row never reaches its small nonzero vertical span. The only regression fixture is a non-planar four-vertex ring with nonzero span on all three axes, which cannot expose this failure. No source change was made because the user asked whether the limitation was real; the required correction is an orientation-aware axis choice that excludes the surface-normal flatness without losing repeat-operation idempotence.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T01:16:01.889Z"
+}

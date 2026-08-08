@@ -1,0 +1,28 @@
+{
+  "id": "req_4079",
+  "at": "2026-08-08T12:08:09.309Z",
+  "origin": "codex:019fd9ee",
+  "text": "sorry, are u saying the v4 and the v5 are both being loaded at the same time? or what? why would the v4 be relevant if the v5 passes ?",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:08:13.986Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T12:08:27.478Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified that Compact Car has one on-disk RJMD v4, not simultaneous v4/v5 loads. V5 is the current target and exists on other catalog documents; the Compact Car failure is a TypeScript compatibility validator rejecting a v4 edge-semantic row against a v5-only logical-vertex table, while the native v4 envelope reader succeeds. No fallback is being treated as valid.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T12:08:27.477Z"
+}

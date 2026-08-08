@@ -1,0 +1,18 @@
+{
+  "id": "req_3947",
+  "at": "2026-08-06T07:16:30.504Z",
+  "origin": "session:e863e9d6",
+  "text": "right but why didnt they use the offscreen? like, thats literally what it was made for. so why are they not using it",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:16:50.329Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

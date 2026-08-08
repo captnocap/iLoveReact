@@ -1,0 +1,28 @@
+{
+  "id": "req_3609",
+  "at": "2026-08-01T23:08:49.672Z",
+  "origin": "codex:019fbf8c",
+  "text": "[Image #1]But the semantics panel is showing the first genuinely new failure mode of the whole test program, and it's worth stopping on: saved 89 regions, mount 89, resident 69 — with 900/900 faces agreeing everywhere. Every prior horizon split was names lost downstream (saved has them, live dropped them). This is inverted: the disk knows more than the living mesh. Twenty regions exist in the blob and the mount input, and native hydration didn't materialize them — that's the load-mismatch row of the skill's table, live in the wild, except with full face-count agreement, meaning the membership survived but twenty region identities didn't make it into the resident table. And the six mount only cardinal rows are the fingerprint: cube-bootstrap names in the blob that the resident mesh no longer carries.\n\nTwo candidate stories, and the difference matters:\n\nHydration cap or filter — native rebuild drops empty/consumed regions (tombstoned cardinals whose faces got eaten by modeling) while the save faithfully persists the full historical table. Then resident-69 is correct and saved-89 is carrying dead entries — the bug is that save serializes tombstones, and the diagnostic is right to flag the drift but the arrow of error points at the writer.\nReal hydration loss — twenty live regions (Sol duplicated a lot of parts; part-duplicate semantics were the flagged half-shipped area) failed to re-establish on load. Then the next cold agent inherits an engine where twenty named things are anonymous, and this is req_3588's disease at the load boundary instead of the save boundary.",
+  "status": "review",
+  "sessionId": "019fbf8c-07b2-7401-b788-1b68067b1fe8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:09:14.720Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T23:10:18.403Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Distinguished the semantic-count mismatch without mutating the model. The resident native percept contains all 89 semantic table identities, and its table ID set exactly equals the 89 diagnostic rows. The displayed 69 is only the count of face-occupied aggregates: the 20 omitted rows are 14 intentional role=part parent nodes plus six emptied bootstrap cardinal leaves, all with zero direct faces. modelSemanticsFocus compares saved/mount table lengths to resident.regions.length and classifies rows by aggregate presence, so resident zero-face table rows are falsely shown as mount-only. This is a diagnostic aggregation bug, not writer tombstones causing loss and not native hydration loss; all 900 faces remain named. No code or model artifacts changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T23:10:18.402Z"
+}

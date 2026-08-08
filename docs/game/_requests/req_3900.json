@@ -1,0 +1,36 @@
+{
+  "id": "req_3900",
+  "at": "2026-08-06T00:51:34.322Z",
+  "origin": "codex:019fd481",
+  "text": "no no not that. look again. i clicked keep live and it says live could not be saved",
+  "status": "review",
+  "sessionId": "019fd481-0f28-7392-a715-361850d2180a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:51:40.353Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:57:41.501Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed against the live car_backseats session: Keep LIVE reached writeMeshDoc, but the semantic-erasure guard refused because disk still had headrest_mount_left on 8 triangles while the resident mesh had zero named regions after the user's deliberate last-name removal. The conflict picker had collapsed that independent refusal to a generic red sentence. Fix in progress makes the already-explicit Keep LIVE choice carry a one-shot allowSemanticClear only when the picker can prove and display that exact live-zero/disk-named mismatch; ordinary saves/autosaves stay guarded. The picker now includes named-triangle/name facts on both sides, and successful saves consume both structural capabilities."
+    },
+    {
+      "at": "2026-08-06T00:58:33.295Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The failure was not the paint gate after all: Keep LIVE reached the document writer, where the separate semantic-erasure guard saw an empty resident name table against a disk document that still carried headrest_mount_left on 8 triangles. That was the exact deliberate-last-name-removal state from req_3898, but the conflict picker neither disclosed it nor carried the explicit authorization through, so it collapsed the refusal into the generic red sentence. The picker now reads and displays live/disk named-triangle facts, warns when Keep LIVE will remove disk-only names, and that explicit choice supplies allowSemanticClear only for the proven live-zero/disk-named case. Ordinary saves and autosaves remain guarded; all structural save authorizations are consumed after success. The click boundary re-reads both states and prefers the hot current save callback, so the already-open repro modal can use the fix. Paint-conflict tests are 4/4, meshdoc tests are 14/14, editor tsc-check and full bundle pass.",
+  "shas": [
+    "dbb498044"
+  ],
+  "resolvedAt": "2026-08-06T00:58:33.295Z"
+}

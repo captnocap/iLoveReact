@@ -1,0 +1,28 @@
+{
+  "id": "req_4013",
+  "at": "2026-08-07T23:46:18.377Z",
+  "origin": "codex:019fdda4",
+  "text": "[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T23:46:22.348Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T00:03:15.718Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the misleading BadPhysicsConfig mount failure by giving each replaceable native library its own Zig I/O owner and task implementation. Missing world.gamefile now follows the intended FileNotFound blank-canvas path, while asynchronous module work no longer calls through foreign std.Io vtables across a dynamic-library boundary.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T00:03:15.718Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3780",
+  "at": "2026-08-04T20:08:27.510Z",
+  "origin": "codex:019fce59",
+  "text": "yeah but the question is WHY. look. turn on follow and il show u, if i undo some history, all of a sudden i can cut again. it doesnt have any rhyme or reason",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T20:08:32.298Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T20:09:54.563Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's live undo-to-success demonstration with Agent Seat Follow from generation 813. The authoritative journal contains exactly four accepted events: undo weld action 557 restored 1626→1632 soup vertices and 542→544 triangles; undo weld action 556 restored additional topology state with counts unchanged; basic cut then succeeded 544→546; loop cut then succeeded 546→586. Rejected cut attempts do not journal. This localizes the apparently random failure to one of the two immediately preceding weld transactions (action 557 is the strongest culprit because it collapsed/dropped two triangles and six soup vertices). In the welded state, the editor still reports one selected authored face, but loop-cut begin cannot reconstruct/seed a coherent indexed authored face and returns null; the UI incorrectly translates every such internal begin failure into 'select a face,' hiding the real topology/provenance failure. No repository files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T20:09:54.563Z"
+}

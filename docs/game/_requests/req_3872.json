@@ -1,0 +1,30 @@
+{
+  "id": "req_3872",
+  "at": "2026-08-05T20:57:54.901Z",
+  "origin": "session:f7c3f9ca",
+  "text": "yeah because there is no way to name it from the gui. if there was, i would mark both so that it was more clear what went where",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T20:58:04.670Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T21:06:07.911Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the missing GUI naming lane the user called out: Face mode's action bar now carries a 'name faces…' text input plus a tag button (Enter also commits, Escape clears) that names the current face selection as a durable semantic region. It reuses the exact Seat path — declareRegion on the live __mesh_semantic_state table, then __mesh_semantic_assign — but stamps the action source as toolbar rather than automation so Follow provenance stays honest. The status line reports how many faces were named, naming marks the model dirty so the next save rides the table into RJMD v4 per SEMBLOB-0801, and the Model Focus SEMANTICS panel refreshes immediately. Verified live over the running dev host: hot reload took the change, tools/seat look still answers, and a self-shot shows the control rendered in the bar with car_backseats open. Also noted GUI/Seat naming parity in the agent-seat skill so agents expect human-authored regions to appear. This unblocks marking BOTH the soup and the retopo so 'what went where' is recorded in the blob.",
+  "shas": [
+    "ff53f8841"
+  ],
+  "resolvedAt": "2026-08-05T21:06:07.911Z"
+}

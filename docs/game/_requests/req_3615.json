@@ -1,0 +1,18 @@
+{
+  "id": "req_3615",
+  "at": "2026-08-01T23:31:20.286Z",
+  "origin": "codex:019fbfa8",
+  "text": "$agent-seat \n   Open the current torso through Agent Seat and enter Follow mode. Do not edit yet. I’m going\n   to demonstrate one vertical quad strip and propagate it across two neighboring columns.\n   Record my exact face selections and merge operations. When I say done, preview the next\n   unseen column using the same adjacency pattern. Keep all vertices fixed and preserve the\n   source curvature. Treat the unfinished frontier sliver as temporary; validate only after\n   completing the wrap. Stop at topology poles or mismatched columns. After I approve the\n   pattern, finish the left half in closed horizontal bands, work downward, and mirror it\n   across X.",
+  "status": "doing",
+  "sessionId": "019fbfa8-8053-7d53-99c9-af1fab9db646",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:31:29.745Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

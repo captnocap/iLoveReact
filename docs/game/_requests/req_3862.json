@@ -1,0 +1,36 @@
+{
+  "id": "req_3862",
+  "at": "2026-08-05T19:17:18.387Z",
+  "origin": "session:6837fe41",
+  "text": "not doing anything so tap into my live view and look at the faces i have selected",
+  "status": "review",
+  "sessionId": "6837fe41-16e0-490b-8b99-32c07855cc55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T19:17:34.235Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T19:30:03.200Z",
+      "actor": "session-6837",
+      "kind": "note",
+      "text": "Root-caused live: discovery finds the pairs (incl. the user's selected specimen, quad 344 ↔ lone tris 281+286); Merge Faces' coplanarity gate (dot≥0.9999, ~0.1mm) refused every fusion — import quads are ~3.7mm warped. Fixed via mergeSelectedTrusted (gate off for licensed mirror copies) + stats-bearing receipts, f8bf00539. Awaiting rebuild to verify 3 fusions."
+    },
+    {
+      "at": "2026-08-05T19:46:58.465Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Tapped into the live view as asked, read the user's exact selection, and root-caused the dead quads button live: verified the door existed in build 3860 (earlier binary probes were misled by grep on binaries), replayed the algorithm offline on both the welded dump and the raw doc.blob soup (both find the 3 pairs incl. the user's specimen), and proved the refusal was the coplanarity gate via the specimen's 3.7mm warp. Fix committed as f8bf00539 (trusted merge + honest stats).",
+  "shas": [
+    "f8bf00539"
+  ],
+  "resolvedAt": "2026-08-05T19:46:58.465Z"
+}

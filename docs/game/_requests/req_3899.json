@@ -1,0 +1,31 @@
+{
+  "id": "req_3899",
+  "at": "2026-08-06T00:46:02.503Z",
+  "origin": "codex:019fd073",
+  "text": "yep good. now this shit keeps happening on hot updates. code hits -> ui reloads -> mesh randomly has a few near by recently touched faces turned to glass and i have to remove the glass from it to restore its normal state",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:46:13.026Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:51:22.656Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the hot-update glass corruption at its load/resume boundary. A remounted React surface was replaying the stale RJMD trailing-glass boundary onto a newer host-resident mesh whose topology and face order already survived the reload, turning recently touched tail faces translucent. Cold loads still restore saved glass once; hot-resumed sessions now preserve live per-face alpha untouched. Added a red-then-green regression, passed the existing paint-hydration suite and editor type-check, and completed the ReleaseFast editor build.",
+  "shas": [
+    "0ebc22005",
+    "a68507c4f"
+  ],
+  "resolvedAt": "2026-08-06T00:51:22.656Z"
+}

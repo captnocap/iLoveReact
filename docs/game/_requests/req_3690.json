@@ -1,0 +1,30 @@
+{
+  "id": "req_3690",
+  "at": "2026-08-02T17:58:16.936Z",
+  "origin": "session:413446d4",
+  "text": "the green is me drawing a circle poorly lol im talking about the fact that the top of the machine has a slot on it [Image #2]",
+  "status": "review",
+  "sessionId": "413446d4-dc31-44e7-ab96-293e8cdd0f76",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T17:59:13.116Z",
+      "actor": "fable-4134",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T18:05:25.365Z",
+      "actor": "fable-4134",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user caught an invented slot slit painted on the TOP face of a housing box: my prompt had named the small strip islands 'edges of the card slot / cash dispenser slot' and image models decorate anything named after a functional part. Rewrote the prompt to enumerate the only allowed openings and declare every small island 'completely featureless — NO slots, NO slits, NO openings', regenerated (nano-banana-2-lite x2 + gpt-image-2 x1, which also surfaced that gpt-image-2 requires dims in multiples of 16), imported the crisper gpt result, verified the top is clean from the user's own angle via self-shot, replaced the two flawed paint variants with clean 'graphite gpt' + 'steel soft', saved. Both lessons written into the agent-skin skill's Prompting and Generate sections.",
+  "shas": [
+    "9d0a09174"
+  ],
+  "resolvedAt": "2026-08-02T18:05:25.365Z"
+}

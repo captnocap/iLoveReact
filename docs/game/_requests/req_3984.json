@@ -1,0 +1,28 @@
+{
+  "id": "req_3984",
+  "at": "2026-08-07T18:40:00.153Z",
+  "origin": "codex:019fd9ee",
+  "text": "and one more thing, the skeleton rigging only appears when you literally start from new player/npc but that immediately removes all imports from getting the same rigging capabilities if wanted",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T18:40:15.545Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:01:27.646Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made humanoid rigging an opt-in capability on any open created or imported model. Capability attachment preserves geometry and model identity and no longer depends on package kind.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:01:27.646Z"
+}

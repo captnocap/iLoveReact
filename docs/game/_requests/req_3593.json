@@ -1,0 +1,30 @@
+{
+  "id": "req_3593",
+  "at": "2026-08-01T19:31:37.199Z",
+  "origin": "codex:019fbe1c",
+  "text": "i just rebuilt. it gave me the same thing. siah@busiah ~/creative/reactjit $ tools/seat look\n{\"ok\":true,\"op\":\"look\",\"percept\":{\"version\":1,\"generation\":1,\"faces\":28,\"unnamed\":28,\"regions\":[],\"table\":{\"version\":1,\"regions\":[]}}}\nsiah@busiah ~/creative/reactjit $ tools/seat look\nseat: connect ENOENT /tmp/reactjit.sock\nsiah@busiah ~/creative/reactjit $ tools/seat look\n{\"ok\":true,\"op\":\"look\",\"percept\":{\"version\":1,\"generation\":1,\"faces\":28,\"unnamed\":28,\"regions\":[],\"table\":{\"version\":1,\"regions\":[]}}}\nsiah@busiah ~/creative/reactjit $  \n\n\n\nlets get those semantics to render in the model focus panel here in the gui, just so i also know if they exist or not and is a tool failure",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T19:31:42.264Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T19:40:12.829Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the actual cold-load loss and added an explicit GUI diagnostic. The v4 RJMD blob and decoder were healthy; the single-model resolveViewer branch reconstructed initialMesh with geometry/groups/materials but dropped semanticRegions, semanticInstances, and semanticTable. Both single- and multi-part mounts now cross one tested modelDocumentSeed boundary. Model Focus now renders a SEMANTICS section with mounted-vs-resident counts, region names/roles/face+instance counts, and RESIDENT/LOAD MISMATCH/LIVE ONLY/NO NAMES status. tools/seat semantic-status exposes that same diagnosis. ReleaseFast editor build and 17 focused V8 tests pass; user visual/cold-restart verification remains.",
+  "shas": [
+    "d7d7a1ffe"
+  ],
+  "resolvedAt": "2026-08-01T19:40:12.829Z"
+}

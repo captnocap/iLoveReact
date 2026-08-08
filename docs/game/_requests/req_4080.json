@@ -1,0 +1,18 @@
+{
+  "id": "req_4080",
+  "at": "2026-08-08T12:09:48.026Z",
+  "origin": "session:ae84f281",
+  "text": "did this come from us clearing the cache? - install reactjit-dev\n   +- compile exe reactjit-dev ReleaseFast native failure\nerror: warning: unable to open library directory '/home/siah/creative/reactjit/tsz/zig-out/lib': FileNotFound\n       error: unable to find dynamic system library 'llama_ffi' using strategy 'paths_first'. searched paths:\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.so\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.a\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.so\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.a\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.so\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.a\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.so\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.a\n         /home/linuxbrew/.linuxbrew/Cellar/libsodium/1.0.20/lib/libllama_ffi.so\n         /home/linuxbrew/.linuxbrew/Cellar/libsodium/1.0.20/lib/libllama_ffi.a\n         /home/siah/creative/reactjit/deps/onnxruntime/lib/libllama_ffi.so\n         /home/siah/creative/reactjit/deps/onnxruntime/lib/libllama_ffi.a\n         /home/linuxbrew/.linuxbrew/Cellar/libsodium/1.0.20/lib/libllama_ffi.so\n         /home/linuxbrew/.linuxbrew/Cellar/libsodium/1.0.20/lib/libllama_ffi.a\n         /usr/local/lib/libllama_ffi.so\n         /usr/local/lib/libllama_ffi.a\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.so\n         /usr/lib/x86_64-linux-gnu/libllama_ffi.a\n         /lib64/libllama_ffi.so\n         /lib64/libllama_ffi.a\n         /lib/libllama_ffi.so\n         /lib/libllama_ffi.a\n         /usr/lib64/libllama_ffi.so\n         /usr/lib64/libllama_ffi.a\n         /usr/lib/libllama_ffi.so\n         /usr/lib/libllama_ffi.a\n         /lib/x86_64-linux-gnu/libllama_ffi.so\n         /lib/x86_64-linux-gnu/libllama_ffi.a\n       ",
+  "status": "doing",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:10:05.121Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

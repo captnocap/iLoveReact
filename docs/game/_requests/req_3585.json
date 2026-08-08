@@ -1,0 +1,30 @@
+{
+  "id": "req_3585",
+  "at": "2026-08-01T18:22:24.107Z",
+  "origin": "session:357e79a6",
+  "text": "yeah lets make the skill clarify more, obviously the more it says and the less it means you or any model has to investigate a capability is best. just context dump them on everything since they are going to grep for it otherwise",
+  "status": "review",
+  "sessionId": "357e79a6-b104-4a5e-9d0a-394c0080a5f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T18:22:40.083Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T18:26:11.098Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded .claude/skills/agent-seat/SKILL.md from 97 to ~290 lines so a model reads the answer instead of grepping the editor for it, per the user's ruling that the more the skill says the less anyone has to investigate. Every claim was verified against source first, because the oracle flagged 'doc-comment drift as a trap' (a header confidently describing things that do not exist) as the live hazard for exactly this kind of write-up. Added: the scale contract up front (1 unit = 1 meter per R4, the bootstrap cube is a 1m cube, plus a reference-dimension table) since its absence caused a 4x-oversized radio on the skill's first drive; the complete ten-verb table with both CLI and JSON arg shapes; the complete selector grammar from compileSeatSelector; the exact SeatPercept shape; the two-stage inset recipe with its silent pyramid failure mode; batch semantics (verified 100ms cadence at ModelView.tsx:2629, a ~140-row ceiling derived from the CLI's 15s timeout, stop-at-first-rejection, generation guard checked once per request not per row); and a 'What the seat cannot do' table listing 95 declared __mesh_* doors against the 11 the seat uses, naming the resident implementation for each gap (editMesh.ts primitives including cylinder(r,h,segments) clamped 3..48 and wheelMesh, bevel, loop cut, mirror/symmetrize, parts/outliner, journal checkpoint, frame capture) so a model is told there is no way in rather than searching for one. Documented gotchas that cost real debugging time on the first drive: named regions are resolved before the top/bottom keywords and the cube bootstrap creates regions literally named top/bottom, so they coincide on a fresh cube and silently diverge after edits; the comparator in above:/below: is decorative; extruding a .cap consumes it so only .wall names persist down a chain; each extrude adds exactly 8 faces. Also removed two pre-existing drift traps from the old text: an 'as _' syntax that does not exist in the parser, and guidance to 'use instances' when no verb creates one. No code changed; agents/openai.yaml is 4 lines of interface metadata and carries no duplicated contract, so it needed no update.",
+  "shas": [
+    "d616c462f"
+  ],
+  "resolvedAt": "2026-08-01T18:26:11.098Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3996",
+  "at": "2026-08-07T20:04:21.586Z",
+  "origin": "codex:019fda1a",
+  "text": "oh its the same thing above and below also. look. at these i have selected. or here look at my purple arrows on this image [Image #1] see the difference here",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T20:04:38.986Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:06:00.746Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Used the annotated side-view image and the newly selected top/bottom groups 163 and 164 to confirm the same defect on the second axis. Chamfer Boundary converts each surrounding face into a six-vertex polygon, then lowering fans its four triangles from the face's existing first vertex. Because that starting vertex rotates between faces, the triangulation phase differs around the opening, producing the shown 90-degree path on one side and a diagonal bypass on the opposite side before any later cut occurs.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:06:00.746Z"
+}

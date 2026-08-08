@@ -1,0 +1,28 @@
+{
+  "id": "req_4068",
+  "at": "2026-08-08T09:47:42.401Z",
+  "origin": "codex:019fd9ee",
+  "text": "ok and then help me understand how we can have a bunch of tests written that pass then somehow the blob cant be read in the actual app; thats a useless test as far as im concerned",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T09:47:51.715Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T09:53:45.344Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited why RJMD tests passed while Compact_Car_001 failed in the production editor. Proven: TS v5 tests hand-built tiny buffers, Zig tests exercised a shared helper encoder, character cold-open used mocked FS, and none exercised the generic prop host writer or a real process restart. Found and fixed the concrete save gate where native success plus parseDocBlob(null) could still advance parts.json/report success; unreadable native output now rolls back/refuses. Added structured first-failure diagnostics exposed by Seat package and focused regression tests (21/21 pass). Exact existing artifact rejection remains intentionally unknown until reopened through the supported diagnostic path; backup untouched.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T09:53:45.343Z"
+}

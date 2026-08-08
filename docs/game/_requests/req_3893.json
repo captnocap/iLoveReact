@@ -1,0 +1,18 @@
+{
+  "id": "req_3893",
+  "at": "2026-08-05T23:58:51.108Z",
+  "origin": "session:f7c3f9ca",
+  "text": "oh also u need to add to this names thing to be able to remove them i just realized its locking me up from  making those deletes because of the mismatch, but i cant clear any of the existing so im effectively boned",
+  "status": "doing",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T23:59:02.726Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

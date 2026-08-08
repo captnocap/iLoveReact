@@ -1,0 +1,30 @@
+{
+  "id": "req_3846",
+  "at": "2026-08-05T17:29:38.259Z",
+  "origin": "codex:019fd073",
+  "text": "Ok now the Recent and Favorites tabs in this asset explorer dont show recents or favorites at all",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T17:29:47.677Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T17:37:05.103Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Favorites and Recent now render real mixed Asset Explorer collections in both tucked and expanded layouts. Favorites derives from live model favorite state and catalog asset overrides; Recent records model tree selections, model opens, asset selections, selected world-object assets, and applied materials in newest-first deduplicated order. Existing search text filters the selected collection instead of masking it.",
+  "shas": [
+    "966549805"
+  ],
+  "resolvedAt": "2026-08-05T17:37:05.103Z"
+}

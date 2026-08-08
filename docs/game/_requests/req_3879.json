@@ -1,0 +1,30 @@
+{
+  "id": "req_3879",
+  "at": "2026-08-05T21:51:03.628Z",
+  "origin": "session:2eed946e",
+  "text": "this is much better but why does none of the islands stay to gether ? like look here [Image #8] ok but if i select the middle, [Image #9] it segments that area, and if i double click. [Image #10] it isolates inside of it. so why cant it connect to everything that it is clearly connected to",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T21:52:16.195Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T21:54:30.456Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The unfold survived generation but not ADOPTION: every time corner UVs are re-adopted (save/reload hydration, structural edits, UV geometry apply), buildFromNormalizedUv re-derives island membership, and its merge rule still carried the projection-era dominant-axis gate — two faces only joined when their normals shared a 90-degree world bucket, even with perfectly continuous UVs. An unfolded chart deliberately folds up to 92 degrees, so island identity re-shredded at every bucket wall while the drawn layout stayed visually connected — exactly the 'segments when I select, isolates when I double-click' behavior. Fix: dropped sameProjectionBucket/projectAxis entirely; reconstruction now merges on the honest test alone — the shared 3D edge remains shared (coincident) in UV space. Deliberately split UVs still split (moving a wedge breaks coincidence); old box-projection layouts are unaffected (their bucket-separated faces never had coinciding UV edges anyway). New regression test: a 90-degree-fold chart with continuous UVs survives reconstruction as ONE island. 13/13 paint_islands, 55/55 model-paint, 166/166 mesh-edit. Rebuild + reopen the seat and the central chart should select as one island.",
+  "shas": [
+    "c468fd1be"
+  ],
+  "resolvedAt": "2026-08-05T21:54:30.456Z"
+}

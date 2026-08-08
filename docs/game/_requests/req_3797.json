@@ -1,0 +1,30 @@
+{
+  "id": "req_3797",
+  "at": "2026-08-04T23:48:31.322Z",
+  "origin": "session:e412dbcf",
+  "text": "yeah lets go ahead and do that because while its just like whatever for me and i end up just hacking around the inability, trying to have an agent model anything and the moment it doesnt just automatically behave in a way that would be expected, they hit serious roadblocks and then takes much longer for them to reason about how to do something correctly",
+  "status": "review",
+  "sessionId": "e412dbcf-68b0-4527-a26e-1bfbc966b8b4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T23:49:35.292Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T00:13:17.945Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made every editing verb bilateral under an armed mirror plane, so an agent modeling in mirror mode never hits the one-sided roadblock. Three mechanisms in 3d.zig: (1) the extrude mask-extension door is now shared by delete, flip, glass, paint fill (the mirror-painting half of req_1538, for fills), solidify, and detach — twins join the same detached part; (2) single-cluster machinery gets a second fusion in the same commit — merge-faces fuses the twin cluster separately and refuses the WHOLE op if the twin half cannot merge, connect-vertices connects every twin pair; (3) positional twins — weld collapses twin sets to reflected centroids, bevel resolves twin targets at begin and previews both at one shared width, extrude-edge and create-face append reflected reverse-wound geometry only when the twin edge actually exists. Extrude now reply-selects only the source cap so the follow-up transform mirrors the twin instead of dragging both rigidly (this makes the seat's composite inset symmetric too). Added RJIT_MESHOPS harness ops symreport (file-dumped symmetry proof) and weld. Headless-proven symmetric on the mirrored cube: delete, solidify, extrude-edge, extrude+nudge, weld, glass+flip — all unmatched=0. merge/bevel/connect/create-face lack harness doors and are compile+review verified. Honest remainder: basic-cut is still one-sided (needs a per-side reflected plane comb; ring loop cut needs nothing — it already propagates around the whole body). 151/151 mesh tests and part-sync-parity A-D pass.",
+  "shas": [
+    "64b824b01"
+  ],
+  "resolvedAt": "2026-08-05T00:13:17.945Z"
+}

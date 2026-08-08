@@ -1,0 +1,30 @@
+{
+  "id": "req_3861",
+  "at": "2026-08-05T19:16:42.357Z",
+  "origin": "session:2eed946e",
+  "text": "that is still not it. try again [Image #4]",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T19:22:42.714Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T19:25:53.420Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Third pass on the Surface-mode occlusion overlay: the remaining vanishing edges were on GRAZING panels — at shallow view angles a panel sweeps a huge depth range within a few pixels, so the grid's flat relative eps (0.3% of distance) classified points a hair past a shallow hull fold as occluded and whole visible edges died. Fix: slope-scaled depth bias (the classic wireframe polygon-offset) in occPointHidden — each covering triangle also forgives the depth it sweeps across 2 screen px of its own gradient, computed exactly from the tri's linear 1/z plane. Grazing coverers get large slack (silhouette markers survive), frontal coverers get ~zero (greebles behind the hull stay hidden). Also made pickVertex/pickEdge trust the visibility mask instead of re-running the raw ray occlusion test, so drawn == clickable. New unit test: grazing panel keeps a near-silhouette point the raw ray test calls occluded, while a genuinely buried point stays hidden. 163/163 mesh-edit tests pass. Needs dev-host rebuild to see it.",
+  "shas": [
+    "4f9a57c1e"
+  ],
+  "resolvedAt": "2026-08-05T19:25:53.420Z"
+}

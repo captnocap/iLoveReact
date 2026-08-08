@@ -1,0 +1,28 @@
+{
+  "id": "req_3788",
+  "at": "2026-08-04T20:28:19.284Z",
+  "origin": "codex:019fce59",
+  "text": "Ok i see it. So, why would it still be a triangle, now look at the verts selected, those merge. that should close the quad entirely, this is opposite ends of the quad, meaning it would close",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T20:28:25.749Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T20:28:54.487Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the two live selected vertices are opposite corners 8 and 14 of authored quad group 8. Their centroid exactly matches the later welded point. The quad [9,8,11,14] becomes [9,M,11,M], whose boundary cancels completely; it should be removed. Root cause: weld cleanup validates each render triangle independently, so [9,M,11] and [9,11,M] each have three distinct corners and both survive despite being exact opposite-winding duplicates. The authored-group boundary then has zero edges, poisoning whole-document loop-cut import.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T20:28:54.487Z"
+}

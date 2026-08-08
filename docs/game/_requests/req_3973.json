@@ -1,0 +1,28 @@
+{
+  "id": "req_3973",
+  "at": "2026-08-07T03:04:35.778Z",
+  "origin": "codex:019fda1a",
+  "text": "i still dont get it why does some other problem in a model stop me from cutting my perfect quad",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T03:04:40.422Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T03:04:53.682Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the architectural cause: Cut does not operate directly on the selected raw quad. Its begin path first deserializes the entire resident triangle soup into one indexed editing graph so vertex identity, authored faces, parts, UVs, semantics, and loop adjacency can be preserved through commit. That constructor is all-or-nothing; one unrelated malformed face aborts the graph, so the selected perfect quad is never reached. Basic Cut inherited the same global setup despite its local edit scope. This is an editor architecture/diagnostic defect, not a property of the selected quad. No changes made.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T03:04:53.682Z"
+}

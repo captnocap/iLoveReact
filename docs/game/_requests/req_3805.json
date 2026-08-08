@@ -1,0 +1,30 @@
+{
+  "id": "req_3805",
+  "at": "2026-08-05T01:07:23.969Z",
+  "origin": "session:bae7e49e",
+  "text": "ok. now check this face merge. this shouldnt be possible, and yet it is being allowed. \n\nsee the 4 faces\n[Image #11]\n\n[Image #12] [Image #13] [Image #14] \n\nok\n\ninstantly none of t hese should merge right\n\n[Image #15]\n\nso why does that merge. \n\nits even lying about itself, and shows the edges still at the bottom. but you know it merged into one piece, becuase the center dot of each face is no longer visible, its in the center of the 3.",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T01:09:16.278Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T01:17:45.699Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The horseshoe merge: read the live topology via the seat — the merged group was three quads (two tall columns bridged only by a small bottom quad, hole above), with T-junction seams to the bridge. Root cause: req_3800's geometric cancellation dissolves seams the render rows never stitched (a T-split seam is a physical crack — no shared welded vertex along the overlap). Convex results re-tessellate and heal it; CONCAVE results keep byte-stable rows, so the horseshoe committed an authored face still rendering its interior open edges ('lying about itself'), centre dot over the void. Fix in both twins: mergeFaceIds tracks which cancelled seam keys contain T-split fragments and refuses when the clean loop is concave (before mutation); concave over exact seams (req_3771 bookshelf class) and convex over cracked seams stay legal. Unit-pinned both sides incl. a hole-filled convex control (Zig 153/153, TS suite green). Editor rebuild kicked off; the committed lying merge in the live model can be undone with ctrl+z.",
+  "shas": [
+    "ed8090895"
+  ],
+  "resolvedAt": "2026-08-05T01:17:45.698Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_4035",
+  "at": "2026-08-08T05:49:21.053Z",
+  "origin": "one-off",
+  "text": "i have 4490 tris it says so its not the same model[Image #1]",
+  "status": "new",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:02:19.257Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

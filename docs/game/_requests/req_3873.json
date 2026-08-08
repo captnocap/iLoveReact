@@ -1,0 +1,30 @@
+{
+  "id": "req_3873",
+  "at": "2026-08-05T20:59:38.644Z",
+  "origin": "session:2eed946e",
+  "text": "that doesnt make any sense. why do big titty anime models load in nwith huge islands when its all a bunch of triangle soup they are surely not coplanar or whatever the hell",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T20:59:59.983Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T21:37:26.915Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Part of the UV-confetti diagnosis thread that led to the unfold-chart build (see req_3876, commit a85590308). This message narrowed the root cause: island grouping history (req_3426 buckets vs req_3726 coplanar), the import-vs-studio lane split (TEXCOORD_0 reconstruction vs generation), the 18k-soup-vs-1.8k-quads asymmetry (smooth curvature stays in one axis bucket, hard angles shatter), and the verdict that a UV without unfold is only paint storage — the cube-to-cross test is now the pinned law.",
+  "shas": [
+    "a85590308"
+  ],
+  "resolvedAt": "2026-08-05T21:37:26.915Z"
+}

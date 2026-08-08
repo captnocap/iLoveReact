@@ -1,0 +1,36 @@
+{
+  "id": "req_3619",
+  "at": "2026-08-01T23:54:41.454Z",
+  "origin": "session:bfe7a1dc",
+  "text": "hey uh so there was a change the other day that fixed a whole problem with showing every edge on the other side of a model but now the xray or whatever it is kicks in and u can never disable that sht [Image #1] or something idk this happens randomly tho ;_;",
+  "status": "review",
+  "sessionId": "bfe7a1dc-6565-4d5c-8242-39b319b07ad7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:54:50.046Z",
+      "actor": "bfe7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T00:00:39.971Z",
+      "actor": "bfe7",
+      "kind": "note",
+      "text": "Traced: 'random xray' was the per-device tool memory replaying mesh-xray on mouse/pen switches; fc001dc3f (Jul 31) declassified it and gated replays. All JS/host xray writers audited clean post-fix. Remaining unguarded door: agent seat viewport op (ModelView.tsx:2669) can set xray directly — other session runs the seat. Awaiting user repro detail (button state when stuck; seat/pen present) or a go to force xray off on every select-mode entry + gate the seat op."
+    },
+    {
+      "at": "2026-08-02T00:03:27.040Z",
+      "actor": "bfe7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same fix covers the diagnosis thread: the random X-Ray was traced to the per-device tool memory replaying mesh-xray (fixed fc001dc3f) plus any lingering enable now being unable to survive a tool switch after 608385565. X-Ray requests are per-entry and the seat op is containment-gated, making 'it turned on by itself and won't go away' structurally impossible.",
+  "shas": [
+    "608385565"
+  ],
+  "resolvedAt": "2026-08-02T00:03:27.039Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_3958",
+  "at": "2026-08-06T07:54:54.037Z",
+  "origin": "session:e863e9d6",
+  "text": "yeah but look at the model i have open right now to compare the whole naming problem. because sure u could blame it on that or u could do something like the car_backseats approach is, which albeit its not done but u can already tell if 11 regions cover 489/1167 where the intersectiing is 0 and unreachable is a fake 2 (so also 0) and it does not have to end up that way. now, idk if what ur going to find is even possible to do through the agent seat and if not thats a problem",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:55:23.706Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

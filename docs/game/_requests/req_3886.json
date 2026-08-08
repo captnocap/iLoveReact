@@ -1,0 +1,30 @@
+{
+  "id": "req_3886",
+  "at": "2026-08-05T23:12:01.095Z",
+  "origin": "session:2eed946e",
+  "text": "uh so one thing. mirror x y z needs to be mirroring for parts, because now that i detached a head rest im trying to on the single head rest make it symmetric for where im going to build the posts but it mirrors across the entire model not the part in the outliners",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T23:12:35.260Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T23:18:30.495Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Mirror X/Y/Z is now scope-aware. Whole-model scope keeps req_3795's fixed model-origin plane (the 'center, then mirror' workflow and all armed Mirror-Edit twinning are untouched — re-derived planes across edits were the drift disease that ruling cured). With a part FOCUSED in the Outliner (the detached head rest case), meshTopoSymmetrize now computes each targeted part's plane as its own bounds midpoint on the chosen axis, quantized to 0.1mm for repeat-invocation stability, and symmetrizes the part in place via the new indexed_edit_mesh.symmetrizePartsAt (per-part planes). Multiple focused parts each repair about their own centerline. New regression test: an off-origin part at x[10,12.5] symmetrized keep-positive lands at x[9.5,12.5] — in place, symmetric about its own line, never reflected across the model. 167/167 mesh-edit suite tests pass; agent-seat SKILL.md mirror row updated; memory ruling refined (one-shot part plane is allowed, persistent derived planes stay banned). Needs dev-host rebuild: focus the head rest part, then Mirror X.",
+  "shas": [
+    "693671c50"
+  ],
+  "resolvedAt": "2026-08-05T23:18:30.495Z"
+}

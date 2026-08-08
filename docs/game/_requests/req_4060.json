@@ -1,0 +1,17 @@
+{
+  "id": "req_4060",
+  "at": "2026-08-08T09:06:21.328Z",
+  "origin": "one-off",
+  "text": "oh yeah these are all just notes from another claude who is critiquing from no ability to read the code. so they got the photo not u sorry",
+  "status": "new",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T09:06:32.764Z",
+      "actor": "claude-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

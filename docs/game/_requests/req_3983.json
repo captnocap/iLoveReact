@@ -1,0 +1,28 @@
+{
+  "id": "req_3983",
+  "at": "2026-08-07T18:38:22.761Z",
+  "origin": "codex:019fd9ee",
+  "text": "also it seems that the skeleton has a fixed height, pulling on something like the pelvis causes the entire skeleton to come with it, therefore no means to shorten or extend based on the model",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T18:38:32.181Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:01:27.584Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added anchored-child joint translation for bind fitting. Moving a non-root joint changes adjacent segment lengths while immediate child origins remain fixed; root remains the whole-hierarchy translation control.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:01:27.584Z"
+}

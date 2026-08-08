@@ -1,0 +1,30 @@
+{
+  "id": "req_3842",
+  "at": "2026-08-05T08:02:34.511Z",
+  "origin": "session:09dee98c",
+  "text": "k perfect so i delete the two triangles, and create a face. and now look at my selected",
+  "status": "review",
+  "sessionId": "09dee98c-f214-4806-94c1-8d557ea2f434",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T08:14:50.912Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T08:14:50.922Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same demonstration thread as req_3841/req_3843: confirmed from the follow transcript that the delete removed only tris 1315/1316 (left flank) while the right quad survived, and the subsequent create-face minted both the correct left quad (group 1761) and the duplicate coincident twin (group 1762) over the filled right side. Cured by the twin edge-openness match in sha dc5cee4a3.",
+  "shas": [
+    "dc5cee4a3"
+  ],
+  "resolvedAt": "2026-08-05T08:14:50.922Z"
+}

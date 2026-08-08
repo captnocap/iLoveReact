@@ -1,0 +1,42 @@
+{
+  "id": "req_3771",
+  "at": "2026-08-04T06:15:13.138Z",
+  "origin": "session:a023d12b",
+  "text": "this doesnt make sense. follow this chain of events: start from cube -> loop cut -> loop cut -> loop cut -> loop cut -> loop cut -> mirror part on x -> mirror part on z -> mirror part on x -> merge parts together -> extrude face -> extrude face -> delete face -> delete face -> weld vert -> weld vert -> weld vert -> weld vert -> merge faces \n\nif you follow that, you would get something like this: [Image #5] notice whats a complete failure here? the purple and red dots are verts that no longer exist (or shouldnt exist) because the faces were merged. notice it has no running edges across the face or down the side of it",
+  "status": "review",
+  "sessionId": "a023d12b-0027-49b7-8939-e9fb73c25f4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T06:15:20.608Z",
+      "actor": "fable-mergefaces",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T06:45:39.475Z",
+      "actor": "fable-mergefaces",
+      "kind": "note",
+      "text": "Root cause: Merge Faces was group-only from birth (req_2520 studio parity) — commitIndexedFaceGrouping keeps every resident triangle byte-stable, so the seam verts the fused boundary drops (collinear cut leftovers, interior grid verts) stayed in the soup as dots with no authored edges; the TS reference (editMesh.ts mergeFaces, req_1282) always dissolved them. Fixed in c06ae85a7: convex fusions with dropped corners re-tessellate from the clean loop via the Loop Cut lower()+install path; concave fusions stay byte-stable (re-fan flips triangles — bookshelf bug). Headless proof: cube→ring cut→merge top+right halves = 16 tris, 12→11 welded verts, undo/redo atomic. 66/66 mesh-edit tests green."
+    },
+    {
+      "at": "2026-08-04T06:48:25.146Z",
+      "actor": "fable-mergefaces",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-04T07:06:35.854Z",
+      "actor": "fable-mergefaces",
+      "kind": "note",
+      "text": "Push unblocked: c06ae85a7 is now on GitHub (rode the req_3772 reconcile — untrack + merge + push, tip 7dab6f5b8)."
+    }
+  ],
+  "resolution": "Merge Faces now actually dissolves the dead verts. Root cause: the native op was group-only from birth (req_2520) — commitIndexedFaceGrouping kept every resident triangle byte-stable, so the corners the fused boundary drops (collinear loop-cut seam verts, interior grid verts) stayed in the soup as selectable dots with no authored edges — the purple/red dots in the screenshot. The TS reference (editMesh.ts mergeFaces, req_1282, the old studio) always dropped them. Fix in indexed_edit_mesh.mergeFaceIds + meshMergeSelectedFaces: when the clean boundary drops corners AND the loop is convex, the face re-tessellates from its clean loop via the Loop Cut lower()+install path (paint keeps its atlas region via the loop's original UVs); concave fusions stay byte-stable because a re-fan flips render triangles (the unit-pinned bookshelf bug); verts still cornered by neighbour faces honestly survive until those merge/weld too. Headless proof: cube→ring cut (20 tris/12 welded verts)→merge top halves (18 tris)→merge right halves (16 tris, 12→11 verts, the shared ring vert gone, clean shot); undo/redo atomic. 66/66 test-mesh-edit + 5 adjacent suites green. Docs: editor_mesh_integrity.md + _index record updated same commit. Repair recipe for pre-fix faces: merge with any coplanar neighbour (or loop cut + re-merge) — the dissolve sweeps old debris. NOTE: commit is LOCAL-ONLY; origin/main was rewritten by GitHub-web directory deletions (models/props among them) and merging would delete local model files — needs your ruling. Also re-pointed the corrupt edit-trail ref (bad object ff202bfc9, kernel-panic victim) at HEAD per the documented recovery recipe; fetch works again.",
+  "shas": [
+    "c06ae85a7"
+  ],
+  "resolvedAt": "2026-08-04T06:48:25.145Z"
+}

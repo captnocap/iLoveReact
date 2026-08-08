@@ -1,0 +1,28 @@
+{
+  "id": "req_3981",
+  "at": "2026-08-07T18:32:45.309Z",
+  "origin": "codex:019fd9ee",
+  "text": "ok. so i just clicked to start a new character model. 2 things, 1, this is a brand new model as the default and im not sure why, but 2 there are 2 of them ? [Image #1]",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T18:32:53.753Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:01:27.449Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the unsolicited Player/NPC starter path and its generated block body. Draft rig view now renders only the bind specimen; the deformed second specimen appears only when resident weights exist.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:01:27.449Z"
+}

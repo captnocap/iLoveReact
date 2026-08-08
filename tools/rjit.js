@@ -9962,6 +9962,20 @@ ${IMPORTS_MARKER}`).replace(
       what: "a .jsx snapshot of cart/app taken during the TS migration \u2014 and cart/ is .tsx/.ts only",
       insteadOf: "git history, which already holds it"
     },
+    {
+      // Note the trailing space in the directory name — it is real, and git quotes the path
+      // in `status` output because of it.
+      path: "bunch of dogshit ",
+      kind: "oneoff",
+      what: "the user's own sweep of ~200 esbuild bundles and metafiles off the repo root (372 files, ~195MB)",
+      insteadOf: "nothing \u2014 every one of them is rebuilt by `rjit ship` / `rjit dev`"
+    },
+    {
+      path: "torso_quad.glb",
+      kind: "asset",
+      what: "a 3D model sitting at the repo root, untracked but UNIGNORED \u2014 one `git add -A` from publication",
+      insteadOf: 'local disk. CLAUDE.md: "do not commit 3d models to github" (USER RULING req_3772)'
+    },
     // ── Frozen eras. Read for reference, never built. The repo already zips these into
     //    archive/*.zip and gitignores the zip (editor/experiments/images/os did this) — that
     //    informal move is what `rjit repo archive` makes into a real, announcing verb. ──────
@@ -10034,7 +10048,11 @@ ${IMPORTS_MARKER}`).replace(
     }
   ];
   var ARTIFACT_SHAPES = [
-    { test: (p) => /(^|\/)bundle(-[^/]*)?\.js$/.test(p), what: "esbuild cart bundle \u2014 rebuilt by `rjit ship` / `rjit dev`" },
+    // Any `<prefix>bundle-<cart>.js`, not just a bare `bundle-` start. The .gitignore rule was
+    // written as `bundle-*.js` on the day someone got burned, so the later `gdev-bundle-*.js`
+    // and `tui-bundle-*.js` outputs walked straight past it and sat unignored at the repo root.
+    // `cart-bundle.js` and friends are safe: this needs a hyphen AFTER "bundle".
+    { test: (p) => /(^|\/)(bundle(-[^/]*)?|[A-Za-z0-9_]+-bundle-[^/]*)\.js$/.test(p), what: "esbuild cart bundle \u2014 rebuilt by `rjit ship` / `rjit dev`" },
     { test: (p) => /\.metafile\.json$/.test(p), what: "esbuild metafile \u2014 rebuilt with the bundle" },
     { test: (p) => /\.(png|jpg|jpeg|ppm|gif|webp)$/i.test(p), what: "raster image \u2014 an asset or a capture, never source" },
     { test: (p) => /\.(glb|gltf|obj|fbx|blend)$/i.test(p), what: "3D model \u2014 CLAUDE.md forbids publishing these" },
@@ -10274,8 +10292,8 @@ ${IMPORTS_MARKER}`).replace(
           err(removed.stderr.trim());
           return removed.code || 1;
         }
-        out(`[repo] ${tree}: ${addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what)}`);
       }
+      out(`[repo] ${tree}: ${addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what)}`);
       if (drop) {
         if (!zipRel) {
           err(`[repo] ${tree}: --drop only applies to \`archive\` \u2014 unpublish keeps the files by design`);

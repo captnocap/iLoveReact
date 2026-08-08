@@ -1,0 +1,48 @@
+{
+  "id": "req_3897",
+  "at": "2026-08-06T00:27:17.221Z",
+  "origin": "session:2eed946e",
+  "text": "ok lets do a /hand-over what i was t hinking that needs to happen when there is a mismatch from the live state to the disk and it doesnt want to save, we should surface a ui that shows both states, and lets me pick between the two to actually save, because its really annoying that it happens to desync at all",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:28:51.136Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:30:26.725Z",
+      "actor": "2eed",
+      "kind": "note",
+      "text": "Handoff brief written for a fresh session: /tmp/handoff-20260806-002830-live-vs-disk-mismatch-save-picker-ui.md — full stale-gate refusal chain traced (host flag → layout.stale.json marker → silent variant-load no-op), conflict-surface spec with Keep LIVE / Keep DISK verbs, live specimen package car_backseats documented. Feature not yet built; req stays doing for the consuming session."
+    },
+    {
+      "at": "2026-08-06T00:38:02.157Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Resumed from the 2eed handoff. Oracle checked first: no stale-save ruling; modal query returned no conflicting UI ruling. Implementing the visible live-vs-disk picker on cart/editor without weakening the host stale-layout gate."
+    },
+    {
+      "at": "2026-08-06T00:48:06.956Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implementation complete pending final commit. Added a viewer-owned live/disk paint-layout conflict modal triggered on cold stale-package open, stale variant Load, and explicit full Save before the marker write. It shows live triangles/authored faces/generation/dirty state and direct disk doc stamp/time, marker reason+docStamp, base paint era, and every variant era. Keep LIVE resumes the save then opens Remake Atlas; Keep DISK requires destructive confirmation, clears working state, releases the host lease, and forces a cold package remount. Hydration now returns structured refusal reasons and failed non-stale restores report visibly. Current car_backseats artifact has moved since handoff: disk doc is 749 tris / 81099 bytes, Painting 2 and base are 1019, Painting 1 is 2382. Focused tests and editor bundle pass."
+    },
+    {
+      "at": "2026-08-06T00:49:13.564Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Shipped the live-vs-disk paint-layout conflict picker across all three stale refusal entrances. A cold package open, a stale Paint Variant Load, and an explicit Save now open one modal that names the mismatch and compares live authored/triangle counts, host generation, dirty state, disk doc size/stamp/time, stale reason/docStamp, base paint geometry, and every named variant geometry. Keep LIVE explicitly saves the resident mesh through the existing honest stale-marker path and then opens Remake Paint Atlas. Keep DISK requires a second destructive confirmation, clears the shell working copy, releases the host session, and forces an ordinary package remount so live edits and native Ctrl+Z history are genuinely gone. Hydration returns structured refusal reasons and non-stale restore failures now surface visible messages. Verified the changing car_backseats specimen directly (current disk 749 triangles; Painting 2/base 1019; Painting 1 2382), editor bundle, hydration 11/11, conflict facts 3/3, and command/modal discipline 20/20. Visual interaction verification remains with the user per repository policy.",
+  "shas": [
+    "0ebc22005"
+  ],
+  "resolvedAt": "2026-08-06T00:49:13.564Z"
+}

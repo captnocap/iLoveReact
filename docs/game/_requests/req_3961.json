@@ -1,0 +1,18 @@
+{
+  "id": "req_3961",
+  "at": "2026-08-06T08:04:39.331Z",
+  "origin": "session:e863e9d6",
+  "text": "no thats not the option either. the only actual thing to do is enforce a pass of intentionally naming things as they should be after the fact. removing it solves nothing. Yes its worse to have a bunch of names that have no meaning. does not change the fact that it can be done. so get it in the code, and then update the skill accordingly to reflect the necessary pass to rename with intention",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T08:05:12.664Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

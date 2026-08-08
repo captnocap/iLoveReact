@@ -1,0 +1,28 @@
+{
+  "id": "req_3966",
+  "at": "2026-08-07T00:41:18.501Z",
+  "origin": "codex:019fd9aa",
+  "text": "explore and tell me how the animation/bone/rigging systems works, lets get a full breakdown of what it is right now.",
+  "status": "review",
+  "sessionId": "019fd9aa-05b5-7283-ab3a-0bc8db4c79a3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T00:41:22.286Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T00:46:40.638Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Read-only architecture audit completed: traced the active editor's skeleton schema and export compilers, RJMD v4 semantic persistence, live player skin staging, Zig voxel-geodesic auto-weights, palette pose math, GPU LBS shaders, procedural clips and sampler, MoveNet capture/pose streaming, baked-format boundaries, tests, and the V6 animation ruling. No code or model changes; shas none.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T00:46:40.638Z"
+}

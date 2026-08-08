@@ -1,0 +1,28 @@
+{
+  "id": "req_3789",
+  "at": "2026-08-04T20:40:35.001Z",
+  "origin": "codex:019fce59",
+  "text": "I can no longer do a weld i could do before. tap in and look at my verts selected",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T20:40:53.055Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T20:44:41.961Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The selected seam vertices were valid; the failure was introduced by the authored-boundary weld guard. After a cut, the live displayed mesh had 544 triangles while source-owned face-group rows still represented 542, and the guard incorrectly rejected that normal divergence. It now snapshots the current displayed face-group mapping, matching the authority used by the editor's other topology transactions, while retaining the malformed-face protection. The mesh-edit suite passes 99/99 and the editor ships successfully in ReleaseFast.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T20:44:41.961Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3823",
+  "at": "2026-08-05T04:10:11.577Z",
+  "origin": "session:fc4b5586",
+  "text": "is the goal here to be identical on both sides? because if so we already have diverted from that",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T04:10:48.933Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T04:10:48.957Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's question mid-retest: yes, the goal is identical world-aligned results on both sides from one call, and the cuts=2 case has already diverged — first cut mirrors correctly, the recursion for subsequent cuts descends into the wrong child on reversed rings (ring-order side[0] in splitFace). Axis choice and single cuts are fixed and trustworthy; even combs remain phase-drifted on mirrored geometry pending the recursion fix noted on req_3821.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T04:10:48.957Z"
+}

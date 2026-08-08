@@ -1,0 +1,28 @@
+{
+  "id": "req_3675",
+  "at": "2026-08-02T09:47:30.826Z",
+  "origin": "codex:019fbe1c",
+  "text": "why is it doing this: \n• Ran tools/request move req_3674 doing --by codex\n  └ req_3674 → doing\n\n• Ran tools/oracle \"Agent Seat editor connection model creation\"\n  └ oracle: \"Agent Seat editor connection model creation\"\n    ACTIVE SURFACE (V32 SURFACE-0705): going-forward work lives in cart/editor/ (+ its /play route). cart/hmsc-int/ and the labs are the\n    … +25 lines (ctrl + t to view transcript)\n\n    sources: docs/game/DECISIONS.md · docs/game/<doc>.md · docs/game/_index/ · docs/game/_requests/\n\n• Ran tools/seat --brief look\n  └ seat: timed out waiting for reactjit-seat-3243440-1785664002714-f70cf6646c643.json",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T09:47:40.769Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T09:49:43.550Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the live Agent Seat timeout without changing the running model. The dev host and /tmp/reactjit.sock are healthy and answer INFO immediately, but repeated Seat look requests receive no reply file. The Seat system:notification subscriber is installed inside ModelView, so an editor process with no currently mounted model surface (or a ModelView lost during reload) still acknowledges NOTICE at the host while silently having no JS consumer to execute it or write the response. Also clarified that the request claim and oracle calls are mandated repository workflow, not the source of the timeout.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T09:49:43.550Z"
+}

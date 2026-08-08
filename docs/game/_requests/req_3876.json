@@ -1,0 +1,30 @@
+{
+  "id": "req_3876",
+  "at": "2026-08-05T21:12:51.763Z",
+  "origin": "session:2eed946e",
+  "text": "thats highly debateable. becuase the other day the changnes were made in effort to try and solve the fact that claudes models were 2.7 faces per island while an imported model was with 18k tris had 58 faces per island, and those were imported and uv created in our studio, so why is it that something with 18 thousandn triangles in soup can make a better experience in uv than a 1.8k tris (IN QUADS) makes life a living hell. the only argument against this is the fact that claudes model is primitive soup, a lot more hard angles that wouldnt make sense, sure lets go with that. but it doesnt change a damn thing about the fact that a cube even completely unwraps all faces into 6 islands rather t han doing a cross island with the 6 like wtf man",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T21:13:21.975Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T21:37:26.898Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the missing unwrapper. Root cause chain established across the thread: generated layouts never had UNFOLDING — req_3426 folded faces into dominant-axis buckets (big islands, cosine-squeezed density), req_3726 (Aug 2) fixed the density/rotation bug with strict coplanar intrinsic charts and collaterally shredded every curved in-studio mesh into per-quad confetti (the van seat retopo: 531 faces → 510 islands; even a cube was 6 islands, never the cross). Neither rule could unfold a 90° edge. paint_islands.zig generation lane now grows charts by HINGE UNROLL: rigid rotation+translation lays each neighbouring authored face flat across the shared manifold edge, growth stops only at folds past 92°, non-manifold edges, and genuine 2D self-overlap (shrunk-triangle SAT on a hash grid). Isometric per face, so req_3726's law is kept exactly (physical density, rotation-invariant) while a cube now unfolds into the classic 64x48 cross, a hexagon cylinder into one 96x16 strip, and a curved retopo band into one 32x16 rectangle — tests pin all three plus a 120-degree crease staying a seam. Authored-UV reconstruction (imports with real UVs, saved layouts) keeps its exact historical rule; painting unaffected (corner-UV mapping, zero basis like the reconstructed lane). 12/12 paint_islands, 54/54 model-paint, 165/165 mesh-edit. Needs dev-host rebuild + Remake Atlas on the seat to see the band-strip islands.",
+  "shas": [
+    "a85590308"
+  ],
+  "resolvedAt": "2026-08-05T21:37:26.898Z"
+}

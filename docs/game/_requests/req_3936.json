@@ -1,0 +1,17 @@
+{
+  "id": "req_3936",
+  "at": "2026-08-06T06:57:16.906Z",
+  "origin": "one-off",
+  "text": "to my understanding the orbit camera isnt even reachable code. so what other camera is there",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:57:46.889Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

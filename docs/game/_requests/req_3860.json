@@ -1,0 +1,30 @@
+{
+  "id": "req_3860",
+  "at": "2026-08-05T18:57:31.878Z",
+  "origin": "session:6837fe41",
+  "text": "yeah because ive been doing a lot of cleaning on it lol",
+  "status": "review",
+  "sessionId": "6837fe41-16e0-490b-8b99-32c07855cc55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T18:57:50.756Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T19:46:58.456Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Duplicate capture of the req_3857 thread (user reporting the quads button doing nothing plus confirming heavy cleaning on the model). Resolved by the same work: trusted merge fix + stats receipts (f8bf00539) and the door-missing diagnosis. See req_3857/req_3862.",
+  "shas": [
+    "f8bf00539"
+  ],
+  "resolvedAt": "2026-08-05T19:46:58.456Z"
+}

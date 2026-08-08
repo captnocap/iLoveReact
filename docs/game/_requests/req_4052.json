@@ -1,0 +1,30 @@
+{
+  "id": "req_4052",
+  "at": "2026-08-08T08:24:03.387Z",
+  "origin": "session:ae84f281",
+  "text": "grep the claude and codex logs for node / bun / python commands related to when using the agent-seat skill, we want to find everything that agents are using and then be able to turn those into useful commands so they no longer have to. /home/siah/.codex /home/siah/.claude",
+  "status": "review",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T08:24:07.020Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T08:53:44.940Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Surveyed 132 Claude+Codex sessions that used the agent-seat skill and extracted every bun/node/python invocation: 461 escapes, which decompose into four missing capabilities rather than four bad habits. 236 reshaped replies with jq, 155 hand-parsed mesh/doc.blob, 89 did geometry math over look output, 3 slept before a call that might race the editor. The blob readers were already silently wrong — they hardcode RJMD v4's 40-byte header while the format is v5 with 48, and the live editor has both on disk. Built the replacements: tools/seat package info|regions|diff (the editor's own RJMD decoder), measure bbox|distance|contact and stats edges|symmetry|anomalies and align (dry-run reports the delta, apply uses that same delta), --fields for reply shaping, --wait/wait-ready plus an explicit editor-status state of ready|starting|dialog-blocked so a refusal says whether waiting helps. region:/model targets answer from the percept and leave the live selection alone; richer selectors report selectionSet:true instead of clobbering it silently. Verified live against the running editor and covered by 17 new geometry tests plus 9 new seat dispatch tests.",
+  "shas": [
+    "a48649782"
+  ],
+  "resolvedAt": "2026-08-08T08:53:44.940Z"
+}

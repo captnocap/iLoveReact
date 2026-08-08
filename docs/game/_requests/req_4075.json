@@ -1,0 +1,30 @@
+{
+  "id": "req_4075",
+  "at": "2026-08-08T11:44:21.324Z",
+  "origin": "session:ae84f281",
+  "text": "make a script to clean them up, present it in the ui like the notification for rebuilding when there are orphans",
+  "status": "review",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T11:44:26.574Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T11:52:19.649Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built orphan dev-host detection and cleanup, surfaced in the editor as a notice matching the existing rebuild one. The problem it names is invisibility: a rjit dev run that dies without taking its host down leaves it running and reparented to init, holding no window and serving no socket, so nine had accumulated since Aug 2 holding 4.7GB while the user correctly believed they had one app. rjit orphans reports, --kill retires, --json feeds the notice. A pid is called an orphan only when three independent facts agree — reparented to init, not the dev socket listener, and holding no dmabuf or display-server handle — and any host failing one is kept with the reason printed. Safety drove every decision: there is no pattern form at all, because pkill -f over this repo path matches the polling shell running it and cascades, which is the 2026-04-22 incident that killed all 14 panes; the scan matches the executable rather than a command line mentioning it, with a test proving a pkill shell is not self-matched, and kills are exact numeric pids signalled one at a time with each re-verified immediately beforehand. One measured correction landed mid-build: the first window test counted /dev/dri/renderD128 and spared all nine orphans, because every GPU-initialised process holds it — the honest signal is a dmabuf, which the live host had three of and the orphans none, and that is now a test. The UI never signals a process: it shows the exact pids, says this app is not among them, and writes a one-shot token bound to that pid set which the dev supervisor acts on. 13 tests pass and the live scan correctly kept the user's app and found the nine orphans; nothing was killed, since that is the user's click.",
+  "shas": [
+    "53bae5bc1"
+  ],
+  "resolvedAt": "2026-08-08T11:52:19.649Z"
+}

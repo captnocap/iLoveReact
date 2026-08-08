@@ -1,0 +1,30 @@
+{
+  "id": "req_3829",
+  "at": "2026-08-05T05:46:32.773Z",
+  "origin": "codex:019fd073",
+  "text": "yo so heres some annoying crap you can fix for me first before we start on some deshitification. basically, some of the right click context menus seem to be aware of edges of the app and will position themselves accordinngly and others do not. the UV seems to be particularly good while basically any other right click context menu will run off the screeen if i open it too low ;_; its very annoying [Image #1][Image #2] see that one [Image #3] its bad but there is also the one on the actual world map also",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T05:46:36.285Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T05:54:39.019Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made cursor context-menu placement a shared runtime boundary instead of per-menu behavior. useContextMenu now snapshots host viewport bounds, measures live menu contents (including expanded submenus), flips left/up before overflow, clamps to a 4px app edge, and gives menus larger than a short window a bounded scroll viewport. This covers the model and world-map menus at their existing app-root mounts while preserving the UV menu's deliberate panel-relative override. Added pure regression tests for normal placement, bottom/right flips, corner/oversize clamping, unmeasured fallback, and short-window bounds; ReleaseFast editor ship passes.",
+  "shas": [
+    "7e7280f57"
+  ],
+  "resolvedAt": "2026-08-05T05:54:39.019Z"
+}

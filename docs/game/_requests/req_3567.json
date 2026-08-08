@@ -1,0 +1,31 @@
+{
+  "id": "req_3567",
+  "at": "2026-08-01T15:37:46.378Z",
+  "origin": "session:35434fae",
+  "text": "ok and then either its just the fact that this react is clearly broken or something is actually wrong with it, but place a wall/floor/anything with a texture slot, right click it, the menu shows the slots, and it is suppose to be, dont click the slot, and click any of the textures, it applies to all the slots, but then click a slot, and apply the texture to that one specifically. well, clicking on a slot lights up its name but clicking it again to remove the slot keeps it highlighted still while deactivating it, so the react is bad without a question, but i swear to god yesterday i was looking at a wall, i knew it was the front, i selected back, applied texture, it applied to the front, so theni was like ok im wrong, its backwards, so i selected front, applied the texture and it applied to the front and back. so close the menu, open it again, front, and texture, and it applies to the back -_-",
+  "status": "review",
+  "sessionId": "35434fae-dd0b-48d1-aa4a-701ed181c056",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T15:37:59.323Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T15:51:59.127Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both halves of the report were real bugs. (1) Sticky slot highlight: renderer diff bug — diffStyleObjects treated a style key toggled back to undefined as a changed value; undefined serializes away, so the host never reset it and any 'cond ? accent : undefined' highlight stuck on forever. undefined now means unset (removeStyleKeys/removeKeys, which the host already honors). (2) Front/back misdirection: two compensating frame errors — faceRoleForHit un-rotated the raycast normal with the wrong sign (applied localOffset's matrix again instead of its transpose), and pieceShapes carried an odd-quarter-turn frontSlot/backSlot tag swap matching that bug — so on walls at yaw 90/270 the menu's front/back painted the physically opposite slab, and painted faces jumped sides on rotation. Both removed; roles are piece-fixed at every yaw incl. free angles (stickerLocalFrom proved the correct inverse). pieceSlots tests updated to the piece-fixed contract + a 45° case; pieces/stickers/pieceEditCommand suites green; face-paint doc + index record updated.",
+  "shas": [
+    "f715194a1",
+    "fc0629133"
+  ],
+  "resolvedAt": "2026-08-01T15:51:59.127Z"
+}

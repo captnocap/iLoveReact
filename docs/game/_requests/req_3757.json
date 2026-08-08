@@ -1,0 +1,28 @@
+{
+  "id": "req_3757",
+  "at": "2026-08-04T01:23:29.048Z",
+  "origin": "session:a0539482",
+  "text": "ok yeah so look at this notice how body is active, [Image #1] and u can see the wheels faces/edges/verts, but switch sides [Image #2] you dont have it there, so it looks like it got corrupted",
+  "status": "review",
+  "sessionId": "a0539482-a1b4-434a-8aa5-9017f43a5556",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T01:24:17.513Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T01:37:51.757Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed while building police_sedan (req_3751). Root cause found and written up in docs/handoffs/SEAT-MODEL-EDITOR-DEFECTS-0803.md: the Outliner part-range re-stamp in AppFrame.tsx:4901 bails whenever native part count differs from row count, which is a permanent latch because resyncing is the only thing that could restore parity. Consolidated with every other tool defect hit during the session into one work order.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T01:37:51.757Z"
+}

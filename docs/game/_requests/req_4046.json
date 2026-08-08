@@ -1,0 +1,28 @@
+{
+  "id": "req_4046",
+  "at": "2026-08-08T06:43:27.501Z",
+  "origin": "codex:019fe013",
+  "text": "is it possible to do it where i could select one vert and one edge, and it would share that vert with one of the extended edges and leave the other one open to connect to",
+  "status": "review",
+  "sessionId": "019fe013-69df-7ea1-b018-875cf0bb6059",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:43:38.013Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:50:45.577Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the same native edge extrusion to consume one retained edge plus one Shift-selected same-part vertex. The selected vertex is reused as an outer corner, only the opposite corner is minted, and the resulting open edge stays selected; choosing a source endpoint produces a triangle fan while choosing another vertex produces a quad bridge. Added contextual UI discovery, native selection/geometry regressions, and a green ReleaseFast build; user visual and spikewatch confirmation remain.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:50:45.577Z"
+}

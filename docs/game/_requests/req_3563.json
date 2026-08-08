@@ -1,0 +1,18 @@
+{
+  "id": "req_3563",
+  "at": "2026-08-01T00:12:05.874Z",
+  "origin": "session:12bfb258",
+  "text": "ok and then another thing. im pretty sure the import model pipeline is turning quads into tris. because if you look at the difference of @torso_quad.glb raw and @editor/data/models/prosp/torso_quad is the post import of it and it lost all the quads",
+  "status": "doing",
+  "sessionId": "12bfb258-c068-45f4-b4e2-508fb707452f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T00:12:11.249Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

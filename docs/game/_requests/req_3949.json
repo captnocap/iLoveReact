@@ -1,0 +1,17 @@
+{
+  "id": "req_3949",
+  "at": "2026-08-06T07:18:40.968Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>a1186432d75ca43b9</task-id>\n<tool-use-id>toolu_016ntLQfMXBHZV3ifxLMobM6</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/e863e9d6-4fb4-4103-84ef-500707015d9d/tasks/a1186432d75ca43b9.output</output-file>\n<status>completed</status>\n<summary>Agent \"Can offscreen shot see a background model\" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>Now I have all the evidence needed for the concise verdict.\n\n## Verdict: NEITHER — the mesh draw is skipped (blank), not background-or-active\n\n**Chain:**\n1. `&lt;Scene3D.Mesh hostKey={model.key}&gt;` (cart/editor/stage/ModelView.tsx:4524-4526) compiles to `scene3dGeomKey: hostKey` **with no vertices prop** (runtime/primitives.tsx:641-648, comment: \"No verts cross the bridge\"). `host_tree.materializeChildren` (framework/v8_bindings_core.zig:751) copies this committed React node unchanged — it still carries the ACTIVE document's key string, untouched by the native session swap.\n2. `drawScene` resolves geometry by `key = child.scene3d_geom_key` → `lookupGeometry(key)` → `geometryGeneration(hash)` (framework/gpu/3d.zig:727-728): `return if (hash == g_edit_key_hash) g_edit_generation else 0`. During the excursion, `modelSessionSelect` (framework/gpu/3d.zig:16877-16906) has pointer-swapped `g_edit_key_hash`/`g_edit_generation` (and `g_edit_verts`/`g_edit_count`, all in `DocState`, 16768-16809) to the **background** doc's values.\n3. Since the drawn node's key hash is the *active* doc's but `g_edit_key_hash` is now the *background* doc's, `geometryGeneration` returns 0. The active mesh's real GPU-cache entry has a non-zero `generation` from when it was last interned, so `lookupGeometry` **misses** (3d.zig:14319-14326). `internFromStash` also gates on the same generation match (3d.zig:412-419) and misses too. Fallback is `const verts = child.scene3d_vertices orelse continue;` (3d.zig:16077-16079) — `scene3d_vertices` is null, so **this mesh child is skipped entirely** (`continue`), never entering the draw list.\n4. Paint atlas (model_paint.zig `sessionLoad`, 3367-3376) does force a full re-upload of whatever `g_rgba` is now resident (background's atlas) — but it's moot since no mesh triangles are drawn to sample it.\n\n**Smallest fix to show the background model instead:** in `hostModelShotOffscreen` (framework/v8_bindings_core.zig, right after `scene.children = host_tree.materializeChildren(...)` at line 751), overwrite the mesh child's `scene3d_geom_key` with `scene3d.meshEditActiveKey()` (the *currently resident* — i.e. background — session's key). That key's hash already equals the live `g_edit_key_hash`/`g_edit_generation` pair, so `lookupGeometry` hits the background mesh's still-resident `g_retained_vbuf` slot and it renders correctly.</result>\n<usage><subagent_tokens>80181</subagent_tokens><tool_uses>38</tool_uses><duration_ms>226118</duration_ms></usage>\n</task-notification>",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:19:23.247Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

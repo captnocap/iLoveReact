@@ -1,0 +1,18 @@
+{
+  "id": "req_3851",
+  "at": "2026-08-05T18:04:29.893Z",
+  "origin": "session:e863e9d6",
+  "text": "not every boot. memory is stale.  and so i dont think you necessairly need to edit the model through the running app really. its just manipulated data. you could point the same functions at a text file and end in the same state. you just need a better way to visually look at whatever it is your doing. past that in the app you would still get a tab space and i could open it at any state its in, but regardless its just mutations on the blob, more direct",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T18:05:12.925Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3878",
+  "at": "2026-08-05T21:18:57.872Z",
+  "origin": "session:2eed946e",
+  "text": "well no thats whats fucking annoying is allegedally what we got was a faithful clone of the block bench behavior (which is not a fkn nightmare mind you) and evidently its far from it. very far from it. and if its the industry standard, that makes it more embarassing because i never at any point had any opinion that said this is better, thats agent big brain thinking",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T21:37:39.187Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T21:37:39.195Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Part of the UV-confetti diagnosis thread that led to the unfold-chart build (see req_3876, commit a85590308). This message narrowed the root cause: the 'faithful Blockbench clone' claim was never parity-tested (Blockbench box UV unfolds a cuboid into one connected cross; ours made 6 islands), and the user's 'what else is a UV if not an unwrap' verdict became the pinned law — the cube-to-cross test now enforces it.",
+  "shas": [
+    "a85590308"
+  ],
+  "resolvedAt": "2026-08-05T21:37:39.194Z"
+}

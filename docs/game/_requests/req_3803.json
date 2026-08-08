@@ -1,0 +1,30 @@
+{
+  "id": "req_3803",
+  "at": "2026-08-05T00:42:06.078Z",
+  "origin": "session:bae7e49e",
+  "text": "its its not clear what is happening. its creating a face between two edges. not extruding",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T00:42:21.362Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T00:59:04.139Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same demonstration as req_3802 (the 'not extruding, creating a face between two edges' clarification) — resolved by the same fix: extrude-edge distance auto-nudges clear of every resident vertex's weld class so the stamp can never silently fuse onto neighbouring geometry, and the agent-seat skill doc now states the never-fuses contract (bridge deliberately with create-face instead). See req_3802 for the full mechanism writeup.",
+  "shas": [
+    "ee7776f06"
+  ],
+  "resolvedAt": "2026-08-05T00:59:04.139Z"
+}

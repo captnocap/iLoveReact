@@ -1,0 +1,33 @@
+{
+  "id": "req_4085",
+  "at": "2026-08-08T12:23:45.004Z",
+  "origin": "session:c4057f17",
+  "text": "hey make a skill to maintain the repo for what is and isnt relevant to go up on the github please it never takes long before some idiot starts commiting a bunch of files that are artifacts or one offs and we need to clean it up ideally, archive basically everything except for the framework, runtime, cart, docs, tools, tui and sdk maybe cli idk whats in there off the top off my head but get it cleaned up, love2d code u can just pack into a zip or whatever and everything else and pack into archive",
+  "status": "review",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:23:50.639Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T12:46:06.930Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the publish-relevance capability and ran it. The disease was that .gitignore is a BLOCKLIST — 429 lines, each the scar of one artifact that already reached a commit, so it is permanently one incident behind; the repo was publishing 586MB across 15,561 tracked files including 86MB of 3D model JSON that a HARD RULE had forbidden the whole time. cli/dev/publishable.ts inverts this into an ALLOWLIST as the sibling of dev/deletable.ts: published trees are DECLARED with what each is and why a clone needs it, and anything tracked that no rule covers is reported, never defaulted. ARTIFACT_SHAPES additionally catches artifact-shaped files INSIDE published trees, which a per-tree allowlist would wave through — it found 10 tracked _old breadcrumbs and 2 unreferenced PNGs nobody had noticed. rjit repo surveys and changes nothing; the archive/unpublish verbs cannot delete, because the only git command they run against a tree is git rm --cached, so a wrong call costs a re-add and never a file (req_4083 built in rather than remembered). Result: 586MB/15,561 files down to 81.4MB/8,515 — tsz and love2d zipped to archive/ (verified against git ls-tree, 0 missing) and 505MB untracked with every byte still on disk. Archiving exposed a defect in my own archiver: plain zip -r follows symlinks, wrote 4751 entries for 1882 files and tripled 52MB into 144MB, fixed with -y and re-verified before untracking. Left published deliberately: tools/v8cli, tools/esbuild, tools/rjit.js and the baked icon atlas (66MB) are all BLOCKED — nothing fetches or bakes them, so untracking breaks a fresh clone; they need a fetch/bake path first. The skill (.agents/skills/publish-guard) plus a matching CLAUDE.md HARD RULE make agents ask the question before committing. tidy was RETIRED to a redirect: 271 lines calling tsz/ the ACTIVE STACK would have sent the next agent to reorganize a corpse. NOT done and needing a ruling: .git still holds 1.9GB of history so GitHub still serves those blobs — only a rewrite drops them, which I will not do on main with parallel sessions live.",
+  "shas": [
+    "cd931fc80",
+    "38fad40fb",
+    "9eb8ecbdc",
+    "a903d9816"
+  ],
+  "resolvedAt": "2026-08-08T12:46:06.930Z"
+}

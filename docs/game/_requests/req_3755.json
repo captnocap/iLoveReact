@@ -1,0 +1,10 @@
+{
+  "id": "req_3755",
+  "at": "2026-08-04T00:56:03.452Z",
+  "origin": "session:3ec0e7bf",
+  "text": "ok so then what constitutes as unreachable again? because if interior of a car would be considered unreachable then the value is wrong. Also, that becomes hard to statically claim if it is intentional or not but reguardless what is 'unreachable' exactly",
+  "status": "new",
+  "sessionId": "3ec0e7bf-84a2-4409-93cc-09d9e7361d20",
+  "captureMode": "hook",
+  "events": []
+}

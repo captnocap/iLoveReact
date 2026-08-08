@@ -1,0 +1,28 @@
+{
+  "id": "req_3708",
+  "at": "2026-08-03T01:53:25.767Z",
+  "origin": "session:c440da46",
+  "text": "thats not a problem. pass the idea off in a /hand-over to build it out. worst outcome is we delete some code, and if it works then we gain hours of time from  tinkering with uvs",
+  "status": "review",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T01:54:01.486Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T01:57:38.638Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote a self-contained continuation brief at /tmp/handoff-20260803-015445-sam-uv-correspondence-and-two-sheet-uv-planner.md so a fresh session can build out the UV work with zero re-prompting. Lineage originates at this session, c440da46-5d54-48fc-b611-dea6a31b1f2a. The brief carries the user's asks verbatim including the risk mandate that deleting code is an acceptable outcome, the Moped_50 test model with its hard 477-island baseline and 14 percent congruent-twin floor, a verified inventory of the machinery that already exists versus what is merely unreachable from the seat, and five ordered independently-shippable steps: island count in the percept, stack and stitch exposed as seat verbs, the seat atlas gate fix, the two-sheet aspect-binned planner, and finally the SAM correspondence pipeline with the agreed design corrections on term normalization, mesh-adjacency neighbours, projected position and non-square assignment. It also carries the hard hazard that Python onnxruntime kernel-panics this box regardless of the CPU provider flag, the Agent Seat gotchas discovered this session, the dead ends already explored, and the skinning approach that actually outperformed the documented flow.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T01:57:38.638Z"
+}

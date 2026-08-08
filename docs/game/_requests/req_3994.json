@@ -1,0 +1,28 @@
+{
+  "id": "req_3994",
+  "at": "2026-08-07T19:56:30.162Z",
+  "origin": "codex:019fda1a",
+  "text": "ok done. now look at my edits and look at the result of the selected faces",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:56:40.492Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:59:21.738Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured the completed live Follow transcript and inspected both the generated topology and the currently highlighted faces. The accepted loop cut added triangles 524 through 531 as Cylinder-owned groups 263 through 270, but the UI selection highlights pre-existing Cube groups 158 and 163. Those highlighted groups are six-corner, four-triangle patches with open boundary edges, proving the edit result and selection identity diverged during topology installation.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:59:21.738Z"
+}

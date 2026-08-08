@@ -1,0 +1,36 @@
+{
+  "id": "req_3714",
+  "at": "2026-08-03T03:38:55.167Z",
+  "origin": "codex:019fc558",
+  "text": "yes also, there are dozens and dozens of trash shaders in the shader library, we can remove them and then rewrite for these textures also",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T03:39:05.899Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T03:51:48.752Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-03T03:52:52.631Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Follow-up commit 914706b1c refreshes the UV patch shelf immediately when a new imported image registers during the same editor session; editor bundle check remains green."
+    }
+  ],
+  "resolution": "Replaced the model-skinning shader-first library with a reusable exact-image UV patch path: imported images now appear in the UV editor, require selected islands, enter a focused image/UV placement view, and still compile through the existing one-atlas workspace. Audited 410 WGSL materials, retained the 18 with verified code/default/saved-data dependencies, deleted 392 catalog-only entries, regenerated the stable-id registry/dispatch, and fixed the compact-index versus tombstoned materialId bug exposed by pruning. Focused catalog, ground composition, texture package, UV workspace, shader grid, editor bundle, plan-integrity, and diff checks pass; model data was not committed. User visual verification remains requested for the live patch-focus interaction.",
+  "shas": [
+    "beaef7301"
+  ],
+  "resolvedAt": "2026-08-03T03:51:48.752Z"
+}

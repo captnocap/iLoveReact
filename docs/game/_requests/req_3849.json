@@ -1,0 +1,28 @@
+{
+  "id": "req_3849",
+  "at": "2026-08-05T17:46:15.830Z",
+  "origin": "codex:019fd073",
+  "text": "what is the criteria for something to fall into recent",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T17:46:19.936Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T17:46:54.594Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected the live Asset Explorer history implementation and documented its exact inclusion rules: asset selection, model opening or model-home navigation, world-object selection by underlying asset, and committed face-material assignment all record a recent. Entries are newest-first, deduplicated, capped at 24, omit missing catalog/package records, survive hot reload, and reset on a cold editor restart. No code change was requested or made.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T17:46:54.594Z"
+}

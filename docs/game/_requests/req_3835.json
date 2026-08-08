@@ -1,0 +1,30 @@
+{
+  "id": "req_3835",
+  "at": "2026-08-05T07:12:35.266Z",
+  "origin": "codex:019fd073",
+  "text": "ok next for whatever god forsaken reason imported models get this exclusive slop bit about shit no one cares about [Image #1] get rid of that garbage",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:12:41.354Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:14:29.572Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the imported-model-only FOLDER CONTRACT section from the model focus detail body, including its source model / rig data / manifest row construction and placeholder filtering. Package provenance fields remain intact in ModelPackage persistence and save/load paths; only the unwanted presentation was retired. ReleaseFast editor ship passes.",
+  "shas": [
+    "ab831b787"
+  ],
+  "resolvedAt": "2026-08-05T07:14:29.572Z"
+}

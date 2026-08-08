@@ -1,0 +1,28 @@
+{
+  "id": "req_4039",
+  "at": "2026-08-08T06:02:10.506Z",
+  "origin": "codex:019fdda4",
+  "text": "sorry wrong chat, but this popped up for the first time would you move it to exist in the bottom toolbar as a popover alert instead of right on top of the save button [Image #1]",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:02:19.265Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:05:47.477Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the native rebuild approval out of the top-right editor overlay and into the bottom status dock. A highlighted NATIVE READY dock button is now the persistent alert; clicking it opens the same approval controls in a bottom-anchored popover, and Keep working closes the popover without discarding the pending update. The notice now starts collapsed, survives ordinary TypeScript bundle reloads through host-owned hot state, and clears immediately after an approval token is successfully handed to the supervisor so exact-child restart handoff cannot resurrect a stale Applying panel. Updated the focused notice tests and verified the full editor bundle.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:05:47.477Z"
+}

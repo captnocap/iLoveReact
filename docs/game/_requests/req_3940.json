@@ -1,0 +1,18 @@
+{
+  "id": "req_3940",
+  "at": "2026-08-06T07:04:05.566Z",
+  "origin": "session:e863e9d6",
+  "text": "yeah so that slot machine i switched to it, and got the document mismatch prompt. uh SO I just picked the live document for them",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:05:05.453Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

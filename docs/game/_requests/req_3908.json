@@ -1,0 +1,36 @@
+{
+  "id": "req_3908",
+  "at": "2026-08-06T01:56:48.551Z",
+  "origin": "codex:019fd481",
+  "text": "OK I have a model in live view. it says unsaved edits. im trying to save it after doing a handful of edits, and it is not bringing up the dialog to let me store the live state",
+  "status": "review",
+  "sessionId": "019fd481-0f28-7392-a715-361850d2180a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T01:56:58.967Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T02:03:07.597Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Diagnosed the live Save refusal without mutating the resident model: LIVE has 3 host-coherent Outliner ranges and 1,167 triangles, while the durable RJMD still owns 4 parts and 881 triangles. writeMeshDoc correctly refused the unapproved part-count shrink, but AppFrame collapsed that guard into the generic 'model artifacts were not written' status and never opened the LIVE/DISK picker. The cart now preflights that exact durable/live part mismatch, shows both part counts in the existing conflict surface, and makes Keep LIVE mint only a one-shot allowPartShrink capability for the disclosed replacement. Focused paint-conflict and meshdoc tests pass; full editor bundle passes. Awaiting the user's in-place Save/Keep LIVE visual verification."
+    },
+    {
+      "at": "2026-08-06T02:03:39.192Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Save now preflights the same destructive part-count condition enforced at the RJMD write boundary. When LIVE owns fewer Outliner parts than DISK and no explicit Delete/Merge capability survived, AppFrame opens the existing LIVE/DISK conflict surface instead of falling through to 'model artifacts were not written.' The surface states the exact part deletion, shows live and saved part counts, and Keep LIVE grants a one-shot allowPartShrink permission scoped to that disclosed choice; Keep DISK remains the ordinary destructive reload. Paint-layout behavior and semantic-clear authorization remain intact. Verified with 6 paint-conflict tests, 14 meshdoc persistence tests, full editor bundle, and diff checks; user was asked to exercise Save then Keep LIVE against the resident 1,167-triangle / 3-part model.",
+  "shas": [
+    "4644b0a8c"
+  ],
+  "resolvedAt": "2026-08-06T02:03:39.192Z"
+}

@@ -1,0 +1,37 @@
+{
+  "id": "req_3904",
+  "at": "2026-08-06T01:15:37.631Z",
+  "origin": "codex:019fd481",
+  "text": "oh sorry i didnt have it selected. erm. or i did something i have no clue and now they are not there. / back to nnormal. idk but still i cant chamfer there. now i cant chamfer the other side. yeah its in the trenches now lol im going to undo the history but that shit needs to stop happening basically we need a way to do surgery in the ui. because i see it all the time, what should happen is that let me select them when i see them, and then be able to cycle that selection through the outliner choices til i get back to the one it belongs to. maybe that should solve it",
+  "status": "review",
+  "sessionId": "019fd481-0f28-7392-a715-361850d2180a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T01:15:43.709Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T01:23:41.139Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented selection surgery as an Outliner Locate verb. It reads the host-owned selection, maps numeric topology owners to range-ranked Outliner rows, focuses the owning row, and restores the exact selection after the ordinary scope switch clears it. Mixed-owner selections are banked and cycle one owner at a time; unowned, truncated, hidden, unstamped, or changing selections refuse visibly. Native edge consumers now intersect raw selection bits with active scope, preventing stale sibling edges from entering Chamfer or other topology tools. TS resolver test, full cart bundle, and ReleaseFast test-mesh-edit passed."
+    },
+    {
+      "at": "2026-08-06T01:23:41.185Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an Outliner selection-surgery verb: select visible vertices, edges, or faces, press the amber Locate icon, and the editor focuses the row that actually owns them while preserving the exact selection. If corruption mixed owners, repeated presses cycle the bank owner-by-owner and restore only the active owner’s subset. Refusals are explicit for unowned, hidden, truncated, unstamped, or changed topology. Hardened native edge-tool boundaries so stale selections outside the active Outliner scope cannot participate in Chamfer or other topology operations. Verified the pure owner resolver, bundled the full editor cart, and passed the ReleaseFast mesh-edit unit gate with a regression injecting cross-owner stale edge bits.",
+  "shas": [
+    "65732d165",
+    "8fb89a0fc"
+  ],
+  "resolvedAt": "2026-08-06T01:23:41.185Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_4070",
+  "at": "2026-08-08T10:51:48.980Z",
+  "origin": "codex:019fda1a",
+  "text": "for the edges, i see there is boundary hinge mount contact, what are the 4 ? so i know which to use best",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T10:51:56.502Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T10:52:18.227Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the four durable logical-edge purposes from the active editor contract and gave vehicle-specific selection guidance: boundary for outlines/seams, hinge for pivot axes, mount for fixed attachment interfaces, and contact for mating/closing/stop interfaces. Clarified that the roles currently preserve author intent for future rigging/assembly consumers rather than creating mechanics by themselves.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T10:52:18.227Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3761",
+  "at": "2026-08-04T01:40:17.826Z",
+  "origin": "session:a0539482",
+  "text": "the loop cut one check on, do u not have the normal cut? that only cuts that face ?",
+  "status": "review",
+  "sessionId": "a0539482-a1b4-434a-8aa5-9017f43a5556",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T01:40:38.292Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T01:47:12.008Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Checked on the loop-cut complaint: basic-cut already does bounded, selection-local subdivision. Measured on region:hood, basic-cut adds +6 tris touching only hood, while cut adds +66 across nine regions. P1-3 in the work order was wrong and has been rewritten as a documentation gap, not a defect - basic-cut's one-line description says nothing about locality, which is why cut got used all session.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T01:47:12.008Z"
+}

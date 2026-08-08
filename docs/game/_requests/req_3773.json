@@ -1,0 +1,30 @@
+{
+  "id": "req_3773",
+  "at": "2026-08-04T07:15:17.973Z",
+  "origin": "session:a023d12b",
+  "text": "uh ok so this is new. i started a model -> made some edits -> closed the model -> new mesh -> it opened the model i just closed, and never saved",
+  "status": "review",
+  "sessionId": "a023d12b-0027-49b7-8939-e9fb73c25f4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T07:15:26.534Z",
+      "actor": "fable-newmesh",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T07:31:18.082Z",
+      "actor": "fable-newmesh",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the 'New Mesh opened the model I just closed, never saved' chain to ONE defect with three faces, fixed in aaba78eba. (1) Identity reuse: allocate*ModelId proved reuse only from things that outlive an allocation — disk, catalog, open tabs — and a doc closed before its first save has none, so primitive:cube:1 was minted again and the new doc inherited the dead one's hot state. New session ledger (cart/editor/model/docSession.ts, hot-state backed so it survives hot reload and resets on cold restart) retires every identity at mint; the primitive allocator retires the NUMBER across kinds to match its existing open-doc rule so 'Model 1' stays unique. (2) The live-mesh lease (doc twig, req_2898) was released only by the Discard branch of the unsaved prompt; closeWorkspaceDocument now releases it for the closed doc, targeted so a background close never drops the active doc's claim. The twig key was a magic string in two files — now one owner with claim/read/release. (3) Silent data loss: the unsaved prompt was gated on !autosave, but autosave only writes models ALREADY on disk, so a brand-new model closed with no prompt and nothing written; the gate is now what autosave actually covers. Verified 6/6 modelIdentity (3 new), commands 19/19, surfaces, modelOutliner, persistenceLifecycle green + headless boot proving the lease claims through the new module (twig docId prop:primitive:cube:77 == viewer doc id, partition OK, rows SYNCED, no JS errors). Also removed a pre-existing .gitignore landmine hit while committing: 'cart/editor/data/' ignored the editor's whole SOURCE dir — tracked files were safe but any NEW source file there was invisible to git; the three asset dirs it meant are already named exactly under req_3772.",
+  "shas": [
+    "aaba78eba"
+  ],
+  "resolvedAt": "2026-08-04T07:31:18.082Z"
+}

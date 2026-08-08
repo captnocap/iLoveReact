@@ -1,0 +1,28 @@
+{
+  "id": "req_3998",
+  "at": "2026-08-07T20:39:44.754Z",
+  "origin": "codex:019fda1a",
+  "text": "better solution is to add in the capability to turn a face into one of these N amounts with it jointed already to extrude with, so you could effecively extrude a cylinder out of a square",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T20:40:02.571Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:53:10.037Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented Face to N-gon across native mesh editing, the editor command and popup, mirror-aware preview/commit, and the structured Agent Seat session. The selected convex face becomes a welded N-sided center with a triangle/quad transition ring and remains selected for immediate extrusion. Added focused Zig and TypeScript coverage; mesh-edit tests, editor command tests, Seat API tests, diff checks, and the ReleaseFast editor build all pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:53:10.037Z"
+}

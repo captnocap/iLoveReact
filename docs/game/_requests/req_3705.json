@@ -1,0 +1,28 @@
+{
+  "id": "req_3705",
+  "at": "2026-08-03T01:22:34.043Z",
+  "origin": "session:c440da46",
+  "text": "possible you can just do a dry run and see how many islands the SAM model alone ends up pulling without doing any hacky work to it, see what we might be up against",
+  "status": "review",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T01:23:00.169Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T01:47:34.009Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "SAM dry run could not be executed as asked, but the investigation answered most of the question. Three blockers: (1) the resident SlimSAM build is strictly click-prompted - __segment_refine(handle, clicksJson, opts) returns one mask per point prompt and there is no automatic-mask-generation path, so how many segments SAM yields unaided is undefined until a point-grid plus NMS dedupe pass is written, which is exactly the work the request wanted to avoid; (2) the segment doors are not registered in the running editor binary at all, because source-driven ingredient gating in framework/v8_ingredients.zig compiles the onnx ingredient only when cart source greps __onnx_, and although runtime/hooks/useSegment.ts names __onnx_test specifically to trip that gate, cart/editor never imports it, so registerOnnx is the no-op stub; (3) the offline Python route via onnxruntime is now permanently barred on this machine after it kernel-panicked the box during a read-only model-shape probe - onnxruntime 1.27 GPU device discovery walks /sys/class/drm/card* and the AMD card kills it, and passing CPUExecutionProvider does not prevent discovery. Hazard recorded in agent memory as onnxruntime_python_panics_the_box. Analytic conclusion that stands without running it: SAM over a UV atlas would over-segment rather than reduce, since it is trained on natural photographs and a UV sheet is hard-edged colour blocks, so it would rediscover roughly the island count we already hold exactly; SAM over a reference photograph yields tens of masks, which is the number that actually decides whether photo-to-texture correspondence is tractable, and a rectangular assignment of tens against 477 islands with slack rows is computationally trivial. Safe path to real measurement is in-engine via deps/onnxruntime plus framework/ml/onnx.zig, which already runs pose and movenet without incident, requiring one useSegment import and a Zig rebuild.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T01:47:34.009Z"
+}

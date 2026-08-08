@@ -1,0 +1,28 @@
+{
+  "id": "req_4002",
+  "at": "2026-08-07T21:12:21.530Z",
+  "origin": "codex:019fd9ee",
+  "text": "ok all of that is exactly what this is. everything is on body.  its a blank model with no accessories and everything else is in line. it just says blocked. the vertex probe has 0 data for every vert and the heatmap shows nothing",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:12:28.449Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:27:09.614Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the reported blocked bind on the live Female Tpose model: its durable RJMD has a 4,732-triangle main BODY plus one genuinely detached left-shoulder triangle and zero anatomy-role regions. Added exact connectivity evidence and one-click detached selection, strict anatomy-role authoring for imported meshes, clear unbound probe/heatmap presentation, and dependent WAITING readiness states. Bind remains strict and produces weights only after real prerequisites pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:27:09.614Z"
+}

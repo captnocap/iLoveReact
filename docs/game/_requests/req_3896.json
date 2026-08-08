@@ -1,0 +1,30 @@
+{
+  "id": "req_3896",
+  "at": "2026-08-06T00:19:27.882Z",
+  "origin": "session:2eed946e",
+  "text": "[Image #11] this does not remove from the ui. its probably gone in the data. its still in my ui tho",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:25:20.240Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:25:20.248Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The NAMES panel ghost-row bug from the user's screenshot (headrest_mount_left lingering after delete): removing/renaming a region drops it from the RESIDENT table immediately, but the name survives in the saved-blob and mount horizons until the next Save, so modelFocusSemantics kept emitting a warning 'saved only' row — an honest drop diagnostic that reads as a failed delete when the drop was deliberate. Fix in ModelView.tsx: editRegion records the old name in a per-model sessionDroppedNamesRef on successful remove/rename; the semantics publisher suppresses non-resident rows carrying a deliberately dropped name; a name returning resident (Ctrl+Z) clears its mark on the next refresh; the set resets on model change. Genuine drops (names lost without a deliberate edit) still surface exactly as before. Cart-side only — hot reload picks it up, no rebuild. Note: the original 'last in the list doesnt remove' message (req_3895) turned out to be aimed at the adjacent terminal pane, but the screenshot bug was real and is fixed here.",
+  "shas": [
+    "6916e71d0"
+  ],
+  "resolvedAt": "2026-08-06T00:25:20.247Z"
+}

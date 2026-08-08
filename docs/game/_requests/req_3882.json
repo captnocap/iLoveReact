@@ -1,0 +1,28 @@
+{
+  "id": "req_3882",
+  "at": "2026-08-05T22:40:57.943Z",
+  "origin": "session:2eed946e",
+  "text": "ok its working good but im confused on what just happened. i just mapped a texture to it very well and then saved as a painting. closed the app and restarted it, come back to the model, and try to apply the paint texture and its not applying, and clicking paint wants to create a new atlas and i dont want to do that",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T22:41:59.039Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T23:11:11.876Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed, no code change needed — the system behaved correctly. Forensics from the package dir: base.paint.json + Painting 2 (paint_2.json/blob) were saved against a 1019-triangle mesh at 15:02-15:39; two full saves at close (15:46:47, 15:47:10) wrote a smaller doc.blob and the layout.stale.json marker with reason topology-changed; the live mesh is now 961 triangles. The user confirmed they were editing the model to modularize it after painting — the stale gate honestly refused to apply a painting whose faces no longer exist, and the cold-reopen Remake Atlas prompt is that refusal surfacing. Painting is recoverable: paint_2.blob carries the exact 1019-tri painted mesh and paint_2.png is a reusable texture to remap after the final topology gets its atlas. Flagged one UX gap to the user: variant Load silently no-ops when stale — a 'this painting was made on an older shape (1019 vs 961 faces)' message would have answered this instantly; offered to build it if wanted.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T23:11:11.876Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3945",
+  "at": "2026-08-06T07:13:07.569Z",
+  "origin": "one-off",
+  "text": "lol dude good thing this is a test whatever the hell that fireescape is i dont even know how they thought it was one xD",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:13:13.925Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

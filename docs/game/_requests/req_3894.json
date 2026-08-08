@@ -1,0 +1,30 @@
+{
+  "id": "req_3894",
+  "at": "2026-08-06T00:06:22.363Z",
+  "origin": "session:f7c3f9ca",
+  "text": "i can just restart the app. its one small edit its not the end of the world. but the part where i cant rename / remove names from this face list is a problem tho u may have fixed it",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:06:49.072Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:12:26.716Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built rename and remove for semantic regions — naming had been a one-way door, so a mistyped or repurposed name was permanent and the user was left with no way to clear a table they had outgrown. New host door __mesh_semantic_region_edit(region, remove, tableJson): rename lands the caller's rewritten table with face membership untouched, while remove additionally clears every face wearing that region back to unnamed. Removal clears region AND instance together because model_source rejects a row carrying an instance without a region, and children of a removed region are orphaned to root instead of dangling at a dead parent; either edit is one journal step so Ctrl+Z restores it. The NAMES rows now carry inline rename (Enter commits, Escape cancels) and a remove verb, each reporting its outcome on the shell status line — a refusal that says nothing would be the same dead end as having no verb at all. Renaming onto another region's existing name is refused rather than silently minting a duplicate row, since that is a merge the user should ask for deliberately. The Agent Seat gets region-edit for parity and the skill documents both it and select-audit. rjit ship editor builds clean.",
+  "shas": [
+    "5ad82a546"
+  ],
+  "resolvedAt": "2026-08-06T00:12:26.716Z"
+}

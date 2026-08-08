@@ -1,0 +1,31 @@
+{
+  "id": "req_3903",
+  "at": "2026-08-06T01:10:47.285Z",
+  "origin": "codex:019fd481",
+  "text": "oh i just realized there is corruption. nice. these edges i have selected now, do not belong to this outliner i have active. god damnit lol",
+  "status": "review",
+  "sessionId": "019fd481-0f28-7392-a715-361850d2180a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T01:10:59.617Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T01:23:41.268Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed the observed topology-selection/active-Outliner mismatch with an explicit selection-surgery workflow. The editor can now locate the owning Outliner row without losing the selected edges, cycle mixed owners safely, and native topology tools ignore any stale out-of-scope edge bits.",
+  "shas": [
+    "65732d165",
+    "8fb89a0fc"
+  ],
+  "resolvedAt": "2026-08-06T01:23:41.268Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3566",
+  "at": "2026-08-01T15:32:08.257Z",
+  "origin": "session:35434fae",
+  "text": "ok yeah silence it, its not doing anything useful unless like you said it itself actually changes",
+  "status": "review",
+  "sessionId": "35434fae-dd0b-48d1-aa4a-701ed181c056",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T15:32:26.580Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T15:32:55.669Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Silenced the chatty [live-regions] bind summary in cart/editor/world/livePush.ts. pushLiveMaterialRegions still re-binds regions on every world push (the bind is cheap host-side data and must land after reloads), but the console.warn now only fires when the bind set actually changes — a module-level signature of every bind's key, regionId, face count, and material data is compared against the last logged one. Placing unrelated props no longer prints the cylinder slot-0 line every click; editing the live material params or adding/removing a live-material model logs once. Host-refused binds still console.error unconditionally.",
+  "shas": [
+    "ea1f5b44a"
+  ],
+  "resolvedAt": "2026-08-01T15:32:55.669Z"
+}

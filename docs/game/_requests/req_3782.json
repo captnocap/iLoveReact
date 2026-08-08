@@ -1,0 +1,28 @@
+{
+  "id": "req_3782",
+  "at": "2026-08-04T20:14:57.405Z",
+  "origin": "codex:019fce59",
+  "text": "ok. so help me understand why that edit specifically is bad. let me show you why this makes no sense. follow again",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T20:15:02.057Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T20:17:53.798Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded and analyzed the exact reproduced poison state. Follow captured undo back through loop cut 559/cut 558/weld 555/cut 554/weld 553/cut 552, then a fresh sequence: cut 560, weld 561, cut 562, weld 563, weld 564 (544→542 triangles), weld 565 (same count), followed by a rejected/unlogged cut. The live/saved generation-1944 RJMD was decoded with the native import weld tolerance and authored-group boundary algorithm. Exactly one group is unreconstructable: group 8 in Outliner part 0, semantic backrestRoot.wall, resident triangles 16 and 17. Both triangles contain the exact same three welded positions in opposite order; their normals are exact opposites. Thus every undirected edge is used twice, leaving boundary_count=0 and causing MalformedFaceBoundary. This is a legal user intent—collapsing a quad corner so the quad becomes one triangle—but Weld only deletes triangles with coincident corners. Each surviving triangle still has three distinct corners, so it leaves both old tessellation halves as coincident reversed twins instead of canonicalizing the authored face to one triangle. They overlap perfectly and are visually invisible. semantic-status still reports healthy because it checks semantics, not boundary topology. No repository files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T20:17:53.798Z"
+}

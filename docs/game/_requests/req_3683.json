@@ -1,0 +1,28 @@
+{
+  "id": "req_3683",
+  "at": "2026-08-02T10:22:06.393Z",
+  "origin": "codex:019fc1f7",
+  "text": "ok so uh im curious what these do since i cant see them  i think u called them fins but they dont stick out on anything so [Image #1]",
+  "status": "review",
+  "sessionId": "019fc1f7-ce72-71e2-a37b-5944db851ddd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T10:22:12.615Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T10:22:20.701Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the queried geometry without changing the model: the ten radiator_fin cuboids were intended as radiator cooling ribs, but their z extent (-0.7285..0.7285 m) sits inside each radiator bank (-0.816..0.816 m) and behind the fan faces, so they have no visible or gameplay effect in the current prop. They should be removed or rebuilt as exposed corrugations if revised.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T10:22:20.701Z"
+}

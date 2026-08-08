@@ -1,0 +1,30 @@
+{
+  "id": "req_3890",
+  "at": "2026-08-05T23:49:00.565Z",
+  "origin": "codex:019fd43a",
+  "text": "the chamfer popup is completely unusable, i dont even know what its saying or where the buttons are to change anytghing because of the style it is using for all the elements it has",
+  "status": "review",
+  "sessionId": "019fd43a-3dac-7b72-8885-3de82e7839ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T23:49:08.513Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:00:35.193Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the unreadable compact chamfer card with a dedicated high-contrast panel: explicit title and N-to-M readout, large labeled target-side and width controls, slider, warning state, and distinct Cancel/Apply actions. ReleaseFast editor build and focused editor tests pass.",
+  "shas": [
+    "e5965ea30"
+  ],
+  "resolvedAt": "2026-08-06T00:00:35.193Z"
+}

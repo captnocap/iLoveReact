@@ -1,0 +1,30 @@
+{
+  "id": "req_3621",
+  "at": "2026-08-02T00:15:19.830Z",
+  "origin": "session:bfe7a1dc",
+  "text": "its not xray then. why else would it be translucent. its not glass, glass is blue",
+  "status": "review",
+  "sessionId": "bfe7a1dc-6565-4d5c-8242-39b319b07ad7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T00:15:34.624Z",
+      "actor": "bfe7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T00:21:46.754Z",
+      "actor": "bfe7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the 'permanent xray' ghost: it was never the X-Ray toggle. Reference backdrop trace planes (req_2758) persisted under ONE global localstore key (editor/model-backdrops), so planes added while tracing any model rendered forever in every model viewer as translucent grey quads — blank when their cached image was gone, a thin tick-marked line when seen edge-on — matching the screenshot exactly. Saved docs were verified opaque (glassFirstVertex == vertCount), ruling out glass/atlas alpha. Fix: backdrops now key per document (model-backdrops:<docId> from the same identity the hot-resume twig uses); the old global key is no longer read, so the haunting planes vanish everywhere while each model keeps only its own traces. ModelView bundles clean; hot reload applies.",
+  "shas": [
+    "48b5df5bc"
+  ],
+  "resolvedAt": "2026-08-02T00:21:46.754Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3976",
+  "at": "2026-08-07T06:40:38.638Z",
+  "origin": "codex:019fda1a",
+  "text": "ok uh the basic cut needs to mirror when mirror edits is on i keep forgetting and then realize like several cuts down the line and its not so fun to go fix",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T06:40:49.154Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T06:48:44.299Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented armed Mirror Edit behavior for bounded Basic Cut in the active editor host. The clicked face now supplies the popup direction, offset phase, and retained selection first; then the cut-only mask expands through the existing positional mirror-twin authority, respecting the fixed model-origin plane and current Outliner scope. Both sides preview, commit, and undo in one journal transaction, while ordinary Loop Cut remains unchanged. Added a Zig regression covering a clicked face whose mirrored twin has earlier triangle IDs and proving cut stations appear on both sides; updated the Agent Seat contract. Verified with Zig 0.16 formatting, the full test-mesh-edit target (179 tests), and a ReleaseFast editor ship. Changes remain uncommitted because all touched framework test/host files contain unrelated in-flight worker edits.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T06:48:44.298Z"
+}

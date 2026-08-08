@@ -1,0 +1,28 @@
+{
+  "id": "req_4008",
+  "at": "2026-08-07T21:48:02.228Z",
+  "origin": "codex:019fdda4",
+  "text": "couldnt you just precompile every thing into a library, except for like the 3d and game related code. those things fully can rebuild each time into their own library that is linked with the rest into one build. and then technically editing anything that would change the larger library would cause it to do a full recompile obviously",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:48:09.534Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:50:11.281Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Validated the proposed precompiled-library approach against the live import graph. The core idea is correct, with the essential requirement that each tier be a separate Zig Compile artifact and that cold code stop importing hot implementations. Identified the current coupling points in v8_app, engine, v8_bindings_core, v8_ingredients, and world_loader; proposed a cold core library, independently cached scene3d and game libraries, a narrow extern ABI, a tiny final launcher, and separate cache domains so clearing hot build history never discards the expensive core artifact.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:50:11.281Z"
+}

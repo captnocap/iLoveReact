@@ -1,0 +1,36 @@
+{
+  "id": "req_3857",
+  "at": "2026-08-05T18:54:43.430Z",
+  "origin": "session:6837fe41",
+  "text": "oh i see it. im spamming it and its not doing anything ;_;",
+  "status": "review",
+  "sessionId": "6837fe41-16e0-490b-8b99-32c07855cc55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T18:55:12.991Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T19:02:29.536Z",
+      "actor": "session-6837",
+      "kind": "note",
+      "text": "Diagnosed: running dev host (build 3856) predates commit 54353c436 — __mesh_topo_mirror_quads absent from the binary (string-probed /proc/<pid>/exe); TSX button hot-reloaded but host door missing → silent no-op. Verified algorithm offline against the live mesh via read-only seat dump: 402 quads, 334 already symmetric, 9 fusable. Awaiting user rebuild to confirm live."
+    },
+    {
+      "at": "2026-08-05T19:46:58.448Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The quads button silently doing nothing had two stacked causes: (1) the first two rebuilds raced the commits so the host door was missing while the hot-reloaded button existed — the UI now says 'host door missing, rebuild' explicitly; (2) once the door existed, discovery found the twin pairs but Merge Faces' coplanarity gate (dot>=0.9999, ~0.1mm) refused every import-warped pair (specimen 3.7mm out of plane) — fixed with mergeSelectedTrusted (gate off for licensed mirror copies) and stats-bearing receipts. f8bf00539.",
+  "shas": [
+    "f8bf00539"
+  ],
+  "resolvedAt": "2026-08-05T19:46:58.448Z"
+}

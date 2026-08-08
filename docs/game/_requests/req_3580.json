@@ -1,0 +1,34 @@
+{
+  "id": "req_3580",
+  "at": "2026-08-01T17:31:24.863Z",
+  "origin": "session:6d137ac4",
+  "text": "ok and then news to me but does a staircase remove the floor underit?seems as if",
+  "status": "review",
+  "sessionId": "6d137ac4-a939-4905-8e14-37a458be92f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T17:33:14.697Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T17:46:04.550Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-01T17:57:12.427Z",
+      "actor": "fable-3568",
+      "kind": "note",
+      "text": "CORRECTION: the physics-side answer here was incomplete — the user's follow-up screenshots (req_3582) showed the floor GEOMETRY genuinely missing under staircases in the editor. Real cause found and fixed under req_3582: placementSlotKey omitted the semantic kind from grid keys, so a stairs placement in a floored cell evicted the floor piece. The under-the-map physics teleport diagnosed here was real too (fixed in 9d89117f8), but the 'floor removed' observation was the authoring-data bug."
+    }
+  ],
+  "resolution": "Answered the question with evidence: NO — nothing removes the floor under a staircase. Checked the authoring side first: editor piece/placement data has no floor carving anywhere (cutouts are wall windows/doors only, stairs pieces are purely additive boxes, placed mesh props only ADD colliders). Then built a repro harness (scratchpad, zig run) that decodes the real RJCB collision blobs from the prop packages and drives a simulated player with the exact resolveMeshPropPlayer wiring over a flat floor with the real support law — walk lanes across every footprint from all four sides, with and without jumps, plus descend-from-top lanes. Swept ALL 183 prop collision bakes: zero props sink the body below the floor or into the void under the current code. What the user saw is the SAME bug as the table launch (req_3578), triggered at the staircase: on the fix-1 binary they were playing, the unbounded mesh ceiling seat catches the flight underside/treads overhead mid-body and teleports the feet up to ~1m down — for undersides between ~0.7m and ~1.15m that lands beyond step-height below terrain, where ground support refuses, so the player falls out of the world exactly where the staircase stands, reading as 'the staircase removed the floor'. Already fixed by the bounded ceiling seat in 9d89117f8 (req_3578); needs the dev host rebuilt. No new code change for this req.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T17:46:04.550Z"
+}

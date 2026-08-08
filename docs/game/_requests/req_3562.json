@@ -1,0 +1,30 @@
+{
+  "id": "req_3562",
+  "at": "2026-07-31T22:25:37.678Z",
+  "origin": "session:12bfb258",
+  "text": "for some reason the paint is doing something strange, im not sure what u call this but here is the model [Image #1] and here is it placed [Image #2]",
+  "status": "review",
+  "sessionId": "12bfb258-c068-45f4-b4e2-508fb707452f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-31T22:25:41.401Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-31T22:34:39.708Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The placed bed rendered inside-out (mattress/frame/pillow over the blanket draped on top of them) while the model editor showed it correctly. Traced end to end on Bed_002: its atlas is strictly binary alpha (3.89% zero UV gutters, 96.11% opaque), but live_mesh_doors.rgbaHasTranslucency flagged any texel below 250, so the mesh reported texture_has_translucency and routeTexturedMeshTransparent put the WHOLE mesh on LIVE_TEXTURED_ALPHA_ROUTE_ALPHA (0.998, under the 0.999 cutoff). That lands it in gpu/3d.zig g_pipeline_transparent, which is depth_write_enabled = .false and sorts PER MESH — so the mesh loses self-occlusion and paints in vertex-buffer order. Decoding painted.blob and sampling the atlas per triangle confirmed the order: blanket 0-239, wood frame 240-400, mattress/pillow 401-438, which is exactly the artifact. The route was never needed for cutout: the shared mesh shader already ends with 'if (out_a <= 0.01) { discard; }' and a discarded fragment writes no colour AND no depth, so holes reveal what is behind them from inside the opaque pass. Fixed by narrowing rgbaHasTranslucency to the genuine blend band (SHADER_ALPHA_CUT_BYTE 2 < a < SHADER_ALPHA_OPAQUE_BYTE 250). A disk scan of all 131 model atlases splits 74 fully opaque, 48 cutout-only (the broken class, now opaque and self-occluding), 9 genuinely translucent (bong_01, rhino_pill, Lavalampsad and friends) which keep the depth-write-off draw; the 87/255 Studio door glass is unaffected. Tests updated to assert the new contract and pass (5/5). Docs: new 'Cutout alpha is not translucency' section in docs/game/editor_painted_placements.md plus a hazard record in the _index. NOT YET VERIFIED ON SCREEN — this is a framework change and the dev host running is stale; needs a rebuild.",
+  "shas": [
+    "730bbad50"
+  ],
+  "resolvedAt": "2026-07-31T22:34:39.707Z"
+}

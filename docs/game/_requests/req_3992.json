@@ -1,0 +1,28 @@
+{
+  "id": "req_3992",
+  "at": "2026-08-07T19:45:48.923Z",
+  "origin": "codex:019fd9ee",
+  "text": "what happened ? [Image #1] i opened it on a model that is pre existing and it seemed to fail when i chose humanoid",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:45:56.168Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:17:11.252Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed existing-model Humanoid attach/open: empty Outliner now gets the descriptor-owned body row without remounting or replacing resident geometry; native open preflights the full skeleton/descriptor/source before any topology mutation; eligible rangeless meshes promote to durable logical topology and one body range; ModelView immediately resyncs the native/cart range ledger; exact session-open faults and Retry Open are visible; retry adoption is model/document/source scoped; successful character saves replace stale in-session draft projections. Verified focused TS suites, tools/tsc-check editor, Zig test-character-rig-session, Zig test-mesh-edit, git diff --check, final independent review, and post-edit SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor. User visual verification requested on the reported pre-existing model.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:17:11.252Z"
+}

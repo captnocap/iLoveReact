@@ -1,0 +1,28 @@
+{
+  "id": "req_4038",
+  "at": "2026-08-08T05:53:09.090Z",
+  "origin": "codex:019fda1a",
+  "text": "oh sorry there is a step missing. after detach i selected all and moved it along X to pull it away from the car, and that is what made it concave",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T05:53:24.380Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:02:21.972Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the missing-move root cause: detach now splits logical vertex identity at the new part boundary so rigid X translation cannot falsely buckle shared seam faces; Detach also installs scope and journal metadata synchronously so Split/Undo restores the correct rows.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:02:21.972Z"
+}

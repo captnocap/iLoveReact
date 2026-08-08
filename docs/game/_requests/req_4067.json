@@ -1,0 +1,28 @@
+{
+  "id": "req_4067",
+  "at": "2026-08-08T09:45:13.667Z",
+  "origin": "codex:019fd9ee",
+  "text": "will u clone the safe file now so i can close this and be sure it doesnt autosave over it",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T09:45:36.364Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T09:47:07.639Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cloned the authoritative Compact_Car_001 mesh/doc.blob together with mesh/parts.json and manifest.json into .recovery/req_4067/Compact_Car_001, outside the editor package/autosave target. Verified all three copies byte-for-byte with cmp and matching SHA-256; doc.blob is 7506326113109dd382d16453fdee0138ab7e2dc6b328d0730b0fb0ec0b84b18e. No live model or package file was mutated.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T09:47:07.639Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_3601",
+  "at": "2026-08-01T21:17:30.887Z",
+  "origin": "codex:019fbe1c",
+  "text": "here is something to work towards and some comments: scripting here, being like the exact flow to target a face and turn into a dial, after going through it once and approving the flow. so future items go 'i need a dial' and just run a script at a target face 1. Name-shadowing is the worst one and shouldn't be prose. select top resolving to a stale named region instead of the extremal query, silently diverging after the first edit, is a correctness landmine that documentation mitigates but doesn't defuse — an agent that skimmed will hit it. Fix in code: reserve the keyword namespace (extremal:top) or stop the cube bootstrap from minting names that collide with selectors. The doc even admits the name top \"may not exist at all\" post-edit — so the collision buys nothing and risks everything.\n\n2. part:12..18 vs part:body is a terminology collision. The selector part: prefix means face-index range while the entire parts system uses part:body-shaped ids everywhere else, including part-select. An agent will absolutely write select part:body and get an unparseable range. Rename the range selector (faces:12..18) before muscle memory forms.\n\n3. The percept formatter is exported and unused — the seatq debt survived. \"formatSeatPercept() is exported... but the CLI does not call it\" is documenting your own unshipped --brief flag. The agent already proved the need by writing its own reader; a 14-row batch returning 14 full percepts at ~140-row ceilings is real token burn. This is a one-line CLI change with a doc paragraph standing in for it.\n\n4. The generation guard has a 14-second hole. Checked once before a batch, and a max batch runs ~14s at 100ms cadence — so a user edit mid-batch lands unguarded into rows already queued. That's the review's \"human edit closes the take\" rule, still unimplemented. Either a per-row check against external generation bumps (seat's own bumps whitelisted) or a host-side rule that a native-source commit flushes the pending batch.\n\n5. The debt gate is a creation backstop, not a boundary gate. Refusal at unnamed > 8 is the construction allowance from the review — good — but the other half was zero debt at durable boundaries: nothing here says save refuses at unnamed > 0. Save protects against name loss, not name absence. A model can be saved with 8 mystery faces forever. That's the exact clause the combined contract said made \"60 mystery faces structurally impossible.\"\n\n6. Instances are still a stub with a discipline rule papering it. The instance arg exists, but \"part duplication/path arrays duplicate geometry but do not invent new semantic names; inspect and rename\" is manual labor where the design said membership should be born, not maintained. And \"repeated structure should share one name, not window1/window2\" is asking the agent to uphold by hand the thing instanceFamily was supposed to make automatic. Half-shipped — fine, but the skill phrases it as doctrine rather than gap.\n\n7. Recipes are prose, not callables. The Recipes section is exactly the macro library from our earlier thread — except each recipe is a worked example the agent must re-derive parameters for, and the section will grow linearly with every discovered pattern until the skill is mostly recipes. The dial(face, w, d) system is the pressure release; until then this doc's growth rate is the feature request.",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T21:17:37.134Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T21:26:17.540Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Hardened the Agent Seat at all seven review seams: geometric selector keywords now outrank saved names with explicit region:/extremal: namespaces; ephemeral face ranges moved from part: to faces:; --brief uses the shipped percept formatter and collapses repeated batch state; batches re-check generation before every row and close on intervening editor mutations; save enforces zero naming debt; native duplicate/path-array topology preserves region names while minting fresh instance families; and recipes are callable registry entries with a candidate dial flow plus rollback. Updated and validated the agent-seat skill around the callable candidate/approved lifecycle. The dial remains candidate pending the user's one visual approval run.",
+  "shas": [
+    "135c5131f",
+    "1aa45675a"
+  ],
+  "resolvedAt": "2026-08-01T21:26:17.539Z"
+}

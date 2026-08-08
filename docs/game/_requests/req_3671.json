@@ -1,0 +1,28 @@
+{
+  "id": "req_3671",
+  "at": "2026-08-02T06:48:14.084Z",
+  "origin": "codex:019fbe1c",
+  "text": "how is it not just a pipe of every edit happening so that no matter what u get it? how does it drop the edit. its this sort of shit that turns any amount of my time into being completely wasted over and over again, just firehose it to the fkn models, they can handle it, i cant keep doing the same thing over and over and over again",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T06:48:26.760Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T06:56:43.051Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced Follow's lossy recipe-only recording with an append-only raw event transcript. The native journal now mirrors every accepted edit/undo/redo into an independent unbounded Follow queue, while operation-specific topology patches remain richer supplemental events. Seat retains every event and source in order before deriving human-only delete/create examples. Added TS and Zig regressions, updated the agent-seat skill, validated the skill, passed 38 Seat tests, Zig mesh-edit tests, and a full ReleaseFast editor ship.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T06:56:43.051Z"
+}

@@ -1,0 +1,43 @@
+{
+  "id": "req_3608",
+  "at": "2026-08-01T23:05:28.724Z",
+  "origin": "codex:019fbf8c",
+  "text": "check out the paint pipeline, it seems broken, i saw ur paint on it, i changed the mode to the paint mode and it is now all black",
+  "status": "doing",
+  "sessionId": "019fbf8c-07b2-7401-b788-1b68067b1fe8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:05:43.007Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T23:08:49.576Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-01T23:11:27.160Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User explicitly followed up for the paint itself; diagnosis alone was insufficient. Implement the durable selection-fill journal fix, add framework-layer regression coverage, and recover the intact colored engine atlas."
+    },
+    {
+      "at": "2026-08-01T23:11:27.169Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ],
+  "resolution": "Root-caused the Paint-mode black reset. Agent Seat selection fills update the live atlas and saved composite base.png, but framework/gpu/3d.zig meshPaintSelection never records those fills in the durable paint_program journal. Paint-mode hydration then correctly restores the dark raster-base.png and replays an empty program, dropping the visible colors. No code or model artifacts were changed; the colorful base.png remains intact and recoverable. The pipeline fix belongs in the native selection-fill path with Zig-layer coverage.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T23:08:49.576Z"
+}

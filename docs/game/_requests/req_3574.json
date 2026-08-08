@@ -1,0 +1,36 @@
+{
+  "id": "req_3574",
+  "at": "2026-08-01T16:35:08.947Z",
+  "origin": "session:1132e81b",
+  "text": "address the problem where you can quickly turn 6 unnamed but relatively known faces into 60 faces that now only has any meaning if the model reasoned about it but hasnt properly declared it for anything it will forget where its ass from its head is",
+  "status": "review",
+  "sessionId": "1132e81b-d85b-488d-bae0-2da8ab1e4540",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T16:35:53.164Z",
+      "actor": "session-1132",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T16:40:05.185Z",
+      "actor": "session-1132",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-01T16:40:17.760Z",
+      "actor": "session-1132",
+      "kind": "note",
+      "text": "Correction — three quoted fragments were eaten by shell backtick expansion in the resolution above. They read: (1) \"Face ... carries a MATERIAL texture-role tag\"; (2) \"makeSplitFace and appendBevelFace both do .material = source.material while minting a FRESH group id\"; (3) \"a HARD naming-debt gate where AS <NAME> is required on every face-creating op\". No change to the design or the commit."
+    }
+  ],
+  "resolution": "Addressed the semantic-drift hole in the agent seat design: selectors reach geometry but do not remember it, so once 6 faces become 60 the agent's understanding lives only in its context window and is lost to any compaction, rewind, or new session — and worse, the agent does not notice, it just selects facing:+z believing that is the window row, catches the door too, and reports success. Added part 2 (The Name) to docs/game/AGENT_SEAT_DESIGN.md, commit 803e158d2, and re-cut the build order and risks around it. The mechanism is already proven in this repo and that is the whole reason the fix is small: Face in framework/gpu/indexed_edit_mesh.zig:311 carries a  texture-role tag documented as inherited by splits/cuts from the source face, and makeSplitFace (:2186) and appendBevelFace (:2520) both do  while minting a FRESH group id — which is exactly why group cannot be the carrier (:1021 'the negative piece retains the source group; the positive piece receives a fresh authored group', so a group-borne label would silently cover half of what it used to). So the label layer is a second inheriting tag on the same face-mint path plus a name table, with the hand-copied inheritance collapsed into one Face.inheritFrom so it does not become hand-synced copy #9. Six moves: labels inherit through cuts; every creating op emits a FIXED role vocabulary (extrude→cap/wall, inset→field/rim, loopcut n→band.0..n ordered along the axis) so names are predictable before the op runs, which is what makes multi-step planning possible; a HARD naming-debt gate where  is required and anonymous work is refused past a budget, so complexity cannot accumulate unnamed past 8 faces instead of 60; one label with N instances rather than N labels, so 60 faces stay 7 names; a named-tree percept with provenance instead of a face count; and pre-named primitives so a cube is known rather than relatively known from op zero. Persistence needs no new format — the journal note (AppFrame.tsx:4453, restored on undo), RJMD's per-face role field, and PARTS_META (meshDoc.ts:186) already carry exactly this shape, so a rewind restores names WITH the geometry. Acceptance test stated explicitly: a brand-new agent with an empty context opens the model and continues correctly. Build order re-cut so slices 1-3 ship together (slice 1 alone yields an agent that reaches everything and remembers nothing, which looks fine for three ops then quietly loses the plot), and label rot added as a first-class risk with its three failure modes and their rules.",
+  "shas": [
+    "803e158d2"
+  ],
+  "resolvedAt": "2026-08-01T16:40:05.185Z"
+}

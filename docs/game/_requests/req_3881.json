@@ -1,0 +1,30 @@
+{
+  "id": "req_3881",
+  "at": "2026-08-05T22:04:00.205Z",
+  "origin": "session:2eed946e",
+  "text": "ok and then one more thing is it not possible to force all the uv verts to grid snap out of the gate. its incredibly annoying that it doesnt",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T22:05:06.524Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T22:07:13.357Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Generated UV layouts now emit grid-snapped corners: in paint_islands.zig's emission pass, every corner rounds to the nearest whole texel within its island rect (clamp [0,w]), replacing the old half-texel inset + unroll fp fractions that made hand editing in the UV workspace miserable. Safety checked before building: model_paint's fill/tint paths already expand strokes into the 2-texel pad gutter and clamp at the island rect, so border-exact corners sample cleanly under linear filtering. Guard: a pre-pass detects islands where snapping would collapse any triangle (sub-texel slivers) and those keep the legacy inset corners — the decision is island-wide so shared corners stay bit-coincident and the req_3879 continuity rule never splits a chart over it. Authored/imported UVs (reconstruction lane) are user data and are never quantized. Cube law test extended: every generated corner must be integer-valued. 13/13 paint_islands, 55/55 model-paint, 166/166 mesh-edit. Rebuild + Remake Atlas to get grid-true corners.",
+  "shas": [
+    "7a6dac492"
+  ],
+  "resolvedAt": "2026-08-05T22:07:13.357Z"
+}

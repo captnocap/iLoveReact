@@ -1,0 +1,30 @@
+{
+  "id": "req_3867",
+  "at": "2026-08-05T20:19:04.792Z",
+  "origin": "session:2eed946e",
+  "text": "still not it D: look i cant see these verts which is a problem. [Image #5] now this is when looking at it like this [Image #6] and you might say yes that is expected but the problem is that at a certain distance being able to see the inner working of something is acceptable but the moment you have something fundamentally on the other side showing through that sucks ass",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T20:21:58.122Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T20:27:52.810Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the analytic overlay-occlusion mechanism wholesale. The interpolated-plane depth test with scalar tolerances was structurally unable to satisfy both directions: req_3861's slope-scaled bias exploded at extreme grazing angles and let the model's FAR SIDE bleed through panels (the 'sucks ass' screenshot), while some silhouette verts were still eaten. New mechanism in mesh_edit.zig: occBuildDepth rasterizes all front-facing triangles into a small CPU depth buffer (~1/3 screen resolution at the real viewport aspect, nearest 1/z per texel, perspective-correct), and occPointHidden hides a point only when EVERY texel in its one-texel (3x3) neighborhood holds a strictly nearer surface (0.5% relative tolerance). Because the buffer holds the same surface the render shows at each pixel, far-side geometry can never leak regardless of grazing, and markers within ~a texel of a silhouette survive via the background texel past the rim — the exact 'close inner workings ok, other side never' split the user described. Removed the slope bias, corner-nudge rescue, and triangle grid entirely; edge span sampling rides on top unchanged; off-viewport points count visible (harmless, pane-bound interactions). 163/163 mesh-edit tests pass; grazing + span + frontal-occluder regression tests all updated to the new semantics. Needs dev-host rebuild.",
+  "shas": [
+    "b284e6f1b"
+  ],
+  "resolvedAt": "2026-08-05T20:27:52.810Z"
+}

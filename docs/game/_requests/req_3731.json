@@ -1,0 +1,18 @@
+{
+  "id": "req_3731",
+  "at": "2026-08-03T06:01:50.110Z",
+  "origin": "codex:019fc558",
+  "text": "im not saying that merging removes overlapping faces. im saying that agents, when using the agent-seat skill, need to not just do outliner soup. because if i wanted to, i could take everything here, and merge it all down into one. its not hard to learn how to merge things correctly. yes it takes work. yes it requires some thinking and fucking up. but once its all welded together not only is it a better model but the uv is way way way more coherent",
+  "status": "doing",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T06:02:07.724Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

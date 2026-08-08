@@ -1,0 +1,28 @@
+{
+  "id": "req_3710",
+  "at": "2026-08-03T02:43:48.432Z",
+  "origin": "codex:019fc558",
+  "text": "hm. im still a bit confused by what that means. Are you saying to find 3d mesh that doesnt have the right texture mapping? because t here is a lot. if im looking for raw color mismatch i cant really because its a texture over the paint",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T02:44:07.775Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T02:44:12.165Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the acceptance criteria: the textured raster was authored for the pre-stack UV coordinates, so widespread apparent mapping errors are expected and cannot validate stacking. Pre-regeneration acceptance is structural and automated; human visual review becomes meaningful only after a fresh atlas is generated for the new coordinates. The remaining user decision is the per-zone density policy, not locating individual texture mismatches.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T02:44:12.165Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3694",
+  "at": "2026-08-02T20:47:23.350Z",
+  "origin": "session:76e32217",
+  "text": "hm. i dont really care who is  the source of truth but it needs to balance between claude and codex and kimi and it likely will be updated as frequently as the agent-seat skill has been til its right so mismatching is not helpful either",
+  "status": "review",
+  "sessionId": "76e32217-ee52-4c1f-b0d1-00d178e18e05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T20:47:29.531Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T20:49:00.610Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Collapsed the repo's skills to one physical home. agent-skin had been written only to .agents/skills/ and was never registered with Claude Code, which scans .claude/skills/ — that is why it never appeared in /skills. The same split had already silently rotted agent-seat: two real directories, the tracked .claude/ copy frozen at 478 lines (missing retopo-bands, boundary-continuation, follow, weld-pairs, normalize-widths, and still naming ModelView as the Seat transport owner instead of AppFrame) while the live .agents/ copy carried 762 lines of current contract. Every session invoking /agent-seat was reading a stale description of the editor. Since these skills are shared across Claude, Codex and Kimi and are revised nearly every session, a copy is a guaranteed divergence, so all eight skills now live once under .agents/skills/ (vendor-neutral, beside AGENTS.md) and every .claude/skills/ entry is a relative symlink into it, committed as git mode 120000. Verified live: the skill scanner follows the symlinks and now lists agent-skin and the 762-line agent-seat. AGENTS.md gained a section stating the rule and the authoring recipe — a real directory under .claude/skills/ is the bug.",
+  "shas": [
+    "fef653f41"
+  ],
+  "resolvedAt": "2026-08-02T20:49:00.610Z"
+}

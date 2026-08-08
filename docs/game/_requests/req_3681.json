@@ -1,0 +1,28 @@
+{
+  "id": "req_3681",
+  "at": "2026-08-02T10:14:12.316Z",
+  "origin": "codex:019fc1e8",
+  "text": "ok well store the mesh model 62 is a bad name",
+  "status": "review",
+  "sessionId": "019fc1e8-eed1-74b1-b88b-bbfef589043c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T10:14:15.352Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T10:14:23.025Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Renamed the active stored model from the generic Model 62 label to Oven Range through the editor's model authority. The saved/mount/resident semantic horizons remain healthy at 602 named faces with zero unnamed faces; the internal immutable document id remains primitive:cube:62 while the user-facing asset name is Oven Range.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T10:14:23.025Z"
+}

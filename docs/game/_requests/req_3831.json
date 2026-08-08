@@ -1,0 +1,24 @@
+{
+  "id": "req_3831",
+  "at": "2026-08-05T05:56:16.386Z",
+  "origin": "session:c9ff77e9",
+  "text": "yeah im aware so this is the only way to do it, and there is no other way to go about it. this will ensure that everything lands as it should\n\n\nhere is a rough roadmap:  freeze the 3d.zig file -> clone it to 3d_helpers.zig -> locate and replace all locations to utilize helpers and remove duplicate ops -> verify byte identical outputs between the two -> freeze 3d_helpers.zig -> break out into scoped files -> byte identical output to 3d_helpers.zig -> reach unreachable code",
+  "status": "doing",
+  "sessionId": "c9ff77e9-3c0b-422e-8182-4e3b5a6caf18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T05:57:17.984Z",
+      "actor": "fable-orchestrator",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T05:57:17.992Z",
+      "actor": "fable-orchestrator",
+      "kind": "note",
+      "text": "Roadmap received: freeze 3d.zig -> clone 3d_helpers.zig -> dedup via helpers -> byte-identical verify -> freeze -> scoped breakout -> byte-identical verify -> wire unreachable. Merging with req_3830 orchestration effort."
+    }
+  ]
+}

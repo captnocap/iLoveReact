@@ -1,0 +1,29 @@
+{
+  "id": "req_3698",
+  "at": "2026-08-02T23:57:30.346Z",
+  "origin": "session",
+  "text": "after the matter we should remember to solve that so u can do it",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-03T02:01:25.468Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T02:31:11.210Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The Agent Seat atlas verb now delegates to the exact create-atlas transaction used by the visible Paint Atlas dialog, so it clears atlasReady/atlasInvalidated, persists the package baseline, and enters Paint without removing the human dialog. A focused regression proves the direct host shortcut is not invoked; all 42 Seat tests and the editor bundle pass.",
+  "shas": [
+    "9c8303f07"
+  ],
+  "resolvedAt": "2026-08-03T02:31:11.210Z"
+}

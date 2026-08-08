@@ -1,0 +1,30 @@
+{
+  "id": "req_3845",
+  "at": "2026-08-05T09:10:29.955Z",
+  "origin": "codex:019fd073",
+  "text": "fix this from happening we dont want it to show us two things highlighted at once [Image #1]",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T09:10:39.475Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T09:13:09.189Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The mixed Asset Explorer search list now resolves a single tagged selection key instead of independently highlighting both the open model document and the retained catalog asset. The current result owns one highlight, clicking another result transfers that exclusive highlight, and a regression test covers the exact simultaneous model-plus-material state shown in the screenshot.",
+  "shas": [
+    "56c1a3213"
+  ],
+  "resolvedAt": "2026-08-05T09:13:09.188Z"
+}

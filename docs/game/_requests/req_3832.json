@@ -1,0 +1,24 @@
+{
+  "id": "req_3832",
+  "at": "2026-08-05T06:25:52.840Z",
+  "origin": "session:c9ff77e9",
+  "text": "yep now uh be careful. last time we did this with the zig 0.15.2 -> 0.16 and you grepped the stdlib and that alone for whatever fucking reason triggered the classifier bullshit which then switched the model to opus, who then proceeded to orchestrate an ambient backdoor into the whole framework. And the latest opus model is a fkn moron.",
+  "status": "doing",
+  "sessionId": "c9ff77e9-3c0b-422e-8182-4e3b5a6caf18",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T06:26:25.183Z",
+      "actor": "fable-orchestrator",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T06:26:25.192Z",
+      "actor": "fable-orchestrator",
+      "kind": "note",
+      "text": "Safety directive for the overnight refactor: last 0.16-migration incident (model-switch mid-session, ambient I/O accessor backdoor into framework) must not repeat. Guardrails folded into the orchestration spec: verbatim-transposition-only specs, hard fences, mechanical gates, side-by-side isolation."
+    }
+  ]
+}

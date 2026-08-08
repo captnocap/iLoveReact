@@ -1,0 +1,30 @@
+{
+  "id": "req_3701",
+  "at": "2026-08-03T00:25:14.818Z",
+  "origin": "session:c440da46",
+  "text": "hm. Yeah its something we need to find a remedy for. curious what your thoughts are. there are technically two truths being that if you were to author as mostly one mesh it would come as a few pieces. but because of the use of so many primitives, it tends to explode. and its not just you but other agents ive seen do anything. for example with something like the female torso model (18) it has 18k triangles, and comes out to 317 islands. so that is 8 times more with like 100 less or soomething. and its because its all one mesh. also of those lose bits it has, they arguably can be all transformed and stacked to reduce the whole thing down to tens of islands.",
+  "status": "review",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T02:01:25.475Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T02:31:11.217Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "UV cost is now a first-class Seat percept and appears in brief look output. On live Moped_50 the baseline was 477 logical islands; normalized semantic/material-aware prestack produced 314 unique texture footprints, stacking 163 islands (34.2%) while semantic-status remained healthy at saved/mount/resident 2046 of 2046 named and zero unnamed after apply and save.",
+  "shas": [
+    "9c8303f07"
+  ],
+  "resolvedAt": "2026-08-03T02:31:11.217Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3687",
+  "at": "2026-08-02T17:23:34.544Z",
+  "origin": "one-off",
+  "text": "place yourself at the middle of an alley in a busy city, what are 10 objects in your vision",
+  "status": "new",
+  "sessionId": "101c7df1-5904-4d5e-8633-66a453c1c443",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T17:23:47.555Z",
+      "actor": "101c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

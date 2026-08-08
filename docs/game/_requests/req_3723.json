@@ -1,0 +1,28 @@
+{
+  "id": "req_3723",
+  "at": "2026-08-03T05:18:31.276Z",
+  "origin": "codex:019fc558",
+  "text": "so the quads are different size but the geometry is the same size? because its on a 6 sided cylinder, and the cylinder i believe is not modified in any which direction, so 2 sides show on the uv as one size while 4 the other",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:18:40.775Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:19:54.347Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user’s cylinder diagnosis against the live rear-indicator geometry and the immutable uv-reset record. All six wall quads are physically equal at approximately 0.00104 square metres each. The UV builder uses dominant-world-axis box projection and explicitly accepts projection-cosine compression on glancing faces. Consequently four angled sides project to about 0.02252 m across while two axis-aligned sides retain the full 0.026 m width; the atlas then groups them as 2 + 1 + 2 + 1 charts. The reset UV already shows roughly 36 versus 40 square texels per equal quad, and the current layout shows about 180 versus 216. No geometry or UV mutation was made.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T05:19:54.347Z"
+}

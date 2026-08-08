@@ -1,0 +1,31 @@
+{
+  "id": "req_3855",
+  "at": "2026-08-05T18:22:57.917Z",
+  "origin": "session:6837fe41",
+  "text": "ok so one of the faces is a quad the other 2 are triangles, but its the same space in mirror right. and the data actually knows that also, so then instead of me going and doing all these again (because i forgot to turn on mirror early on) why isnt there a button that says if you have a quad here and the same mirror space doesnt have a quad, convert it to a quad",
+  "status": "review",
+  "sessionId": "6837fe41-16e0-490b-8b99-32c07855cc55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T18:23:10.946Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T18:36:55.637Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the retroactive mirror quad repair the user asked for ('why isnt there a button that converts the twin space to a quad'). Root cause explained: live bilateral ops pair twins by authored-face corner sets, so a 4-corner quad can never match two 3-corner loose triangles and honestly falls back one-sided; nothing existed to repair quads authored before mirror was armed. New Zig host capability meshMirrorMatchQuads(axisMask) in framework/gpu/3d.zig fuses twin lone-triangle pairs into the matching quad (quantized-positional pairing shared with the live twin extension via hoisted mirror_corners; opposite-diagonal twins still match; group-only byte-stable commit, dissolve fallback; one journal entry). Exposed as __mesh_topo_mirror_quads, a 'quads' verb in the symmetry trust strip beside keep+/keep-, and Seat action mirror-quads. Docs: SKILL.md, editor_mesh_integrity.md + _index record. Needs a dev-host rebuild to use.",
+  "shas": [
+    "4665f5285",
+    "54353c436"
+  ],
+  "resolvedAt": "2026-08-05T18:36:55.637Z"
+}

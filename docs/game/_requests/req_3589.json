@@ -1,0 +1,32 @@
+{
+  "id": "req_3589",
+  "at": "2026-08-01T18:48:54.537Z",
+  "origin": "codex:019fbe1c",
+  "text": "lets close the remaining gaps that arnt covered here: | Inset | **No verb** | Use the two-stage recipe above. |\n| Bevel / chamfer | **No verb** | `bevelEdge`, `bevelVertex`; native `__mesh_bevel_begin/preview/end`. Scaling a cap only *fakes* a chamfer. |\n| Edge or vertex selection | **No verb** | Selection is face-only. `extrudeEdge`, `connectVerts`, `bridgeEdges` exist unexposed. |\n| Delete / merge / weld / solidify / detach / flip | **No verb** | `deleteFaces`, `mergeFaces`, `solidifyFaces`, `detachPanel`, `flipFace`; native `__mesh_topo_*` equivalents. |\n| Save / persist the model | **No verb** | Native `__mesh_journal_checkpoint`, `__mesh_journal_note`. Hot state survives reload; a **cold restart resets it**. Semantic names are LIVE-ONLY — they do not currently ride the saved blob. |\n| UV / paint / materials | **No verb** | Extensive `__mesh_paint_*` and texture-slot doors exist. |",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T18:49:04.887Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T19:04:53.615Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the remaining Agent Seat gaps without creating a second mesh path. Added on-demand vertex and edge topology descriptors, programmatic vertex selection, native connect-vertices, edge extrusion, atomic bevel, create and bridge face, destructive and repair verbs, compound inset with rollback, named detach through Outliner authority, journaled selection paint, explicit atlas rebuild, material role assignment, selected-island UV operations, and full package save. Fixed the load-bearing semantic bug where shared topology replacement retained face region ids but cleared their name dictionary, and made mixed-name merges create explicit naming debt. Focused TypeScript and Zig contracts, skill validation, diff checks, and ReleaseFast editor ship are green. User visual, cold-restart persistence, and 60-second frame-time verification remain review gates.",
+  "shas": [
+    "7c40f8381",
+    "cf3112734",
+    "a42c23882"
+  ],
+  "resolvedAt": "2026-08-01T19:04:53.615Z"
+}

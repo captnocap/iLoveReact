@@ -1,0 +1,17 @@
+{
+  "id": "req_3941",
+  "at": "2026-08-06T07:04:22.334Z",
+  "origin": "one-off",
+  "text": "  oh the payphone is doing it also [Image #1]",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:05:05.462Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_3963",
+  "at": "2026-08-07T00:19:02.775Z",
+  "origin": "codex:019fd98f",
+  "text": "tap into the $agent-seat look at the edges i have selected. why cant i make a face here?",
+  "status": "review",
+  "sessionId": "019fd98f-1392-75c2-affa-f7418f7a012c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T00:19:09.248Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T00:30:14.701Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected the live Torso selection through Agent Seat: e218 and e263 were valid open opposite edges of one four-edge hole. Their adjacent normals and the cross-edge normals both disagreed, so Create Face's winding gate falsely rejected valid manifold topology. Added a boundary-circulation fallback, Zig regression coverage, Seat consumption coverage, and updated the Agent Seat contract.",
+  "shas": [
+    "c08fb77d0",
+    "0357386ab"
+  ],
+  "resolvedAt": "2026-08-07T00:30:14.701Z"
+}

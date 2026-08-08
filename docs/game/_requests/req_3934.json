@@ -1,0 +1,17 @@
+{
+  "id": "req_3934",
+  "at": "2026-08-06T06:51:47.012Z",
+  "origin": "one-off",
+  "text": "all of them immediately hyit a error in their first command saying its already claimed, just FYI they are going now but just keep that in mind",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:52:22.512Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

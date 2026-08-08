@@ -1,0 +1,59 @@
+{
+  "id": "req_3991",
+  "at": "2026-08-07T19:44:27.768Z",
+  "origin": "codex:019fdda4",
+  "text": "make a plan to correct those times we want it to be near instant",
+  "status": "done",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:44:36.326Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:02:53.104Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-07T20:06:39.208Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User approved the reviewed performance plan and requested implementation; reopen it for execution."
+    },
+    {
+      "at": "2026-08-07T20:06:39.216Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:33:43.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Implemented the performance plan on the active editor surface. The World editor/WorldLoader now stays mounted across document tabs; unchanged live-world and resident catalogs are not republished on return, and residency is restricted to authored models and flora actually referenced by the active world or armed preview. Existing RMAP files now read, validate, expand, derive transport roads, and allocate chunks on a native worker against detached ownership; the frame thread publishes the finished document through bounded pointer/hash-map swaps and destroys the outgoing map on a worker. Clean painting.rmap and world.json snapshots skip redundant switch-time serialization. Map switching keeps the outgoing world visible, camera-usable, and authoring-locked until atomic replacement. FPS telemetry now measures complete frame intervals with rounded cadence, duplicate telemetry consumers share one poller, and the watchdog no longer forks awk/date/cat/sleep around forty times per second. Added TS residency coverage plus Zig detached-prepare, malformed-input preservation, road derivation, clean-save, and FPS cadence coverage. The real 625-chunk nice map measured 4416ms of publish-time road work before the detached-road change and 0ms publish at millisecond resolution afterward in the Zig test build. test-game-map, frame_telemetry tests, residentDemand/surfaceFlora tests, watchdog syntax/diff checks, and the ReleaseFast editor ship all pass. Repository policy leaves the 60-second interactive spikewatch/navigation check for the user's visual run."
+    },
+    {
+      "at": "2026-08-07T20:41:12.199Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done",
+      "text": "User verified the rebuilt editor and reported the interaction is instant: 'instant. nice'."
+    }
+  ],
+  "resolution": "Plan grounded in measured bottlenecks: retain the WorldLoader session hidden across tabs; replace whole-catalog synchronous resident pushes with content-addressed per-package artifacts and a process-wide native registry that streams missing props; refactor map globals into detached MapDocument ownership with background prepare/save and bounded atomic commit; normalize FPS by elapsed time, consolidate telemetry subscriptions, and replace the shell-forking watchdog sampler. Acceptance gates require one-frame tab/switch request handling, no map/resident main-thread phase over the 4.167ms 240Hz budget, compatible RMAP/MESH_PROPS formats, layered TS/Zig tests, ReleaseFast build, and a 60s spikewatch run.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:02:53.104Z"
+}

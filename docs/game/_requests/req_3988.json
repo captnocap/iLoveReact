@@ -1,0 +1,28 @@
+{
+  "id": "req_3988",
+  "at": "2026-08-07T19:29:21.024Z",
+  "origin": "codex:019fd9ee",
+  "text": "this is just a bunch of soup. only show it to me when i hover the specific joint [Image #1]",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:29:28.186Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:40:58.389Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the all-bones rig name overlay with one native hover disclosure tied to the exact joint origin and exact bind/deformed specimen. The host samples its own pointer during paint, so no JavaScript motion traffic or React rerender was introduced; selection and all other rig visuals remain intact.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:40:58.389Z"
+}

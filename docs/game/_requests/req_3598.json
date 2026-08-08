@@ -1,0 +1,30 @@
+{
+  "id": "req_3598",
+  "at": "2026-08-01T20:01:26.540Z",
+  "origin": "codex:019fbe1c",
+  "text": "the skill still says: | Parts in the percept | **Not reported** | `add` creates parts, but the percept stays face-regions only, so a cold `look` cannot see part structure. Native `__mesh_part_ranges`. |",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T20:01:29.973Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T20:05:09.876Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the stale Agent Seat capability gap instead of only editing the documentation. Every seat percept now joins native face semantics with the shell-owned durable Outliner structure: named parts, primitive kind, visibility, exact ranges, folder ancestry, and the active part scope. Updated the skill to remove the old limitation and teach cold agents how to use the new fields. Added a focused contract test, validated the skill, and passed the full ReleaseFast editor build.",
+  "shas": [
+    "5fd00cf6a"
+  ],
+  "resolvedAt": "2026-08-01T20:05:09.876Z"
+}

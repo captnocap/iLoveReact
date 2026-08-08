@@ -1,0 +1,31 @@
+{
+  "id": "req_3569",
+  "at": "2026-08-01T16:04:18.826Z",
+  "origin": "session:35434fae",
+  "text": "ok now idk what the problem is with the code-based wall compared to a wall that i place in the world with the same thickness, but u see this tearing here? [Image #2] [Image #3] [Image #4] this is happening at a distance, maybe 45 meters or so away",
+  "status": "review",
+  "sessionId": "35434fae-dd0b-48d1-aa4a-701ed181c056",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T16:04:56.342Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T16:19:55.668Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the distance tearing as z-fighting between the two opaque surfaces every shader-skinned catalog-piece face draws: the flat colored instance box and its textured skin box outset 4mm over it (SKIN_BOX_OUTSET 0.008). Past ~45m, 24-bit depth precision exceeds 4mm and the flat color (the asset hex — the purple/red/blue streaks) tears through. Model/authored walls draw one mesh, which is why the user's own wall didn't tear. Fix decouples draw from collide: pieceInstanceRows marks skin-covered rows r=-1 (collide-only), applyPendingLive compacts them out of the render buffer, applyLiveColliders (which never reads the color floats) keeps every row so playtest walls stay solid. Also stopped pieceSkinBoxes plating an opaque skin cube over the window glass pane. Zig half needs a dev-host rebuild; until then new JS renders the tear band dark instead of colored. ast-check + pieces/pieceSlots/stickers suites green; face-paint doc + record updated.",
+  "shas": [
+    "e813d8ec1",
+    "7323a3fb4"
+  ],
+  "resolvedAt": "2026-08-01T16:19:55.668Z"
+}

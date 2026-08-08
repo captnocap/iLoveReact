@@ -1,0 +1,28 @@
+{
+  "id": "req_4031",
+  "at": "2026-08-08T05:38:52.832Z",
+  "origin": "codex:019fda1a",
+  "text": "yes well.. the other thing is like, i could name the edges where it sits in, but there is no way to name an edge piece only faces",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T05:39:01.935Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T05:39:20.704Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Established the missing semantic primitive: persistent named edge sets/loops, stored by canonical stable logical-vertex pairs rather than render triangle-edge indices. This lets an artist name a detached part perimeter (for example ps_rear_door.mount) and the receiving body seam (ps_rear_door.socket); Agent Seat can then solve and validate the rigid transform between those loops. Face semantics remain surfaces, while edge semantics represent seams, sockets, hinges, and attachment boundaries.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T05:39:20.703Z"
+}

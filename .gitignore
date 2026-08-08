@@ -310,3 +310,7 @@ userdata/
 /verify-zig016-tests.sh
 # artifact: 5MB debug dump of the icon atlas — a visual aid, not an input
 /framework/gpu/icon_atlas_debug.ppm.txt
+# oneoff: the user's own sweep of ~200 esbuild bundles and metafiles off the repo root (372 files, ~195MB)
+/bunch of dogshit /
+# asset: a 3D model sitting at the repo root, untracked but UNIGNORED — one `git add -A` from publication
+/torso_quad.glb

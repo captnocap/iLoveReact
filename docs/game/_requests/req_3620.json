@@ -1,0 +1,30 @@
+{
+  "id": "req_3620",
+  "at": "2026-08-02T00:01:50.055Z",
+  "origin": "session:bfe7a1dc",
+  "text": "well i dont think its the agent seat either way i dont **really** give a darn about how it got there i just want it fixed its not helpful",
+  "status": "review",
+  "sessionId": "bfe7a1dc-6565-4d5c-8242-39b319b07ad7",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T00:01:59.582Z",
+      "actor": "bfe7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T00:03:27.030Z",
+      "actor": "bfe7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "X-Ray is now opt-in per tool entry: chooseSelMode drops the xray request on EVERY mode change (not just returning to view), so no remembered, replayed, or external toggle can leave the model ghosted — switching tools always starts opaque. The agent seat viewport xray op is gated by the same meshEditXrayActive containment as the toolbar and refuses loudly outside vertex/edge/face modes. viewportPresentation 3/3, commands 19/19, seatApi 31/31 pass; ModelView bundles clean. Commit local; push blocked by corrupt refs/heads/edit-trail ref (bad object) breaking fetch — flagged to user.",
+  "shas": [
+    "608385565"
+  ],
+  "resolvedAt": "2026-08-02T00:03:27.030Z"
+}

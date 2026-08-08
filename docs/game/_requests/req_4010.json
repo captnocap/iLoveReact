@@ -1,0 +1,28 @@
+{
+  "id": "req_4010",
+  "at": "2026-08-07T22:09:23.532Z",
+  "origin": "codex:019fd9ee",
+  "text": "create for me a end to end guide in a single file html document",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T22:09:34.325Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T22:24:30.133Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Created docs/game/CHARACTER_RIG_GUIDE.html as a single self-contained, responsive, printable end-to-end guide for the current cart/editor character-rig workflow. It covers arbitrary imported/existing models, BODY connectivity repair, complete semantic anatomy assignment, skeleton fitting and manual sizing, binding, heatmap/probe and bend tests, save/cold-reopen durability, export-time Player/NPC role selection, invalidation rules, readiness blockers, undo/redo ownership, and current UI constraints. Validated tag balance, unique IDs, all internal anchors, required workflow coverage, no external scripts/assets/network references, and git diff cleanliness.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T22:24:30.133Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_3852",
+  "at": "2026-08-05T18:11:02.395Z",
+  "origin": "session:e863e9d6",
+  "text": "is there a reason why the actions wouldnt just sync through the event bus anyways. i actually dont see why it would be a problem in the same process. i already can have multiple models open at a time",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": []
+}

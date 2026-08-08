@@ -151,8 +151,12 @@ function applyVerb(verb: 'archive' | 'unpublish', trees: string[], drop: boolean
         err(removed.stderr.trim());
         return removed.code || 1;
       }
-      out(`[repo] ${tree}: ${addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what)}`);
     }
+
+    // The ignore rule is NOT conditional on the path having been tracked. A path that is
+    // untracked AND unignored is the `git add -A` risk the --candidates view exists to
+    // surface — skipping the rule there left the exact case this command is for unhandled.
+    out(`[repo] ${tree}: ${addIgnoreRule(rjitHome, tree, verdict.kind, verdict.what)}`);
 
     if (drop) {
       if (!zipRel) {

@@ -1,0 +1,28 @@
+{
+  "id": "req_4021",
+  "at": "2026-08-08T01:24:23.927Z",
+  "origin": "codex:019fdda4",
+  "text": "your going to need to do something better though, basically what happened is i was in the middle of an edit, and a build came through and it now has the model in a state where it says unsaved edits but it doesnt have my edits also, and i cant save it. basically what you need to do is make it to where i can accept a notification to accept the rebuild and do not force it on me either, then it can happen on my time not when an agent just runs build",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T01:24:32.173Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T01:36:44.778Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented an explicit approval boundary for native development updates. The supervisor now compiles changed core, Scene3D, and game artifacts as pending candidates without activating modules or restarting the live host. It emits a persistent editor notice that can collapse while work continues, rejects Apply while any model or world document is dirty or another editor operation is blocking, binds approval to the exact compiled hashes, rechecks source identity at click time, and only then hot-swaps or performs an exact-child restart. Core candidates build under a separate prefix so even the launch binary remains untouched before approval. Added focused token/payload tests, rebuilt tools/rjit.js, and verified both CLI and editor bundles. The currently running pre-fix supervisor was intentionally not restarted; the gate is armed on the next voluntary dev-host launch.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T01:36:44.778Z"
+}

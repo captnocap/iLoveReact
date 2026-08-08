@@ -1,0 +1,30 @@
+{
+  "id": "req_3856",
+  "at": "2026-08-05T18:25:37.803Z",
+  "origin": "session:2eed946e",
+  "text": "hey can we fix this annoying shit here is my view without xray on [Image #1] and then with xray on [Image #2] notice how without xray im still getting a bunch of bullshit that isnt even in my view showing up",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T18:25:48.547Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T18:35:39.898Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause: the drawn overlay's visibility mask (mesh_edit.refreshCameraVisibility) only did back-face culling, so front-facing geometry hidden BEHIND nearer surfaces (greebles under the hull, the model's far side) still drew its verts/edges/dots in Surface mode — while the click path already ray-tested real occlusion. Fix: refreshCameraVisibility now builds a screen-space depth grid (front-facing triangles binned by projected bounds, perspective-correct 1/z depth compare, same relative eps as model_paint.occluded) and prunes occluded vertices; edges derive from the pruned verts, and face wash + face dots consult the same grid via overlayPointOccludedPub. Marquee select and pick candidates share this one boundary, so hidden elements also stop catching box-selects. X-Ray unchanged — it deliberately restores everything. 161/161 mesh-edit tests pass incl. the flipped occlusion assertion. Needs a dev-host rebuild (framework change) to see it.",
+  "shas": [
+    "4665f5285"
+  ],
+  "resolvedAt": "2026-08-05T18:35:39.898Z"
+}

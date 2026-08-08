@@ -1,0 +1,28 @@
+{
+  "id": "req_3974",
+  "at": "2026-08-07T03:06:42.489Z",
+  "origin": "codex:019fda1a",
+  "text": "but create face does not do this same check?",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T03:06:49.094Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T03:07:14.436Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the exact native asymmetry. meshTopoCreateFaceFromEdges works locally from mesh_edit's selected welded edges, appends raw triangles, then stamps authored group/part/material/semantic metadata; it never calls cloneIndexedEditMeshOrImport or rebuilds every authored polygon. Cut/Basic Cut do call that all-model indexed reconstruction before creating a popup. Therefore Create Face can continue on this model while Cut is globally blocked, and its current postconditions do not prove the appended result can survive the later indexed rebuild. No changes made.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T03:07:14.436Z"
+}

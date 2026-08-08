@@ -1,0 +1,31 @@
+{
+  "id": "req_3891",
+  "at": "2026-08-05T23:52:30.519Z",
+  "origin": "codex:019fd43a",
+  "text": "i thought we said to literally not just restrict it to a 4 -> 8 lol and it is only a 4 -> 8 ?",
+  "status": "review",
+  "sessionId": "019fd43a-3dac-7b72-8885-3de82e7839ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T23:52:37.966Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:00:35.202Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Generalized the open-boundary operation from implicit N-to-2N into a bounded N-to-M chamfer. The native kernel distributes added sides as evenly as possible, the V8/Agent Seat boundary carries targetSides, and tests prove 4-to-6, 4-to-8, and 4-to-12 geometry. ReleaseFast editor build passes.",
+  "shas": [
+    "8bf9cea9b",
+    "e5965ea30"
+  ],
+  "resolvedAt": "2026-08-06T00:00:35.202Z"
+}

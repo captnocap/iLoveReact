@@ -1,0 +1,30 @@
+{
+  "id": "req_3848",
+  "at": "2026-08-05T17:38:32.869Z",
+  "origin": "codex:019fd073",
+  "text": "so to the left of this asset explorer is a gutter of icons, when clicking favorites, it moves from the top icon to the bottom. but if you navigate to that state by hand its the same menu so what are we even doing having it",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T17:38:38.418Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T17:43:48.021Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Collapsed the left rail's redundant Build, Models, Materials, Characters, and Missions library aliases into one Asset Explorer destination. Folder navigation, Favorites, Recent, hot-state migration, and the materials picker now remain under the same Assets icon without shifting rail selection; Paint and World Bible remain only as distinct renderers. Added regression coverage and verified the ReleaseFast editor build.",
+  "shas": [
+    "1d4dc466f"
+  ],
+  "resolvedAt": "2026-08-05T17:43:48.021Z"
+}

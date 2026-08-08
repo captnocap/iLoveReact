@@ -1,0 +1,30 @@
+{
+  "id": "req_3880",
+  "at": "2026-08-05T21:53:16.131Z",
+  "origin": "session:f7c3f9ca",
+  "text": "decent start uh i am not a fan at all of where this input is though. give me a hotkey and when pressed open a popover and let me type there. this bar you put it in is not the place because there is far too much going on up there already",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T21:53:33.933Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T22:00:36.994Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved GUI semantic naming off the action bar and onto a hotkey + popover, as ruled. The action-bar input and tag button are gone; naming is now the mesh-name-faces command bound to N in face mode (contextual exactly like B/M/X — Free Brush keeps N while painting), also reachable from Edit > Mesh > Name Faces... and the context menu. It opens a blocking dialog built on the existing ScaleByDialog pattern: autofocused input, Enter commits, Escape cancels through AppFrame's blocking-overlay gate, plus chips listing the live semantic table's existing names so reusing a name extends that region rather than minting a near-duplicate. The apply now runs through withNativeMeshActionSource in AppFrame so journal provenance follows the true invocation source (hotkey/menu/context) instead of being hard-stamped 'toolbar' in the viewer. NOT VERIFIED LIVE: the dev host's JS push is blocked because the running binary's native build id (082743ea) no longer matches the disk framework fingerprint (c78c4cf7), so watch-and-push refuses and the live editor still lacks the command; the bundle itself rebuilt cleanly with every change in it. Needs a dev host rebuild — deliberately not started during the user's live editing session.",
+  "shas": [
+    "526de34e9"
+  ],
+  "resolvedAt": "2026-08-05T22:00:36.994Z"
+}

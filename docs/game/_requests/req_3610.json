@@ -1,0 +1,28 @@
+{
+  "id": "req_3610",
+  "at": "2026-08-01T23:10:12.097Z",
+  "origin": "codex:019fbe1c",
+  "text": "ok make a bulleted list of total capabilities of the studio editor and what agents can do",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:10:18.507Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T23:11:05.150Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Produced a current capability inventory grounded in the active cart/editor model studio, its ModelToolApi, the Agent Seat dispatcher, and the complete Agent Seat skill. The answer distinguishes editor functionality from what agents can invoke today and calls out the remaining limits; no code or files changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T23:11:05.150Z"
+}

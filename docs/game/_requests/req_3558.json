@@ -1,0 +1,28 @@
+{
+  "id": "req_3558",
+  "at": "2026-07-30T23:59:13.669Z",
+  "origin": "codex:019fac74",
+  "text": "Like lets do Bed 003, get that one a before",
+  "status": "review",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T23:59:24.367Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-31T00:00:20.335Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured Bed_003 as a complete read-only pre-edit mesh package under cart/editor/.cache/mesh-diffs/req_3558/Bed_003/before, including manifest and every mesh artifact. Recorded the RJMD v3 baseline (487 triangles, 419 authored faces: 351 singleton triangles and 68 quads), source hashes, and the two already-dirty auxiliary files so the later diff is anchored to the exact current state. Verified the snapshot byte-for-byte against the source.",
+  "shas": [],
+  "resolvedAt": "2026-07-31T00:00:20.334Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3775",
+  "at": "2026-08-04T19:35:26.065Z",
+  "origin": "codex:019fce42",
+  "text": "$agent-seat model 3 different types of computer desk(s)",
+  "status": "review",
+  "sessionId": "019fce42-a928-7392-acd6-fae62bca4974",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T19:35:37.693Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T19:40:03.616Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Modeled three separate meter-scale computer desks in the live editor: a 1.20m compact writing desk with full side panels and cable spine, a 1.60m executive pedestal desk with inset cabinet fronts, and a 1.40m adjustable standing desk with mirrored lift columns, flared transitions, T-feet, and height control. Each was built through resident topology operations, named semantically, atlas-painted, saved, and verified healthy across saved/mount/resident semantics. No model files were committed per repository instruction.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T19:40:03.616Z"
+}

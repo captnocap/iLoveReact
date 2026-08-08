@@ -1,0 +1,28 @@
+{
+  "id": "req_3686",
+  "at": "2026-08-02T17:15:56.678Z",
+  "origin": "session:6e287070",
+  "text": "good lets also get the type that would attach to a wall",
+  "status": "review",
+  "sessionId": "6e287070-1040-4657-835b-9bb3dc5f75a1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T17:16:27.449Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T17:17:52.408Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the wall-mounted (through-the-wall) ATM variant as model package atm_wall via the agent seat, complementing the freestanding atm prop. Fascia is 0.55x0.85x0.18m spanning y 0.85-1.70 with the BACK FACE flush at z=0 so it surface-snaps flat against any wall with the screen at eye height. Recessed dark-blue screen (manual hairline-extrude + two-axis shrink; the packaged inset action rejected its y-shrink so the equivalent manual sequence was used), protruding card_slot, keypad, and cash_slot applique parts, stainless base coat with painted details at atlas fit 1024. All 56 faces durably named (fascia, screen.cap, card_slot, keypad, cash_slot, sides/back); save + semantic-status healthy; visual verified via self-shot.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T17:17:52.408Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3594",
+  "at": "2026-08-01T19:42:31.845Z",
+  "origin": "codex:019fbe1c",
+  "text": "[Image #1] siah@busiah ~/creative/reactjit $ tools/seat look\n{\"ok\":true,\"op\":\"look\",\"percept\":{\"version\":1,\"generation\":1,\"faces\":28,\"unnamed\":28,\"regions\":[],\"table\":{\"version\":1,\"regions\":[]}}}\nsiah@busiah ~/creative/reactjit $",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T19:42:35.717Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T19:49:57.538Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The new three-way Model Focus diagnosis proved the GUI and Seat agree: primitive:cube:46 resolves to cart/editor/data/models/props/Model_46, but its actual RJMD v4 header contains no semantic rows/table, so mount and resident are correctly anonymous. The prior save response merely echoed live percept; it did not verify the written blob, and the file was written before the rebuilt native writer timestamp. Expanded the panel/semantic-status to compare disk RJMD, ModelView mount, and native resident state with MOUNT DROP vs LOAD MISMATCH distinctions. Added a deep save postcondition: after native write, reparse and compare named-face count plus semantic dictionary; on mismatch restore the exact prior blob and fail the save. Anonymous hydration can no longer overwrite a named durable document. ReleaseFast editor build and 31 focused V8 tests pass. Existing Model_46 names were never present in the saved blob; recovery requires re-authoring or an explicit transcript-based restoration.",
+  "shas": [
+    "0ce73ffc6"
+  ],
+  "resolvedAt": "2026-08-01T19:49:57.538Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3659",
+  "at": "2026-08-02T05:00:54.554Z",
+  "origin": "codex:019fbe1c",
+  "text": "one single ctrl z just undid all the tinting -_-",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T05:01:11.387Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T05:09:35.546Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Retopology teaching data now participates in the resident chronological model journal. Each plan, tint/untint, ghost toggle, and clear is one Ctrl+Z unit; journal snapshots also carry exact live band membership plus the frozen source alongside topology, so undoing geometry restores the matching guide instead of erasing all annotation. Undo/redo mirrors restored ghost state into the UI and immediately rewrites or removes the package sidecar.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T05:09:35.546Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3791",
+  "at": "2026-08-04T21:06:01.099Z",
+  "origin": "codex:019fce59",
+  "text": "that could have worked, you would want to merge faces after that mirror but yeah you see how annoying this is :D",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T21:06:57.834Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T21:07:27.101Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed through the live chair edit that mirroring is currently an awkward multi-step cleanup workflow: the command infers a hidden per-part bounds center, so a visibly symmetric selection can reflect around the wrong plane, and center-crossing surfaces require manual face merging afterward. No code or model topology was accepted from the experiment; the provisional vertex offset was restored and the resident model returned to the demonstrated 556-triangle state.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T21:07:27.101Z"
+}

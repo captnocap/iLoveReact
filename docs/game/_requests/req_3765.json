@@ -1,0 +1,30 @@
+{
+  "id": "req_3765",
+  "at": "2026-08-04T02:56:46.162Z",
+  "origin": "session:d6ae2229",
+  "text": "I think you have a misunderstanding. The stage light has nothing to do with the light rigs at all",
+  "status": "review",
+  "sessionId": "d6ae2229-3ef4-4c5e-ac78-4f804fd2f2b5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T02:57:11.560Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T03:11:10.834Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Correct — I had conflated the model-stage light (the viewer's ambient/key rig, req_2545) with the authored LightRig emitters, and my 'rig never reaches the mesh draw' claim was wrong on top of it: the byte-identical before/after shots came from a stale baseline (the 'before' binary already embedded the new key direction; headless renders are deterministic). Proved it with probe builds: a red ambient and a green key both visibly land on the mesh, and the restored rig's rendered faces fit the lighting arithmetic exactly (base 191, ambient 0.65, key 0.35 predicts 179/157/148; measured 180/156/148). The substantive finding survives: the stage key had been aimed at the model's underside since req_2545 (direction is toward-the-light in the shader), which is why every visible face sat at flat ambient and modelling read blind — the direction fix (commit amended to 767a2c3fe) is live and separates the principal axes. Memory and the board note corrected; cavity/AO or matcap remains the open P1-0 follow-up.",
+  "shas": [
+    "767a2c3fe"
+  ],
+  "resolvedAt": "2026-08-04T03:11:10.833Z"
+}

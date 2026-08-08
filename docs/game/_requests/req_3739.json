@@ -1,0 +1,10 @@
+{
+  "id": "req_3739",
+  "at": "2026-08-03T06:54:14.977Z",
+  "origin": "session:3ec0e7bf",
+  "text": "the thing that doesnt make sense is i have screenshots right here to show yesterday that when claude was making the model it got named parts. that was like the one caveat of the first initial setup of any of it. so it might have got missing. ok thats still a problem you know why right? because for any thing that a human does they have 0 ability to give any semantic declarations from the ui, so the code right now basically is going to say fuck you to every model i have ever made if i open it",
+  "status": "new",
+  "sessionId": "3ec0e7bf-84a2-4409-93cc-09d9e7361d20",
+  "captureMode": "hook",
+  "events": []
+}

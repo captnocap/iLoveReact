@@ -1,0 +1,17 @@
+{
+  "id": "req_3826",
+  "at": "2026-08-05T04:26:59.862Z",
+  "origin": "one-off",
+  "text": "there we go. nice thats good shit. alright well thats a wrap. thanks for surfacing that bug",
+  "status": "new",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T04:27:10.239Z",
+      "actor": "fc4b",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

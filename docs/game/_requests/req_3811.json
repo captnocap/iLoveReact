@@ -1,0 +1,28 @@
+{
+  "id": "req_3811",
+  "at": "2026-08-05T02:47:08.507Z",
+  "origin": "codex:019fcfbc",
+  "text": "ok great now last thing is what about just purely unreachable code",
+  "status": "review",
+  "sessionId": "019fcfbc-a1ed-74f2-9325-517de13ab5f9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T02:47:16.970Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T02:51:06.375Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only unreachable-code audit of framework/gpu/3d.zig and adjacent 3D/model-editor modules. A conservative source call graph found 9 unreachable top-level functions in 3d.zig and 2 definition-only adjacent functions, plus a legacy face-tint compatibility subsystem whose operational branch is unreachable because its backing map has no current writer. Separated test-only helpers from truly unreachable runtime code and did not modify source files.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T02:51:06.375Z"
+}

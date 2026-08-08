@@ -1,0 +1,28 @@
+{
+  "id": "req_3729",
+  "at": "2026-08-03T05:53:38.125Z",
+  "origin": "codex:019fc558",
+  "text": "Ok. the cylinder is correct. but now look at these two i have selected. why are these not grouped/stacked",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:53:43.814Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:55:26.424Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the live selected UV islands 2 and 3 without mutating the atlas. Both are exactly 25x176 texels with the same two-triangle rectangular coverage under reflection, but their semantic intents are floorboard.front and floorboard.back. PRESTACK deliberately partitions candidates by semantic family and only collapses explicit left/right markers, so both exact and normalize plans reported no inspected family for this pair. The blocker is the semantic reuse policy, not geometry, UV scale, or the cylinder projection fix.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T05:55:26.424Z"
+}

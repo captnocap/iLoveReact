@@ -1,0 +1,18 @@
+{
+  "id": "req_3955",
+  "at": "2026-08-06T07:36:48.775Z",
+  "origin": "session:e863e9d6",
+  "text": "go ahead do that fire escape blind model, no looking. lets see what happens since i talked a bunch of shit i better be able to back it up",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:39:47.972Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

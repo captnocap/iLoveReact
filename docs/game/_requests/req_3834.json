@@ -1,0 +1,30 @@
+{
+  "id": "req_3834",
+  "at": "2026-08-05T07:07:18.829Z",
+  "origin": "codex:019fd073",
+  "text": "great so the next thing is so in that asset explorer right you click a chevron on the item or just the item in general and it expands and shows 4 folders but clicking any one of them doesnt do jack shit so its time to retire that behavior entirely",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:07:23.267Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:11:02.883Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Retired the model-package subfolder behavior end to end. Model rows in the asset tree are now terminal model assets with no chevron expansion and no generated mesh/atlases/paints/shaders children. Deleted the corresponding special file-grid navigation, subfolder classification, file-list resolution, and count paths; the actual package directories remain untouched as storage internals. Added a hot-state migration from old model-…/<subdir> selections back to the owning model node and pinned it in panel-system tests. ReleaseFast editor ship passes.",
+  "shas": [
+    "8b4eb9ff9"
+  ],
+  "resolvedAt": "2026-08-05T07:11:02.883Z"
+}

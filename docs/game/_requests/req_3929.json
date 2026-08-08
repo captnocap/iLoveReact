@@ -1,0 +1,17 @@
+{
+  "id": "req_3929",
+  "at": "2026-08-06T06:42:42.896Z",
+  "origin": "one-off",
+  "text": "ok then. lets restart. no reaason to go off on a bad start. every time there is a problem, we run it back from the top. so, go ahead and clean up the open models and start it agane",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:43:30.584Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

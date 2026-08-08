@@ -1,0 +1,30 @@
+{
+  "id": "req_4054",
+  "at": "2026-08-08T08:43:53.872Z",
+  "origin": "session:ae84f281",
+  "text": "sorry i totally forgot but since we are going to an oracle you can also include into it all the agent-skin skill nomeclature",
+  "status": "review",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T08:43:58.771Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T08:53:44.958Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded the agent-skin skill into the same oracle rather than leaving a second monolith beside the first. Its content became four phase slices in the shared corpus — uv-skin (save gate, atlas budget, prestack review, guide export), generate (the img.cjs headless console and the prompting rules including declaring the featureless islands), map-back (resize to the live atlas dims, async import, verify from viewport shots), and variants (paint variants as the wardrobe) — and its hazards ride the uv-skin slice where an agent hits them first. A skinning task now classifies to the skin plan, setup through uv-skin, generate, map-back, variants and finish, with the same measured gates as modelling work: the uv-skin phase refuses to advance while the document is unsaved or no atlas exists. agent-skin's SKILL.md shrank from 180 lines to 47 that state only what never changes — dims come from the live reply not memory, judge from shots not the flat PNG, atlas alpha is glass, never stage img.cjs, and the semantic table must survive skinning because it is rigging data. Corpus routing spot-checked live: paint variants, prompting, and atlas budget each resolve to their correct slice.",
+  "shas": [
+    "20548f142"
+  ],
+  "resolvedAt": "2026-08-08T08:53:44.958Z"
+}

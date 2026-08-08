@@ -1,0 +1,18 @@
+{
+  "id": "req_3719",
+  "at": "2026-08-03T04:39:30.332Z",
+  "origin": "codex:019fc558",
+  "text": "also, if u continue to do it this way its going to explode the ui with a bunch of shit. so what u need to do is make it so that its just a normal button/action that opens a exploring panel to select from",
+  "status": "doing",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T04:39:36.127Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

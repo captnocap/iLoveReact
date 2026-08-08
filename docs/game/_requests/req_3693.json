@@ -1,0 +1,17 @@
+{
+  "id": "req_3693",
+  "at": "2026-08-02T20:45:28.044Z",
+  "origin": "one-off",
+  "text": "uh.... hm... another version of u just made an agent-skin skill and its not in ur skills list. where did they put it?",
+  "status": "new",
+  "sessionId": "76e32217-ee52-4c1f-b0d1-00d178e18e05",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T20:46:11.369Z",
+      "actor": "claude-opus5",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3815",
+  "at": "2026-08-05T03:10:35.957Z",
+  "origin": "codex:019fcfbc",
+  "text": "its not a bad thing at all its just what is that like 1300 or so lines of comments. the thing is that when it would come to scoping out the book into chapters we need to carry on the narrative because a lot of the comments explain why something is the way it is and otherwise removing them allows for any agent to start to make their own assumptions which we do not want",
+  "status": "review",
+  "sessionId": "019fcfbc-a1ed-74f2-9325-517de13ab5f9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:10:47.131Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:10:57.287Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the governing constraint for any eventual 3d.zig decomposition: comments are architectural rationale and behavioral guardrails, not cleanup material. Clarified the exact comment composition and established that extraction should move local explanations with their code, promote cross-module invariants to module/interface headers, preserve ruling and request lineage, and require explicit evidence before deleting any apparently obsolete narrative. No repository files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T03:10:57.287Z"
+}

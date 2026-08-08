@@ -1,0 +1,17 @@
+{
+  "id": "req_3616",
+  "at": "2026-08-01T23:34:07.042Z",
+  "origin": "one-off",
+  "text": "why would that prompt have them start exploring code. [Image #1]",
+  "status": "new",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:34:15.328Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

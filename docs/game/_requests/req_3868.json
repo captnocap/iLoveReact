@@ -1,0 +1,30 @@
+{
+  "id": "req_3868",
+  "at": "2026-08-05T20:50:14.509Z",
+  "origin": "session:f7c3f9ca",
+  "text": "hey so i want to see if anything is possible here but so there is a model that is the van_seat_soup which was generated in tripo. i did a by hand retopology of it, and it is the car_backseats; im wondering if you could compare the two, and do some reverse engineering to help shape the agent seat skill for being able to help steer how to retopology a model properly when an agent is asked to do so",
+  "status": "review",
+  "sessionId": "f7c3f9ca-18d4-4276-b075-bb7bdbdcf8d0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T20:50:20.072Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T20:55:57.101Z",
+      "actor": "fable-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compared the Tripo soup (Van_Seat_Soup GLB: 1998 tris, 26 intersecting shells, zero mirror symmetry) against the hand retopo (car_backseats RJMD v4 doc.blob) by parsing both binaries directly. Recovered the actual build order from the blob's face-group creation sequence: right half first, mirrored left block second, then full-width quad band rows, closeout last. Measured the finished shape of done — 50% tri budget, 480 quads/49 pole-only triangles, 26-to-6 shell fusion, 8mm median surface fidelity, 95% imposed bilateral symmetry, adaptive 14-190mm quad sizing, hardware dropped to paint. Distilled all of it into a new 'Retopology playbook — the measured reference retopo' section in .agents/skills/agent-seat/SKILL.md with target metrics, deliberate-drop guidance, the measured build order mapped onto mirror-replace/retopo-bands/weld-pairs, and a name-as-you-go correction (the exemplar's own semantic table is empty — SEMBLOB debt agents must not repeat).",
+  "shas": [
+    "a5d6f86db"
+  ],
+  "resolvedAt": "2026-08-05T20:55:57.101Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3721",
+  "at": "2026-08-03T05:03:36.119Z",
+  "origin": "codex:019fc558",
+  "text": "ok so about the prestack, is there a reason why these two uv do not stack? they are literal mirror objects of one another, [Image #1] dont mind the mistexturing but the fact stands, if i just horizontal flip one of them they are identical. so why isnt it prestacking",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:03:45.471Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:12:56.205Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed PRESTACK rejection of mirrored auto-projected UV twins. Live inspection identified the shown legShield pair as islands 70 and 71: their contours are mirror-equivalent but differ by approximately 0.504 texel, while the old exact matcher allowed only 0.01 texel; the Seat path also partitioned semantic names legShield.left and legShield.right. The planner now canonicalizes delimited left/right semantic twins, validates complete D4-transformed boundary edge sets within a bounded subpixel projection tolerance, and maps accepted twins to literally identical representative corners. A mutation-free live exact dry run explicitly returns family [70,71] and reduces current Moped footprints from 212 to 195; normalize proposes 193. All 52 uvLayout tests and the full editor bundle pass. No UV apply or model-data commit was performed.",
+  "shas": [
+    "0547832d8"
+  ],
+  "resolvedAt": "2026-08-03T05:12:56.205Z"
+}

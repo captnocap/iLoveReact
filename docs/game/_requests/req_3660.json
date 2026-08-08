@@ -1,0 +1,28 @@
+{
+  "id": "req_3660",
+  "at": "2026-08-02T05:01:26.441Z",
+  "origin": "codex:019fbe1c",
+  "text": "ctrl y restores it but ya its clearly a problem get it under control",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T05:01:42.386Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T05:09:35.555Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ctrl+Y now replays the same authored retopology-guide unit that Ctrl+Z removed, while both directions preserve geometry/guide correspondence and package persistence. Added the append-only native action identity and dedicated non-geometry restore domain, updated the Agent Seat skill contract, passed focused Zig journal/mesh tests, 4 native-event bridge tests, all 36 Seat tests, and a full ReleaseFast editor build.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T05:09:35.555Z"
+}

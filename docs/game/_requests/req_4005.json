@@ -1,0 +1,28 @@
+{
+  "id": "req_4005",
+  "at": "2026-08-07T21:19:02.525Z",
+  "origin": "codex:019fda1a",
+  "text": "i see it now. ok so [Image #1][Image #2] can we fix the rotation",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:19:09.766Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:23:10.207Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Face to N-gon rotation by phasing the generated regular loop from the selected source face's first directed edge instead of its first corner. The first generated N-gon edge now remains parallel to the source edge for every target side count, eliminating the visible re-rotation between 5 and 17 sides. Added a focused Zig regression for both counts; 187 mesh-edit tests and the ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:23:10.207Z"
+}

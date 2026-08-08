@@ -1,0 +1,30 @@
+{
+  "id": "req_3877",
+  "at": "2026-08-05T21:16:15.754Z",
+  "origin": "session:2eed946e",
+  "text": "ok the only rebuttle i have to say is, coming from a non technical stand point. what else is a uv if its not an unwrap/unfold ? like why would anyone make it any other way",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T21:37:39.171Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T21:37:39.179Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Part of the UV-confetti diagnosis thread that led to the unfold-chart build (see req_3876, commit a85590308). This message narrowed the root cause: the 'faithful Blockbench clone' claim was never parity-tested (Blockbench box UV unfolds a cuboid into one connected cross; ours made 6 islands), and the user's 'what else is a UV if not an unwrap' verdict became the pinned law — the cube-to-cross test now enforces it.",
+  "shas": [
+    "a85590308"
+  ],
+  "resolvedAt": "2026-08-05T21:37:39.179Z"
+}

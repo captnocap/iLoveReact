@@ -1,0 +1,28 @@
+{
+  "id": "req_4036",
+  "at": "2026-08-08T05:49:23.289Z",
+  "origin": "codex:019fda1a",
+  "text": "it says i have 32 undo, my misread. but of the 32, i cant undo a single one of them [Image #1]",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T05:49:28.840Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:02:21.880Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the 32 badge was the native mesh journal while each Undo install was failing and re-queuing the same top entry; recovery backup was verified before diagnosis.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:02:21.880Z"
+}

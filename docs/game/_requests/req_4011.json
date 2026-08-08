@@ -1,0 +1,28 @@
+{
+  "id": "req_4011",
+  "at": "2026-08-07T23:38:49.999Z",
+  "origin": "codex:019fdda4",
+  "text": "ok so im running build right now and its compiling the cold core correct",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T23:38:55.565Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T23:39:07.602Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed from the live process tree that the active command is  targeting , using  with the default  profile. This is the one-time cold-core compile, not a Scene3D or Game module compile. The hot-module records already point to cached artifacts, so after this finishes ordinary classified Game or Scene3D edits should rebuild only their corresponding shared library.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T23:39:07.602Z"
+}

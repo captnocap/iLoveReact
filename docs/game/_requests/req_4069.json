@@ -1,0 +1,28 @@
+{
+  "id": "req_4069",
+  "at": "2026-08-08T10:15:25.766Z",
+  "origin": "codex:019fd9ee",
+  "text": "make a validation script that is a guard for passing, run through every model blob and make sure it is the most up to date version of the model versioning and if not then convert it to do as such, and then with that make a script that also gets called with this but can also be called by itself, that will take all the models on disk and copy them into a safe directory, and they can only go in here by passing the most valid versioning before the versioning migrates, and therefore if for whatever reason shit breaks its a quick fallback",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T10:15:37.990Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T11:18:10.637Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented a dual-reader full-catalog model artifact guard, backup-first transactional RJMD v5 migration, immutable external snapshot verification/restore, native RTGD/RJSK inspection, exact candidate preservation receipts, and black-box rollback/durability coverage. The live catalog was audited read-only and migration correctly refused its existing invalid/stale artifacts before creating a backup or changing model bytes.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T11:18:10.637Z"
+}

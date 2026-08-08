@@ -1,0 +1,28 @@
+{
+  "id": "req_3822",
+  "at": "2026-08-05T04:08:35.223Z",
+  "origin": "session:fc4b5586",
+  "text": "alright the edits are in, rebuild is in, make the same edits on a new mesh again",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T04:08:54.877Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T04:10:48.950Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reran the req_3820 slab repro through the seat after the fix+rebuild. PASS: one cut call now resolves one world axis across mirror twins (both halves columns; single perpendicular cut ran one continuous aligned line through both halves), and the basic-cut receipt now reports the applied worldDirection. FAIL RESIDUE: multi-cut combs (cuts>=2) still phase-diverge on mirrored rings — left half stations {-0.333,-0.167} vs right {0.333,0.667} — because splitFace's cut-N recursion selects the child via ring-order side[0]; noted on req_3821 for the fixing thread. Demo slab left live in the editor showing the divergence.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T04:10:48.950Z"
+}

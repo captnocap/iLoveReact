@@ -1,0 +1,28 @@
+{
+  "id": "req_3824",
+  "at": "2026-08-05T04:12:12.587Z",
+  "origin": "session:fc4b5586",
+  "text": "yeah but just to verify where the mismatch is, you have this [Image #6] right and it was the first cuts basically broke it",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T04:12:50.023Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T04:12:50.031Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's read of the live slab: all visible unevenness came from the FIRST basic-cut call (cuts=2 comb) — right half spread thirds correctly, left half's plane-2 recursion descended into the wrong child on the reversed ring (fat 0.667 column = the child that never got its cut, two 0.167 slivers = the over-subdivided child); the later single perpendicular cut is clean and continuous across both halves. Pinpointed the residue for the fixer: splitFace's plane 2..N recursion passes {center_side, side[0]} in ring order (~indexed_edit_mesh.zig:2216) — needs the same world-direction orientation the entry edge now gets. Already noted on req_3821.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T04:12:50.031Z"
+}

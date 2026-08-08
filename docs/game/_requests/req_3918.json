@@ -1,0 +1,17 @@
+{
+  "id": "req_3918",
+  "at": "2026-08-06T05:47:06.480Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>b4g7099c4</task-id>\n<tool-use-id>toolu_01LpGkVBN7ozgBQFNFZHeZwP</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/e863e9d6-4fb4-4103-84ef-500707015d9d/tasks/b4g7099c4.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run codex terra on slice 3a policy layer (background)\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T05:47:20.310Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

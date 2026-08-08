@@ -1,0 +1,30 @@
+{
+  "id": "req_3901",
+  "at": "2026-08-06T00:59:35.263Z",
+  "origin": "codex:019fd481",
+  "text": "this thing is actually stupid. im clicking live. it then updates and says its now the saved model. make one edit at all and it says the file on disk is the one i already was suppose to overwrite on the last prompt and therefore the disk file is not changed at all",
+  "status": "review",
+  "sessionId": "019fd481-0f28-7392-a715-361850d2180a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:59:52.488Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T01:03:50.501Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The screenshot proved the dialog was no longer comparing two model revisions at all: LIVE and DISK were both the same 791-triangle / 85,543-byte checkpoint, while only the preserved 1019-triangle Painting 2 differed. Disk had in fact advanced from 749 to 791 triangles at 17:58:39, but AppFrame ignored the conflict acknowledgement ModelView already stored, so every later stale-paint save reopened the picker and offered the just-saved checkpoint back as a competitor. Save now consults the acknowledged concrete disk revision, bypasses the picker for edits descended from that checkpoint, and rolls the acknowledgement forward after every successful descendant save. A cold process or genuinely different disk stamp still requires a new choice. Marker removal after Remake Atlas falls back to the same doc stamp, so it cannot manufacture a new conflict. An already-mounted obsolete save modal retires on hot reload. Paint-conflict tests are 5/5; editor tsc-check and full bundle pass.",
+  "shas": [
+    "f83c5789d"
+  ],
+  "resolvedAt": "2026-08-06T01:03:50.501Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3840",
+  "at": "2026-08-05T07:52:33.282Z",
+  "origin": "session:09dee98c",
+  "text": "SO then what needs to happen is when making a quad, rather than doing that bullshit and making me have to go from another end, run a check, if it fails on the two edges, check what the failed quad would have selected for the other two edges, and if those two edges end up passing then allow the quad to pass",
+  "status": "review",
+  "sessionId": "09dee98c-f214-4806-94c1-8d557ea2f434",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:53:38.669Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T08:00:00.605Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the ruled fallback: when a two-edge create-face bridge fails the winding-agreement gate (the selected pair's adjacent face normals oppose, e.g. the two flank walls of a recess), the host now consults the quad's other two edges — the ones the failed quad would have connected. If both already exist as legal boundary edges whose adjacent faces agree, their agreement carries the winding and the quad passes. Added mesh_edit.bridgeCrossReferenceNormalPub plus id-tracked endpoint pairing in meshTopoCreateFaceFromEdges; new unit test reproduces the recess (flank pair rejects, cross pair carries +z winding, missing diagonals still reject); 160/160 mesh-edit tests pass and the app compiles. Needs the host rebuilt to take effect live.",
+  "shas": [
+    "e0595047d"
+  ],
+  "resolvedAt": "2026-08-05T08:00:00.605Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3578",
+  "at": "2026-08-01T17:08:47.336Z",
+  "origin": "session:6d137ac4",
+  "text": "nice uh so going up the steps is great now coming down each step seems to be treated as falling at least based on animations also i just went up to a table and jumped and it shot me under the map xD",
+  "status": "review",
+  "sessionId": "6d137ac4-a939-4905-8e14-37a458be92f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T17:11:00.296Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T17:18:35.912Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both symptoms were in the exact mesh-triangle lane the req_3568 stair fix runs through. (1) Descending read as falling because the lane's mount only reached the 0.08m ground-snap band below the feet: walking off a 0.25m tread left the player airborne for several frames until gravity dropped them into the band, and the animation clock (airborne = !grounded or |vy|>0.05) played falling on every step. The rect lane has a downhill snap for exactly this; the mesh lane now has its own: PlayerState gains on_mesh (the mesh lane's grounded memory — the packed rect step can never see mesh tops, so player.grounded is always false on one), and a body that stood on a mesh last frame reaches a full step_height DOWN in the mount, gluing tread to tread. (2) The table launch was the mesh ceiling seat: jumping beside a table drifts the rising centre over the slab rim, the tabletop becomes a horizontal face mid-body-span, and ceilingSurfaceAt seated the head under it — y = ceiling - height teleported the feet ~0.9m down, below what slope-agnostic terrain support reaches (it only lifts within step_height), so the player fell through the world. The seat now only fires for a genuine head bonk (downward correction within a step); deeper overlap rides past and the fall mounts on top of the table instead. Tests: staircase descent stays grounded tread to tread ending on the bottom tread; a mid-jump rim cross leaves y/vy untouched; the existing head-bonk test still pins the genuine seat. test-game-mesh-collision all green, test-game-physics 53/54 (only the documented pre-existing hollow-ramp red). Zig change — needs the dev host rebuilt.",
+  "shas": [
+    "9d89117f8"
+  ],
+  "resolvedAt": "2026-08-01T17:18:35.912Z"
+}

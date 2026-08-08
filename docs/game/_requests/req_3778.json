@@ -1,0 +1,28 @@
+{
+  "id": "req_3778",
+  "at": "2026-08-04T20:00:41.624Z",
+  "origin": "codex:019fce59",
+  "text": "is it showing a loop cut state? because i dont have any UI element that is showing up when i use the hotkey",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T20:00:47.133Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T20:03:30.793Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed from the live viewport readback that the status label is only proof the hotkey routed: shell status says 'Loop Cut - hotkey', while both editor blocking and shell blocking are null and the native pending guard is 0. There is no actual loop-cut state or popup session. No files or mesh topology were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T20:03:30.793Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3712",
+  "at": "2026-08-03T03:08:23.874Z",
+  "origin": "codex:019fc558",
+  "text": "hm. im still getting 447 islands but thats too many right",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T03:08:38.559Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T03:17:18.242Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the UV cost readout so 477 is no longer presented as the remaining paint workload. The editor header, scope row, and Agent Seat now distinguish 250 exact coverage-compatible paint footprints from 477 logical/selectable UV islands on Moped_50. Added the footprint count to ModelFocusUv and SeatPercept, reused the existing coverage-aware grouping authority, updated the shared Agent Seat skill, and added a regression proving two stacked logical islands count as one painted footprint. Verified live generation-1 Moped readback at 2046 faces, 250 paint footprints, 477 logical islands, and zero unnamed faces; UV tests are 50/50, Seat tests 42/42, and the editor bundle check passes.",
+  "shas": [
+    "dced553f6"
+  ],
+  "resolvedAt": "2026-08-03T03:17:18.242Z"
+}

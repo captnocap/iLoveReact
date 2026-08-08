@@ -1,0 +1,30 @@
+{
+  "id": "req_3905",
+  "at": "2026-08-06T01:19:32.785Z",
+  "origin": "codex:019fd073",
+  "text": "yeah seems to be solved i couldnt do it to myself so next thing when in the chamfer dialog the texture is corrupted / pointed at garbage and u cant see shit [Image #1]",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T01:19:39.208Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T01:27:26.663Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed corrupted texture sampling in Chamfer Boundary previews. Newly created chamfer faces previously received generated 0..1 square UVs and therefore sampled the entire existing authored atlas as random fragments. The preview now preserves exact interpolated UVs on every existing face while routing only freshly minted bevel/chamfer faces to the atlas neutral gutter texel until Remake Paint Atlas establishes real UV ownership. Added a Zig regression, passed the full mesh-edit suite, and completed the ReleaseFast editor build.",
+  "shas": [
+    "91364365e"
+  ],
+  "resolvedAt": "2026-08-06T01:27:26.663Z"
+}

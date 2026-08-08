@@ -1,0 +1,30 @@
+{
+  "id": "req_3596",
+  "at": "2026-08-01T19:53:12.491Z",
+  "origin": "codex:019fbe1c",
+  "text": "what? no just make a new model lol. doing anything outside of the normal flow makes 0 sense. just do it again. its a brand new cube it will take u 2 seconds to do it",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T19:53:26.201Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T19:57:04.005Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Used the requested simple normal-flow test: {\"ok\":true,\"op\":\"new\",\"result\":{\"kind\":\"cube\"},\"percept\":{\"version\":1,\"generation\":1,\"faces\":20,\"unnamed\":0,\"regions\":[{\"id\":0,\"faces\":2,\"instances\":1,\"bbox\":[0.5,0,-0.5,0.5,1,0.5]},{\"id\":1,\"faces\":2,\"instances\":1,\"bbox\":[-0.5,0,-0.5,-0.5,1,0.5]},{\"id\":3,\"faces\":2,\"instances\":1,\"bbox\":[-0.5,0,-0.5,0.5,0,0.5]},{\"id\":4,\"faces\":2,\"instances\":1,\"bbox\":[-0.5,0,0.5,0.5,1,0.5]},{\"id\":5,\"faces\":2,\"instances\":1,\"bbox\":[-0.5,0,-0.5,0.5,1,-0.5]},{\"id\":6,\"faces\":2,\"instances\":1,\"bbox\":[-0.5,1.25,-0.5,0.5,1.25,0.5]},{\"id\":7,\"faces\":8,\"instances\":1,\"bbox\":[-0.5,1,-0.5,0.5,1.25,0.5]}],\"table\":{\"version\":1,\"regions\":[{\"id\":0,\"name\":\"right\",\"role\":\"+x\",\"createdBy\":{\"op\":\"new cube\",\"at\":1785614106859}},{\"id\":1,\"name\":\"left\",\"role\":\"-x\",\"createdBy\":{\"op\":\"new cube\",\"at\":1785614106859}},{\"id\":2,\"name\":\"top\",\"role\":\"+y\",\"createdBy\":{\"op\":\"new cube\",\"at\":1785614106859}},{\"id\":3,\"name\":\"bottom\",\"role\":\"-y\",\"createdBy\":{\"op\":\"new cube\",\"at\":1785614106859}},{\"id\":4,\"name\":\"back\",\"role\":\"+z\",\"createdBy\":{\"op\":\"new cube\",\"at\":1785614106859}},{\"id\":5,\"name\":\"front\",\"role\":\"-z\",\"createdBy\":{\"op\":\"new cube\",\"at\":1785614106859}},{\"id\":6,\"name\":\"persistence_test.cap\",\"role\":\"cap\",\"createdBy\":{\"op\":\"extrude\",\"at\":1785614106918}},{\"id\":7,\"name\":\"persistence_test.wall\",\"role\":\"wall\",\"createdBy\":{\"op\":\"extrude\",\"at\":1785614106918}}],\"nextRegionId\":8}}} now creates a genuine new editor model document through the existing shell constructor. Created/saved/restarted Model_49 and confirmed semantic names survive cold process restart: 20 faces, unnamed=0, eight dictionary regions, persistence_test.cap and persistence_test.wall resident. No special persistence path and no game model commit.",
+  "shas": [
+    "6846b8bfb"
+  ],
+  "resolvedAt": "2026-08-01T19:57:04.004Z"
+}

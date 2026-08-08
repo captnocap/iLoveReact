@@ -1,0 +1,28 @@
+{
+  "id": "req_4027",
+  "at": "2026-08-08T03:43:32.462Z",
+  "origin": "codex:019fda1a",
+  "text": "[apptick-split] total=137.0ms | jsTick(+microtasks)=135.2 (of which GC=0.0ms x1) tickDrain=0.0 drainFlush=1.6 dirty(snap=0.0+rebuild=0.1)\n[js.err] [rangetrace] push 0 range(s) [] → host « at applyMesh (<anonymous>:67278:9) « at <anonymous>:67452:11 « at wrappedCreate (<anonymous>:26171:34)\nerror: [meshdoc] refused write: at least one Outliner range has no resident visible/hidden faces, or a face has no range owner\nerror: [mesh-integrity] roll call after 'cut': ranges_valid=true unowned=12 multiply_owned=0 duplicate_faces=0 declared 2->2 healed=false (req_3484)\n[apptick-split] total=57.0ms | jsTick(+microtasks)=56.5 (of which GC=3.9ms x2) tickDrain=0.0 drainFlush=0.3 dirty(snap=0.0+rebuild=0.2)\nerror: [meshdoc] refused write: at least one Outliner range has no resident visible/hidden faces, or a face has no range owner",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T03:43:42.350Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T03:52:00.515Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the empty ownership push by carrying RJMD part ranges through modelDocumentSeed independently of transient Outliner colors, and fixed the post-reload dirty probe so native history is re-read after session selection. Live Compact Car 001 now has two resident ranges, autosaved successfully, and saved/mount/resident all agree at 3,686 triangles.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T03:52:00.515Z"
+}

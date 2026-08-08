@@ -1,0 +1,28 @@
+{
+  "id": "req_3999",
+  "at": "2026-08-07T20:42:33.757Z",
+  "origin": "codex:019fd9ee",
+  "text": "question, if i put in a rig on a model, and then i need to scale the model size later on, does the rig follow the scale",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T20:42:40.400Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:43:24.875Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified current character-scale behavior. Mesh Scale By is a position-only geometry operation: logical-vertex weights remain valid, but the independent skeleton does not automatically scale during that gesture. The changed shape sets fitNeedsReview; Fit Skeleton refits unlocked joints to the scaled anatomy while manual/locked joints remain fixed and must be unlocked or adjusted explicitly. No code change requested.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:43:24.875Z"
+}

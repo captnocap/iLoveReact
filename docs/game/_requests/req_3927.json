@@ -1,0 +1,17 @@
+{
+  "id": "req_3927",
+  "at": "2026-08-06T06:41:54.441Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>a3114eb2a722d178a</task-id>\n<tool-use-id>toolu_01UhGzRVhaRdHq7z26usX4br</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/e863e9d6-4fb4-4103-84ef-500707015d9d/tasks/a3114eb2a722d178a.output</output-file>\n<status>killed</status>\n<summary>Agent \"Model bar stool via seat\" was stopped by user</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n</task-notification>",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:43:30.567Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3724",
+  "at": "2026-08-03T05:20:45.666Z",
+  "origin": "codex:019fc558",
+  "text": "why tho? i mean its 1 confusing as hell and 2 doesnt make sense if they are all the same size, why would it opt for making any ones uv larger than another",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:21:04.925Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:21:13.816Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the verified cause rather than treating unequal UV scale as intentional importance. The current unwrap uses dominant-axis box projection: it deletes one world coordinate and scales the remaining projected shadow by the global texel density. This cheaply creates deterministic, stitchable charts, but a face tilted 30 degrees retains only cos(30), about 86.6 percent, of its true width while an axis-aligned face retains 100 percent. The code explicitly accepts that compression. There is no ruling requiring this tradeoff, and for equal cylinder sides it violates the useful invariant that UV area divided by physical surface area should be constant. No code or model data changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T05:21:13.816Z"
+}

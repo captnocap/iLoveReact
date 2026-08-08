@@ -1,0 +1,17 @@
+{
+  "id": "req_3751",
+  "at": "2026-08-03T23:36:10.256Z",
+  "origin": "session:cfdba782",
+  "text": "model a police sedan. You will want to have doors, gas tank, trunk, hood, windows, interior seats, steering wheel, mirrors, the essentials. Use the image generation for gathering reference images rather than searching for them on the internet, exact prompting will get you exact reference images. You have no enforced time limit, so there is no reason to complete for a deadline. Using primitives is fine but its unacceptable to leave primitive soup and to launder via merging without welding verts appropriately. The target poly count is 3000. If you hit bumps in the road, like trying to figure out how to merge parts without losing shape, just stop and ask, i will gladly show you how to do the right thing rather than just laundering the wrong thing",
+  "status": "doing",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-03T23:36:12.708Z",
+      "actor": "session:cfdba782",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

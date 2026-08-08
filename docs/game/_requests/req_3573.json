@@ -1,0 +1,30 @@
+{
+  "id": "req_3573",
+  "at": "2026-08-01T16:24:15.352Z",
+  "origin": "session:1132e81b",
+  "text": " Alright so heres what i want you to map out into a\n  coherent idea for me, basically, we use to let you\n  models/agents\n      write code that would make 3d models, they fell\n  extremely short. now we have a very capable studio\n  editor for 3d\n      modeling, and all the tools necessary. so what id\n  like to see happen is to be able to open a session of\n  claude or\n      kimi or codex and be able to send an image or\n  just a descriptive prompt, they would then be able to\n  place a cube,\n      make cuts, pull on edges, you know, all the\n  things i would do by hand. ideally, it would be in\n  real time, showing\n      me what they are building, so that i can revert\n  to a point where i can tell if they are messing up or\n  something i\n      dont like.  Pretty much a 'MCP' but dont use an\n  actual mcp since its just going to end up being\n  likely just some\n      typescript api and a skill on how to use it.\n  anyways, lets see what u can sauce up   and we might\n  run with it\n ",
+  "status": "review",
+  "sessionId": "1132e81b-d85b-488d-bae0-2da8ab1e4540",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T16:24:22.723Z",
+      "actor": "session-1132",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T16:30:19.595Z",
+      "actor": "session-1132",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Mapped the ask into a coherent design and wrote it to docs/game/AGENT_SEAT_DESIGN.md (commit 0d90a72e8). No code changed. Surveyed the existing surface first and found the seat is mostly assembly, not new machinery: ModelToolApi already carries ~40 real verbs (extrudeFace, loopCut, bevel, weld, solidify, glass, detach, merge, pathArray), the mesh journal already holds labeled full snapshots plus __mesh_journal_checkpoint, __mesh_action_drain already streams accepted commits WITH source attribution, CommandAuthority's CommandSource already contains 'remote' and 'automation', /tmp/reactjit.sock already routes NOTICE JSON into the JS runtime, and __capture_frame already lets the app screenshot itself. The design names the real gap: every tool verb has the signature verb() — both the noun (which faces) and the amount (how far) come from the human's hand via viewport clicks and gizmo drags or a host-owned popup, which an agent cannot supply. The repo already solved this twice for tests (__mesh_gizmo_nudge/scale_by are documented as camera-free headless hooks), so the seat completes a pattern rather than inventing one. Five parts: a host-resolved selector language (facing:+y, part:roof, loop:, set algebra) so the agent never holds an index that a topology op will invalidate; parameterized ops that all bottom out in existing verbs; a cheap text percept plus on-demand ortho shots; takes (journal mark + thumbnail + staggered ~100ms application so the user actually watches it model) with rewind and a generation stamp that rejects in-flight ops after a rewind; and a seat policy with hold/step/take-the-wheel. Wire is a SEAT verb on the existing dev socket plus rjit seat CLI verbs, so any agent that can shell out can join — no MCP. Seven build slices, with the selector resolver as the load-bearing one. Risks called out, chief among them that a seat firing 40 ops in seconds is exactly the load that trips the derived-copy consistency matrix (req_3469-3486), making the stable-handle work a companion to slice 1 rather than unrelated.",
+  "shas": [
+    "0d90a72e8"
+  ],
+  "resolvedAt": "2026-08-01T16:30:19.594Z"
+}

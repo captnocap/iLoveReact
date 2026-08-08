@@ -1,0 +1,30 @@
+{
+  "id": "req_4088",
+  "at": "2026-08-08T12:56:49.941Z",
+  "origin": "session:c4057f17",
+  "text": "why is the app still running when i have clearly ended it ?  drainFlush=11.0 dirty(snap=0.0+rebuild=0.5)\n[js.warn] [modelview] resumed live host session for prop:import:blue_sedan_3d_model_2_ (0 undo · atlas none · mode 3 · 0 selected)\n^C\nsiah@busiah ~/creative/reactjit $ [watch] build started (change: \"cart/editor/stage/ModelDocumentSurface.tsx\")\n[watch] build finished\n[js.warn] [editor-data] moved 0 file(s) to userdata/editor; 7 left in zig-out/game/editor because they could not be verified at the new home — nothing was deleted\n[apptick-split] total=119.7ms | jsTick(+microtasks)=107.9 (of which GC=6.0ms x3) tickDrain=0.0 drainFlush=11.3 dirty(snap=0.0+rebuild=0.5)\n[js.warn] [modelview] resumed live host session for prop:import:blue_sedan_3d_model_2_ (0 undo · atlas none · mode 3 · 1 selected)\n^C\nsiah@busiah ~/creative/reactjit $ ^C\nsiah@busiah ~/creative/reactjit $ ^C\nsiah@busiah ~/creative/reactjit $ ^C\nsiah@busiah ~/creative/reactjit $ ^C\nsiah@busiah ~/creative/reactjit $ ^C\nsiah@busiah ~/creative/reactjit $ ^C\nsiah@busiah ~/creative/reactjit $ [watch] build started (change: \"runtime/hooks/fs.ts\")\n[watch] build finished\n[watch] build started (change: \"cart/editor/stage/ModelDocumentSurface.tsx\")\n[watch] build finished\n[js.warn] [editor-data] moved 0 file(s) to userdata/editor; 7 left in zig-out/game/editor because they could not be verified at the new home — nothing was deleted\n[apptick-split] total=116.4ms | jsTick(+microtasks)=104.5 (of which GC=4.3ms x2) tickDrain=0.0 drainFlush=11.3 dirty(snap=0.0+rebuild=0.6)\n[js.warn] [modelview] resumed live host session for prop:import:blue_sedan_3d_model_2_ (0 undo · atlas none · mode 3 · 1 selected)",
+  "status": "review",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:57:08.635Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T13:04:58.818Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed why the app survives being ended, and cleaned up the wreckage. Ten dev hosts were alive on pts/15 — oldest 5 days 11 hours — holding 4.7 GB, plus an orphaned watch-and-push watcher and its esbuild child, which is what kept printing [watch] build started and [apptick] lines into a terminal whose app had visibly closed. The signal path is NOT the bug: engine.zig catches SIGINT/SIGTERM and flips g_received_quit_signal, the main loop polls it, and a healthy host proved this by exiting in under one second on SIGTERM. An orphan cannot, because it sits in futex_wait_queue with its window and socket already released — the main loop is already gone, so nothing remains to read the quit flag. The shutdown path leaves the loop, destroys the window, then wedges before process exit, which is precisely the reported symptom: window closed, process alive, terminal still streaming. Once the supervisor dies the host is reparented to init in a background process group, so no later Ctrl-C can ever reach it — that is why the six subsequent ^C presses did nothing. Found and fixed a second, worse bug on the way: rjit orphans --kill printed retired 9/9, reclaiming about 4.7 GB while all nine were still running, because it treated kill exiting 0 (signal DELIVERED) as proof of death. Verified against a synthetic SIGTERM-ignoring process. killOrphanHosts now SIGTERMs first so a healthy host still runs its full teardown rather than leaving SDL_CaptureMouse held on the X server, polls up to 2s for a CONFIRMED exit, escalates to SIGKILL, then verifies again; ok now means gone, how distinguishes a clean exit from a wedge, and survivors are reported as NOT retired with the summary saying the rest are STILL RUNNING. All 11 stray processes are now confirmed dead by exact numeric pid, one at a time, no pattern form. OPEN and deliberately not fixed here: the teardown wedge itself — every orphan arrives the same way, so the dev host has a shutdown path that can block forever after the window is destroyed, and that is the thing that manufactures these in the first place.",
+  "shas": [
+    "555782e8c"
+  ],
+  "resolvedAt": "2026-08-08T13:04:58.818Z"
+}

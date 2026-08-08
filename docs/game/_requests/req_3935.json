@@ -1,0 +1,18 @@
+{
+  "id": "req_3935",
+  "at": "2026-08-06T06:55:54.516Z",
+  "origin": "session:e863e9d6",
+  "text": "uh here is one thing we can do after they get done, basically idk how to really explain it but the camera is an actual pain in the ass. to get it to reposition correctly, you have to double click on a face to recenter it, and so when the agent has their camera all fucked up and im trying to see what they are doing. i end up targeting something they werent expecting to be the target because i was just trying to reposition",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:56:27.969Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

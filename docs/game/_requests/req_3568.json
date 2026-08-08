@@ -1,0 +1,30 @@
+{
+  "id": "req_3568",
+  "at": "2026-08-01T15:57:54.023Z",
+  "origin": "session:6d137ac4",
+  "text": "alright so uh something is a bit fucked up and needs a look. basically, this doesnt make any sense at all here are code-generated stairs [Image #1] and the player can walk up them [Image #2] but then these stairs i made the player cant walk up at all [Image #3] and if you jump up, you slide down them.\n\nnow, top that off with, the player can scale this [Image #4] \n\nthe player can also scale this [Image #5]\n\n[Image #6] \n\n'oh but your physics settings are letting you'\nok sure [Image #7] but lets just test that \n\n[Image #8] everything is defaulted now \n\nand i still scale the terrain [Image #10] \n\nbut i cant walk up these steps \n[Image #11]",
+  "status": "review",
+  "sessionId": "6d137ac4-a939-4905-8e14-37a458be92f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T15:58:11.656Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T16:18:04.517Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the stairs/terrain inconsistency as two missing laws, both in framework physics. (1) Placed props with baked collision triangles (the white stairs prop) resolve through the exact mesh-triangle lane, and that lane had NO step-height concept: projectedTrianglePush in framework/game/mesh_collision.zig treated a 0.2m stair riser exactly like a 10m wall, pushing the player centre a radius off the riser plane so the step-up mount (a point sample at the centre) could never reach the tread — which is why cranking step height to 2.0 changed nothing. Proc stairs climb because they decompose to plain boxes, and the box lane has grace_walkable/too_tall_to_step. Fix: a steep face topping out at/below feet+step_height is now skipped by the push — the mount law seats the feet — mirroring the box law; also inverse-scaled the world-metre tuning distances for scaled props. (2) Terrain cliffs read walkable because heightfieldSurface smeared the gradient over a ±1-cell central difference: a rise inside one cell reported HALF its grade, so at walk_cos 0.6 a ~69° wall passed the walkability gate and the too-steep move-cancel never fired. Fix: sample at ±half-cell so a one-cell cliff reads its true grade while sub-cell sculpt noise stays averaged. Added tests: staircase walk mounts to the top platform, a 2m face still walls, a one-cell 2.5m cliff reads normal_y<walk_cos. zig build test-game-mesh-collision all green; test-game-physics 53/54 with only the documented pre-existing hollow-ramp red. Framework change — needs the dev host binary rebuilt to take effect.",
+  "shas": [
+    "9482f3cd0"
+  ],
+  "resolvedAt": "2026-08-01T16:18:04.517Z"
+}

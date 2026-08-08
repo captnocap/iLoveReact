@@ -1,0 +1,28 @@
+{
+  "id": "req_4073",
+  "at": "2026-08-08T11:30:25.134Z",
+  "origin": "codex:019fd9ee",
+  "text": "dude lol why is this always the fucking case [js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Camper_Van_3d_Model_1_: resident mesh is anonymous but the durable document still has named faces, and no explicit Remove authorized clearing them\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Camper_Van_3d_Model_1_: resident mesh is anonymous but the durable document still has named faces, and no explicit Remove authorized clearing them\n[js.err] [rangetrace] push 9 range(s) [0,119 119,144 144,250 250,275 275,305 305,474 474,506 506,522 522,524] → host « at Object.setPartRangesMirror (<anonymous>:68719:9) « at meshUndoRedo (<anonymous>:89334:13) « at Object.runCommand (<anonymous>:86649:11)\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/Camper_Van_3d_Model_1_: resident mesh is anonymous but the durable document still has named faces, and no explicit Remove authorized clearing them\n[js.err] [meshdoc] REFUSING SAVE for cart/editor/data/models/props/camper: resident mesh is anonymous but the durable document still has named faces, and no explicit Remove authorized clearing them i cant save",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T11:30:35.250Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T13:20:31.744Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Camper refusal at its cause: a readable saved RJMD now outranks retained import paths, cold hydration uses the exact saved six-part rows, explicit Save owns the live resident and may commit intentional semantic state, and unreadable/native-apply failures block visibly without loading the source GLB. Verified the real Camper cold-open/save path earlier, preserved its durable recovery copy, and passed the focused 32-case RJMD plus 14-case cold-mount suites and ReleaseFast editor build.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T13:20:31.744Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_4066",
+  "at": "2026-08-08T09:44:13.904Z",
+  "origin": "codex:019fd9ee",
+  "text": "make sure they NEVER fall back that shit is not ok",
+  "status": "doing",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T09:44:32.903Z",
+      "actor": "codex:019fd9ee",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

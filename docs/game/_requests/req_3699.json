@@ -1,0 +1,28 @@
+{
+  "id": "req_3699",
+  "at": "2026-08-02T23:58:21.852Z",
+  "origin": "session:c440da46",
+  "text": "oh yeah sorry i didnt even think about that, its tiny as shit huh. we can do a new one",
+  "status": "review",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T23:58:44.447Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T00:17:43.812Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The first paint atlas came back at 1024-fit (853x978) which was far too coarse for a 1.84 m vehicle carrying 78 parts and 477 UV islands - the exported guide showed most islands reduced to a few pixels of sliver. Rebuilt the sheet at the 2048 budget without needing another dialog click by driving the supported cart path tools/seat action uv-atlas resize width 1651 height 1899, which resamples the composite through __model_atlas_resize, flips atlasReadyRef, rewrites the package artifacts and rebuilds the UV panel. UV coordinates are normalized so the island layout is untouched and each island simply gains texels: density went from 221 to 441 texels per metre, a 4x area gain per island. Re-exported the pink AI guide at the new 1651x1899 and keyed the whole skin pipeline to those exact dims.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T00:17:43.812Z"
+}

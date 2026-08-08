@@ -1,0 +1,23 @@
+{
+  "id": "req_3695",
+  "at": "2026-08-02T21:14:10.758Z",
+  "origin": "session:436392a9",
+  "text": "make a 3 sets of kitchen cupboards  that have internal storage, and doors that will open and close, and then follow up with matching countertops with drawers, for each set then use the /agent-skin skill to generate art for the models. You can also use the internet to collect reference images to model from as needed. be sure you find as much opportunity to remove faces that will never show so that the uv can stay coherent",
+  "status": "doing",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-02T21:14:14.072Z",
+      "actor": "session:436392a9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T21:37:13.267Z",
+      "actor": "session:436392a9",
+      "kind": "note",
+      "text": "Modelled 3 kitchen base units via agent-seat (600/900/1200mm), all saved + semantic-status healthy: hollow 18mm carcass w/ shelf (real internal storage), recessed plinth, worktop w/ front overhang, hinged door leaves + drawer(s) as separate named parts, steel bar pulls merged into their moving bodies. Removed 100%-occluded faces only (carcass top under worktop, plinth top/bottom, shelf ends+back into carcass walls, pull backs, drawer-box front behind drawer front) - 9 whole-face removals per unit, e.g. 140->122 tris on the 600. Skinned the 1200 via agent-skin (gpt-image-2 pink guide -> uniform sage painted MDF, then exact paint fills for graphite worktop/plinth, steel pulls, white melamine interior), banked as paint variant 'Sage Painted'. BLOCKED on skinning the 600 and 900: the Seat has no action or registered command to switch the active model document - every activeWorkspaceDocumentId writer is a React handler in AppFrame.tsx. Needs a tab click, or a new seat action."
+    }
+  ]
+}

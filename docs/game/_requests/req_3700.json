@@ -1,0 +1,18 @@
+{
+  "id": "req_3700",
+  "at": "2026-08-03T00:18:07.673Z",
+  "origin": "session:c440da46",
+  "text": "curious did u stack the uv before generation? 477 pieces is a handful Lol",
+  "status": "doing",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T00:18:33.709Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

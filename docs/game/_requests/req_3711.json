@@ -1,0 +1,30 @@
+{
+  "id": "req_3711",
+  "at": "2026-08-03T02:47:48.513Z",
+  "origin": "codex:019fc558",
+  "text": "i see what you are saying. you want to know if regardless of the size of the uv should it be a fixed size. i dont think its obviously necessary to normalize across the board but yeah up to some point it makes sense to, but it only makes sense for parts that are loadbearing. no they should not but they also shouldnt be defaulted to so small u cant make anything of it",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T02:48:10.717Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T02:53:10.945Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced blanket equal-area normalization with the user's proportional-with-floor rule. Material/support footprints retain natural relative scale; only rows below a reviewed 1024-texel area floor grow, with a 4x safety cap and automatic floor reduction only if the zone cannot fit. On Moped_50 the full floor fits: hero scale 1.0, 41 of 112 support footprints boosted, zero capped, and 250 final footprints from the 477 baseline. Applied and saved; semantic status remains healthy at 2046/2046 named. UV/Seat tests and editor bundle pass.",
+  "shas": [
+    "3dba5bb46"
+  ],
+  "resolvedAt": "2026-08-03T02:53:10.945Z"
+}

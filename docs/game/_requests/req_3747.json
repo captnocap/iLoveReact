@@ -1,0 +1,10 @@
+{
+  "id": "req_3747",
+  "at": "2026-08-03T23:00:12.923Z",
+  "origin": "session:3ec0e7bf",
+  "text": "yes i think that is useful, infact i would say it would be beneficial if every single operation reported back how many things are **questionably wrong if not wrong entirely** from overlap, but dont enforce it.",
+  "status": "new",
+  "sessionId": "3ec0e7bf-84a2-4409-93cc-09d9e7361d20",
+  "captureMode": "hook",
+  "events": []
+}

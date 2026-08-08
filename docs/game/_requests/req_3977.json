@@ -1,0 +1,28 @@
+{
+  "id": "req_3977",
+  "at": "2026-08-07T07:58:38.282Z",
+  "origin": "codex:019fda1a",
+  "text": "ok why can i not add a cylinder to my scene",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T07:59:07.312Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T08:01:18.560Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the initial Add Cylinder symptom against the live editor. The document was active, resident, unclaimed, outside Paint mode, and its visible Outliner range matched its authored-face count; the Add command did reach the shell but the native mesh append returned refusal. The shell retained all existing geometry and surfaced the recovery hint. The user then identified a reproducible edit sequence, which continues under req_3978 using the native Follow recorder to locate the first corrupting transaction.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T08:01:18.560Z"
+}

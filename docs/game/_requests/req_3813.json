@@ -1,0 +1,28 @@
+{
+  "id": "req_3813",
+  "at": "2026-08-05T03:05:04.693Z",
+  "origin": "codex:019fcfbc",
+  "text": "and then one more thing. in 3d.zig how much of the line count is comments vs actual code",
+  "status": "review",
+  "sessionId": "019fcfbc-a1ed-74f2-9325-517de13ab5f9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:05:13.952Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:05:48.979Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Counted framework/gpu/3d.zig using a line-aware Zig comment scan and independently cross-checked the result with tokei. The 16,083 physical lines divide into 12,791 code-bearing lines, 2,572 comment-only lines, and 720 blank lines; 288 of the code-bearing lines additionally contain an inline comment. No repository files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T03:05:48.978Z"
+}

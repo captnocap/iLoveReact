@@ -1,0 +1,28 @@
+{
+  "id": "req_3967",
+  "at": "2026-08-07T00:58:16.204Z",
+  "origin": "codex:019fd9aa",
+  "text": "ok. thats a lot as expected. il give my two cents on some of it worth starting to address, first i do not like that a mesh is required to be parted into outliners, because parting out breaks the weld on a vert and therefore doesnt make any sense when it comes to weight based meshing. the other thing with that in general is, there is no way for me to even see what the 'auto rigging' is even doing, and thus explains a lot why the animation mocap does not align with what is happening from the capture.",
+  "status": "review",
+  "sessionId": "019fd9aa-05b5-7283-ab3a-0bc8db4c79a3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T00:58:38.513Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T00:59:33.789Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed both reported concerns against the active editor and oracle. The live path conflates outliner partitioning, semantic identity, bone placement, and skin seeds; it uses range bounds centers as pseudo-bones and hides generated weights, while capture retargets anatomical landmarks through manual model-space chain math. Established the corrective direction: preserve one welded authoring mesh, bind persistent semantic face regions to an independent visible skeleton, persist weights, add bind/deformed skeleton and influence inspection, then retarget mocap through calibrated local rotations and hierarchy/FK. No code or model changes.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T00:59:33.789Z"
+}

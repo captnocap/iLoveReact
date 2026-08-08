@@ -1,0 +1,28 @@
+{
+  "id": "req_3809",
+  "at": "2026-08-05T02:28:26.777Z",
+  "origin": "codex:019fcfbc",
+  "text": "hey so i want you to take a moment and go top to bottom on the gpu/3d.zig and adjacent **GOD** files (you know, the ones where its like over 5k lines of code) and lets gather up all the encompassing capability its trying to juggle in one, and start by just plainly stating what it does, and where grouped actions are identified. like mesh editing actions, world placement actions, etc. do this with the intention where a near future would take the file and finally start to break it up accordingly. The larger reason here is that we are just now getting to a point where trying to locate one part of a file such its size is becoming more and more problematic. no code changes just build out that list for us",
+  "status": "review",
+  "sessionId": "019fcfbc-a1ed-74f2-9325-517de13ab5f9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T02:28:36.091Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T02:33:17.851Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only top-to-bottom capability inventory of framework/gpu/3d.zig and the active oversized adjacent sources (framework/engine.zig, cart/editor/stage/ModelView.tsx, cart/editor/shell/AppFrame.tsx). Identified exact line-band ownership, the native mesh/UV and world-placement action vocabularies, direct bridge/support seams, and the key boundary that world placement is authored in the editor command/world layer while 3d.zig consumes render geometry/instances. No source changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T02:33:17.851Z"
+}

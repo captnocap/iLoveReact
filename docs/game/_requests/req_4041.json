@@ -1,0 +1,28 @@
+{
+  "id": "req_4041",
+  "at": "2026-08-08T06:09:37.740Z",
+  "origin": "codex:019fda1a",
+  "text": "it said concave still i just ignored it there is nothing concaving at all",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:09:46.122Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:15:51.419Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Proved the repeated concavity warning came from relaunching a stale reactjit-dev binary built at 18:21, before the 22:58 detach/logical-vertex fix. Rebuilt and relaunched the actual dev binary; the live editor now runs the fixed 23:15 core. Awaiting the user's exact visual reproduction on the newly built host.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:15:51.419Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3716",
+  "at": "2026-08-03T04:06:50.074Z",
+  "origin": "codex:019fc558",
+  "text": "well, so, the problem is this: if it is a 1x1 patch or whatever, and i open the patch panel, and make that 1x1 take up say a 1k image, its still expected in the full scale uv that this is the same size, so changing the uv size in the focus shouldnt make it that size globally",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T04:06:56.144Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T04:13:56.520Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the direct master-atlas patch focus with a true local mapping workspace. Selecting a reusable image now edits a temporary UV copy; Apply + Show All triangle-rasterizes that source into the islands' original signed-atlas footprint, keeps master UV coordinates and scale untouched, and writes transparent pixels outside the selected silhouettes so neighboring islands are not painted. Added render-face identity validation and regression tests proving a 4x4 local fit remains a 2x2 master footprint. UV layout 50/50, workspace 7/7, patch 3/3, and editor bundle checks pass.",
+  "shas": [
+    "02e30ca4c"
+  ],
+  "resolvedAt": "2026-08-03T04:13:56.519Z"
+}

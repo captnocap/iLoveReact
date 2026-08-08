@@ -1,0 +1,17 @@
+{
+  "id": "req_3928",
+  "at": "2026-08-06T06:41:54.505Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>aafd88d230db9c423</task-id>\n<tool-use-id>toolu_01Ja9kLi3cmUgL9NwkXKmZRV</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/e863e9d6-4fb4-4103-84ef-500707015d9d/tasks/aafd88d230db9c423.output</output-file>\n<status>killed</status>\n<summary>Agent \"Model slot machine via seat\" was stopped by user</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n</task-notification>",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:43:30.575Z",
+      "actor": "fable-agentseat",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

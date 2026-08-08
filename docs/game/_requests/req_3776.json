@@ -1,0 +1,28 @@
+{
+  "id": "req_3776",
+  "at": "2026-08-04T19:44:10.134Z",
+  "origin": "codex:019fce42",
+  "text": "Lets do another round and do some computer chairs",
+  "status": "review",
+  "sessionId": "019fce42-a928-7392-acd6-fae62bca4974",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T19:44:21.465Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T19:54:24.072Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Modeled and saved three semantically named computer chairs: Compact Task Chair, Ergonomic Mesh Chair, and High Back Gaming Chair. All three have zero intersecting faces; ergonomic and gaming repeated UVs are exact-stacked; save and semantic persistence checks are healthy.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T19:54:24.071Z"
+}

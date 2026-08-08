@@ -1,0 +1,17 @@
+{
+  "id": "req_3770",
+  "at": "2026-08-04T05:00:57.801Z",
+  "origin": "one-off",
+  "text": "can u verify that the agent-seat codex skill is up to date with the same skill in the .claude directory in here",
+  "status": "new",
+  "sessionId": "019fcb24-f185-73a1-aa36-acc763663b45",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T05:01:03.258Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

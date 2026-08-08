@@ -1,0 +1,28 @@
+{
+  "id": "req_3987",
+  "at": "2026-08-07T19:19:10.883Z",
+  "origin": "codex:019fdda4",
+  "text": "hey man so this is something that has been a bit of a problem now for a while i just keep putting it off, but there is something very wrong with how the editor is opening to the game world side of the editor, in that, whether it be a 1 chunk brand new map with nothing on it or a 625 chunk world they both take the same amount of time, meaning it has absolutely nothing to do with what is in a world at all, there is something blocking for 2-3 seconds and this happens at app start, and then it happens when navigating to the game world tab. now on top of that, if you have the world open already and then change the maps around, its about a second long delay switch between the map files, its certainly much faster than switching between the tabs but the fact the tab switching for 1 chunk and 625 chunks says the tax is entirely somewhere else. dig into it. and then on top of that also there is a performance problem in general, im not sure what the hell is doing it but no matter what im sitting at 238/239 fps and not 240. i can have a fuck load of text on the screen and it stays there or i can close all the menus and its still 238/239 so something is causing it to not be its best self. Tell me what you can find",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:19:15.473Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:30:07.634Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed editor performance without source changes. Controlled hidden A/B: blank data boot 0.65s; full model packages with blank world reproduced a 2.48s JS app tick and 103-mesh resident catalog; manifests-only retained the same approximately 2647-node UI tree but cut the JS tick to 62ms. The fixed cost is WorldViewport synchronously rebuilding, encoding, and copying the complete resident mesh and paint catalog on mount, independent of map chunks. Map switching synchronously saves outgoing world JSON, performs two-pass full RMAP serialization and write, reads, decodes, and restamps the target RMAP, rewrites target world JSON, then swaps React state; the 625-chunk nice RMAP is 114830906 bytes. The FPS dock uses an unnormalized raw frames-per-at-least-one-second counter, FIFO vsync, and self-polling telemetry, so 238/239 is not proof of a content or rendering bottleneck. The primary display mode computes to 239.9985Hz; present_us versus CPU buckets is the exact discriminator.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:30:07.634Z"
+}

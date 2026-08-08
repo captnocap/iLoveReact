@@ -1,0 +1,18 @@
+{
+  "id": "req_4087",
+  "at": "2026-08-08T12:42:11.586Z",
+  "origin": "session:ae84f281",
+  "text": "oh dont be sorry there was nothing on it but we do need to generate a new one, also we need to work on the generator in general so /hand-over that",
+  "status": "doing",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:42:31.492Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

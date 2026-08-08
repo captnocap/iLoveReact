@@ -1,0 +1,28 @@
+{
+  "id": "req_3677",
+  "at": "2026-08-02T09:52:38.066Z",
+  "origin": "codex:019fbe1c",
+  "text": "are u just reasserting what im saying without just making the change again. theres nothing to discuss here",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T09:52:53.744Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T09:58:09.519Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the Agent Seat NOTICE receiver from ModelView into always-mounted AppFrame. A model-less editor now answers look immediately with a structured no-live-model result; new creates the first real model through the shell and delays completion until its mesh-capable ModelView is mounted; other mesh verbs reject cleanly. ModelView now only publishes the current mesh-capable Seat and a UI refresh hook. Preserved per-row generation guards and batch cadence at the shell boundary, including batches that begin with new. Verified the exact live failure path no longer times out, added a model-less bootstrap test, passed all 40 Seat tests, bundled the editor, passed diff checks, and completed a ReleaseFast editor ship.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T09:58:09.519Z"
+}

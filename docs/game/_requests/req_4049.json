@@ -1,0 +1,28 @@
+{
+  "id": "req_4049",
+  "at": "2026-08-08T07:06:57.603Z",
+  "origin": "codex:019fda1a",
+  "text": "ok so i still see the thing dragged out to the side. what should i do. obviously i could cut the model in half and mirror the good half but that is a lot of effort",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T07:07:07.830Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T07:16:13.783Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved the recovery approach without cutting/mirroring the whole vehicle: the stale damage is a 46-vertex car_body patch created by the former cross-owner mirror mapping, and it can be restored by one exact +0.392829 m X vertex move with Mirror Edit off. No detached part replacement is involved.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T07:16:13.783Z"
+}

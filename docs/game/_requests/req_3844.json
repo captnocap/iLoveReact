@@ -1,0 +1,30 @@
+{
+  "id": "req_3844",
+  "at": "2026-08-05T08:30:54.897Z",
+  "origin": "codex:019fd073",
+  "text": "ok now the search asset string search does literally nothing. fix it",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T08:30:59.921Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T08:35:28.721Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The Asset Explorer search now presents visible results instead of filtering only the hidden gallery for the currently selected folder. Queries search globally across live models, materials, props, and build assets using names, paths, stable ids, recipes, variants, and semantic metadata; ranked results appear in both tucked and expanded layouts and select or open the clicked asset. Shared matchers keep the existing folder galleries consistent with the new search contract.",
+  "shas": [
+    "13968e934"
+  ],
+  "resolvedAt": "2026-08-05T08:35:28.721Z"
+}

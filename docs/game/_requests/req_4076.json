@@ -1,0 +1,28 @@
+{
+  "id": "req_4076",
+  "at": "2026-08-08T11:50:15.186Z",
+  "origin": "codex:019fd9ee",
+  "text": "welp that reset it back a handful of edits. but i assume thats whats on disk right? this save shit is getting really fucking annoying and excuse my french but whatever i have in memory in the app and i press save button should save the model. the fact that the safety guard literally just fucks me is not safe. also whatever causes that to happen just needs to be fixed",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T11:50:47.586Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T13:20:31.752Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explicit File/Ctrl+S/Agent/Export Save now commits the actual live resident through a complete staged package transaction: clone and fingerprint the durable tree, write all artifacts plus manifest only in the stage, atomically exchange directories, read back, then retire the predecessor; validation failure rolls back and uncertain I/O retains both trees. Background autosave remains conservative. Concurrent writers and occupied orphan targets are refused without overwriting. Native filesystem, save-authority, production reader, and ReleaseFast build gates pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T13:20:31.752Z"
+}

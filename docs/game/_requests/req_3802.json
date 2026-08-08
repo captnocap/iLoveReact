@@ -1,0 +1,30 @@
+{
+  "id": "req_3802",
+  "at": "2026-08-05T00:40:52.042Z",
+  "origin": "session:bae7e49e",
+  "text": "ok there is the first one. look at what the extrude does on the edge",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T00:40:59.000Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T00:59:04.129Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Edge extrude 'creates a face between two edges' diagnosed from the follow transcript: the parameterless hotkey stamps a quad at model.radius*0.08 every time, so a later stamp's outer corners land bit-equal on an earlier stamp's vertex stations and the weld rebuild (WELD_Q=1024 cells) silently fuses the new quad onto unrelated geometry — the inspect proved the demo quad's outer edge was a shared interior edge with old triangle 106. Fixed in 3d.zig meshTopoExtrudeEdge: the distance now auto-nudges in 4/1024 steps until the outer corners and their enabled mirror reflections sit clear of every resident vertex's weld class, so an extrude always creates a free boundary edge. Verified by clean build + headless harness run. Editor binary rebuilt at zig-out/bin/editor; dev host needs a restart to pick it up.",
+  "shas": [
+    "ee7776f06"
+  ],
+  "resolvedAt": "2026-08-05T00:59:04.129Z"
+}

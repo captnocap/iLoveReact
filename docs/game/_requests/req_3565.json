@@ -1,0 +1,28 @@
+{
+  "id": "req_3565",
+  "at": "2026-08-01T15:28:39.319Z",
+  "origin": "session:35434fae",
+  "text": "yo so uh curious what is this log specifically compared to any of the actual place logs? thats not the chunk number ? [js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click ate as DRAG (travel 7+0px from down)\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[apptick-split] total=44.6ms | jsTick(+microtasks)=44.5 (of which GC=25.5ms x1) tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:primitive:cube:14 at (32.01582336425781,-0.0000171661376953125,30.292341232299805) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[apptick-split] total=123.4ms | jsTick(+microtasks)=123.3 (of which GC=0.0ms x0) tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n[js.warn] [place] click -> place prop:primitive:cube:14 at (32.14033126831055,-0.0001163482666015625,27.816360473632812) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:primitive:cube:17 at (29.497791290283203,0.000179290771484375,27.07782745361328) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[apptick-split] total=152.9ms | jsTick(+microtasks)=152.8 (of which GC=0.0ms x0) tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n[js.warn] [place] click -> place prop:primitive:cube:17 at (31.75966553317838,0.9217586517333984,27.595956693350548) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:mdl-mqq10drr-ki9 at (23.416465759277344,0.00035381317138671875,23.885862350463867) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:import:toilet_3d_model at (26.994525909423828,0.0003185272216796875,23.95411491394043) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:import:videocamera_001 at (27.216535568237305,0.00003719329833984375,25.994556427001953) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:primitive:cube:56 at (28.078433990478516,0.00046634674072265625,22.60495376586914) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[apptick-split] total=64.1ms | jsTick(+microtasks)=64.1 (of which GC=0.0ms x0) tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[js.warn] [place] click -> place prop:primitive:cube:39 at (1.3930158615112305,-0.0003337860107421875,29.997468948364258) yaw 0\n[js.warn] [live-regions] 1/1 placed-prop region(s) bound: prop:primitive:cylinder:2:slot-0\n[apptick-split] total=41.5ms | jsTick(+microtasks)=40.1 (of which GC=32.6ms x1) tickDrain=0.0 drainFlush=0.4 dirty(snap=0.1+rebuild=0.8) im talking about every prop:primitive:cylinder:2:slot-0 why is that on every single placement ?",
+  "status": "review",
+  "sessionId": "35434fae-dd0b-48d1-aa4a-701ed181c056",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T15:28:48.935Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T15:29:49.705Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the [live-regions] log the user asked about: it comes from pushLiveMaterialRegions in cart/editor/world/livePush.ts:314, which runs at the tail of every pushLiveWorld. Every placement mutates the pieces array, WorldViewport/PlaytestSurface re-push the whole live world, and the region pusher re-scans all placed pieces and re-binds every liveMaterial slot, logging the summary unconditionally — hence the line on every click. The '2' in prop:primitive:cylinder:2 is the primitive model's mint sequence from allocatePrimitiveModelId (second stored cylinder primitive), not a chunk number; ':slot-0' is the texture slot index wearing the liveMaterial. No code changed — question answered.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T15:29:49.705Z"
+}

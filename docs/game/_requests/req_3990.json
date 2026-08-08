@@ -1,0 +1,28 @@
+{
+  "id": "req_3990",
+  "at": "2026-08-07T19:31:45.687Z",
+  "origin": "codex:019fda1a",
+  "text": "that doesnt even make sense. if you realize that the paint pipeline requires you to actively go into paint mode and make an atlas, you would realize that the flow of that comes after you model entirely, why would you create an atlas and then immediately start making new cuts",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:31:57.925Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:37:33.350Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Accepted and implemented the user’s workflow correction: no atlas is the expected modeling state because Paint is an explicit later phase, not an exceptional UV-layout failure. Removed the misplaced compatibility from model_paint and made the shared Chamfer/Loop Cut installer choose plain geometry installation until the user creates or imports an authored atlas; pixel-preserving installation is now reserved for actual painted data. Focused suites and the ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:37:33.350Z"
+}

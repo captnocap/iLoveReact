@@ -1,0 +1,28 @@
+{
+  "id": "req_4015",
+  "at": "2026-08-07T23:57:05.956Z",
+  "origin": "codex:019fdda4",
+  "text": "ok and next build piece textures are not loading in only painted atlases are",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T23:57:09.714Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T00:03:15.739Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed ordinary build-piece textures by moving shader and pixel materialization behind a core-owned ABI service. The Game module had compiled a private uninitialized effects and static-surface registry, so recipes silently failed while resident painted atlases worked; both paths now converge on the live core texture registry.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T00:03:15.739Z"
+}

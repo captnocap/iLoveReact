@@ -1,0 +1,28 @@
+{
+  "id": "req_3679",
+  "at": "2026-08-02T10:06:13.812Z",
+  "origin": "codex:019fc1e8",
+  "text": "now remove all the faces that do not show up on the model so the uv can stay clean. also, there can be no empty floating space, so you will want to merge verts where applicable",
+  "status": "review",
+  "sessionId": "019fc1e8-eed1-74b1-b88b-bbfef589043c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T10:06:27.231Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T10:07:56.767Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed 186 fully occluded contact faces from the saved oven (four burner bases, five dial bases, and five buried slab backs), reducing the visible mesh from 788 to 602 faces. Closed the former 7.5mm oven-window gap so all features contact their supports. Existing contacts have non-matching perimeter topology (circles against planar panels), so no safe pairwise vertex weld exists without destructive retopology; retained manifold contact loops instead. Rebuilt and UV-saved a 1024-fit atlas (811×1016); semantic status is healthy with saved/mount/resident all at 602 named faces, zero unnamed.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T10:07:56.767Z"
+}

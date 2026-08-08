@@ -1,0 +1,28 @@
+{
+  "id": "req_3756",
+  "at": "2026-08-04T01:21:32.534Z",
+  "origin": "session:a0539482",
+  "text": "hold up one moment. your body, seems to have the verts of two of t he tires also. are you seeing the same thing i am?",
+  "status": "review",
+  "sessionId": "a0539482-a1b4-434a-8aa5-9017f43a5556",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T01:24:17.504Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T01:37:51.749Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed while building police_sedan (req_3751). Root cause found and written up in docs/handoffs/SEAT-MODEL-EDITOR-DEFECTS-0803.md: the Outliner part-range re-stamp in AppFrame.tsx:4901 bails whenever native part count differs from row count, which is a permanent latch because resyncing is the only thing that could restore parity. Consolidated with every other tool defect hit during the session into one work order.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T01:37:51.749Z"
+}

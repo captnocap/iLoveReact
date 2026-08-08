@@ -1,0 +1,17 @@
+{
+  "id": "req_4093",
+  "at": "2026-08-08T13:23:22.668Z",
+  "origin": "one-off",
+  "text": "ok what is not staged that didnt go up. i know there is a lot more _requests",
+  "status": "new",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T13:23:35.755Z",
+      "actor": "session-c405",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3895",
+  "at": "2026-08-06T00:18:32.124Z",
+  "origin": "session:2eed946e",
+  "text": "the last in the list doesnt remove, probably stale cache",
+  "status": "review",
+  "sessionId": "2eed946e-0d8c-4c8e-a26c-ae423f3614ee",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T00:19:09.861Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T00:25:20.256Z",
+      "actor": "2eed",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User clarified this message was meant for the adjacent terminal pane's session, not this one — logging that here so the board reflects it. The screenshot that followed it in THIS session did expose a real editor bug (NAMES panel ghost rows after deliberate region removal), which was diagnosed and fixed under req_3896, commit 6916e71d0.",
+  "shas": [],
+  "resolvedAt": "2026-08-06T00:25:20.256Z"
+}

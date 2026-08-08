@@ -1,0 +1,28 @@
+{
+  "id": "req_3725",
+  "at": "2026-08-03T05:23:05.210Z",
+  "origin": "codex:019fc558",
+  "text": "Well, so how does that affect every other existing atlas, i mean effectively everything is wrong if it has used any cylinder and had a rotation from so it sounds which is actually stupid to do. No wonder this doesnt compact down to like nothing, it makes no sense why it hasnt been. now it does",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:23:29.205Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:23:47.917Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Established the systemic impact and safe migration boundary. Every atlas generated through the dominant-world-axis auto-atlas path can have orientation-dependent chart splits and texel density on non-axis-aligned faces; rotating otherwise identical primitives can therefore produce different UV topology and prevent repeat stacking. Existing atlases and banked paint variants are not visually corrupted because each stores the exact cornerUv used when painted, and a generator change would not retroactively rewrite them. Remaking an atlas under a corrected intrinsic unwrap would move UVs, so old raster content must be explicitly reprojected per face or the model knowingly repainted. Imported authored UV texture slots are outside this auto-atlas defect unless explicitly remade. No code or model data changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T05:23:47.917Z"
+}

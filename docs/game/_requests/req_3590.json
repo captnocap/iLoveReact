@@ -1,0 +1,30 @@
+{
+  "id": "req_3590",
+  "at": "2026-08-01T18:54:23.887Z",
+  "origin": "session:357e79a6",
+  "text": "bro what the oracle is for the shit i dont need to reexplain over and over again, by not doing it now, your going to make it end up there by the next time you call it",
+  "status": "review",
+  "sessionId": "357e79a6-b104-4a5e-9d0a-394c0080a5f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T18:54:39.291Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T18:55:54.931Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected where the skinning decision was filed. The user's point: the oracle exists so they do not have to re-explain things, and by recording their skinning rationale only in a memory file and the agent-seat skill doc — both places only the assistant reads — I guaranteed they would have to say it again the next time anyone consulted the oracle on model semantics. Ruled it into the constitution instead as V33 (SEMBLOB-0801): semantic region names are RIGGING DATA, not agent scratch memory, because named surfaces are what make auto-skinning from a UV tractable, and therefore the semantic table must persist into the model blob rather than living only as host state a cold restart drops. Two standing consequences are written in so future work does not need re-litigation: any model-persistence work (meshdoc/blob save+load) carries the semantic table through as in-scope rather than optional, and any authoring surface that creates geometry (Agent Seat, outliner, importers, primitive adds) names what it creates at the moment of creation, since a name reconstructed later from normals is a guess. The verdict also states that an op which resets or drops the semantic table is a BUG rather than an acceptable cost, citing the add-verb table wipe (req_3588) and its part-range twin (req_3465) as the same disease. Both the user's original verbatim words and their correction are quoted in the verdict so the reasoning survives without them. Updated DECISIONS.md and _index/decisions.ts in the same commit per the maintenance contract, and verified the oracle now returns V33 ranked top for semantics/skinning/persistence queries. The verdict records honestly that the persistence half is OWED, not built — names remain live-only host state today. Staged only the two doc files: a parallel session is concurrently adding persist/detachSelection to seatApi.ts and that work was left untouched.",
+  "shas": [
+    "bb25f0643"
+  ],
+  "resolvedAt": "2026-08-01T18:55:54.930Z"
+}

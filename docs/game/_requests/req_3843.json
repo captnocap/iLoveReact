@@ -1,0 +1,30 @@
+{
+  "id": "req_3843",
+  "at": "2026-08-05T08:07:28.689Z",
+  "origin": "session:09dee98c",
+  "text": "yep thats the problem is that for whatever reason it decides to make two triangles on the other side even when that side is already filled in, there is nothing there for it to be authoring, and then to top it off those triangles faces are not even facing out so to actually find them is not so simple, thats a problem. either delete the face on nthe other side when i delete the triangles to begin with so that it just does both faces when i create it or dont make those extra triangles. pick one, both result the same either way",
+  "status": "review",
+  "sessionId": "09dee98c-f214-4806-94c1-8d557ea2f434",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T08:08:44.315Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T08:14:29.319Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Picked option B per the user's ruling (don't make the extra triangles): a mirrored create-face/extrude-edge twin now requires the twin edge to match the source edge's face incidence (mesh_edit.twinEdgeMatchesSourcePub). Bridging from an open boundary edge onto a twin side that is already surfaced (2 incident faces) skips the twin and falls back one-sided honestly, so the Van Seat flow — delete the left flank's two tris, create the quad — no longer stacks a duplicate coincident quad on the intact right flank. Matching incidence (not demanding openness) keeps deliberate authored-seam extrudes bilateral; bevel untouched since interior-edge bevels are legitimate. New unit test covers open-vs-filled, seam-vs-seam, and missing-edge cases; 161/161 mesh-edit tests pass, app compiles. Needs host rebuild.",
+  "shas": [
+    "dc5cee4a3"
+  ],
+  "resolvedAt": "2026-08-05T08:14:29.319Z"
+}

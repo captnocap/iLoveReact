@@ -1,0 +1,30 @@
+{
+  "id": "req_3804",
+  "at": "2026-08-05T00:46:06.059Z",
+  "origin": "session:bae7e49e",
+  "text": "yep ok now did u also catch that it creates two faces on opposite ends as the same face? thats the same bug im showing you now, is look at the piece i have selected. how is that even possible? 1 create face is 2 parts on opposite ends, where selecting one of the faces selects both. it thinks its one piece",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T00:46:17.647Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T00:59:04.149Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 'two faces on opposite ends selecting as one piece' bug: adoptAppendedFaces stamped ONE fresh group id across every triangle appended in a transaction, so mirror-bilateral extrude-edge/create-face fused the twin and its source into a single authored face (inspect proved tris at x=-0.5 and x=+0.5 sharing group 123). Fixed: the appended range partitions into per-face segments (source, then each twin), each minting its own group id (nextFreeGroupId is max+1 so consecutive ids are free), and Create Face's focus handoff now selects only the SOURCE face — bilateral ops still pair twins positionally. Headless proof on the rebuilt binary: mirrored edge extrudes produce distinct groups (+x quad and -x twin), every authored group is one contiguous quad, no group owns disjoint opposite-side islands.",
+  "shas": [
+    "ee7776f06"
+  ],
+  "resolvedAt": "2026-08-05T00:59:04.149Z"
+}

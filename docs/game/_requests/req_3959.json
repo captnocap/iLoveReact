@@ -1,0 +1,10 @@
+{
+  "id": "req_3959",
+  "at": "2026-08-06T07:58:24.611Z",
+  "origin": "session:e863e9d6",
+  "text": "yeah thats a problem then to fix. the thing is names are mandatory is why it auto populates but auto population for an entire model is going to be literally more useless than not having it, because at that point none of it means anything at all",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3767",
+  "at": "2026-08-04T04:36:36.477Z",
+  "origin": "session:d6ae2229",
+  "text": "Lol thats the whole problem. Its not a rock. That is a face",
+  "status": "review",
+  "sessionId": "d6ae2229-3ef4-4c5e-ac78-4f804fd2f2b5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T04:37:30.152Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T04:38:05.123Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The demonstration object I twice called a rock is a face — a sculpted head — which is the purest statement of the P1-0 defect: the old stage shading destroyed so much form information that object identity itself did not survive, let alone edge counts. Closed the loop by rendering Bald+Head+3d+Model (17.5k tris) under the new matcap shading shipped in 9fd84db53: the shot now plainly shows brow, eyelids and lashes, nose, cheekbones, grinning mouth with teeth, ear, and skull faceting where the old render showed an amorphous grey mass. No code change in this req beyond the already-committed matcap; the remaining P1-0 piece (cavity/AO for concavities like eye sockets and nostrils, plus optional faceted-normals stage mode) stays filed on req_3763's follow-up note.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T04:38:05.123Z"
+}

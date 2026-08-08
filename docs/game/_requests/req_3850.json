@@ -1,0 +1,30 @@
+{
+  "id": "req_3850",
+  "at": "2026-08-05T17:57:23.043Z",
+  "origin": "session:e863e9d6",
+  "text": "hey so the agent-seat skill, we basically want to set us up so that, we could have multiple agents modeling at a time but also letting me do whatever without just sitting around and doing nothing. so effectively we need to set up to be able to let an agent run this while its not actually in focus on my app. now there is the whole problem of well how do you ensure one model isnt edited by the wrong agent by accident, and i think the answer is rather simple. basically, when an agent starts, they put a password on the model, that only they would knnow. that model is immune to edits unless it has the password. and it would just automatically wipe as soon as the app restarts or agent can dismiss it when done. basically tho we also have to find some way to capture a screenshot for something that wouldnt be active on my view at that time. well, i mean it could be active. but likely not. \n\nthats all pretty straight forward, where do we stand",
+  "status": "review",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T17:57:30.901Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T18:55:49.967Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made Asset Explorer Recent durable across cold editor restarts. Added a dedicated per-concern history file for mixed asset/model keys, boot-time rehydration, and micro-save wiring; persisted input is validated, deduplicated, newest-first, and capped at 24. Added normalization and save-shape regression tests, passed editor type-check, and completed the ReleaseFast editor build.",
+  "shas": [
+    "438fdc877"
+  ],
+  "resolvedAt": "2026-08-05T18:55:49.967Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_4071",
+  "at": "2026-08-08T10:52:54.129Z",
+  "origin": "one-off",
+  "text": "can u run the tools script that cleans the cache",
+  "status": "new",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T10:53:08.703Z",
+      "actor": "claude-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

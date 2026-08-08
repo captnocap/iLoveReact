@@ -1,0 +1,28 @@
+{
+  "id": "req_3665",
+  "at": "2026-08-02T06:18:25.593Z",
+  "origin": "codex:019fbe1c",
+  "text": "im curious where exactly you see the problem. because you just deleted a bunch of faces, and those faces, had edges, and those edges, connect to verts that still exist, so there is almost no room for interpretation, its purely mechanical from here",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T06:18:32.269Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T06:26:37.819Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the abstraction: the deleted patch already owns the exact reconstruction boundary. Wired the existing native Follow delete transaction into Seat delete receipts as a compact deletedBoundary and added reconnect recovery via retopo-bands deleted-patch; 37 Seat tests pass. Replayed only band 0, leaving its neighboring rails intact at generation 89.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T06:26:37.819Z"
+}

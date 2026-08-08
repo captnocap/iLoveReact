@@ -1,0 +1,10 @@
+{
+  "id": "req_4081",
+  "at": "2026-08-08T12:11:09.692Z",
+  "origin": "session:ae84f281",
+  "text": "did you delete it directly or did a script you ran delete it ?",
+  "status": "new",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": []
+}

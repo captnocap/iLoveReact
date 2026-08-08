@@ -1,0 +1,34 @@
+{
+  "id": "req_3676",
+  "at": "2026-08-02T09:51:09.289Z",
+  "origin": "codex:019fbe1c",
+  "text": "understand why that is fundamentally just a flaw: if i have to start by opening something like a new model, but then i invoke the skill, agents see they can start a new model from the skill so they end up opening a new one anyways when asked to make something and therefore now ive done extra work for no reason",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T09:51:18.408Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T09:51:33.385Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-02T09:51:48.219Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Correction to shell-stripped command names in the resolution: look must return structured no-live-mesh state, and new must create the first real model through the always-mounted shell-level Seat receiver."
+    }
+  ],
+  "resolution": "Established the correct Agent Seat bootstrap contract: the control plane cannot be mounted by ModelView, because that requires the user to create a disposable model solely to expose the API and the agent then correctly replaces it with its own  operation. The Seat receiver must be owned by the always-mounted editor shell from process startup;  must answer immediately with structured no-live-mesh state,  must create the first real model through the shell, and mesh-only verbs must reject cleanly until one exists. No manual prerequisite or throwaway model is acceptable.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T09:51:33.385Z"
+}

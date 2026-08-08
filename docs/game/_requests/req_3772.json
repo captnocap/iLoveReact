@@ -1,0 +1,38 @@
+{
+  "id": "req_3772",
+  "at": "2026-08-04T07:00:02.089Z",
+  "origin": "session:a023d12b",
+  "text": "yeah fix that. do not publish the 3d models or image based textures to github",
+  "status": "review",
+  "sessionId": "a023d12b-0027-49b7-8939-e9fb73c25f4a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T07:01:55.611Z",
+      "actor": "fable-mergefaces",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T07:06:35.864Z",
+      "actor": "fable-mergefaces",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-04T18:46:38.084Z",
+      "actor": "fable-newmesh",
+      "kind": "note",
+      "text": "Follow-up ruling applied in a9ffb8aa3: 'yep that directory is to be ignored' — cart/editor/data is now ignored WHOLESALE (/cart/editor/data/* ) rather than by three named subdirs, so models/, textures/, stickers/ and any future asset dir the editor grows are covered with nothing to keep in sync. One exemption: !/cart/editor/data/*.ts, because that same directory is the editor's source tree (73 tracked .ts — commands, types, meshDoc, the stores). A bare 'cart/editor/data/' makes git skip the directory without descending, so nothing inside can be re-included; ignoring the CONTENTS instead keeps both halves of the ruling true. Verified: models/textures/stickers/loose blob/hypothetical future paints dir all ignored; existing and brand-new .ts visible; all 73 source files still tracked."
+    }
+  ],
+  "resolution": "Reconciled the local repo with the GitHub-web cleanup without touching a single file on disk. (1) Re-pointed the corrupt edit-trail ref (bad object from a kernel panic) at HEAD per the documented recovery recipe, which un-broke git fetch and the trail watcher. (2) ab8083fc0 untracks the whole models/textures class via git rm --cached + root-anchored .gitignore rules: cart/editor/data/models (all 1383 tracked files incl. build/characters, not just the props dir you deleted remotely), cart/editor/data/textures, cart/editor/data/stickers (7dab6f5b8), cart/hmsc-int assets/tex + exports *.png + texture.png/Desk.glb/car.obj + exports/.cache, pics, world/knowledge, zig-pkg, tmp, design_handoff_color_studio, _MODEL_RECOVERY_BACKUP, research_runs auto-skinning — 2689 files, ~1.6M lines out of the tree. shots/ audit PNGs, pixel_icons UI assets, and the frozen love2d/tsz/archive trees deliberately untouched. (3) 183831d14 merges origin/main (your 8 deletion commits) — dry-run proved conflict-free first; both sides agree on every deletion so the merge changed zero worktree files (1975 model files verified on disk before and after). (4) Pushed; the req_3771 merge-faces fix c06ae85a7 rode along. Belt-and-suspenders hardlink snapshot at /home/siah/creative/.reactjit-untrack-snapshot-20260804 (1.8G, no extra disk) — delete it whenever you're confident.",
+  "shas": [
+    "ab8083fc0",
+    "183831d14",
+    "7dab6f5b8"
+  ],
+  "resolvedAt": "2026-08-04T07:06:35.864Z"
+}

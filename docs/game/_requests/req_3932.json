@@ -1,0 +1,18 @@
+{
+  "id": "req_3932",
+  "at": "2026-08-06T06:48:23.272Z",
+  "origin": "session:e863e9d6",
+  "text": "cool. all good now, and none of those got saved to disk so the names are open still",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T06:48:44.519Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

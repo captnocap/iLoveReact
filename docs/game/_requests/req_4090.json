@@ -1,0 +1,31 @@
+{
+  "id": "req_4090",
+  "at": "2026-08-08T13:10:59.204Z",
+  "origin": "session:c4057f17",
+  "text": "the archive folders make sure they are just zips and remove the unzipped after",
+  "status": "review",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T13:11:22.386Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T13:17:30.149Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "archive/ is now 16 zips and zero directories, and the two unzipped originals at the repo root are gone with them. Built `rjit repo archive <tree> --drop` rather than hand-running rm -rf, because deletion belongs in a script that announces what it is doing (req_4083). The gate is the feature: dropArchivedTree does NOT accept 'a zip exists' or 'zip -T passed' as evidence, since a valid archive of the wrong content satisfies both. It enumerates every file and symlink on disk right now, enumerates the zip's entries, and refuses to remove anything if a single disk path is missing — then reports the count it proved before deleting. That failure mode is real and already happened in this work: packing love2d with plain zip -r silently dropped all 11 symlinks while producing a valid, zip -T-clean archive, and this check is what would have caught it. Removed after verification: archive/frozen-compilers (60M, 131 files), archive/tsz-gen (5.8M, 409), archive/tsz-v1 (4.2M, 199), archive/qjs-stack (460K, 11), tsz/ (80M, 4163) and love2d/ (52M, 1893). An existing zip is reused rather than overwritten but its coverage is re-checked against current disk contents, so a stale archive can never authorise a delete. On the user's challenge that zipping is not deleting and what would actually go missing: they were right, and the honest answer is nothing — the real risk is a live READER of the path, so I checked. build.zig:552 falls back to tsz/zig-out/lib only when root zig-out lacks libllama_ffi.so, and that fallback is unchanged in effect because tsz/zig-out/lib never existed on disk; the real .so is a symlink in root zig-out into LM Studio. debug_server.zig's .tsz/sessions paths are $HOME dotdirs, not the repo tree. render-test.tsx hardcodes an absolute path to a love2d ISO that was never on disk, so that cart was already broken. zipName no longer double-prefixes trees already under archive/. The skill was corrected too: it claimed 'nothing here deletes', which --drop makes false.",
+  "shas": [
+    "cbd80223e",
+    "b18d41f0f"
+  ],
+  "resolvedAt": "2026-08-08T13:17:30.149Z"
+}

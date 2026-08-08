@@ -1,0 +1,28 @@
+{
+  "id": "req_4012",
+  "at": "2026-08-07T23:39:41.539Z",
+  "origin": "codex:019fdda4",
+  "text": "Ok. and then the application starts up and the world editor is blank",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T23:39:45.551Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T00:03:15.710Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the blank World editor after modularization by routing Scene3D image bind-group creation, image-quad submission, and static-surface lookup through the cold core ABI. The replaceable library no longer writes into private uninitialized compositor queues; the real Scene3D and Game modules rebuilt and the live world renders again.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T00:03:15.710Z"
+}

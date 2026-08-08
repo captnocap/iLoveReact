@@ -1,0 +1,10 @@
+{
+  "id": "req_3960",
+  "at": "2026-08-06T08:01:15.210Z",
+  "origin": "session:e863e9d6",
+  "text": "yeah well from my ui those two things are the same thing so as i see it, yes, you have authored coverage, even if u didnt set any of it up.",
+  "status": "new",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": []
+}

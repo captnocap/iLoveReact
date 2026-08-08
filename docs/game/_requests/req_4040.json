@@ -1,0 +1,30 @@
+{
+  "id": "req_4040",
+  "at": "2026-08-08T06:03:45.543Z",
+  "origin": "session:3eb73457",
+  "text": "this stopped reporting triangle count [Image #1] uh and seemingly so for both the world and the studio",
+  "status": "review",
+  "sessionId": "3eb73457-b787-4144-98bc-0991c2502838",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:03:53.482Z",
+      "actor": "opus-hud",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:18:27.685Z",
+      "actor": "opus-hud",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The status bar's TRI/DC stopped reporting because the dev host became modular: scene3d now lives in a hot-reloadable .so, and every scene3d call routes through dev_modules/scene3d_runtime.zig — but diag/telemetry.zig and diag/mem_breakdown.zig still imported framework/gpu/3d.zig directly, reading a statically-linked copy in the core that nothing ever draws into. Its g_telemetry is zero forever, so TRI/DC read 0 for both the world and the studio (a headless run of the SHIPPED editor binary, one static image, correctly reported TRI 30k DC 1 — that was the discriminator). Fix: Scene3dApiV1 gains telemetry_stats + memory_stats entries, scene3d_module exports them from the live library, scene3d_runtime exposes telemetryStats()/memoryStats() that dispatch in the modular core and call gpu/3d.zig directly in every static build, and both diag readers now go through that boundary. The memory popover's Scene3D rows (geometry intern, mesh stash, render targets, static/slim instance pools) were zeroed by the identical dead-copy read and come back with it. Verified by compiling all three shapes clean: dev-scene3d-module, the modular dev core, and the static shipped-shape core. Needs a dev-host restart (rjit dev rebuilds core + module in lockstep) to take effect.",
+  "shas": [
+    "275f7bcb8"
+  ],
+  "resolvedAt": "2026-08-08T06:18:27.685Z"
+}

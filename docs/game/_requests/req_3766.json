@@ -1,0 +1,36 @@
+{
+  "id": "req_3766",
+  "at": "2026-08-04T03:17:40.505Z",
+  "origin": "session:d6ae2229",
+  "text": "i still dont quite understand to be honest with you. Maybe the whole problem was not transfered in understanding because you still cannot see the shape of anything without explicitly using the vert/edge/face overlays. Look. Tell me, how many edges are here [Image #1]",
+  "status": "review",
+  "sessionId": "d6ae2229-3ef4-4c5e-ac78-4f804fd2f2b5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T03:19:28.385Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T03:52:48.373Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-04T04:50:15.414Z",
+      "actor": "d6ae",
+      "kind": "note",
+      "text": "User confirmed the matcap live on their own HEAD_ONE model after restarting onto the new build: the side view that was one flat mass now reads every facet. Verbatim: 'yeah thats much better'."
+    }
+  ],
+  "resolution": "The question could not be answered from the render — which was the point. Counted honestly: maybe 20-30 edges discernible in the faceted crown + a few crease notches on the right silhouette, zero across the entire interior; the true count is unknowable from flat N-dot-L shading because an edge only reads when its faces land in different brightness bands (low-dihedral edges and light-symmetric creases collapse into one tone; no light direction fixes it). Built the fix the work order named: matcap shading on the model stage — new Scene3D matcap prop plumbed layout→uniform→scene3d_fs, shading by view-space normal with a sphere ramp + warm/cool hue split + grazing darkening, enabled whenever not in Paint/Flat. Cube faces went from near-identical bands (180/156/148) to distinct tone AND hue (bright top 135/127/99, cool left 81/88/96, warm right 113/88/59) — edges read with no overlay. Honest limit documented in SKILL.md + memory: smooth-shaded normals still blend across interiors, so organic blobs like the demonstration rock need a faceted-normals stage mode or cavity/AO as the remaining P1-0 follow-up. part-sync-parity and mesh-audit gates green.",
+  "shas": [
+    "9fd84db53"
+  ],
+  "resolvedAt": "2026-08-04T03:52:48.373Z"
+}

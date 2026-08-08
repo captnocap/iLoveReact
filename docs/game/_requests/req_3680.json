@@ -1,0 +1,28 @@
+{
+  "id": "req_3680",
+  "at": "2026-08-02T10:10:54.720Z",
+  "origin": "codex:019fbe1c",
+  "text": "update the skill. they need to be better at making objects touch they need to be better about removing faces that dont show and they also need to break topology, merge pieces with weld and then break it apart again so that verts can sit on the same address",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T10:11:02.508Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T10:13:22.976Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Updated the Agent Seat skill with a low-freedom contact and assembly workflow. Agents must now prove axis-aligned contact numerically from mating planes and interval overlap, use real boundary vertices plus pairwise welds for rotated or curved contact, remove fully and permanently occluded mating faces, isolate partial hidden patches before deleting, and preserve faces that articulation or damage can expose. Documented the exact part workflow: place, delete hidden faces, part-merge, re-read ephemeral elements, weld corresponding seam pairs with a distance leash, then either keep one permanent shell or detach the logical piece so separate vertex identities remain at identical coordinates. Also corrected the skill bootstrap contract and source-of-truth pointers for the new always-on AppFrame transport. Skill validation and diff checks pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T10:13:22.975Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3582",
+  "at": "2026-08-01T17:52:22.619Z",
+  "origin": "session:6d137ac4",
+  "text": "wait really? [Image #12] [Image #13] every single one removes the floor",
+  "status": "review",
+  "sessionId": "6d137ac4-a939-4905-8e14-37a458be92f5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T17:52:58.245Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T17:57:00.815Z",
+      "actor": "fable-3568",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user was right and my earlier physics-side answer was wrong about the authoring layer: staircases WERE deleting the floor under them, in the placement data itself, not in collision. Root cause: placementSlotKey (cart/editor/world/pieces.ts, req_2583 footprint law) keys every grid plate as grid:x,y,z with no semantic kind, and resolvePlacement gives every non-prop piece the same storey-base y at the same snapped cell centre — so a stairs piece placed into a floored cell produced a slot key IDENTICAL to the floor's, and planPiecePlacement's footprint replacement silently removed the floor piece (same for ramps/pillars/any grid kind, and the same eviction runs on move/rotate via pieceEditCommand). This regressed when the footprint-identity law landed (~req_2583 era, about a month ago) which matches 'they used to never remove the floor'. Fix: grid slot keys now include the semantic kind (grid:<kind>:x,y,z) so different plate kinds coexist in a cell — a staircase stands ON its floor — while same-kind contest is preserved (floor-over-floor and stairs-over-stairs still replace, window-wall-over-wall untouched on the edge branch). Added a regression test: stairs over a floor keeps both pieces and classifies as place; stairs over stairs still replaces. Ran piecePlacementCommand/pieceEditCommand/pieces suites under v8cli: 34 tests, 0 failures. TS-side fix — hot reload picks it up, no rebuild needed. Floors already eaten by old placements are gone from the map data; re-place those floor tiles (or undo if recent).",
+  "shas": [
+    "2e683f8fd"
+  ],
+  "resolvedAt": "2026-08-01T17:57:00.815Z"
+}

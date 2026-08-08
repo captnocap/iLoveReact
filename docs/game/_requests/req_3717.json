@@ -1,0 +1,30 @@
+{
+  "id": "req_3717",
+  "at": "2026-08-03T04:34:06.335Z",
+  "origin": "codex:019fc558",
+  "text": "hm. i click apply + show all and it doesnt do anything now",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T04:34:10.894Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T04:38:04.176Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the inert Apply + Show All button from live evidence: local triangle baking succeeded, but the generic asynchronous file-picker layer route never installed its staged PNG and swallowed the outcome. Replaced that hop with a dedicated synchronous pixel bridge that content-addresses the encoded patch directly into the model UV workspace and returns exact refusals to the UI. The user confirmed the repaired button works; patch tests 3/3 and the editor bundle check pass. Removed seven orphaned temporary PNGs created only by the failed route.",
+  "shas": [
+    "255fe0428"
+  ],
+  "resolvedAt": "2026-08-03T04:38:04.176Z"
+}

@@ -1,0 +1,34 @@
+{
+  "id": "req_4001",
+  "at": "2026-08-07T21:02:53.693Z",
+  "origin": "codex:019fd9ee",
+  "text": "ok so walk me through the process of it. because i just positioned all the rigs in place for some model, and what do i do now. it says im blocked on [Image #1] all of those",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:03:03.628Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:07:39.449Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-07T21:07:48.887Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Correction to resolution: generic Name Faces hardcodes the semantic role value authored; the omitted word was shell quoting damage in the ledger paragraph."
+    }
+  ],
+  "resolution": "Audited the live Character Rig readiness path and documented the actual workflow. Confirmed the user's manual skeleton placement is not the blocker: connected body and required face-role membership are prerequisites, while the three hash rows plus four-influence row are the same downstream no-current-binding condition and clear together after Bind. Found a real UI dead end for imported models: generic Name Faces hardcodes semantic role , the Names pane only edits display names, and no exposed control assigns the 16 stable humanoid anatomy roles consumed by native readiness. Therefore an imported model cannot currently complete Bind through the UI; naming regions pelvis/arm/etc does not work. Also identified that component repair is manual detach/weld with no component locator. No files changed; provided an evidence-backed intended sequence and warned the user to preserve the draft rather than waste work.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:07:39.449Z"
+}

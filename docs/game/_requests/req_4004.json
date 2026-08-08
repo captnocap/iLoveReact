@@ -1,0 +1,28 @@
+{
+  "id": "req_4004",
+  "at": "2026-08-07T21:16:46.016Z",
+  "origin": "codex:019fd9ee",
+  "text": "i know the mesh has a break in it. if that is the problem then that needs to be more clear. because why would it let me attempt to rig something that it wouldnt bind anyways",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:16:52.267Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:27:04.024Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rig setup now fails visibly before joint work: native BODY diagnostics report exact component/main/detached triangle counts, compact detached faces can be selected for repair, and joint gizmos/Fit/Bind/constraints/poses are gated in both native and UI layers until connectivity, anatomy, and canonical skeleton readiness pass. Imported meshes also gained strict face-role anatomy assignment independent of display names; unbound probes and heatmaps no longer present fake zero data. Focused TS/Zig suites and ReleaseFast editor ship pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:27:04.024Z"
+}

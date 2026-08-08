@@ -1,0 +1,28 @@
+{
+  "id": "req_3986",
+  "at": "2026-08-07T18:44:04.868Z",
+  "origin": "codex:019fd9ee",
+  "text": "also, now that im actually looking at this, they got it very wrong. if i do this: file -> new player/npc -> that brings me to this new block model where it is purely only rigging even though i can turn on any other type like faces edges verts, etc but none of them work. soooo im looking at this and it looks in the lens where this is what was made: a new block model no one asked for, and locking down rigging to only a player model while also ensuring that player models cannot be edited at all",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T18:44:16.678Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:01:27.779Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed New Player/NPC creation and the player starter adapter, restored mesh tool ownership for vertex/edge/face/paint/path modes, added explicit rig viewport activation, and kept ordinary models editable before and after optional rig attachment.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:01:27.779Z"
+}

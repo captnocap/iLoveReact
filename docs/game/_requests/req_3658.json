@@ -1,0 +1,28 @@
+{
+  "id": "req_3658",
+  "at": "2026-08-02T04:29:45.985Z",
+  "origin": "codex:019fbe1c",
+  "text": "why wouldnt you save it in the model package? how did you expect it to persist at all ? your interpretation is expecting that someone only cares about spending 40 minutes to annotate for a model to correctly understand only to wipe it entirely if in any event there needs to be a reset. and it took you 26 minutes to make that.",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T04:29:58.865Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T04:52:51.801Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Retopology tinting is now durable model-package authoring data instead of disposable session state. A compact versioned mesh/retopo-guide.blob atomically stores exact live band membership, the complete frozen source triangle positions and band membership, whether the source still tracks pre-edit tinting, and ghost visibility. GUI and Agent Seat tint, erase, ghost, planning, topology-carry, Clear, and Save paths now use that persistence boundary; cold model hydration validates the saved guide against the resident face count before installing it, while invalid or mismatched records remain on disk rather than being silently erased. The GUI reports package-save success/failure and restores GHOST ON honestly, explicit Clear removes the sidecar, and the Agent Seat skill now requires cold-restart persistence. Native round-trip tests, 36 Seat tests, 13 mesh-document tests, 10 package/paint tests, diff checks, and a ReleaseFast editor build all pass; no per-frame path was added.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T04:52:51.795Z"
+}

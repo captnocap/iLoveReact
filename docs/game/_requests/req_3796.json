@@ -1,0 +1,30 @@
+{
+  "id": "req_3796",
+  "at": "2026-08-04T21:49:33.686Z",
+  "origin": "session:e412dbcf",
+  "text": "yeah well. thats what doesnt make too much sense to me. if u mirror an extrude, the extrude is still only happening in one direction. it just happens in one direction, across two different faces. so i dont know that i quite understand the restrictions tbh",
+  "status": "review",
+  "sessionId": "e412dbcf-68b0-4527-a26e-1bfbc966b8b4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T21:50:56.979Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T22:08:56.299Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user was right and their framing became the implementation: a mirrored extrude is the same extrude on two faces, each along its own normal — the only real restriction was that region extrude averaged ONE direction across the whole selection (a face plus its twin summed to zero and was rejected as folded). Rebuilt region extrude per-patch: edge-connected patches (union-find over the exact-position edge census) each push along their own area-weighted normal, walls rise per patch boundary, caps/walls carry per-face part ownership. With a mirror plane armed, extrude first extends the selection to each fully-selected authored face's positional origin-plane twin — quantized corner-set matching, tessellation-agnostic so a twin quad split on the other diagonal still pairs; missing/out-of-scope twins and partial selections honestly don't extend. Both sides land in one 'extrude face' journal transaction and one undo restores both. Verified headlessly: cube + mirror X + one-face extrude → 28 tris, 14 authored faces, symmetry badge '✓ X clean', one-undo restore; single-face/single-patch paths byte-stable. Pinned forever as part-sync-parity scenario D ([0,14)/[14,20) partition; unilateral would read [0,10)/[10,16)) — A1-A6+B+C+D all pass. Other topology ops (bevel/inset/loop cut/delete) not yet mirror-extended; the mask-extension helper is the seam if wanted.",
+  "shas": [
+    "06ede2a44"
+  ],
+  "resolvedAt": "2026-08-04T22:08:56.299Z"
+}

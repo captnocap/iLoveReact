@@ -1,0 +1,28 @@
+{
+  "id": "req_3812",
+  "at": "2026-08-05T03:01:04.976Z",
+  "origin": "codex:019fcfbc",
+  "text": "sorry what are the operations for those i dont have the code pulled up; anything that looks like it has been superceeded likely is, but anything that is just loosely hanging around is likely because no onen ever wired it up, i cant really think of anything that we have ever added and then outright removed without some related replacement of it",
+  "status": "review",
+  "sessionId": "019fcfbc-a1ed-74f2-9325-517de13ab5f9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:01:19.178Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:04:30.554Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced each previously identified unreachable 3D operation through its introduction, later call-site removals, and current replacement path so the list distinguishes retired implementation from genuinely missing wiring. The audit found one real unwired support path: retopology band inheritance is implemented and unit-tested but is not connected to topology edits that already emit source-face provenance. Everything else is a superseded implementation, redundant getter or wrapper, test-only relic, or intentional hot-reload compatibility cleanup; no source files were changed.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T03:04:30.554Z"
+}

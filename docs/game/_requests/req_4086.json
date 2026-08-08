@@ -1,0 +1,30 @@
+{
+  "id": "req_4086",
+  "at": "2026-08-08T12:39:39.296Z",
+  "origin": "session:c4057f17",
+  "text": "sorry were u saying there are libs in the love2d dir that are also used? if so, just copy them into our lib directory with the others and then archive it. simple as that",
+  "status": "review",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:39:53.988Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T12:46:06.940Z",
+      "actor": "session-c405",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered by verification, not assumption: NOTHING in love2d/ is in use, so no libs needed copying anywhere. The libmpv.so.2 path ship.ts wanted (love2d/storybook/lib/) does not exist in the checkout and never did — framework/render/videos.zig dlopens libmpv from the SYSTEM at runtime and degrades gracefully, so that pinned-copy branch has been dead the whole time. love2d/quickjs is likewise absent (gitignored build output); cli/'s pack-sdk skipped it via an fsExists guard, but the legacy scripts/pack-sdk.js copyTree loop has NO guard, so that entry was a hard failure waiting on a QJS pack — removed from both. The only real .so under love2d is libagnes.so, a 47KB NES emulator lib for love2d's own Lua stack that nothing outside love2d references, and it is inside archive/love2d.zip. Rather than delete the pinning capability I repointed it to deps/libmpv/libmpv.so.2, the per-dep convention deps/ already uses, so dropping a .so there re-enables pinning without reaching into an archived tree. Everything else naming love2d/ or tsz/ is a provenance doc comment (ported from love2d/lua/privacy.lua) and stays — that lineage is worth keeping; the one remaining live path, build.zig addLibraryPath(tsz/zig-out/lib), is a fallback to gitignored BUILD OUTPUT, not tracked source. Also pruned .gitignore 429 to 309 lines: every rule scoped under tsz/, love2d/ or archive/ is unreachable now those trees are ignored wholesale. Proven mechanically rather than by eye — git ls-files --others --exclude-standard returns the identical 744-path set before and after. Two traps on the way: *.so, *.so.* and *.dylib were filed INSIDE the old love2d block while being repo-wide (they are why no deps/**/*.so is tracked), and a first tidy pass cut a multi-line comment in half, so the rewrite treats a comment block as indivisible.",
+  "shas": [
+    "489ae806e"
+  ],
+  "resolvedAt": "2026-08-08T12:46:06.940Z"
+}

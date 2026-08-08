@@ -1,0 +1,18 @@
+{
+  "id": "req_3691",
+  "at": "2026-08-02T20:27:24.667Z",
+  "origin": "session:413446d4",
+  "text": "alright so, are u able to collect those current uv locations because il then adjust it, so you can see where it actually should be, and you can infer from there what we can do.",
+  "status": "doing",
+  "sessionId": "413446d4-dc31-44e7-ab96-293e8cdd0f76",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T20:27:49.345Z",
+      "actor": "fable-4134",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

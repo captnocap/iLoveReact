@@ -1,0 +1,30 @@
+{
+  "id": "req_3617",
+  "at": "2026-08-01T23:35:53.725Z",
+  "origin": "codex:019fbe1c",
+  "text": "no, that defeats the whole point. why would i ask for a prompt on how to do it and you deliver one knowing it doesnt work, you should have taken that as a means to implement it so that when i came back around copying your prompt it would actually mean something",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T23:36:01.840Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T23:47:48.442Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the previously fictional Follow workflow as a real live-editor and Agent Seat capability. The native host now emits an exact read-only local patch for the current or supplied render triangles, including welded vertices, authored groups, part/material/semantic identity, adjacency rings, and propagation frontiers. Agent Seat persists a short-lived Follow session through hot reload, records accepted human Merge Faces selections before and after their group-only commit, excludes automation from demonstrations, exposes start/read/stop/clear/inspect through tools/seat, and documents the runnable no-source-exploration workflow in the local skill. Verified with test-mesh-edit, 31 Seat API tests, node syntax validation, and a ReleaseFast editor build; no model assets were committed.",
+  "shas": [
+    "70fc8dbb8"
+  ],
+  "resolvedAt": "2026-08-01T23:47:48.442Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3713",
+  "at": "2026-08-03T03:15:25.277Z",
+  "origin": "codex:019fc558",
+  "text": "i was thinking, and this would be in-line with the whole reuse often policy is that, for things like tire textures, or head light textures, etc. these things, are to be heavily reused anyways right. So why not keep a library of just this, basically tell me what u think about where you know you add some image. when you have a part, and u want it to use the image, it brings that uv into a sort of isolated view, which just has that texture image, and you lay it over however you want for that specific model, and then going back to the model just shows that texture in place of where ever the uv sits",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T03:15:43.441Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T03:17:18.251Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reviewed the reusable part-texture-library proposal against the active editor and the content-addressed asset ruling. The proposal is sound and aligns with reuse-often: semantic regions such as tire tread, headlamp lens, reflector, gauge face, rubber grip, and generic metal trim should bind to reusable image patches in an isolated UV placement view, with live whole-model preview. The existing signed UV image workspace, image layers, face isolation, semantic blob names, and explicit layer compilation provide most of the authoring substrate; the missing product layer is a shared content-addressed patch catalog plus durable semantic-region bindings and a part-level isolate/apply flow. Recommended architecture is shared source assets at authoring time, compiled into each prop's one runtime atlas so reuse does not add materials/draw calls; reserve runtime texture slots for genuinely dynamic screens or exceptional hero surfaces. No implementation was authorized by this opinion request.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T03:17:18.251Z"
+}

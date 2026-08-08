@@ -1,0 +1,30 @@
+{
+  "id": "req_3863",
+  "at": "2026-08-05T19:31:26.805Z",
+  "origin": "session:6837fe41",
+  "text": "thats the problem is that im not merging faces to begin with. no wonder its not finding it. you have to delete the two triangles and then create a face between two edges in the space",
+  "status": "review",
+  "sessionId": "6837fe41-16e0-490b-8b99-32c07855cc55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T19:32:49.117Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T19:46:58.431Z",
+      "actor": "session-6837",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User clarified their quad workflow is delete-two-tris + create-face, not Merge Faces, and rejected keep+X (cuts whole part, ignores deliberate asymmetry, unwelded seam). Measured the twin spaces: mostly offset import quads, so per-quad matching can't scale. Built the faithful generalization: meshMirrorReplaceSelection — selection-scoped mirror stamp that deletes whole twin faces buried in the stamped space, re-creates the selection reflected (quads stay quads), and welds seam (1mm plane sharing) + borders (position-class snap to survivors). copy sel chip in the symmetry strip + seat mirror-replace + stats-bearing receipts. Commit 32001a9e1; needs dev-host rebuild.",
+  "shas": [
+    "32001a9e1"
+  ],
+  "resolvedAt": "2026-08-05T19:46:58.431Z"
+}

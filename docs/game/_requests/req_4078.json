@@ -1,0 +1,30 @@
+{
+  "id": "req_4078",
+  "at": "2026-08-08T12:01:34.386Z",
+  "origin": "session:ae84f281",
+  "text": "maybe lets update the skill nomenclature and the agents/claude md files to express that if you feel the need to reach for node/bun, instead whatever the capability is that is lacking, create it",
+  "status": "review",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:01:40.699Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T12:05:32.295Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Named the doctrine this session kept demonstrating and placed it where agents actually read: CLAUDE.md as the HARD RULE 'THE ESCAPE HATCH IS THE SPEC', AGENTS.md as a third failure mode beside treating-this-as-browser-React, and both the agent-seat and agent-skin skills. The rule is not don't-script; it is that the thing you were about to script IS the specification of a capability the tooling lacks, so build that instead. It is backed by the measurement rather than asserted — 461 escapes across 132 sessions decomposing into four missing verbs, with every blob reader among them hardcoding RJMD v4's 40-byte header while v5 with 48 sat in the same directory — and it states four steps in order: name the capability, build it where the data lives, provide before you ban because banning without a replacement produces worse workarounds, and if you cannot build it now name the gap plainly. I practised it on the two live instances instead of only asserting it. map-back.md called node with sharp to resize a skin, and the engine already owns that pipeline through __imageops_ and runtime/image.ts with the identical resize signature — what is missing is only a shell entry point, so rather than half-build an unverifiable verb (the live model has no atlas, so I could not test one) the doc now names the gap and specifies the right shape, a tools/seat atlas-fit that reads the LIVE dims so no remembered number can enter. generate.md drives the user's img.cjs console with node, which is invoking a real external tool rather than substituting for a capability, so that is explicitly exempted where the rule could otherwise read as self-contradicting.",
+  "shas": [
+    "5c77303d5"
+  ],
+  "resolvedAt": "2026-08-08T12:05:32.295Z"
+}

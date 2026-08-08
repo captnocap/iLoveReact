@@ -1,0 +1,28 @@
+{
+  "id": "req_3793",
+  "at": "2026-08-04T21:11:47.610Z",
+  "origin": "codex:019fce59",
+  "text": "man im glad you hit these same problems ive learned to fight around. it sucks major ass. mirror part: it finds the middle of the MESH not the middle. Mirror edits is even worse about that.",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T21:11:56.727Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T21:12:07.877Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's distinction with the live chair evidence: Mirror Part derives its plane from current mesh geometry bounds, so adding the one-sided feature shifts the very plane needed to reflect it (the chair became X -0.27..+0.37 and mirrored around +0.05 instead of X=0). Mirror Edits is more unstable because its effective plane changes with edit context. The durable fix direction is a stable explicit symmetry origin/plane, never a midpoint inferred from mutable geometry. This request records the diagnosed behavior; no code or model changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T21:12:07.877Z"
+}

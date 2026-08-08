@@ -1,0 +1,28 @@
+{
+  "id": "req_3697",
+  "at": "2026-08-02T23:48:00.225Z",
+  "origin": "session:c440da46",
+  "text": "great job. really nice. go ahead and give it some paint",
+  "status": "review",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T23:48:17.052Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T00:17:43.822Z",
+      "actor": "session",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Painted the Moped 50 in two banked paint variants. First laid exact material colours per part through the resident journaled paint machinery: a generated plan drove 78 part-select plus faces-range plus paint triples so every one of the 78 semantic parts got its correct colour - warm cream bodywork, brown suede saddle, near-black tyres and rubber, polished chrome trim, satin aluminium engine and hubs, amber indicator lenses, red tail lamp, white headlamp lens. That is variant 1, Ivory Flat, and it is exact by construction because it uses the semantic partitioning rather than hoping an image model guesses placement. Then ran the agent-skin AI pass with gpt-image-2, feeding the colour-blocked atlas itself as the img2img reference so the model only had to add material realism on top of a layout it could not invent. The first round drifted several islands toward white, so the prompt was tightened with an explicit hue-lock clause and regenerated; the third candidate held full island coverage and correct hues. Resized to the exact 1651x1899 atlas dims, imported, verified in the viewport from side and iso, and banked as variant 2, Ivory Textured. Package saved; semantic-status healthy with 2046 of 2046 named faces across saved, mount and resident, so the rigging data survived skinning untouched.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T00:17:43.822Z"
+}

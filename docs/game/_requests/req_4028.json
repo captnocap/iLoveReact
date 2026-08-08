@@ -1,0 +1,28 @@
+{
+  "id": "req_4028",
+  "at": "2026-08-08T05:14:31.643Z",
+  "origin": "codex:019fda1a",
+  "text": "this part. where it is just saying authored N times over. remove the authored, none of that is relevant to say it 10000x times yeah duh its authored",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T05:14:53.229Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T05:16:01.298Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the repeated generic · authored suffix from Names-panel rows while preserving any non-generic semantic role label and leaving saved semantic data unchanged. ReleaseFast editor build passes.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T05:16:01.298Z"
+}

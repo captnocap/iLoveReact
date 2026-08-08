@@ -1,0 +1,18 @@
+{
+  "id": "req_3952",
+  "at": "2026-08-06T07:22:05.839Z",
+  "origin": "session:e863e9d6",
+  "text": "ok well do you think you can model any one of those 4 things without ever looking?",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:23:01.595Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

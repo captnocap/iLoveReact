@@ -1,0 +1,28 @@
+{
+  "id": "req_3818",
+  "at": "2026-08-05T03:26:21.709Z",
+  "origin": "session:fc4b5586",
+  "text": "nah dont worry about it. we were just honestly trying to find where this shit keeps breaking. because ive become so accustomed to just working around it when i model by hand but agents expose all those areas really fast when they dont have the expertise of dealing with it. which they never will, therefore thats why i care more about what actually caused it t o happen rather than just fixing the model. the model is effectively a throwaway but we cant say that to start off otherwise agents just dont put any effort into it. \n\nbut look. let me show  you exactly where things dont make sense and also look like they couldnt be because you meant to do it, \n\nso this on the hood i just showed u is really bad. [Image #3] notice how one sides verts are just a nightmare. that is the ROOF of the car btw. \n\nthis front also, 3 vertical and 3 horizontal is not something y ou can just easily do. requires you to intentionally do polar opposites [Image #4]\n\nthats actually it, but yeah also you are miles short on the poly count but there is no reason to go after that now because the model has soup in those areas i just showed you. do you know what may have caused those to occur. was it really hiding a outliner?",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:27:18.634Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:34:06.385Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the police_sedan topology soup with code receipts. basic-cut's direction argument is an INDEX into each face's stored vertex ring (indexed_edit_mesh.zig:2162 cutSelected), not a world axis: mirror twins carry reversed rings, replaceFaceLoop/makeSplitFace rewrite children's ring rotations after every cut, and unsplit neighbors absorb collinear T-verts that make both direction values resolve to the same axis. One multi-face cut call can therefore cut different world axes on different faces, and the same argument changes meaning after any prior cut. The UI masks all of it via the click-seed + live-preview loop; the seat has no preview and its session seed is firstSelectedFace (lowest face id — a face the agent never chose, also owning the offset span semantics). Proposed fix: resolve direction per face by max |dot| of ring edges against the seed's world-space direction vectors (seedInfo already computes them), plus report the applied per-face axis in the seat receipt; T-vert non-absorption is a separate deeper surgery. Awaiting the user's go before changing a core verb.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T03:34:06.385Z"
+}

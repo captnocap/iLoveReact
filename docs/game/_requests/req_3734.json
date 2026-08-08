@@ -1,0 +1,10 @@
+{
+  "id": "req_3734",
+  "at": "2026-08-03T06:13:25.097Z",
+  "origin": "session:50e798e2",
+  "text": "hey uh codex is an idiot and ended up wiping a bunch of wgsl textures that were in use lol -_- can u just pull them back from github. and dont run any fancy commands to do it. just do it the old fashion way copy paste. basically what happened is i said there were a number of them that were trash and they said they were going to purge what isnt used and then purged what is actually used also lol",
+  "status": "new",
+  "sessionId": "50e798e2-89cf-4bf2-9ac2-fcd16637a00a",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3841",
+  "at": "2026-08-05T08:00:56.875Z",
+  "origin": "session:09dee98c",
+  "text": "yep no problem il rebuild in a minute i have another thing to show u. so look at the 3 faces i have selected and then follow along after",
+  "status": "review",
+  "sessionId": "09dee98c-f214-4806-94c1-8d557ea2f434",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T08:01:06.246Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T08:14:29.328Z",
+      "actor": "seat-09de",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Followed the user's live demonstration on the Van Seat mirror-pair asymmetry (left flank quad authored as two single-tri faces, right flank as one proper quad). Recorded the delete/create sequence through a seat follow session and identified via topology inspection that bilateral create-face deposited group 1762 — a twin quad triangle-for-triangle coincident with the surviving right-flank quad 1698. Root cause and fix landed under req_3843 (sha dc5cee4a3).",
+  "shas": [
+    "dc5cee4a3"
+  ],
+  "resolvedAt": "2026-08-05T08:14:29.328Z"
+}

@@ -1,0 +1,34 @@
+{
+  "id": "req_3575",
+  "at": "2026-08-01T16:35:34.398Z",
+  "origin": "codex:019fbe1c",
+  "text": "address the problem where you can quickly turn 6 unnamed but relatively known faces into 60 faces that now only has any meaning if the model reasoned about it but hasnt properly declared it for anything it will forget where its ass from its head is",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T16:35:37.787Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T16:37:09.025Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Refined Studio Hand around a durable semantic-topology ledger. Existing indexed faces already carry stable id/group/part/material provenance and topology splits propagate part/material, while the TS EditMesh tag is explicitly transient. The proposed fix adds persisted semantic regions plus operation-derived lineage, requires automation targets to be claimed before multiplicative topology edits, automatically classifies split/cap/side/bevel/mirror outputs, and gates phase completion on zero unresolved semantic debt."
+    },
+    {
+      "at": "2026-08-01T16:37:09.033Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed the anonymous-face explosion in the Studio Hand design with a persistent semantic topology ledger owned by the mesh document. Parts and face sets receive hierarchical semantic regions; cuts and other topology operations propagate those regions and classify generated surfaces, while ambiguous results become visible semantic debt. Automation must target named regions rather than numeric faces, stale or unclaimed operations are rejected, and semantic metadata journals, saves, restores, and overlays with the geometry. No source or model files were changed in this architecture refinement.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T16:37:09.033Z"
+}

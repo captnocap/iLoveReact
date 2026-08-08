@@ -1,0 +1,17 @@
+{
+  "id": "req_3769",
+  "at": "2026-08-04T04:46:22.796Z",
+  "origin": "one-off",
+  "text": "ok. im restarting then. give me a moment",
+  "status": "new",
+  "sessionId": "d6ae2229-3ef4-4c5e-ac78-4f804fd2f2b5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T04:46:44.955Z",
+      "actor": "d6ae",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

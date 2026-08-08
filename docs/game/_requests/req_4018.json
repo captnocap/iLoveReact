@@ -1,0 +1,18 @@
+{
+  "id": "req_4018",
+  "at": "2026-08-08T01:03:38.849Z",
+  "origin": "codex:019fdda4",
+  "text": "Ok so the hot loading does not carry state or if it does it doesnt resume where i was when the app is hit with the new package. also this [js.warn] [authored] resident catalog: 65 mesh(es) — 33 painted, 29 paint skin(s) -> loader node 2649\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n^[[5~[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n[loader] failed to read game-file zig-out/game/editor/world.gamefile: error.BadPhysicsConfig\n[loader] embedded mount/render failed for node 2649: error.BadPhysicsConfig\n^C\nsiah@busiah ~/creative/reactjit $",
+  "status": "doing",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T01:03:51.009Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

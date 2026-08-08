@@ -1,0 +1,28 @@
+{
+  "id": "req_3728",
+  "at": "2026-08-03T05:50:03.668Z",
+  "origin": "codex:019fc558",
+  "text": "ok i re opened it. do i need to reset the uv or something? its fine if i do its not even correctly mapped yet",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:50:08.858Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:52:35.329Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explicitly remade Moped_50 at the same 2048 atlas budget so the new intrinsic UV generator actually ran, then dry-ran exact and normalized PRESTACK and applied the exact plan. The atlas moved from 477 logical/191 footprint legacy state to 745/745 raw and 709 logical/260 footprints after stacking; semantics remained healthy with 2046/2046 named across saved, mount, and resident horizons. This proves equal-face reuse works but also exposes that planar-per-face charting is not yet a net footprint-count win over the legacy packed state.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T05:52:35.329Z"
+}

@@ -1,0 +1,51 @@
+{
+  "id": "req_3838",
+  "at": "2026-08-05T07:32:47.856Z",
+  "origin": "codex:019fd06e",
+  "text": "ok so check it out now. i have mirror edits across X on, i selected two faces. i deleted it. that deleted 4 faces as it should. i create a face. and it does not mirror the create.",
+  "status": "review",
+  "sessionId": "019fd06e-b6cb-7241-a19d-3e84c227504a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:32:54.360Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:34:08.013Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-08-05T07:35:40.398Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "User approved implementation after reviewing the diagnosis; fix the native Create Face mirror seam case and add regression coverage."
+    },
+    {
+      "at": "2026-08-05T07:35:40.441Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:40:24.178Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Fixed Mirror Edit Create Face at the native topology boundary. Create Face now uses a reflected-image lookup that permits vertices exactly on the mirror plane to map to themselves, while transforms retain their distinct-twin-only contract. Added a Zig regression reproducing an off-plane edge endpoint joined to an X=0 seam endpoint. Verified test-mesh-edit with Zig 0.16.0 and built the full editor ReleaseFast binary with packaging skipped."
+    }
+  ],
+  "resolution": "Confirmed and diagnosed the live Mirror Edit X defect from the native Follow transcript. Delete mirrored correctly (2341 to 2335 triangles), while Create Face appended only the two source triangles (2335 to 2337). Root cause: Create Face requires mirrorTwinOfVertPub for every selected-edge endpoint, but that helper rejects self-twins; boundary edges terminating on X=0 therefore abort the mirrored append even though the seam endpoint must legally map to itself. No model or source mutation was made.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T07:34:08.013Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_4025",
+  "at": "2026-08-08T03:05:00.104Z",
+  "origin": "codex:019fda1a",
+  "text": "i have 4490 tris so its not the same or this is wrong. you can tell me",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T03:05:10.901Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T03:52:00.417Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The stale model/session projection was rebound synchronously on hot reload, and the live SHAPE triangle total now matches native resident truth (3,686). Added an editor-status readback so future count disagreements can be checked without guessing.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T03:52:00.417Z"
+}

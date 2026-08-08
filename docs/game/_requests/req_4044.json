@@ -1,0 +1,36 @@
+{
+  "id": "req_4044",
+  "at": "2026-08-08T06:31:11.672Z",
+  "origin": "session:3eb73457",
+  "text": "it is giving me the number twice. i know because it says 6.9k on a 3450 triangle model",
+  "status": "review",
+  "sessionId": "3eb73457-b787-4144-98bc-0991c2502838",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:31:31.530Z",
+      "actor": "opus-hud",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:50:58.966Z",
+      "actor": "opus-hud",
+      "kind": "note",
+      "text": "Not a double count. Live seat capture of the running editor: resident mesh 3786 tris, dock reads TRI 7.6k DC 2 — two real draw calls. Cause: cart/editor/library/ModelThumbnail.tsx is a LIVE <Scene3D> that re-rasterizes the model's full geometry every frame into the ~40px Model Focus card (and one per row in ModelPackageBrowser). Verified: headless docs whose card shows a flat swatch (no resident thumb mesh) report DC 1 and TRI == the header tri count exactly, incl. a 4687-tri imported GLB. The counter is honest; the editor is drawing the model twice."
+    },
+    {
+      "at": "2026-08-08T07:26:04.699Z",
+      "actor": "opus-hud",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed. The TRI readout was honest: cart/editor/library/ModelThumbnail.tsx was a live <Scene3D> re-rasterizing the model's full mesh every frame into a ~40px card (one per ModelPackageBrowser row, up to the 64-view RT pool), so a 3786-triangle model drew twice per frame — captured from the running editor's own frame as TRI 7.6k DC 2. Per the user's ruling the thumbnail is now a screenshot they STAGE in the studio: a camera verb on the Model Focus card calls __model_shot_offscreen at the current viewport pose, writes thumb-<n>.png into the package, and records the path in the manifest; cards render that image and fall back to the colour swatch when no shot is staged. The revision suffix is required because gpu/image_cache.zig keys on the source string and never re-reads changed bytes at a fixed path. Also exposed as seat action 'thumbnail' (refused for background lanes) and RJIT_PARTOPS 'thumb'. Verified live through the seat's frame capture: TRI 7.6k DC 2 -> TRI 3.8k DC 1 on the same model, card now shows swatch + camera verb; modelPackage tests (5) and seatApi tests (57) pass. Pressing the verb end-to-end could not be driven from here because codex holds the claim on that model.",
+  "shas": [
+    "a07b99d3a"
+  ],
+  "resolvedAt": "2026-08-08T07:26:04.699Z"
+}

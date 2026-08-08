@@ -1,0 +1,28 @@
+{
+  "id": "req_4017",
+  "at": "2026-08-08T00:57:18.166Z",
+  "origin": "codex:019fda1a",
+  "text": "will you add a feature that will let me align all the verts on a loop in one motion since coming back and aligning these is a pain [Image #1]",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T00:57:29.496Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T01:11:25.944Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added Align Loop as a native, journaled mesh transform for one connected unbranched vertex path or authored edge loop. It chooses the least-varying model axis, flattens the welded selection to its centroid in one operation, preserves selection, participates in Mirror Edit through the existing transform core, and refuses branched/disconnected/already-flat input without mutation. Exposed the action in the model toolbar/context menu and Edit > Mesh > Transform, assigned A in Vertex/Edge modes, and added Agent Seat parity. Verified 188/188 native mesh tests, command and Seat API test bundles, a clean scoped diff, and a ReleaseFast editor ship build.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T01:11:25.944Z"
+}

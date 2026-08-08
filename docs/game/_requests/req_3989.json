@@ -1,0 +1,28 @@
+{
+  "id": "req_3989",
+  "at": "2026-08-07T19:29:53.020Z",
+  "origin": "codex:019fd9ee",
+  "text": "the name is the problem the axis is fine",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T19:29:59.286Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:40:58.359Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Kept the authored local XYZ axis overlay completely unchanged and narrowed only bone-name rendering. Names now appear for one hovered joint sphere, obey the existing Names toggle, disappear off-joint, and never gain a selected-bone fallback that could recreate the label soup.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:40:58.358Z"
+}

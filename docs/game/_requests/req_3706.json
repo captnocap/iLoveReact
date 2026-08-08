@@ -1,0 +1,17 @@
+{
+  "id": "req_3706",
+  "at": "2026-08-03T01:32:30.555Z",
+  "origin": "one-off",
+  "text": "Lmao uh hm. whatever that was just caused kernel panic lol. u probably hit the amd card which can be a little shit and not the nvidia card.",
+  "status": "new",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T01:47:33.992Z",
+      "actor": "session",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

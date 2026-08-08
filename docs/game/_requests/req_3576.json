@@ -1,0 +1,30 @@
+{
+  "id": "req_3576",
+  "at": "2026-08-01T16:47:23.860Z",
+  "origin": "session:1132e81b",
+  "text": "now the other part that is about 'An agent has no hand. It cannot click a face and it cannot drag a gizmo. That —\nnot topology, not file formats, not model capability — is the entire reason this\ndoesn't already work.'\n\n\n\nnow explain that one, because, i disagree. even if i have no hands either, every operation is on a specific id or index of them, and operations arnt something magical, i have a gizmo that has 3 directions, and each direction is bi directional, and steps in its distance. so ?",
+  "status": "review",
+  "sessionId": "1132e81b-d85b-488d-bae0-2da8ab1e4540",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T16:47:59.459Z",
+      "actor": "session-1132",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T16:51:09.149Z",
+      "actor": "session-1132",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User challenged the claim that \"an agent has no hand\" is the reason agent-driven modeling does not work, arguing every operation targets a specific id or index and a gizmo is just three bidirectional axes with a step distance. Checked it against the code and the user is right; corrected the section in docs/game/AGENT_SEAT_DESIGN.md (commit 9caf56e34). Findings: selection by index and range was always callable (mesh_edit_select_face/edge/vertex/group_range all take an index or lo-hi plus additive), so clicking was only ever one way to produce an index. The Zig transform core is strictly MORE general than a screen gizmo, not less: translateSelection takes an arbitrary delta vector, scaleSelectionAxis and rotateSelectionAxis take an arbitrary axis vector AND an arbitrary pivot, and they are unit-tested at mesh_edit.zig:3039. rotateSelectionAxis is fully written and tested but simply never registered as a host door. So the real structure is three layers each narrowed to fit a mouse: the transform core is general, the JS doors collapse it to one world axis with an implicit pivot and omit rotate entirely, and the ModelToolApi buttons collapse it again to zero-arg calls with hardcoded magnitudes (extrudeFace discards the distance its door accepts and passes model.radius times 0.08; solidify passes 0). The agent is not missing hands, it is being handed the mouse-shaped API while the general one sits one registerHostFn away. Two things genuinely survive. First, modal sessions: bevel, loop cut and quadify are begin then preview then end rather than calls, and notably the one-shot mesh_topo_loop_cut takes no arguments while lc_preview takes direction, cuts and offset, so the parameterized loop cut is reachable ONLY through the session. That is about transactionality (host state lives between calls, a seat that dies mid-session leaves the editor modal), not dexterity, and the fix is an atomic wrapper over doors that already exist. Second, the only conceptually interesting residue: a mouse supplies ambient context rather than skill. scale_by scales around selectionPivot(), the centroid of affected verts, which the caller neither states nor sees; a person does not need to state it because the pivot dot and the axis triad are drawn on screen, so the rendering IS the specification. An agent cannot look, so it must say, and scaleSelectionAxis already takes the pivot argument to say it with while the door does not pass it through. Consequence: slice 1 Zig work shrinks to registering rotate, widening two door signatures to the delta and pivot the core already accepts, and three atomic session wrappers. Restated the design thesis: the hard parts were never the verbs, they are parts 1 and 2 (which faces, and what they mean).",
+  "shas": [
+    "9caf56e34"
+  ],
+  "resolvedAt": "2026-08-01T16:51:09.149Z"
+}

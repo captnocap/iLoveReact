@@ -1,0 +1,28 @@
+{
+  "id": "req_4045",
+  "at": "2026-08-08T06:34:11.092Z",
+  "origin": "codex:019fe013",
+  "text": "hey so can you make it so that extrude edges/face lets me pick the extrude distance/angle rather than just authoring in a huge strip, it makes it a pain in the ass when your zoomed in",
+  "status": "review",
+  "sessionId": "019fe013-69df-7ea1-b018-875cf0bb6059",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T06:34:16.584Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:50:45.566Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the model-radius one-click extrusion stamp with a blocking exact-value panel on cart/editor. Edge extrusion now accepts model-space distance plus departure angle, face and multi-face extrusion accept distance plus taper, invalid values fail before topology, and Apply remains one native journal step. Added focused TS/Zig coverage and completed a ReleaseFast editor build; user visual and 60-second spikewatch confirmation remain the review gate.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:50:45.566Z"
+}

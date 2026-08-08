@@ -1,0 +1,31 @@
+{
+  "id": "req_3588",
+  "at": "2026-08-01T18:41:27.419Z",
+  "origin": "session:357e79a6",
+  "text": "Thats fine, I assume that was the case, the moment it hot-reloaded. we can always start a new one, thats not a problem, the problem is if we just ignore it from happening again. but i would not try to recover your radio, we can just do something else and the more important reason to actually annotate the semantics into the actual blob long term is for skinning them, if you end up naming everything, then skinning from a uv is much less up in arms",
+  "status": "review",
+  "sessionId": "357e79a6-b104-4a5e-9d0a-394c0080a5f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T18:41:41.532Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T18:47:31.810Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the semantic-table wipe the user caught during the add verb's first live run, and recorded the skinning rationale they gave for it. Root cause: the primitive append REPLACES the live mesh and resets the host's semantic table, so the seat re-stamping that table from a POST-append read wrote back a table containing only the new part -- every prior name vanished while the faces stayed bound to ids that no longer had one. This is exactly req_3465's part-range bug one layer up, and it takes the same cure: grow the table from a PRE-append capture rather than a post read. Two regression tests now cover it (an add must preserve an existing name, and an unnamed part must be refused outright rather than added anonymously); the seat suite passes 6/6. Per the user's explicit instruction I did NOT attempt to recover their radio -- they judged it disposable and said the only real problem would be letting it happen again. Also captured the durable reason they gave for caring: semantic names should ride the saved model blob long-term because skinning from a UV is far cheaper when the surfaces are already named, which reframes seat naming discipline as authoring input to a later rig rather than session-local memory. That is now a section in the skill doc and a project memory; it is direction, not a ruling -- the oracle returned no verdict on model-semantics persistence, and the names are still live-only host state today, which the skill's 'cannot do' table states plainly.",
+  "shas": [
+    "5dac877ad",
+    "8d7b09bcc"
+  ],
+  "resolvedAt": "2026-08-01T18:47:31.810Z"
+}

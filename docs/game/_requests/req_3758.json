@@ -1,0 +1,28 @@
+{
+  "id": "req_3758",
+  "at": "2026-08-04T01:26:34.320Z",
+  "origin": "session:a0539482",
+  "text": "Yep. Knew it. Shit sucks ass doesnt it. Ive had it happen a hundred times over and every 'fix' never fixes it. So do you know what opperation would have shifted it, there is no point in continuing if the program itself is going to do that sort of shit",
+  "status": "review",
+  "sessionId": "a0539482-a1b4-434a-8aa5-9017f43a5556",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T01:27:09.922Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T01:37:51.766Z",
+      "actor": "claude-opus5",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed while building police_sedan (req_3751). Root cause found and written up in docs/handoffs/SEAT-MODEL-EDITOR-DEFECTS-0803.md: the Outliner part-range re-stamp in AppFrame.tsx:4901 bails whenever native part count differs from row count, which is a permanent latch because resyncing is the only thing that could restore parity. Consolidated with every other tool defect hit during the session into one work order.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T01:37:51.766Z"
+}

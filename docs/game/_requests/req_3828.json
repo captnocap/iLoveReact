@@ -1,0 +1,30 @@
+{
+  "id": "req_3828",
+  "at": "2026-08-05T05:42:07.047Z",
+  "origin": "codex:019fd06e",
+  "text": "ok so whatever data you just gathered by tapping into the selected face, i literally see none of it. so thats the task, i would like to see in the ui whatever data you get when you pull the data of the face i have selected, for any face / selection of faces / selection of verts / edges. I am completely blind to all of it",
+  "status": "review",
+  "sessionId": "019fd06e-b6cb-7241-a19d-3e84c227504a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T05:42:13.390Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T05:56:40.000Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a host-native selection snapshot and a visible SELECTION section in Model Focus. Vertex selections show ids, positions, and part ownership; edges show endpoint ids/positions, length, incidence, open/closed state, and part; authored faces show grouped triangle/vertex ids, semantic name/id/instance, normal, area, material, part, pivot, and bounds. Exact totals are always visible, large detail sets are honestly capped and scrollable, and Agent Seat programmatic selections now notify the same UI. Added strict TS boundary validation/grouping tests plus Zig face/edge/vertex snapshot coverage; ReleaseFast editor build passes.",
+  "shas": [
+    "cefa46d59"
+  ],
+  "resolvedAt": "2026-08-05T05:56:40.000Z"
+}

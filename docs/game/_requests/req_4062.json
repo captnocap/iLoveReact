@@ -1,0 +1,28 @@
+{
+  "id": "req_4062",
+  "at": "2026-08-08T09:10:18.596Z",
+  "origin": "codex:019fda1a",
+  "text": "hm. so does the compact car model have any named edges yet? because i named some i think but it doesnt show it",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T09:10:26.189Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T09:11:02.445Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected Compact Car through the live Agent Seat semantic-status lane. Measured saved, mounted, and resident edge-region counts at zero; the current semantic table has no edgeRegions rows, so the empty Names pane is truthful for this model. Noted nextRegionId=19 as evidence of prior semantic-id allocation without claiming which deleted/lost rows occupied those ids.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T09:11:02.445Z"
+}

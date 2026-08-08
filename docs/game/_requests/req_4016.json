@@ -1,0 +1,28 @@
+{
+  "id": "req_4016",
+  "at": "2026-08-08T00:05:53.377Z",
+  "origin": "codex:019fdda4",
+  "text": "uh all the overlays for verts faces and edges are completely gone in the studio",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T00:05:58.947Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T00:11:41.969Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restored every Studio topology overlay after the native split by routing projected capsule lines and polygon face fills through core-owned frame queues. Scene3D had been writing vertices, edges, gizmos, stage chrome, and face tints into private module arrays that the cold renderer never uploaded; the ABI-matched host and both modules rebuilt successfully.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T00:11:41.969Z"
+}

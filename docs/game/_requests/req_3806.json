@@ -1,0 +1,28 @@
+{
+  "id": "req_3806",
+  "at": "2026-08-05T01:19:59.104Z",
+  "origin": "session:bae7e49e",
+  "text": "my u loop is not concave. or convex. it was just a flat set of faces so ?",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T01:20:21.427Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T01:20:21.438Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Terminology question only, no code: explained that convex/concave in the merge rule describes the 2D OUTLINE of the fused face within its flat plane (rectangle = convex, U/horseshoe = concave because the notch corners turn inward), not 3D surface curvature — the user's faces being flat is expected and separate. Also explained why the outline shape matters mechanically: a merged face is stored as its outline loop and rebuilt by fanning triangles from one corner, which only stays inside a convex outline; fanning a notched outline would bridge across the hole, which is why the horseshoe cannot re-tessellate and now refuses.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T01:20:21.437Z"
+}

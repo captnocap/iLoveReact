@@ -1,0 +1,28 @@
+{
+  "id": "req_4059",
+  "at": "2026-08-08T09:04:05.260Z",
+  "origin": "codex:019fda1a",
+  "text": "uh ok so the edge naming. i named some edges. they dont show up in the names list. also, the names list is likely for faces, so we will want to distinguish that clearly in the ui please but also be mindful of the space we already have text that is running off the side to fix also [Image #1]",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T09:04:17.717Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T09:11:02.454Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the narrow Names pane into explicit FACE REGIONS and EDGE PATHS sections with bounded summaries and empty states. Wired edge rows through resident selection, rename, remove, undo/save journal paths, and added semantic projection coverage proving edge names remain distinct and searchable. Focused mesh semantic tests pass; the running editor's watcher bundled and pushed NamesPanel and ModelView successfully.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T09:11:02.454Z"
+}

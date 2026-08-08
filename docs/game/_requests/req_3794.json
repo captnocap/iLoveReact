@@ -1,0 +1,28 @@
+{
+  "id": "req_3794",
+  "at": "2026-08-04T21:16:09.994Z",
+  "origin": "codex:019fce59",
+  "text": "the WORST part of that is. if you start with a cube, perfect right. turn on mirror. and then extrude one side. INSTANTLY its off now, because it does not extrude the other side",
+  "status": "review",
+  "sessionId": "019fce59-649a-7f43-bfa1-351e8a55c5c8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T21:16:18.332Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T21:16:45.908Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the defining mirror-edit failure: enabling mirror on a symmetric cube does not keep later topology operations bilateral. The first one-sided extrusion creates unmatched topology, changes geometry-derived bounds, and immediately invalidates the inferred plane. Correct contract: capture a stable explicit symmetry plane when mirror is enabled, maintain counterpart topology, apply each supported edit atomically to both sides in one undo step, clamp centerline vertices, and reject unsupported operations before either side changes.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T21:16:45.907Z"
+}

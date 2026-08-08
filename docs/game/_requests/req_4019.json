@@ -1,0 +1,28 @@
+{
+  "id": "req_4019",
+  "at": "2026-08-08T01:05:20.135Z",
+  "origin": "codex:019fda1a",
+  "text": "find this bug: outliners will hold a name, and somehow can be renamed to Part 1  Part 2 .....",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T01:05:26.472Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T01:12:16.810Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the outliner name reset against the live Compact Car session and the persisted runtime event log. Ctrl+Z twice restored native geometry with two part ranges while its journal metadata note contained only one outliner row; AppFrame rejected that stale note, entered geometry reconciliation, failed to preserve either authored row because preservation requires an exact old [lo,hi) match, and the unnamed imported mesh had no semantic region name to recover. The explicit fallback then minted Part 1 / Part 2 and part:rebuild identities. The state-authority defect is that part metadata reaches the native journal asynchronously through a React effect, so a structural snapshot can capture a stale row count; the recovery path compounds it by treating range coordinates as identity and discarding valid names. No source fix was applied because this request asked to find and explain the bug.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T01:12:16.810Z"
+}

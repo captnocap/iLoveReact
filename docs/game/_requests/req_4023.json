@@ -1,0 +1,28 @@
+{
+  "id": "req_4023",
+  "at": "2026-08-08T02:51:02.946Z",
+  "origin": "codex:019fda1a",
+  "text": "neither now. i fixed it. but. the model im working on that im 1016 edits into says unsaved edits. that better not mean that all my work is going in the trash. im pretty sure thats exactly what it means. i cant save it either it seems",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T02:51:08.486Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T03:02:08.428Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recovered the user's 1,016-edit Compact Car resident mesh without reload or discard. Diagnosed that the live model (4,611 triangles, generation 3043) differed from the prior disk blob (5,016 triangles) because AppFrame hot reload reset activeSessionModelIdRef to null, making Ctrl+S silently call Save with no model id. Rebound the native session synchronously from the active workspace model before ModelView mounts; the pending autosave then wrote the live 4,611-triangle mesh. Verified saved, mount, and resident counts all equal 4,611 and modelDirty is false. Added a regression test and ReleaseFast editor build. No model asset was committed.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T03:02:08.428Z"
+}

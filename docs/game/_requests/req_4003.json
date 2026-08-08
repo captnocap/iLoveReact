@@ -1,0 +1,28 @@
+{
+  "id": "req_4003",
+  "at": "2026-08-07T21:14:24.884Z",
+  "origin": "codex:019fda1a",
+  "text": "what is the hotkey or where is the action in the menu?",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:14:29.007Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:14:42.044Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the newly added Face to N-gon command currently has no keyboard shortcut. It is context-sensitive and appears only in Face Select mode with exactly one filled face selected, both in the model action toolbar beside Extrude and in the viewport right-click context menu.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:14:42.044Z"
+}

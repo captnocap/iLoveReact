@@ -1,0 +1,17 @@
+{
+  "id": "req_4092",
+  "at": "2026-08-08T13:12:55.328Z",
+  "origin": "one-off",
+  "text": "why lol.... -_- pull it out, then archive the folder and remove it",
+  "status": "new",
+  "sessionId": "c4057f17-aa3a-4484-975f-eef25ae6b576",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T13:17:30.166Z",
+      "actor": "session-c405",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

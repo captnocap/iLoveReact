@@ -1,0 +1,30 @@
+{
+  "id": "req_3726",
+  "at": "2026-08-03T05:24:55.946Z",
+  "origin": "codex:019fc558",
+  "text": "i mean it doesnt really matter there is not many things that use any properly set uv anyways but to think how much longer it could have been gas lighting us is wild. yeah that shouldnt happen. so make it right",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:25:39.477Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T05:33:22.040Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced generated-atlas dominant-world-axis box projection with intrinsic planar chart bases, so equal physical faces retain equal UV scale and repeat-stack shape regardless of object rotation. Existing normalized/saved UV reconstruction stays on its historical path and is not silently migrated; the change takes effect only on an explicit atlas remake. Added a six-sided-cylinder rotation regression and ran the complete model_paint Zig unit suite: 28/28 passing.",
+  "shas": [
+    "aa97472d8"
+  ],
+  "resolvedAt": "2026-08-03T05:33:22.040Z"
+}

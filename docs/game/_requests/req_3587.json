@@ -1,0 +1,10 @@
+{
+  "id": "req_3587",
+  "at": "2026-08-01T18:40:06.005Z",
+  "origin": "session:357e79a6",
+  "text": "Thats fine, I assume that was the case, the moment it hot-reloaded. we can always start a new one, thats not a problem, the problem is if we just ignore it from happening again. but i would not try to recover your radio, we can just do something else",
+  "status": "new",
+  "sessionId": "357e79a6-b104-4a5e-9d0a-394c0080a5f6",
+  "captureMode": "hook",
+  "events": []
+}

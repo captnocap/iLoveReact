@@ -1,0 +1,28 @@
+{
+  "id": "req_3764",
+  "at": "2026-08-04T02:02:31.233Z",
+  "origin": "session:d6ae2229",
+  "text": "oh yeah i forgot to edit that part out. please dont waste your time trying to rescue the model. the model isnt anything but a test surface, but the model who wrote the handover cant accept that after spending an hour doing it. but to me its nothing that can be replaced as fast as it was made.",
+  "status": "review",
+  "sessionId": "d6ae2229-3ef4-4c5e-ac78-4f804fd2f2b5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-04T02:02:56.462Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-04T02:49:49.169Z",
+      "actor": "d6ae",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Amendment to req_3763 acknowledged and applied: the live police_sedan was not rescued (disposable test surface per the user); the rebuild-from-geometry reconciler still shipped as the P0-1 recovery mechanism and is regression-proven in tools/part-sync-parity scenario B, so any future frozen part table heals itself instead of needing a rescue.",
+  "shas": [],
+  "resolvedAt": "2026-08-04T02:49:49.169Z"
+}

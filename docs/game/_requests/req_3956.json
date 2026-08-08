@@ -1,0 +1,18 @@
+{
+  "id": "req_3956",
+  "at": "2026-08-06T07:41:44.191Z",
+  "origin": "session:e863e9d6",
+  "text": "this needs to stop. literally every single document when the agent is done is doing this. [Image #5]",
+  "status": "doing",
+  "sessionId": "e863e9d6-4fb4-4103-84ef-500707015d9d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T07:42:09.008Z",
+      "actor": "fable-agentseat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3906",
+  "at": "2026-08-06T01:32:22.645Z",
+  "origin": "codex:019fd073",
+  "text": "heres a dumb bug i tried to mirror something and i didnt like it, i did undo, and it renamed all my outliners to part 1 part 2 part 3 part 4",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-06T01:32:29.845Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-06T01:46:53.754Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Mirror Part undo so it cannot replace authored outliner names with anonymous Part N rows. Mirror/duplicate batches now synchronize the native journal metadata before the first append and after every appended part, making each native undo step describe the same named row table as its geometry. Added an append-only inverse for shell and native-door undo paths: if an older or unusable journal note is encountered, it removes only the highest-ranked appended mirror row and re-stamps the surviving authored IDs/names from host ranges instead of rebuilding them anonymously. Added a focused metadata regression and a real multipart mirror/undo probe to the part-sync parity harness.",
+  "shas": [
+    "d89254ffc"
+  ],
+  "resolvedAt": "2026-08-06T01:46:53.754Z"
+}

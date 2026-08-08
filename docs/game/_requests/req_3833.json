@@ -1,0 +1,30 @@
+{
+  "id": "req_3833",
+  "at": "2026-08-05T07:01:32.799Z",
+  "origin": "codex:019fd073",
+  "text": "there is one in the asset explorer that if you are too far right it renders under the stage [Image #1]",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:01:39.455Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:04:16.201Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the asset explorer's model action menu out of LibraryPanel's clipped containing block and into AppFrame's late app-root overlay layer. Tree rows and model thumbnails now forward the target model plus window-space right-click coordinates; rename/favorite/duplicate/delete still use the existing AppFrame actions, while the shared viewport flip/clamp behavior from req_3829 applies at the correct root. ReleaseFast editor ship and all six context-menu placement regressions pass.",
+  "shas": [
+    "caf560a57"
+  ],
+  "resolvedAt": "2026-08-05T07:04:16.201Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_4026",
+  "at": "2026-08-08T03:06:48.613Z",
+  "origin": "codex:019fda1a",
+  "text": "something just removed all the overlay for verts/faces/edges ?",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T03:43:42.307Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T03:52:00.466Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The disappearing topology overlay was traced to ModelView falling through to applyMesh during hot reload, which reset edit mode instead of resuming the resident host session. The synchronous native-session rebind plus durable RJMD range seed now keeps the resident session on remount; visual confirmation of the overlay is requested.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T03:52:00.466Z"
+}

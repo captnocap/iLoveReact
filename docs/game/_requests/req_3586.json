@@ -1,0 +1,30 @@
+{
+  "id": "req_3586",
+  "at": "2026-08-01T18:29:19.280Z",
+  "origin": "supervisor-relay",
+  "text": "yes do all three of them",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-01T18:29:26.195Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T18:46:54.347Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built all three requested Agent Seat capabilities plus the frame-capture verb, and verified every one live against the running dev host: add (resident primitives as named outliner parts), cut (loop cut), mirror (symmetrize), and shot (the app capturing its own frame). No rebuild was needed because cart/editor already imported runtime/capture, so -Dhas-capture was already on -- shot produced a real PNG on the first call and I read it back, which also confirmed the earlier scale defect visually against the viewport's own COLLIDER 1.65m marker. add routes through AppFrame's addPrimitivePart rather than the raw __mesh_append_group door specifically so the outliner row and the host mesh stay one truth (req_3465 is what their divergence costs); addPrimitivePart now returns the new group range and AppFrame publishes __seatShellBridge on the same global-door pattern as __modelFocusBridge, since ModelView constructs the seat but the part table lives in the shell. Dimensions are meters end to end -- verified by adding cylinder 0.26 0.10 6 and getting a true hexagon (x +/-0.13, z +/-0.1126 = r*sin60). cut deliberately uses the lc_begin/preview/end session rather than __mesh_topo_loop_cut, because that door cuts across the ONE selected EDGE and the seat has no edge selection; select now asserts face mode since meshLoopCutFaceBegin bails unless mode() == .face, and asserting it inside cut would clear the selection it was just handed. Driving the feature found a real bug I introduced and then fixed: the append REPLACES the live mesh and resets the host semantic table, so re-stamping the table from a post-append read wiped every existing name while leaving faces bound to now-nameless ids -- the same disease as req_3465's part-range bug one layer up, cured the same way by growing the table from a PRE-append capture. Two regression tests cover it and the full seat suite passes 6/6. Also documented the SCOPE trap that cost two wrong diagnoses while building: add makes its new part the active scope and topology ops intersect the selection with it, so a cut on another part's faces refuses even though the selector just reported those faces; the seat has no scope verb yet. The user's radio was left in a degraded test state by the table-wipe and they explicitly declined recovery.",
+  "shas": [
+    "5dac877ad",
+    "8d7b09bcc"
+  ],
+  "resolvedAt": "2026-08-01T18:46:54.347Z"
+}

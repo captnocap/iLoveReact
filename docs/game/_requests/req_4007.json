@@ -1,0 +1,28 @@
+{
+  "id": "req_4007",
+  "at": "2026-08-07T21:45:22.235Z",
+  "origin": "codex:019fdda4",
+  "text": "so how do we make it faster. it blows ass when one thing changes and we sit through that hell 40 times a day, there is literally a script made to clear the zig cache because we have to build so often. so how can we do incremental compiles ? >99% of the code does not change per build",
+  "status": "review",
+  "sessionId": "019fdda4-8d49-72b3-99d8-b58a562a29fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T21:45:32.549Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T21:50:11.234Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the 124-second native dev rebuild as a monolithic ReleaseFast LLVM compilation: build.zig creates one application root module, rjit dev enables nearly every capability, and v8_app/engine/core bindings directly import 3D and game implementations. Confirmed Zig 0.16 supports opt-in incremental watch mode but leaves it disabled by default and LLVM still re-emits the changed compilation unit. Defined the corrective architecture: separate compiled cold-core, scene-3D, and game/world artifacts behind stable ABI tables, a tiny launcher, per-tier fingerprints/caches, and non-incremental release verification.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T21:50:11.234Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_3732",
+  "at": "2026-08-03T06:04:17.880Z",
+  "origin": "codex:019fc558",
+  "text": "Yes so lets talk about this for a moment so we are correctly established for future cases. As far as im concerened, i only wish to have rigging meshes through things like face selection so outliner parts dont make much sense. but there is no way to currently name parts for me to view in any coherent fashion unless its an outliner. see where this is problematic",
+  "status": "doing",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T06:04:40.163Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

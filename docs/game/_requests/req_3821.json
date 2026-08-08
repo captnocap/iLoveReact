@@ -1,0 +1,36 @@
+{
+  "id": "req_3821",
+  "at": "2026-08-05T03:46:43.259Z",
+  "origin": "session:fc4b5586",
+  "text": "yeah thats fucked. alright well pass that over in a /hand-over to get fixed so that we dont have that shit happen again",
+  "status": "doing",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:47:02.599Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:48:32.567Z",
+      "actor": "fc4b",
+      "kind": "note",
+      "text": "Handoff brief written to /tmp/handoff-20260805-034702-basic-cut-world-axis-direction-fix.md — full diagnosis, fix design (world-aligned per-face direction resolution in cutSelected), file/line map, test plan, and verification repro. Releasing claim so the fixing session can take it."
+    },
+    {
+      "at": "2026-08-05T04:10:48.941Z",
+      "actor": "fc4b",
+      "kind": "note",
+      "text": "Retest verdict (req_3822/3823, live slab repro after rebuild): axis resolution FIXED — one basic-cut call cuts the same world direction on both mirror twins, cuts=1 perfectly aligned across the seam, receipt now carries worldDirection. RESIDUE: cuts>=2 station phase still diverges on mirrored rings — right half thirds {0.333,0.667}, left half {-0.333,-0.167}: splitFace's recursion picks the child via {center_side, side[0]} where side[0] is still ring-order-dependent, so the reversed ring descends into the wrong child. The recursion's child selection and offset-ratio anchoring must follow the resolved world orientation, not ring order."
+    },
+    {
+      "at": "2026-08-05T04:19:04.658Z",
+      "actor": "fc4b",
+      "kind": "note",
+      "text": "Part 2 (comb recursion) landed and committed together with the uncommitted part 1 as 6eeb235da (req_3825). Residue from the retest note is closed in code; live verification pending the next editor rebuild."
+    }
+  ]
+}

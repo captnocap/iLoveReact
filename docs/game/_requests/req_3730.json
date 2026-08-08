@@ -1,0 +1,28 @@
+{
+  "id": "req_3730",
+  "at": "2026-08-03T05:59:33.740Z",
+  "origin": "codex:019fc558",
+  "text": "ok. well, on top of that, the problem is that so.. not only are they identical in size and not stacking, but the model will literally neverr show these faces because of the primitive soup that is the model. right, which that is a failure of the agent who did the model but you see why this makes the skill absolutely paramount to enforce merging of outliners. the problem is then you lose all the part break downs, and this is what i keep trying to enumerate through some understanding is that one single final mesh is optimally the best choice for the uv, but our pipeline wants shit to be broken out into its own outliner instead. you cant weld verts between outliners that arnt the same and not merging things together you get a ton of these useless uv spaces that are confusing until u realize they are just noise entirely",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T05:59:40.737Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T06:02:07.716Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the topology concern after inspecting the existing Agent Seat assembly contract. The initial response incorrectly centered a derived exterior mesh; the user clarified that the immediate requirement is stricter modeling discipline: agents must merge, delete mating faces, and weld permanent primitive assemblies instead of accepting Outliner soup. No code or model mutation was made under this request; the enforceable skill change is tracked in req_3731.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T06:02:07.716Z"
+}

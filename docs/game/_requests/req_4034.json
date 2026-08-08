@@ -1,0 +1,28 @@
+{
+  "id": "req_4034",
+  "at": "2026-08-08T05:48:27.254Z",
+  "origin": "codex:019fda1a",
+  "text": "ive already done every possible undo it wont let me go back further even tho it says 170 bus events",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T05:48:34.526Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T06:02:21.832Z",
+      "actor": "Codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified that bus events are not undo snapshots, inspected resident/saved horizons, and preserved the exact package while avoiding Save/Undo mutations.",
+  "shas": [],
+  "resolvedAt": "2026-08-08T06:02:21.832Z"
+}

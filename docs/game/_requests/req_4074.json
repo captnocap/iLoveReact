@@ -1,0 +1,17 @@
+{
+  "id": "req_4074",
+  "at": "2026-08-08T11:42:50.377Z",
+  "origin": "one-off",
+  "text": "what ? i have 1 running app as far as i am concerned",
+  "status": "new",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T11:43:41.934Z",
+      "actor": "claude-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

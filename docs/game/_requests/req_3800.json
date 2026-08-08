@@ -1,0 +1,30 @@
+{
+  "id": "req_3800",
+  "at": "2026-08-05T00:24:46.502Z",
+  "origin": "session:bae7e49e",
+  "text": "fix this bad logic:\n\nthis image shows faces that refuse to merge[Image #3]\n\nbut that isnt a real restriction\n[Image #4] as you can see\n\nto get here, you have to do some shit like this\n[Image #5] [Image #6] [Image #7] [Image #8] [Image #9] [Image #10]",
+  "status": "review",
+  "sessionId": "bae7e49e-93d0-4718-b7d3-45bdc6939b43",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T00:24:58.187Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T00:38:11.878Z",
+      "actor": "bae7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed why the 5x2 face region refused to merge one-shot while staged sub-merges reached the same single face: mergeFaceIds cancelled seam edges by vertex id alone, so a T-junction seam (one face spanning in one edge run what the facing side splits at a mid-run vertex — cuts landing at different heights per column) left both sides looking like boundary and the walk refused. Fixed in framework/gpu/indexed_edit_mesh.zig by splitting every selected edge at selection vertices strictly inside it before cancellation — overlapping seam runs now decompose into sub-edges that cancel exactly, so the region merges in one shot. Holed/pinched selections still refuse. TS twin editMesh.ts got the identical rule. New repro tests both sides (152/152 zig test-mesh-edit green, TS suite green; the one TS FAIL is the pre-existing cylinder cap test, fails on baseline too). Docs + index record updated. NOTE: editor binary needs a rebuild to pick up the zig fix; heavy parity suites (mesh-port-parity ships the editor) deferred to a quiet moment per live-session rule.",
+  "shas": [
+    "52fc93f72"
+  ],
+  "resolvedAt": "2026-08-05T00:38:11.878Z"
+}

@@ -1,0 +1,32 @@
+{
+  "id": "req_3702",
+  "at": "2026-08-03T01:08:47.006Z",
+  "origin": "session:c440da46",
+  "text": "what about breaking the uv out into parts, like, split the uv across multiple images and then piece back together. you could normalize every small bit into a fixed size on one atlas and put everything else on the other. this requires more direct prompting influence but is entirely still possible",
+  "status": "review",
+  "sessionId": "c440da46-5d54-48fc-b611-dea6a31b1f2a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T02:01:25.484Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T03:03:53.352Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented and measured the mutation-free two-zone UV planner on Moped_50. The 477 logical islands reduce to 250 unique paint footprints after 64 additional repeat stacks, a 47.6% reduction. Detail-bearing hero footprints retain natural scale at 1.0; support footprints remain proportional unless undersized, where a 1024-texel-area readability floor raised 41 of 112 footprints while 71 remained natural and none hit the 4x cap. Generated hero and support sheets compile into one 1651x1899 runtime atlas; purple guide substrate was removed and replaced with deterministic ivory/steel bases plus transparent material-detail overlays. Banked reversible paint variant Ivory Two-Zone. Post-layout and post-save semantic status is healthy at 2046/2046 named saved, mounted, and resident faces with 0 unnamed. Coverage save cleared 1,380,625 unsampled pixels with a 2-texel gutter. The legacy 441 x/m UI readout is now explicitly labeled as a target because mixed proportional/floor layouts do not have one actual global density. User visual review remains the acceptance gate.",
+  "shas": [
+    "9c8303f07",
+    "3dba5bb46",
+    "9d5792aa5"
+  ],
+  "resolvedAt": "2026-08-03T03:03:53.352Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3709",
+  "at": "2026-08-03T02:34:25.906Z",
+  "origin": "codex:019fc558",
+  "text": "so what do i need to check? the uv? [Image #1] or what exactly. its saying its a 441x/m but it looks the same size as before so im not sure what im looking for or if its the right thing even",
+  "status": "review",
+  "sessionId": "019fc558-b00d-7581-b2bb-58561c42f808",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-03T02:34:36.446Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-03T02:35:32.711Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the live acceptance signal: normalized prestack keeps the 1651×1899 atlas and 441 texels/m scale, overlaps repeated UVs without repacking the sheet, and leaves the old paint raster visible underneath. The user should inspect the 3D model for incorrect shared-paint pickup; the visibly different hero/uniform split will only appear after the still-unapproved two-sheet plan is applied.",
+  "shas": [],
+  "resolvedAt": "2026-08-03T02:35:32.711Z"
+}

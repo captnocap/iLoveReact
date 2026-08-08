@@ -1,0 +1,31 @@
+{
+  "id": "req_3964",
+  "at": "2026-08-07T00:21:23.254Z",
+  "origin": "codex:019fd98f",
+  "text": "the exact same side edges on the other side also wont make a face. but every other place i want to make a face i can. i mean i can just extrude and weld but that still doesnt address the problem",
+  "status": "review",
+  "sessionId": "019fd98f-1392-75c2-affa-f7418f7a012c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T00:21:34.781Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T00:30:14.696Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the symmetric-side failure was the same normal-disagreement class rather than damaged geometry. Create Face now derives the unambiguous opposite winding from each selected boundary edge's sole incident face when both normal heuristics fail, while contradictory circulation still rejects.",
+  "shas": [
+    "c08fb77d0",
+    "0357386ab"
+  ],
+  "resolvedAt": "2026-08-07T00:30:14.695Z"
+}

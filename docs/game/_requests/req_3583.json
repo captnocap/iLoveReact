@@ -1,0 +1,28 @@
+{
+  "id": "req_3583",
+  "at": "2026-08-01T18:12:46.287Z",
+  "origin": "session:357e79a6",
+  "text": "wow that was genuinely impressive. i didnt expect it to come out so well! that was the first use of the skill, where can it improve ?",
+  "status": "review",
+  "sessionId": "357e79a6-b104-4a5e-9d0a-394c0080a5f6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-01T18:12:51.615Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T18:15:01.823Z",
+      "actor": "claude-seat",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the post-drive retrospective on the Agent Seat skill after its first real modeling session (built a radio from the bootstrap cube, 12 -> 132 faces, 22 named regions, 0 naming debt). Findings are grounded in verified repo state rather than impressions: the seat exposes 11 of ~90 declared __mesh_* host doors, and the constraints that shaped my whole design are artificial -- __mesh_topo_loop_cut exists (so 'one face = one feature chain' is false; I invented a rear deck purely to obtain a second front-facing surface for the dial), __mesh_edit_mirror/__mesh_symmetrize exist (I hand-mirrored the left knob by recomputing every coordinate), and __mesh_bevel_* exists (my chamfers are faked by scaling a cap). No inset verb, so every feature needed a three-call extrude-0.001/scale/extrude dance whose naive form silently turns a whole face into a pyramid -- an undocumented trap. The skill never states the unit scale, and the bootstrap 1x1x1 cube primes unit-cube thinking, so I built a 1.5m-wide, 2.0m-tall radio against R4 (1 tile = 1 meter, player collider 1.65m) -- roughly console-cabinet sized rather than tabletop. formatSeatPercept is exported in seatApi.ts with zero consumers while the CLI emits raw JSON embedding a full percept per batch row, forcing a hand-written wrapper to read output. Also: no save/persist verb despite __mesh_journal_checkpoint existing, no compound selectors (isolating deck.wall's front quad required a hand-tuned magic bound of 1.1515 to dodge a 0.001 sliver), no agent-side visual feedback (__mesh_edit_capture is input-loop handoff, not a frame grab -- the selfshot __capture_frame door is the real path), and the undocumented rule that extruding a .cap consumes it so only .wall names persist. No code changed; recommendations only, awaiting the user's call on which to build.",
+  "shas": [],
+  "resolvedAt": "2026-08-01T18:15:01.823Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3995",
+  "at": "2026-08-07T20:02:25.591Z",
+  "origin": "codex:019fda1a",
+  "text": "no i actually found the real problem. its way before. here look at the difference between the two faces i have selected now, one side has a 90 degree angle in it the other does not",
+  "status": "review",
+  "sessionId": "019fda1a-638f-75c0-947d-b625e06daaac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T20:02:31.661Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:06:00.737Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inspected the first left/right selected pair directly through Agent Seat and compared their welded six-corner authored-face topology. The pair exposed that the asymmetry predates the later loop cut: equivalent faces around the chamfered opening do not receive equivalent internal edge cadence, so one side retains a corner turn while its counterpart is crossed by a diagonal.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:06:00.737Z"
+}

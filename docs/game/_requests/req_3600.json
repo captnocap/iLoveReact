@@ -1,0 +1,29 @@
+{
+  "id": "req_3600",
+  "at": "2026-08-01T20:43:47.578Z",
+  "origin": "pane",
+  "text": "yep lets do it all",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-08-01T20:43:52.241Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-01T21:02:54.321Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded Agent Seat through the existing ModelToolApi, AppFrame command/outliner authorities, and Model Focus bridge: exact and multi-element selection, basic cut/tris-to-quads/uniform scale, part scope/outliner/duplicate/merge/path-array/import, camera/reference/path tools, starters/import/export, full UV arrays/history/atlas with path imports, free paint and paint variants, texture-slot CRUD, rig and emitted lights. Added generic structured CLI lane, updated the skill, 18 contract tests, and passed the ReleaseFast editor build.",
+  "shas": [
+    "2c6f26a26"
+  ],
+  "resolvedAt": "2026-08-01T21:02:54.321Z"
+}

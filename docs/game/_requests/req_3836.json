@@ -1,0 +1,30 @@
+{
+  "id": "req_3836",
+  "at": "2026-08-05T07:15:30.115Z",
+  "origin": "codex:019fd073",
+  "text": "ok next back to the asset explorer, some models have data some models do not seem to have data in this area. a lot more 0 than anything else. fix that [Image #1]",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T07:15:36.906Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T07:22:56.558Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The asset explorer detail card now derives its summary from the model package artifacts instead of trusting stale manifest defaults. Saved mesh documents provide the triangle count, paint variant records and the live base atlas provide their real counts, and packages without measurable geometry show an honest unknown marker rather than zero. A focused regression suite covers both populated and source-only packages.",
+  "shas": [
+    "d68cf22a4"
+  ],
+  "resolvedAt": "2026-08-05T07:22:56.558Z"
+}

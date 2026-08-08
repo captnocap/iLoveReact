@@ -1,0 +1,30 @@
+{
+  "id": "req_3808",
+  "at": "2026-08-05T02:18:07.453Z",
+  "origin": "session:fc4b5586",
+  "text": "yeah that intersecting is full of shit man i was trying to figure that out why it happens. if u noticed it is considering your wheel wells as intersections. because there is a join at the direction change on the edge... total failure to realize its not intersecting if this is the case. We need to fix that. Your model is actually a great start and would be what i would do also, so based on that notion the thing yelling back at you that its intersecting is just flat out wrong",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T02:18:46.749Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T02:27:16.083Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the phantom intersecting count: the audit's per-edge ray test registered boundary grazes as penetrations — every flagged contact on the police_sedan sat at barycentric u/v/w of exactly 0 or 1 (T-junction verts resting mid-edge, wheel-well walls rising off underbody edge lines). Replaced penetrates() with the standard tri-tri interval test plus a 1e-4m touch deadband: both triangles must strictly straddle each other's plane and the crossing interval must have real length, so joins at direction changes can never count while genuine stabs still do. Added T-join regression + genuine-stab control fixtures; test-mesh-audit 9/9; offline replica on the saved sedan mesh reports 0 (was 16). Editor binary needs a rebuild to pick it up.",
+  "shas": [
+    "3fb71b19a"
+  ],
+  "resolvedAt": "2026-08-05T02:27:16.082Z"
+}

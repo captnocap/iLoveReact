@@ -1,0 +1,28 @@
+{
+  "id": "req_3820",
+  "at": "2026-08-05T03:36:13.562Z",
+  "origin": "session:fc4b5586",
+  "text": "can you show me an example of it on a new mesh so i can just see it in real time since i wasnt watching when it occured",
+  "status": "review",
+  "sessionId": "fc4b5586-d8ca-4aaf-ac5f-91191d503b21",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T03:37:10.328Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T03:39:09.236Z",
+      "actor": "fc4b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Live-reproduced the basic-cut ring-index defect on a fresh throwaway slab while the user watched: (1) built mirror twins the same way the sedan roof got them (centerline loop cut, delete -x, mirror x); (2) ONE basic-cut 0 2 call across both halves produced cross-lines on the left and lengthwise columns on the right — one argument, two world axes, split at the mirror seam; (3) the natural retry (flip direction, recut the column side) landed z-lines but misaligned across columns (stations -0.233/+0.233 vs 0.467) because each column's rewritten ring interprets the offset from a different corner — the zigzag from the sedan arches. Demonstrates first-try that direction is a per-face ring index, mirror reverses rings, cut children rotate rings, and endpoints T-vert onto unsplit neighbors. Demo slab left unsaved in the editor; police_sedan intact on disk. Fix proposal from req_3818 (world-aligned per-face direction resolution in cutSelected + per-face axis in the seat receipt) still awaiting the user's go.",
+  "shas": [],
+  "resolvedAt": "2026-08-05T03:39:09.236Z"
+}

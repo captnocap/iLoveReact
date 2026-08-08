@@ -1,0 +1,28 @@
+{
+  "id": "req_4000",
+  "at": "2026-08-07T20:43:24.978Z",
+  "origin": "codex:019fd9ee",
+  "text": "also: there is no undo/redo history on this rig movement and such",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T20:43:31.364Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T20:57:46.358Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented resident native Character Rig undo/redo and routed the editor's single Undo/Redo authority to it only while the exact active rig session owns viewport input. Durable fit, joint transform/constraint/lock, object-binding, and auto-bind edits restore bones, fit metadata, descriptor state, f32 weight buffers, binding hashes, saved-binding/error/review state; view/selection/overlay/test-pose changes do not journal. Added explicit Rig controls and truthful dock/menu/hotkey depths, stale-session and mesh-mode fallback guards, redo-branch/no-op/rejected-command behavior, and dirty-state propagation after restore. Focused TS suites pass (22 command, 4 ownership, 8 session-door, 5 panel tests), native test-character-rig-session passes 11/11, tools/tsc-check editor passes, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor succeeds in ReleaseFast. Scope is honestly resident-session history; cold cross-session total history needs the separate active V20 persistence substrate and is not claimed here.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T20:57:46.358Z"
+}

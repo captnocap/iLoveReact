@@ -1,0 +1,30 @@
+{
+  "id": "req_3689",
+  "at": "2026-08-02T17:50:05.821Z",
+  "origin": "session:413446d4",
+  "text": "so, a few things. one. gpt-image-2 is blind to uv with an alpha channel so it just outputs garbage if u send it with no colored alpha layer, thats why there is two export uv types. and as for the export guide seeing no islands, show me, u might be just as blind as that img model",
+  "status": "review",
+  "sessionId": "413446d4-dc31-44e7-ab96-293e8cdd0f76",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T17:50:18.173Z",
+      "actor": "fable-4134",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T17:56:39.650Z",
+      "actor": "fable-4134",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same thread as req_3688: took the correction that gpt-image-2 is blind to transparent alpha (the reason both export types exist — pink export-guide for gpt-image-2, transparent export-wireframe for alpha-capable models) and captured it in the skill's export table and hazards. The 'no authored UV geometry' blindness was diagnosed by shot: the UV panel only builds when paint mode engages (mesh-paint command); after entering paint mode the export worked immediately. Also caught the numbered-label leak hazard: nano-banana-2-lite paints faint ghost digits into small islands, so numbered guides pair with gpt-image-2 only.",
+  "shas": [
+    "fb78a6282"
+  ],
+  "resolvedAt": "2026-08-02T17:56:39.650Z"
+}

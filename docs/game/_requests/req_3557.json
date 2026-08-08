@@ -1,0 +1,18 @@
+{
+  "id": "req_3557",
+  "at": "2026-07-30T23:58:52.457Z",
+  "origin": "codex:019fac74",
+  "text": "we cam do a 2nd model also that is more flat and not curved like a player model would be to get more data points",
+  "status": "doing",
+  "sessionId": "019fac74-8359-7783-bb8d-7f33ae7dcc6f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-30T23:59:24.357Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

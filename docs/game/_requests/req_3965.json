@@ -1,0 +1,31 @@
+{
+  "id": "req_3965",
+  "at": "2026-08-07T00:24:19.775Z",
+  "origin": "codex:019fd98f",
+  "text": "i keep finding multiple of them now. there are 4 areas so far that refuse to make a face",
+  "status": "review",
+  "sessionId": "019fd98f-1392-75c2-affa-f7418f7a012c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T00:24:25.661Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T00:30:14.708Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Generalized the repair for the multiple failing areas: valid consistently wound four-edge holes no longer depend on either opposite neighbor-normal pair agreeing. Verified 173/173 mesh-edit tests, 56/56 Seat API tests, and the ReleaseFast editor-flags build; the unrelated existing pose-async SIGSEGV remains the only full sweep red.",
+  "shas": [
+    "c08fb77d0",
+    "0357386ab"
+  ],
+  "resolvedAt": "2026-08-07T00:30:14.707Z"
+}

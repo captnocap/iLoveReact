@@ -1,0 +1,30 @@
+{
+  "id": "req_3847",
+  "at": "2026-08-05T17:32:57.536Z",
+  "origin": "codex:019fd073",
+  "text": "ok clicking on favorites or recent focuses on that section only and then there is no way to clear it",
+  "status": "review",
+  "sessionId": "019fd073-0f88-7ce3-8836-3a42613e5719",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-05T17:33:14.841Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-05T17:37:05.110Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Favorites and Recent now behave as reversible quick filters rather than one-way folder navigation. Entering either collection remembers the exact ordinary folder, switching between the collections preserves that return point, and clicking the currently selected quick row toggles it off and restores the prior folder. The same change completes Recent tracking across every Asset Explorer selection path.",
+  "shas": [
+    "966549805"
+  ],
+  "resolvedAt": "2026-08-05T17:37:05.110Z"
+}

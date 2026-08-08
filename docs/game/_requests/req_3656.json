@@ -1,0 +1,28 @@
+{
+  "id": "req_3656",
+  "at": "2026-08-02T03:56:20.891Z",
+  "origin": "codex:019fbe1c",
+  "text": "why can i not make any edits. i came into the model, i made 1 edit, it now says unsaved edits, and wont let me make any edits at all",
+  "status": "review",
+  "sessionId": "019fbe1c-adc1-73b3-b042-5c69cf43a8bf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-02T03:56:31.305Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-02T04:22:52.045Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Create Face could mint a group just beyond a stale sole-part range, leaving the new face unowned: the editor then could not target it and autosave refused the mismatched partition, while the UNSAVED EDITS chip misleadingly looked like the blocker. The native part-range boundary now expands an unambiguous sole part to include newly minted grouped faces, resumed sessions re-seed ranges whenever ownership does not cover the resident mesh, and focused regression coverage proves the repaired range is an exact partition. The editor also exposes ownership and actual blocker diagnostics, labels UNSAVED EDITS as persistence state only, and displays a clear GHOST ON control so an overlay cannot masquerade as an inert mesh. Zig tests, all 36 Seat API tests, and a ReleaseFast editor build pass.",
+  "shas": [],
+  "resolvedAt": "2026-08-02T04:22:52.045Z"
+}

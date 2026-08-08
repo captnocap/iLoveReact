@@ -1,0 +1,30 @@
+{
+  "id": "req_4084",
+  "at": "2026-08-08T12:18:39.655Z",
+  "origin": "session:ae84f281",
+  "text": "its not a problem, we will have to regenerate a full scale map but rather than letting anyone freestyle that shit again for one change the output location for that file and two make the clean up script handle the zig out bin without being a disaster but also do better at announcing what the files are when deleting anything. thats why ideally it doesnt happen other than in a script because otherwise someone will end up wiping the fs for all we know",
+  "status": "review",
+  "sessionId": "ae84f281-655d-446a-a1ec-aa107f034b31",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-08T12:18:56.691Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-08T12:23:04.926Z",
+      "actor": "claude-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both causes of the world-map loss rather than only the symptom. Cause one was that authored data lived in the build-output directory: zig-out/game/editor held the maps, world globals, colour library and asset history, which is irreplaceable work sitting inside the one directory every convention in this repo says is disposable. It now lives under userdata/, a sibling of zig-out so no cleanup aimed at build output can reach it however broadly written, owned by cart/editor/data/editorDataRoot.ts with a copy-then-verify migration that never deletes and leaves anything unverifiable in place; bake output stays in zig-out because losing it only costs a rebuild. Cause two was that nothing announced what a path was before deleting it, so rjit clean now surveys by default and deletes nothing, printing every path with size, class and description, with --bin removing only declared build artifacts and sparing whatever a running dev host holds open. Classification lives in cli/dev/deletable.ts and an undeclared path defaults to authored, so forgetting to declare a new artifact costs a kept file rather than a lost one — run against the directory I damaged it now prints KEEP for both zig-out/lib and zig-out/game with the reasons. The doctrine went into CLAUDE.md as a hard rule and AGENTS.md: deletion happens in a script, zig-out is build output only, and a by-hand delete requires looking inside first and checking for holders. I also restored zig-out/lib, seven symlinks into the LM Studio llama.cpp backend byte-identical to the reactjit-safe copy, which is what broke the reactjit-dev build since build.zig falls back to tsz/zig-out/lib and that path does not exist in this checkout.",
+  "shas": [
+    "7b7e5686f"
+  ],
+  "resolvedAt": "2026-08-08T12:23:04.926Z"
+}

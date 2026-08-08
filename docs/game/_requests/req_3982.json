@@ -1,0 +1,28 @@
+{
+  "id": "req_3982",
+  "at": "2026-08-07T18:34:51.132Z",
+  "origin": "codex:019fd9ee",
+  "text": "other things: you have some javascript sliders that cause the performance to tank to 1 fps, change them to the host owned sliders and then second this rig menu needs to expand in width and then take advantage of it better, there is text getting cut off, buttons half way in view, etc.",
+  "status": "review",
+  "sessionId": "019fd9ee-8fbe-79a3-a57f-5b74b4d96c8c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-07T18:35:05.691Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-07T19:01:27.520Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the joint slider to the host Slider commit event with no JavaScript change stream, and rebuilt Character Rig as a dedicated 720-pixel two-column surface with bounded scrolling and unclipped controls.",
+  "shas": [],
+  "resolvedAt": "2026-08-07T19:01:27.520Z"
+}
