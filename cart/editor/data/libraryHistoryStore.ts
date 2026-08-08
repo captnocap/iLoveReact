@@ -6,10 +6,11 @@
 // restart. Keep it in its own per-concern file rather than making the whole
 // hot-reload view durable.
 import { mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { EDITOR_DATA_ROOT } from './editorDataRoot';
 import { textBytes } from '../../../runtime/workspace/lumps';
 import { normalizeRecentLibraryKeys } from './libraryCollections';
 
-const LIBRARY_HISTORY_DIR = 'zig-out/game/editor';
+const LIBRARY_HISTORY_DIR = EDITOR_DATA_ROOT;
 export const LIBRARY_HISTORY_FILE = `${LIBRARY_HISTORY_DIR}/asset-library-history.json`;
 
 export type LibraryHistorySave = {

@@ -392,3 +392,6 @@ cart/hmsc-int/data/decal-pixels/
 /_MODEL_RECOVERY_BACKUP_20260629/
 /research_runs/2026-07-28__auto-skinning-weights/
 cart/editor/data/corpus/trajectory.jsonl
+
+# Authored editor data — maps, world globals, libraries. NOT build output, never swept.
+userdata/

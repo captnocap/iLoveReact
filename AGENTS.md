@@ -231,6 +231,10 @@ class appearing after your change is an automatic FAIL of that change.
 - **`love2d/` and `tsz/` are read-only.** Copy OUT for porting, never write INTO them. Same treatment for `archive/`.
 - **Zig 0.16.0.** Read `framework/ZIG_016_API_NOTES.md`; inject `std.Io` through signatures/owners and check the compiler's actual std source before assuming API shapes.
 
+- **Never hand-write `rm -rf` against repo dirs — use `rjit clean`.** It classifies and
+  announces every path before deleting, and only removes declared build artifacts. A
+  freestyle `rm -rf zig-out/...` cost an authored world map on 2026-08-08. `zig-out` is
+  build output ONLY; authored editor data lives in `userdata/`.
 - **A scripting escape is a feature request.** `node -e` / `bun -e` / `python3 -c` over
   this project's own data means a verb is missing — build the verb, or name the gap.
 - **Dev builds are always `ReleaseFast`.** Debug builds crash on click — pre-existing framework bug.

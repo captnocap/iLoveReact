@@ -2,23 +2,24 @@
 // authored concern for one map lives below the same stem, so opening a map can
 // never accidentally pair another map's pieces with this map's terrain.
 //
-//   zig-out/game/editor/maps/<stem>/painting.rmap  host-owned terrain/flora/roads
-//   zig-out/game/editor/maps/<stem>/world.json     pieces + objects + zone legend + id seq
-//   zig-out/game/editor/maps/<stem>/meta.json      friendly title + render diagnostics
-//   zig-out/game/editor/maps/_last.txt             last-open document pointer
+//   userdata/editor/maps/<stem>/painting.rmap  host-owned terrain/flora/roads
+//   userdata/editor/maps/<stem>/world.json     pieces + objects + zone legend + id seq
+//   userdata/editor/maps/<stem>/meta.json      friendly title + render diagnostics
+//   userdata/editor/maps/_last.txt             last-open document pointer
 //
 // The previous editor used two unrelated fixed files. On the first boot after
 // this change we register those files as ONE `legacy` document; each concern is
 // imported into the directory by its owning persistence layer. That migration
 // runs once and never becomes a fallback for later documents.
 import { exists, listDir, mkdir, readFile, remove, stat, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { EDITOR_DATA_ROOT, LEGACY_EDITOR_DATA_ROOT, migrateLegacyEditorData } from './editorDataRoot';
 import { mapInspectFile } from '../../../runtime/game/map';
 import { textBytes } from '../../../runtime/workspace/lumps';
 
-export const MAP_DOCUMENT_ROOT = 'zig-out/game/editor/maps';
+export const MAP_DOCUMENT_ROOT = `${EDITOR_DATA_ROOT}/maps`;
 export const MAP_DOCUMENT_POINTER = `${MAP_DOCUMENT_ROOT}/_last.txt`;
-export const LEGACY_MAP_FILE = 'zig-out/game/editor/painted-map.rmap';
-export const LEGACY_WORLD_FILE = 'zig-out/game/editor/world-pieces.json';
+export const LEGACY_MAP_FILE = `${LEGACY_EDITOR_DATA_ROOT}/painted-map.rmap`;
+export const LEGACY_WORLD_FILE = `${LEGACY_EDITOR_DATA_ROOT}/world-pieces.json`;
 export const MAP_DOCUMENT_STEM_MAX_CHARS = 64;
 export const MAP_DOCUMENT_NAME_MAX_CHARS = 80;
 const LEGACY_IMPORT_MARKER = '.legacy-import';
@@ -169,6 +170,9 @@ export function mapDocumentExists(stem: string): boolean {
 }
 
 export function listMapDocuments(): MapDocumentSummary[] {
+  // First read of the authored-data root rescues anything still under the old
+  // build-output path (req_4083). Copy-then-verify; it never deletes.
+  migrateLegacyEditorData();
   let entries: string[] = [];
   try { entries = listDir(MAP_DOCUMENT_ROOT); } catch { entries = []; }
   return entries

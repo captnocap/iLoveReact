@@ -76,6 +76,33 @@ Do not write `until ! pgrep -f "zig build ..."; do sleep 3; done`-style wait loo
 
 ---
 
+# HARD RULE: DELETION HAPPENS IN A SCRIPT, AND ANNOUNCES WHAT IT IS DELETING
+
+**Do not hand-write `rm -rf` against repo directories. Use `rjit clean`.** On 2026-08-08 a
+freestyle `rm -rf zig-out/lib zig-out/game …` destroyed a full-scale authored world map
+and a set of symlinks into the LM Studio llama.cpp backend that `build.zig` links against.
+The scope was authorized; the mistake was deleting a listing instead of inspecting its
+contents. USER RULING: deletion belongs in a script, "because otherwise someone will end
+up wiping the fs for all we know."
+
+- `rjit clean` surveys and deletes NOTHING. It prints every path with its size, its
+  class, and what it is. Run it before you form an opinion about a directory.
+- `rjit clean --drop` drops the zig cache. `rjit clean --bin` drops declared build
+  artifacts under `zig-out`, sparing anything a running dev host has open.
+- Only paths declared `regenerable` in `cli/dev/deletable.ts` are ever deleted. An
+  undeclared path is treated as authored work and KEPT — so forgetting to declare a new
+  artifact costs a kept file, never a lost one. Adding an artifact means adding it there.
+
+**`zig-out` is build output only.** Anything that cannot be rebuilt from source does not
+belong in it. Authored editor data — maps, world globals, colour and asset libraries —
+lives in `userdata/`, a SIBLING of `zig-out`, so no cleanup aimed at build output can
+reach it however broadly it is written (`cart/editor/data/editorDataRoot.ts`).
+
+If you must delete something by hand anyway: look INSIDE it first (`ls -la`, and follow
+symlinks), say out loud what each entry is, and check whether a running process holds it.
+
+---
+
 # HARD RULE: THE ESCAPE HATCH IS THE SPEC
 
 **When you reach for node, bun, or python to inspect or compute something about this

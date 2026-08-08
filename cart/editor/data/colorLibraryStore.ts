@@ -9,10 +9,11 @@
 // palette/recents change. Colors are stored as OKLCH triples — the spine's own
 // working space — so a round-trip never quantizes through hex.
 import { mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { EDITOR_DATA_ROOT } from './editorDataRoot';
 import { textBytes } from '../../../runtime/workspace/lumps';
 import type { OklchColor } from '../../../runtime/paint/colors';
 
-const COLOR_LIBRARY_DIR = 'zig-out/game/editor';
+const COLOR_LIBRARY_DIR = EDITOR_DATA_ROOT;
 export const COLOR_LIBRARY_FILE = `${COLOR_LIBRARY_DIR}/color-library.json`;
 
 export type ColorLibrarySave = {

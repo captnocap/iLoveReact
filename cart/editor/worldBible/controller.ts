@@ -2,6 +2,7 @@
 // general EditorState blob: canonical source, divergent drafts, and frozen
 // write proposals have a stricter lifecycle than ordinary view persistence.
 import { finalizePendingRecovery, listDir, mkdir, readFile, removeFileDurable, restoreFileBytesAtomicIfUnchanged, writeFileBytesAtomic, writeFileBytesAtomicIfUnchanged } from '../../../runtime/hooks/fs';
+import { EDITOR_DATA_ROOT } from '../data/editorDataRoot';
 import { textBytes } from '../../../runtime/workspace/lumps';
 import {
   KNOWLEDGE_KINDS,
@@ -34,7 +35,7 @@ import {
 } from './session';
 
 export const WORLD_KNOWLEDGE_ROOT = 'world/knowledge';
-export const WORLD_BIBLE_RECOVERY_ROOT = 'zig-out/game/editor/world-bible-drafts';
+export const WORLD_BIBLE_RECOVERY_ROOT = `${EDITOR_DATA_ROOT}/world-bible-drafts`;
 export const WORLD_BIBLE_RECOVERY_FILE = `${WORLD_BIBLE_RECOVERY_ROOT}/session.json`;
 
 export type WorldBibleMode = 'read' | 'edit' | 'review';

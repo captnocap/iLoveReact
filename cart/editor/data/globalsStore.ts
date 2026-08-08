@@ -1,18 +1,19 @@
 // editor/data/globalsStore.ts — on-disk persistence for GAME-WIDE globals
 // (GLOBALS req_2770), intentionally outside named map documents:
 //
-//   zig-out/game/editor/maps/<stem>/...     — per-map painting + placements
-//   zig-out/game/editor/world-globals.json  — shared physics/player tunables
+//   userdata/editor/maps/<stem>/...     — per-map painting + placements
+//   userdata/editor/world-globals.json  — shared physics/player tunables
 //
 // Per-concern files, never one blob (V20). With autosave enabled, changes use
 // the same debounced writer as worldStore. Explicit Save always remains valid;
 // disabling autosave cancels only the pending background write.
 // Loads happen once at boot (persistView.loadPersistedState).
 import { mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { EDITOR_DATA_ROOT, migrateLegacyEditorData } from './editorDataRoot';
 import { textBytes } from '../../../runtime/workspace/lumps';
 import { defaultWorldGlobals, revivePhysicsGlobals, type WorldGlobals } from './globals';
 
-const GLOBALS_SAVE_DIR = 'zig-out/game/editor';
+const GLOBALS_SAVE_DIR = EDITOR_DATA_ROOT;
 export const GLOBALS_SAVE_FILE = `${GLOBALS_SAVE_DIR}/world-globals.json`;
 
 export type GlobalsSave = {
@@ -23,6 +24,7 @@ export type GlobalsSave = {
 /** Read the globals save. Null = no file yet (fresh world = game defaults) or
  *  unreadable — a malformed file is reported LOUD and left untouched. */
 export function loadGlobalsSave(): WorldGlobals | null {
+  migrateLegacyEditorData();
   const text = readFile(GLOBALS_SAVE_FILE);
   if (!text) return null;
   try {

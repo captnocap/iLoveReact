@@ -1,4 +1,5 @@
 import { useMemo, useRef } from 'react';
+import { EDITOR_DATA_ROOT } from '../data/editorDataRoot';
 import { C } from '../workspace.cls';
 import WorldViewport from '../world/WorldViewport';
 import { worldToolFor } from '../world/worldTool';
@@ -18,7 +19,7 @@ import type { FloraPaintSample, WorldFloraBrush, WorldFloraPatch } from '../worl
 // this path when it lands.
 // Exported: the playtest tab (GLOBALS req_2770) mounts the SAME world file so
 // what you walk is what you authored.
-export const EDITOR_GAME_FILE = 'zig-out/game/editor/world.gamefile';
+export const EDITOR_GAME_FILE = `${EDITOR_DATA_ROOT}/world.gamefile`;
 export const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 
 // The world document's surface: the editor's thin viewport over host doors.
@@ -30,6 +31,8 @@ export const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 // click drops one so the place→live-render loop is visible. The active FLOOR
 // comes from the action bar's one real floor control (req_2485).
 export default function WorldEditorSurface(props: {
+  active: boolean;
+  interactionLocked: boolean;
   mapOverviewOpen: boolean;
   onToggleMap: () => void;
   paintActive: boolean;
@@ -64,8 +67,8 @@ export default function WorldEditorSurface(props: {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
   // Build bar's pick (req_2563 Phase 2), defaulting to a concrete floor.
-  const tool = props.paintActive ? 'select' : worldToolFor(props.activeCommandId);
-  const armed: ArmedPiece = tool === 'place' && props.armedPieceId
+  const tool = props.interactionLocked || props.paintActive ? 'select' : worldToolFor(props.activeCommandId);
+  const armed: ArmedPiece = !props.interactionLocked && tool === 'place' && props.armedPieceId
     ? { pieceId: props.armedPieceId, yawDegrees: props.armedYawDegrees }
     : null;
 
@@ -84,8 +87,10 @@ export default function WorldEditorSurface(props: {
   }, [props.pieces, props.floor, props.wallsDown]);
 
   return (
-    <C.HW_WorldEditorSurface>
+    <C.HW_WorldEditorSurface style={{ display: props.active ? 'flex' : 'none' }}>
       <WorldViewport
+        active={props.active}
+        interactionLocked={props.interactionLocked}
         mapOverviewOpen={props.mapOverviewOpen}
         onToggleMap={props.onToggleMap}
         gameFile={EDITOR_GAME_FILE}
@@ -106,7 +111,7 @@ export default function WorldEditorSurface(props: {
         onPlace={props.onPlace}
         onMove={props.onMove}
         floor={props.floor}
-        paintActive={props.paintActive}
+        paintActive={!props.interactionLocked && props.paintActive}
         mapPaint={props.mapPaint}
         mapStem={props.mapStem}
         mapZones={props.mapZones}

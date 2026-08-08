@@ -5154,63 +5154,52 @@ ${entry}
     if (code !== 0) out(`[clean] zig cache drop FAILED (exit ${code})`);
   }
 
-  // cli/commands/clean.ts
-  async function run8(argv) {
-    let drop = false;
-    for (const arg of argv) {
-      if (arg === "--drop" || arg === "--all") {
-        drop = true;
-      } else {
-        err(`[clean] unknown arg: ${arg}`);
-        err("Usage: rjit clean [--drop]");
-        return 1;
-      }
-    }
-    const rjitHome = __env("RJIT_HOME") || __cwd();
-    const devCacheDomains = [".cache/zig/dev-core", ".cache/zig/dev-scene3d", ".cache/zig/dev-game"];
-    if (drop) {
-      if (fsExists(`${rjitHome}/.zig-cache`)) {
-        out("[clean] dropping the ENTIRE local zig cache (next build is fully cold)...");
-        const code = dropZigCache(rjitHome);
-        if (code !== 0) {
-          err(`[clean] failed (exit ${code})`);
-          return code || 1;
-        }
-      }
-      for (const domain of devCacheDomains) {
-        const path = `${rjitHome}/${domain}`;
-        if (!fsExists(path)) continue;
-        out(`[clean] dropping whole ${domain} domain...`);
-        const removed = spawnSync("rm", ["-rf", "--", path]);
-        if (removed.code !== 0) {
-          err(`[clean] failed to drop ${domain} (exit ${removed.code})`);
-          return removed.code || 1;
-        }
-      }
-    } else {
-      const maxGb = resolveCacheMaxGb();
-      const budget = maxGb > 0 ? `${maxGb}GB` : "disabled";
-      out(`[clean] auto-drop budget: ${budget} (default ${DEFAULT_CACHE_MAX_GB}GB, RJIT_CACHE_MAX_GB overrides)`);
-      out("[clean] run `rjit clean --drop` to drop the cache now");
-    }
-    reportSize(rjitHome, ".zig-cache");
-    for (const domain of devCacheDomains) reportSize(rjitHome, domain);
-    reportSize(rjitHome, "zig-out");
-    return 0;
+  // cli/dev/deletable.ts
+  var ZIG_OUT_CONTENTS = {
+    bin: { kind: "regenerable", what: "compiled cart binaries \u2014 rebuilt by `rjit ship` / `rjit dev`" },
+    "dev-modules": { kind: "regenerable", what: "hot-loadable dev host modules \u2014 rebuilt by `rjit dev`" },
+    lib: { kind: "external", what: "symlinks into external runtimes (LM Studio llama.cpp); build.zig links libllama_ffi.so from here" },
+    game: { kind: "authored", what: "BAKE OUTPUT + historically the authored editor maps \u2014 inspect before touching" },
+    tools: { kind: "regenerable", what: "built helper tools" },
+    tests: { kind: "regenerable", what: "built test binaries" },
+    manifest: { kind: "regenerable", what: "build manifests" }
+  };
+  function classifyOutputChild(name) {
+    return ZIG_OUT_CONTENTS[name] ?? { kind: "unknown", what: "not a declared build artifact \u2014 treated as authored work" };
   }
-  function reportSize(rjitHome, rel3) {
-    const path = `${rjitHome}/${rel3}`;
-    if (!fsExists(path)) return;
+  function humanSize(path) {
     const du = spawnSync("du", ["-sh", path]);
-    const size = du.stdout.trim().split("	")[0] ?? "?";
-    out(`[clean] ${rel3}: ${size}`);
+    return du.code === 0 ? du.stdout.trim().split("	")[0] ?? "?" : "?";
   }
-
-  // cli/commands/orphans.ts
-  var orphans_exports = {};
-  __export(orphans_exports, {
-    run: () => run9
-  });
+  function surveyOutputDir(rjitHome, rel3) {
+    const root = `${rjitHome}/${rel3}`;
+    if (!fsExists(root)) return [];
+    return fsList(root).map((name) => {
+      const { kind, what } = classifyOutputChild(name);
+      return {
+        path: `${rel3}/${name}`,
+        kind,
+        what,
+        size: humanSize(`${root}/${name}`),
+        safeToDelete: kind === "regenerable"
+      };
+    });
+  }
+  function announce(verdicts, emit) {
+    if (verdicts.length === 0) {
+      emit("[clean] nothing to survey");
+      return;
+    }
+    const width = Math.max(...verdicts.map((row) => row.path.length));
+    for (const row of verdicts) {
+      const action = row.safeToDelete ? "DELETE" : "KEEP  ";
+      emit(`[clean] ${action} ${row.path.padEnd(width)}  ${row.size.padStart(6)}  ${row.kind} \u2014 ${row.what}`);
+    }
+    const kept = verdicts.filter((row) => !row.safeToDelete);
+    if (kept.length > 0) {
+      emit(`[clean] ${kept.length} path(s) KEPT: only declared build artifacts are ever deleted. Remove anything else by hand, after looking inside it.`);
+    }
+  }
 
   // cli/dev/orphan-hosts.ts
   var DEV_HOST_BINARY = "zig-out/bin/reactjit-dev";
@@ -5605,7 +5594,101 @@ done
     return bytes;
   }
 
+  // cli/commands/clean.ts
+  async function run8(argv) {
+    let drop = false;
+    let bin = false;
+    for (const arg of argv) {
+      if (arg === "--drop" || arg === "--all") {
+        drop = true;
+      } else if (arg === "--bin") {
+        bin = true;
+      } else {
+        err(`[clean] unknown arg: ${arg}`);
+        err("Usage: rjit clean [--drop] [--bin]");
+        return 1;
+      }
+    }
+    const rjitHome = __env("RJIT_HOME") || __cwd();
+    const devCacheDomains = [".cache/zig/dev-core", ".cache/zig/dev-scene3d", ".cache/zig/dev-game"];
+    if (drop) {
+      if (fsExists(`${rjitHome}/.zig-cache`)) {
+        out("[clean] dropping the ENTIRE local zig cache (next build is fully cold)...");
+        const code = dropZigCache(rjitHome);
+        if (code !== 0) {
+          err(`[clean] failed (exit ${code})`);
+          return code || 1;
+        }
+      }
+      for (const domain of devCacheDomains) {
+        const path = `${rjitHome}/${domain}`;
+        if (!fsExists(path)) continue;
+        out(`[clean] dropping whole ${domain} domain...`);
+        const removed = spawnSync("rm", ["-rf", "--", path]);
+        if (removed.code !== 0) {
+          err(`[clean] failed to drop ${domain} (exit ${removed.code})`);
+          return removed.code || 1;
+        }
+      }
+    } else {
+      const maxGb = resolveCacheMaxGb();
+      const budget = maxGb > 0 ? `${maxGb}GB` : "disabled";
+      out(`[clean] auto-drop budget: ${budget} (default ${DEFAULT_CACHE_MAX_GB}GB, RJIT_CACHE_MAX_GB overrides)`);
+      out("[clean] run `rjit clean --drop` to drop the cache now");
+    }
+    const verdicts = surveyOutputDir(rjitHome, "zig-out");
+    announce(verdicts, out);
+    if (bin) {
+      const running = scanDevHosts2(rjitHome, DEV_SOCKET_PATH);
+      const live = running.live.map((host) => host.pid);
+      if (live.length > 0) {
+        out(`[clean] ${live.length} dev host(s) still running (pid ${live.join(", ")}) \u2014 keeping zig-out/dev-modules and zig-out/bin/reactjit-dev`);
+      }
+      for (const row of verdicts) {
+        if (!row.safeToDelete) continue;
+        if (live.length > 0 && (row.path === "zig-out/dev-modules" || row.path === "zig-out/bin")) {
+          const spared = dropBuiltBinaries(rjitHome, row.path, live.length > 0);
+          out(`[clean] ${row.path}: removed ${spared.removed}, kept ${spared.kept} in use`);
+          continue;
+        }
+        out(`[clean] removing ${row.path} (${row.size}, ${row.what})`);
+        spawnSync("rm", ["-rf", "--", `${rjitHome}/${row.path}`]);
+      }
+    }
+    reportSize(rjitHome, ".zig-cache");
+    for (const domain of devCacheDomains) reportSize(rjitHome, domain);
+    reportSize(rjitHome, "zig-out");
+    return 0;
+  }
+  function dropBuiltBinaries(rjitHome, rel3, hostsRunning) {
+    const root = `${rjitHome}/${rel3}`;
+    if (!fsExists(root)) return { removed: 0, kept: 0 };
+    let removed = 0;
+    let kept = 0;
+    for (const name of fsList(root)) {
+      const isLiveHost = hostsRunning && (name === "reactjit-dev" || name === "reactjit-dev-tui" || rel3 === "zig-out/dev-modules" && (name === "scene3d" || name === "game" || name === "records"));
+      if (isLiveHost) {
+        kept += 1;
+        continue;
+      }
+      spawnSync("rm", ["-rf", "--", `${root}/${name}`]);
+      removed += 1;
+    }
+    return { removed, kept };
+  }
+  function reportSize(rjitHome, rel3) {
+    const path = `${rjitHome}/${rel3}`;
+    if (!fsExists(path)) return;
+    const du = spawnSync("du", ["-sh", path]);
+    const size = du.stdout.trim().split("	")[0] ?? "?";
+    out(`[clean] ${rel3}: ${size}`);
+  }
+
   // cli/commands/orphans.ts
+  var orphans_exports = {};
+  __export(orphans_exports, {
+    run: () => run9
+  });
   function report(scan2) {
     out(`[orphans] ${scan2.hosts.length} dev host${scan2.hosts.length === 1 ? "" : "s"} running \xB7 socket owner ${scan2.socketOwner ?? "none"}`);
     for (const host of scan2.live) {
