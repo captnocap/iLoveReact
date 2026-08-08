@@ -103,6 +103,34 @@ symlinks), say out loud what each entry is, and check whether a running process 
 
 ---
 
+# HARD RULE: WHAT PUBLISHES IS DECLARED, NOT DISCOVERED
+
+**Before adding anything generated, binary, captured, or one-off to a commit, run
+`tools/rjit repo`.** The trees this project publishes are DECLARED in
+`cli/dev/publishable.ts`; anything tracked that no rule covers is reported and needs a
+decision. Adding a rule there is the ONLY way something becomes publishable.
+
+`.gitignore` is the blocklist half and is permanently one incident behind — every line in it
+is the scar of an artifact that already reached a commit. It grew to 429 lines that way
+while the repo published 586MB across 15,561 files, including 86MB of 3D model JSON this
+file has forbidden the whole time. **Do not fix a stray file by appending a `.gitignore`
+line.** Classify it, then use the verb:
+
+- `tools/rjit repo` surveys and changes NOTHING. `--candidates` also lists
+  untracked-and-unignored paths — the ones a `git add -A` would publish next.
+- `tools/rjit repo archive <tree>` zips to `archive/<tree>.zip`, VERIFIES the zip, then
+  untracks. For frozen eras you may want to read again.
+- `tools/rjit repo unpublish <path>` untracks + ignores. For anything regenerable.
+
+Neither verb deletes: the only git command run against a tree is `git rm --cached`, so files
+stay on disk and a wrong call costs a `git checkout`, never a file. **Never `rm -rf` a tree
+to clean the repo.** Refusals (`source`, `undeclared`, `BLOCKED`) are information — a
+BLOCKED path stays published until the capability that regenerates it exists, because
+banning an escape hatch without providing the replacement is how a big clone becomes a
+broken one. Full procedure: the `publish-guard` skill. (`tidy` is RETIRED.)
+
+---
+
 # HARD RULE: THE ESCAPE HATCH IS THE SPEC
 
 **When you reach for node, bun, or python to inspect or compute something about this
