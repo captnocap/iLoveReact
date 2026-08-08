@@ -18,11 +18,16 @@ declare global {
   function __mesh_set_face_materials(...args: unknown[]): unknown;
   function __mesh_set_face_semantics(...args: unknown[]): unknown;
   function __mesh_semantic_assign(...args: unknown[]): unknown;
+  function __mesh_edge_semantic_assign(...args: unknown[]): unknown;
+  function __mesh_edge_semantic_select(...args: unknown[]): unknown;
   function __mesh_semantic_extrude_intent(...args: unknown[]): unknown;
   function __mesh_semantic_bootstrap_axes(...args: unknown[]): unknown;
   function __mesh_semantic_name_primitive(...args: unknown[]): unknown;
   function __mesh_semantic_state(...args: unknown[]): unknown;
+  function __mesh_semantics_restore_from_rjmd(...args: unknown[]): unknown;
+  function __mesh_semantic_region_edit(...args: unknown[]): unknown;
   function __mesh_select_query(...args: unknown[]): unknown;
+  function __mesh_select_audit(...args: unknown[]): unknown;
   function __mesh_texture_slot_assign(...args: unknown[]): unknown;
   function __mesh_texture_slot_clear(...args: unknown[]): unknown;
   function __mesh_texture_slot_remove(...args: unknown[]): unknown;
@@ -33,6 +38,7 @@ declare global {
   function __model_orbit_lock(...args: unknown[]): unknown;
   function __model_cam_pose(...args: unknown[]): unknown;
   function __model_cam_set_pose(...args: unknown[]): unknown;
+  function __model_shot_offscreen(...args: unknown[]): unknown;
   function __model_orbit_frame(...args: unknown[]): unknown;
   function __mesh_live_frame(...args: unknown[]): unknown;
   function __model_bd_gizmo_set(...args: unknown[]): unknown;
@@ -51,6 +57,7 @@ declare global {
   function __mesh_gizmo_tool(...args: unknown[]): unknown;
   function __mesh_gizmo_nudge(...args: unknown[]): unknown;
   function __mesh_gizmo_scale_by(...args: unknown[]): unknown;
+  function __mesh_align_loop(...args: unknown[]): unknown;
   function __mesh_transform_translate(...args: unknown[]): unknown;
   function __mesh_transform_scale_axis(...args: unknown[]): unknown;
   function __mesh_transform_rotate_axis(...args: unknown[]): unknown;
@@ -67,6 +74,7 @@ declare global {
   function __mesh_bevel_preview(...args: unknown[]): unknown;
   function __mesh_bevel_end(...args: unknown[]): unknown;
   function __mesh_lc_begin(...args: unknown[]): unknown;
+  function __mesh_topo_refusal(...args: unknown[]): unknown;
   function __mesh_lc_preview(...args: unknown[]): unknown;
   function __mesh_lc_end(...args: unknown[]): unknown;
   function __mesh_lc_state(...args: unknown[]): unknown;
@@ -83,6 +91,8 @@ declare global {
   function __mesh_history_log(...args: unknown[]): unknown;
   function __mesh_action_source(...args: unknown[]): unknown;
   function __mesh_action_document(...args: unknown[]): unknown;
+  function __mesh_session_select(...args: unknown[]): unknown;
+  function __mesh_session_resident(...args: unknown[]): unknown;
   function __mesh_action_drain(...args: unknown[]): unknown;
   function __mesh_journal_note(...args: unknown[]): unknown;
   function __mesh_journal_checkpoint(...args: unknown[]): unknown;
@@ -139,6 +149,8 @@ declare global {
   function __mesh_retopo_guide_write(...args: unknown[]): unknown;
   function __mesh_retopo_guide_load(...args: unknown[]): unknown;
   function __mesh_follow_patch(...args: unknown[]): unknown;
+  function __mesh_walk(...args: unknown[]): unknown;
+  function __mesh_walk_apply(...args: unknown[]): unknown;
   function __mesh_follow_action_drain(...args: unknown[]): unknown;
   function __mesh_edit_guard(...args: unknown[]): unknown;
   function __mesh_edit_guard_resolve(...args: unknown[]): unknown;
@@ -181,6 +193,7 @@ declare global {
   function __model_mesh_write(...args: unknown[]): unknown;
   function __model_painted_mesh_write(...args: unknown[]): unknown;
   function __model_meshdoc_write(...args: unknown[]): unknown;
+  function __character_rig_session(...args: unknown[]): unknown;
   function __model_atlas_base(...args: unknown[]): unknown;
   function __model_atlas_apply(...args: unknown[]): unknown;
   function __model_paint_program_read(...args: unknown[]): unknown;
@@ -328,6 +341,9 @@ declare global {
   function __fs_config_dir(...args: unknown[]): unknown;
   function __fs_write_bytes(...args: unknown[]): unknown;
   function __fs_write_bytes_atomic(...args: unknown[]): unknown;
+  function __fs_directory_fingerprint(...args: unknown[]): unknown;
+  function __fs_clone_directory_exact(...args: unknown[]): unknown;
+  function __fs_install_directory_atomic(...args: unknown[]): unknown;
   function __fs_write_bytes_atomic_if_unchanged(...args: unknown[]): unknown;
   function __fs_write_base64_atomic(...args: unknown[]): unknown;
   function __fs_scandir(...args: unknown[]): unknown;
@@ -608,6 +624,7 @@ declare global {
   function __pose_estimate_async(...args: unknown[]): unknown;
   function __pose_estimate_image(...args: unknown[]): unknown;
   function __pose_camera_devices(...args: unknown[]): unknown;
+  function __capture_session(...args: unknown[]): unknown;
 
   // pg (framework/v8_bindings_pg.zig)
   function __pg_connect(...args: unknown[]): unknown;
@@ -886,6 +903,9 @@ declare global {
   function __map_inspect_file(...args: unknown[]): unknown;
   function __map_set_autosave_file(...args: unknown[]): unknown;
   function __map_load_file(...args: unknown[]): unknown;
+  function __map_prepare_file(...args: unknown[]): unknown;
+  function __map_prepare_status(...args: unknown[]): unknown;
+  function __map_commit_prepared(...args: unknown[]): unknown;
   function __map_stroke_begin(...args: unknown[]): unknown;
   function __map_stroke_move(...args: unknown[]): unknown;
   function __map_stroke_end(...args: unknown[]): unknown;
@@ -966,11 +986,9 @@ declare global {
   function __compiled_world_ground_hit(...args: unknown[]): unknown;
   function __compiled_world_set_paint_mode(...args: unknown[]): unknown;
   function __compiled_world_set_resident_meshes(...args: unknown[]): unknown;
-  function __compiled_world_set_player_model(...args: unknown[]): unknown;
-  function __compiled_world_set_player_skin(...args: unknown[]): unknown;
-  function __compiled_world_set_player_animation(...args: unknown[]): unknown;
-  function __compiled_world_set_player_live_pose(...args: unknown[]): unknown;
-  function __compiled_world_clear_player_live_pose(...args: unknown[]): unknown;
+  function __compiled_world_set_player_character(...args: unknown[]): unknown;
+  function __compiled_world_npc_character_session(...args: unknown[]): unknown;
+  function __compiled_world_set_player_pose(...args: unknown[]): unknown;
   function __compiled_world_window(...args: unknown[]): unknown;
   function __compiled_world_window_close(...args: unknown[]): unknown;
   function __compiled_world_window_status(...args: unknown[]): unknown;

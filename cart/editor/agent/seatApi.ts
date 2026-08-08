@@ -1456,6 +1456,16 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
    *  two in-plane axes, which is addressable from a face selector. Authored grouping
    *  carries through, so each crossed face becomes two faces in the SAME semantic
    *  region — a cut never creates naming debt. */
+  /** The host's own account of why the last indexed topology session refused to open
+   *  (req_4114). Loop cut, Basic Cut, bevel, merge-faces and tris-to-quads all failed as
+   *  a bare null, so every one of them reported the seat's GUESS — "it needs a face
+   *  selection" — for causes that had nothing to do with the selection. Refusals are
+   *  data: say what the host actually said. */
+  const topoRefusal = (): string => {
+    const raw = host.__mesh_topo_refusal?.();
+    return typeof raw === 'string' ? raw.trim() : '';
+  };
+  const withTopoRefusal = (fallback: string): string => topoRefusal() || fallback;
   const loopCut = (direction: number, cuts: number, offsetFraction: number, basic = false): TopologyReceipt | null => {
     if (![0, 1].includes(direction) || !Number.isInteger(cuts) || cuts < 1 || !Number.isFinite(offsetFraction) || offsetFraction < 0 || offsetFraction > 1) return null;
     if (parseJson<{ ok?: number }>(host.__mesh_lc_begin?.(basic ? 1 : 0))?.ok !== 1) return null;
@@ -1884,6 +1894,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       packageInSync: saved ? saved.inSync === true : null,
       packageDirty: saved ? saved.dirty === true : null,
       semanticHealthy: diagnostics ? (diagnostics as Record<string, unknown>).status === 'healthy' : null,
+      rig: percept?.rig ?? null,
       attest: oracleSession?.attest ?? {},
     };
   };
@@ -2067,7 +2078,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
-    undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction,
+    undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
     measure, stats, align, oracle, walk, setPosition,
   };
@@ -2400,7 +2411,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'bevel': {
         const targetSides = args.targetSides == null ? undefined : Number(args.targetSides);
         const result = seat.bevel(Number(args.width ?? 0), targetSides);
-        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : 'select one filled convex face, one bevelable edge/vertex, or one complete 3+ edge open boundary loop, then use a valid width and targetSides');
+        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one filled convex face, one bevelable edge/vertex, or one complete 3+ edge open boundary loop, then use a valid width and targetSides'));
       }
       case 'inset': {
         const result = seat.inset(
@@ -2423,7 +2434,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }
       case 'redo': { const result = seat.redo(); return seat.reply('redo', !!result, result ?? undefined, result ? undefined : 'nothing to redo'); }
       case 'delete': { const result = seat.deleteSelection(); return seat.reply('delete', !!result, result ?? undefined, result ? undefined : 'nothing selected to delete'); }
-      case 'merge-faces': { const result = seat.mergeFaces(); return seat.reply('merge-faces', !!result, result ?? undefined, result ? undefined : 'Merge Faces joins exactly two triangles across a shared diagonal (a quadifier, not an n-gon builder) — to push a multi-face patch, select it and extrude: a region selection extrudes as one shell'); }
+      case 'merge-faces': { const result = seat.mergeFaces(); return seat.reply('merge-faces', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('Merge Faces joins exactly two triangles across a shared diagonal (a quadifier, not an n-gon builder) — to push a multi-face patch, select it and extrude: a region selection extrudes as one shell')); }
       case 'weld': { const result = seat.weld(); return seat.reply('weld', !!result, result ?? undefined, result ? undefined : 'select at least two vertices or one edge'); }
       case 'weld-pairs': {
         const result = seat.weldPairs(args.pairs, args.maxDistance === undefined ? undefined : Number(args.maxDistance));
@@ -2470,15 +2481,15 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'cut': {
         const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5));
-        return seat.reply('cut', !!result, result ?? undefined, result ? undefined : 'loop cut rejected — it needs a face selection to cut across (note: cut PROPAGATES the edge ring around the whole body; basic-cut subdivides only the selected faces)');
+        return seat.reply('cut', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('loop cut rejected — it needs a face selection to cut across (note: cut PROPAGATES the edge ring around the whole body; basic-cut subdivides only the selected faces)'));
       }
       case 'basic-cut': {
         const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5), true);
-        return seat.reply('basic-cut', !!result, result ?? undefined, result ? undefined : 'basic cut rejected — select one or more faces (basic-cut subdivides ONLY the selection; use cut when you want the ring to propagate around the body)');
+        return seat.reply('basic-cut', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('basic cut rejected — select one or more faces (basic-cut subdivides ONLY the selection; use cut when you want the ring to propagate around the body)'));
       }
       case 'tris-to-quads': {
         const result = seat.trisToQuads();
-        return seat.reply('tris-to-quads', !!result, result ?? undefined, result ? undefined : 'no compatible triangle pairs were available');
+        return seat.reply('tris-to-quads', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('no compatible triangle pairs were available'));
       }
       case 'mirror-quads': {
         const axisRaw = args.axis;

@@ -2,8 +2,9 @@
 //!
 //! Rendering still consumes non-indexed triangles. Editing does not: vertices have
 //! stable numeric identities and faces own ordered vertex-id loops plus per-corner
-//! UVs. Position tolerance is used exactly once, while importing a triangle soup;
-//! every operation after that resolves adjacency by ids.
+//! UVs. Legacy soup import uses position tolerance exactly once; RJMD v5 hydration
+//! supplies explicit logical ids and never position-welds. Every later operation
+//! resolves adjacency by ids.
 
 const std = @import("std");
 const mesh_semantics = @import("mesh_semantics.zig");
@@ -28,6 +29,94 @@ const MERGE_FACE_PLANE_REL_EPS: f32 = 0.00001;
 
 pub const Vec2 = [2]f32;
 pub const Vec3 = [3]f32;
+
+pub const PartitionedLogicalCorners = struct {
+    rows: []u32,
+    vertex_count: u32,
+
+    pub fn deinit(result: *PartitionedLogicalCorners, allocator: std.mem.Allocator) void {
+        allocator.free(result.rows);
+        result.* = undefined;
+    }
+};
+
+/// Re-key durable render-corner identity after authored faces change Outliner
+/// ownership. Logical ids are shared only by corners that retain BOTH the same
+/// prior identity and the same part. This preserves deliberate same-part seams,
+/// while a detach splits the coincident addresses on opposite sides of its new
+/// part boundary instead of letting a later transform bleed through the seam.
+pub fn partitionLogicalCornersByPart(
+    allocator: std.mem.Allocator,
+    logical_rows: []const u32,
+    face_parts: []const u32,
+    logical_vertex_count: u32,
+) !PartitionedLogicalCorners {
+    if (logical_rows.len == 0 or logical_vertex_count == 0 or logical_rows.len != face_parts.len * 3)
+        return error.InvalidLogicalTopology;
+    const LogicalPart = struct { logical: u32, part: u32 };
+    var ids = std.AutoHashMapUnmanaged(LogicalPart, u32).empty;
+    defer ids.deinit(allocator);
+    const rows = try allocator.alloc(u32, logical_rows.len);
+    errdefer allocator.free(rows);
+    var next: u32 = 0;
+    for (logical_rows, 0..) |logical, corner| {
+        if (logical >= logical_vertex_count) return error.InvalidLogicalTopology;
+        const entry = try ids.getOrPut(allocator, .{
+            .logical = logical,
+            .part = face_parts[corner / 3],
+        });
+        if (!entry.found_existing) {
+            entry.value_ptr.* = next;
+            next += 1;
+        }
+        rows[corner] = entry.value_ptr.*;
+    }
+    return .{ .rows = rows, .vertex_count = next };
+}
+
+fn explicitLogicalRowsValid(
+    allocator: std.mem.Allocator,
+    interleaved: []const f32,
+    rows: []const u32,
+    logical_vertex_count: u32,
+) bool {
+    if (logical_vertex_count == 0 or interleaved.len != rows.len * 8 or rows.len == 0) return false;
+    var min = [3]f64{ std.math.inf(f64), std.math.inf(f64), std.math.inf(f64) };
+    var max = [3]f64{ -std.math.inf(f64), -std.math.inf(f64), -std.math.inf(f64) };
+    for (rows, 0..) |id, corner| {
+        if (id >= logical_vertex_count) return false;
+        const at = corner * 8;
+        for (0..3) |axis| {
+            const value = interleaved[at + axis];
+            if (!std.math.isFinite(value)) return false;
+            const wide: f64 = value;
+            min[axis] = @min(min[axis], wide);
+            max[axis] = @max(max[axis], wide);
+        }
+    }
+    const dx = max[0] - min[0];
+    const dy = max[1] - min[1];
+    const dz = max[2] - min[2];
+    const tolerance = 0.000001 * @max(@as(f64, 1), @sqrt(dx * dx + dy * dy + dz * dz));
+    const tolerance_sq = tolerance * tolerance;
+    var first_positions = std.AutoHashMapUnmanaged(u32, Vec3).empty;
+    defer first_positions.deinit(allocator);
+    for (rows, 0..) |id, corner| {
+        const at = corner * 8;
+        const position = Vec3{ interleaved[at], interleaved[at + 1], interleaved[at + 2] };
+        const entry = first_positions.getOrPut(allocator, id) catch return false;
+        if (!entry.found_existing) {
+            entry.value_ptr.* = position;
+            continue;
+        }
+        const prior = entry.value_ptr.*;
+        const px: f64 = @as(f64, position[0]) - @as(f64, prior[0]);
+        const py: f64 = @as(f64, position[1]) - @as(f64, prior[1]);
+        const pz: f64 = @as(f64, position[2]) - @as(f64, prior[2]);
+        if (px * px + py * py + pz * pz > tolerance_sq) return false;
+    }
+    return true;
+}
 
 /// One source of truth for choosing between competing triangle pairings.
 /// Cardinality is always maximized first. These values only order the augmenting
@@ -318,6 +407,41 @@ pub const BoundaryChamferSelection = struct {
     max_width: f32,
 };
 
+/// One filled authored face can become a welded regular N-gon center plus a
+/// deterministic transition ring. Width is the radial gap between the largest
+/// regular polygon that fits the source face and the generated center polygon.
+/// The center keeps the source face's authored group so the caller can select it
+/// immediately and hand it to Extrude.
+pub const FacePolygonTuning = struct {
+    pub const minimum_target_sides: usize = 3;
+    pub const maximum_target_sides: usize = 256;
+    pub const default_target_sides: usize = 8;
+    pub const minimum_width_m: f32 = BevelTuning.minimum_width_m;
+    pub const default_width_fraction: f32 = 0.25;
+    pub const maximum_width_fraction: f32 = 0.80;
+    pub const planar_epsilon_m: f32 = IMPORT_WELD_EPS * 2.0;
+    pub const barycentric_epsilon: f32 = 0.0001;
+};
+
+pub const FacePolygonSelection = struct {
+    face_id: u32,
+    selection_triangle: u32,
+    sides_before: u32,
+    default_target_sides: u32,
+    minimum_target_sides: u32,
+    maximum_target_sides: u32,
+    default_width: f32,
+    max_width: f32,
+};
+
+const FacePolygonFrame = struct {
+    center: Vec3,
+    normal: Vec3,
+    u: Vec3,
+    v: Vec3,
+    inradius: f32,
+};
+
 pub const BevelKind = enum { vertex, edge };
 pub const BevelTarget = union(BevelKind) {
     vertex: u32,
@@ -468,6 +592,9 @@ pub const Mesh = struct {
     /// polygon fan cannot reconstruct this state.
     render_uvs: std.ArrayListUnmanaged([3]Vec2) = .empty,
     next_group: u32 = 0,
+    /// Distinguishes an authoritative RJMD-v5 import from a legacy soup whose
+    /// position weld happened to mint the same numeric vertex ids.
+    has_explicit_logical_topology: bool = false,
 
     pub fn deinit(mesh: *Mesh) void {
         for (mesh.faces.items) |*face| face.deinit(mesh.allocator);
@@ -479,7 +606,11 @@ pub const Mesh = struct {
     }
 
     pub fn clone(mesh: *const Mesh) !Mesh {
-        var out = Mesh{ .allocator = mesh.allocator, .next_group = mesh.next_group };
+        var out = Mesh{
+            .allocator = mesh.allocator,
+            .next_group = mesh.next_group,
+            .has_explicit_logical_topology = mesh.has_explicit_logical_topology,
+        };
         errdefer out.deinit();
         try out.vertices.appendSlice(mesh.allocator, mesh.vertices.items);
         try out.render_triangles.appendSlice(mesh.allocator, mesh.render_triangles.items);
@@ -556,6 +687,26 @@ pub const Mesh = struct {
                 const base = (triangle * 3 + corner) * 8;
                 if (uv[0] != interleaved[base + 6] or uv[1] != interleaved[base + 7]) return false;
             }
+        }
+        return true;
+    }
+
+    /// Exact cache guard for the RJMD-v5 corner map. Numeric ids alone are not
+    /// sufficient: a legacy position weld can coincidentally produce the same row.
+    pub fn residentLogicalTopologyMatches(
+        mesh: *const Mesh,
+        rows: ?[]const u32,
+        logical_vertex_count: u32,
+    ) bool {
+        const logical_rows = rows orelse return !mesh.has_explicit_logical_topology;
+        if (!mesh.has_explicit_logical_topology or
+            logical_vertex_count != mesh.vertices.items.len or
+            logical_rows.len != mesh.render_triangles.items.len * 3)
+        {
+            return false;
+        }
+        for (mesh.render_triangles.items, 0..) |triangle, index| {
+            if (!std.mem.eql(u32, triangle[0..], logical_rows[index * 3 .. index * 3 + 3])) return false;
         }
         return true;
     }
@@ -672,13 +823,81 @@ pub const Mesh = struct {
         semantic_regions: ?[]const u32,
         semantic_instances: ?[]const u32,
     ) !Mesh {
+        return fromSoupInternal(
+            allocator,
+            interleaved,
+            tri_count,
+            groups,
+            parts,
+            materials,
+            semantic_regions,
+            semantic_instances,
+            null,
+        );
+    }
+
+    /// RJMD v5 import. The render-corner table is the topology authority, so this
+    /// path never enters the legacy quantized-position weld. UV/normal duplicates
+    /// become repeated references to the same stable native vertex id.
+    pub fn fromSoupWithLogicalSemantics(
+        allocator: std.mem.Allocator,
+        interleaved: []const f32,
+        tri_count: u32,
+        groups: ?[]const u32,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+        semantic_regions: ?[]const u32,
+        semantic_instances: ?[]const u32,
+        render_corner_logical_ids: []const u32,
+        logical_vertex_count: u32,
+    ) !Mesh {
+        return fromSoupInternal(
+            allocator,
+            interleaved,
+            tri_count,
+            groups,
+            parts,
+            materials,
+            semantic_regions,
+            semantic_instances,
+            .{ .rows = render_corner_logical_ids, .vertex_count = logical_vertex_count },
+        );
+    }
+
+    const ExplicitLogicalTopology = struct {
+        rows: []const u32,
+        vertex_count: u32,
+    };
+
+    fn fromSoupInternal(
+        allocator: std.mem.Allocator,
+        interleaved: []const f32,
+        tri_count: u32,
+        groups: ?[]const u32,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+        semantic_regions: ?[]const u32,
+        semantic_instances: ?[]const u32,
+        explicit_logical: ?ExplicitLogicalTopology,
+    ) !Mesh {
         if (interleaved.len < @as(usize, tri_count) * 24) return error.InvalidSoup;
         if (groups) |rows| if (rows.len < tri_count) return error.InvalidGroups;
         if (parts) |rows| if (rows.len < tri_count) return error.InvalidParts;
         if (materials) |rows| if (rows.len < tri_count) return error.InvalidMaterials;
         if (!mesh_semantics.rowsValid(semantic_regions, semantic_instances, tri_count)) return error.InvalidSemantics;
+        if (explicit_logical) |logical| {
+            const corner_count = @as(usize, tri_count) * 3;
+            if (logical.rows.len != corner_count or
+                !explicitLogicalRowsValid(
+                    allocator,
+                    interleaved[0 .. corner_count * 8],
+                    logical.rows,
+                    logical.vertex_count,
+                )) return error.InvalidLogicalTopology;
+        }
 
         var mesh = Mesh{ .allocator = allocator };
+        mesh.has_explicit_logical_topology = explicit_logical != null;
         errdefer mesh.deinit();
         var weld = std.AutoHashMapUnmanaged(WeldKey, u32).empty;
         defer weld.deinit(allocator);
@@ -686,6 +905,18 @@ pub const Mesh = struct {
         defer weld_candidates.deinit(allocator);
         const corner_vertex = try allocator.alloc(u32, @as(usize, tri_count) * 3);
         defer allocator.free(corner_vertex);
+        var logical_seen: ?[]bool = null;
+        defer if (logical_seen) |seen| allocator.free(seen);
+        if (explicit_logical) |logical| {
+            const seen = try allocator.alloc(bool, logical.vertex_count);
+            @memset(seen, false);
+            logical_seen = seen;
+            try mesh.vertices.ensureTotalCapacity(allocator, logical.vertex_count);
+            for (0..logical.vertex_count) |_| mesh.vertices.appendAssumeCapacity(.{
+                .position = .{ 0, 0, 0 },
+                .alive = false,
+            });
+        }
 
         var triangle: u32 = 0;
         while (triangle < tri_count) : (triangle += 1) {
@@ -694,6 +925,15 @@ pub const Mesh = struct {
             while (corner < 3) : (corner += 1) {
                 const base = (@as(usize, triangle) * 3 + corner) * 8;
                 const p = Vec3{ interleaved[base], interleaved[base + 1], interleaved[base + 2] };
+                if (explicit_logical) |logical| {
+                    const vertex_id = logical.rows[triangle * 3 + corner];
+                    if (!logical_seen.?[vertex_id]) {
+                        mesh.vertices.items[vertex_id] = .{ .position = p };
+                        logical_seen.?[vertex_id] = true;
+                    }
+                    corner_vertex[triangle * 3 + corner] = vertex_id;
+                    continue;
+                }
                 const cell = WeldKey{
                     .x = @intFromFloat(@floor(p[0] * IMPORT_WELD_SCALE)),
                     .y = @intFromFloat(@floor(p[1] * IMPORT_WELD_SCALE)),
@@ -791,7 +1031,20 @@ pub const Mesh = struct {
         }
 
         for (buckets.items) |*bucket| {
-            var face = try buildFaceFromBucket(allocator, interleaved, corner_vertex, bucket);
+            var face = buildFaceFromBucket(allocator, interleaved, corner_vertex, bucket) catch |err| switch (err) {
+                // ONE face group that cannot close a boundary loop used to reject the
+                // WHOLE composite mesh, which silently disabled loop cut, Basic Cut,
+                // bevel, merge-faces and tris-to-quads across the entire model — over a
+                // 2 mm sliver no human can see, let alone select (req_4114). Degrade just
+                // that group into loose triangles instead. The rest of the model stays
+                // fully editable and the offender survives as ordinary selectable faces,
+                // so it can be found and repaired rather than blocking everything.
+                error.MalformedFaceBoundary => {
+                    try appendDegradedBucket(&mesh, allocator, interleaved, corner_vertex, bucket);
+                    continue;
+                },
+                else => return err,
+            };
             face.id = @intCast(mesh.faces.items.len);
             try mesh.faces.append(allocator, face);
         }
@@ -888,6 +1141,53 @@ pub const Mesh = struct {
         return a == b or b == c or c == a;
     }
 
+    /// Source triangle and authored group of the face bucket that last failed to close a
+    /// boundary loop. `error.MalformedFaceBoundary` rejects the WHOLE composite mesh, so a
+    /// single bad face group silently blocks EVERY topology op on the model — loop cut,
+    /// Basic Cut, bevel, merge-faces, tris-to-quads. The offender has to be nameable, not
+    /// just countable, or the only repair advice possible is "rebuild the model" (req_4114).
+    pub var last_malformed_triangle: i64 = -1;
+    pub var last_malformed_group: i64 = -1;
+
+    fn malformedBoundary(bucket: *const Bucket) error{MalformedFaceBoundary} {
+        last_malformed_triangle = if (bucket.triangles.items.len > 0) @intCast(bucket.triangles.items[0]) else -1;
+        last_malformed_group = @intCast(bucket.group);
+        return error.MalformedFaceBoundary;
+    }
+
+    /// Emit every triangle of a face group that failed to close a boundary loop as its
+    /// own single-triangle face. Each gets a fresh group id — the same way every other
+    /// newly created face gets one — because the composite group it belonged to is not a
+    /// coherent authored face and pretending otherwise is what wedged the indexer.
+    fn appendDegradedBucket(
+        mesh: *Mesh,
+        allocator: std.mem.Allocator,
+        interleaved: []const f32,
+        corner_vertex: []const u32,
+        bucket: *const Bucket,
+    ) !void {
+        for (bucket.triangles.items) |triangle| {
+            var face = Face{
+                .id = @intCast(mesh.faces.items.len),
+                .group = mesh.next_group,
+                .part = bucket.part,
+                .material = bucket.material,
+                .semantic = bucket.semantic,
+                .source_tessellation_valid = true,
+            };
+            errdefer face.deinit(allocator);
+            try face.source_triangles.append(allocator, triangle);
+            var corner: u32 = 0;
+            while (corner < 3) : (corner += 1) {
+                try face.vertices.append(allocator, corner_vertex[triangle * 3 + corner]);
+                const base = (@as(usize, triangle) * 3 + corner) * 8;
+                try face.uvs.append(allocator, .{ interleaved[base + 6], interleaved[base + 7] });
+            }
+            try mesh.faces.append(allocator, face);
+            mesh.next_group += 1;
+        }
+    }
+
     fn buildFaceFromBucket(
         allocator: std.mem.Allocator,
         interleaved: []const f32,
@@ -967,25 +1267,25 @@ pub const Mesh = struct {
         for (directed.items, 0..) |edge, index| {
             if ((uses.get(edge.key) orelse 0) != 1) continue;
             const entry = try next.getOrPut(allocator, edge.from);
-            if (entry.found_existing) return error.MalformedFaceBoundary;
+            if (entry.found_existing) return malformedBoundary(bucket);
             entry.value_ptr.* = @intCast(index);
             if (start == null) start = edge.from;
             boundary_count += 1;
         }
-        if (boundary_count < 3) return error.MalformedFaceBoundary;
+        if (boundary_count < 3) return malformedBoundary(bucket);
 
         var current = start.?;
         const first = current;
         var visited: u32 = 0;
         while (visited < boundary_count) : (visited += 1) {
-            const index = next.get(current) orelse return error.MalformedFaceBoundary;
+            const index = next.get(current) orelse return malformedBoundary(bucket);
             const edge = directed.items[index];
             try face.vertices.append(allocator, edge.from);
             try face.uvs.append(allocator, edge.uv);
             current = edge.to;
             if (current == first) break;
         }
-        if (current != first or face.vertices.items.len != boundary_count) return error.MalformedFaceBoundary;
+        if (current != first or face.vertices.items.len != boundary_count) return malformedBoundary(bucket);
         // Recover the exact diagonal that triangulated an imported authored quad.
         // Once inside the indexed model this edge is topology, never re-guessed from
         // positions after a non-planar edit.
@@ -1017,6 +1317,104 @@ pub const Mesh = struct {
             if (faceFullySelected(face, selected_triangles)) return face.id;
         }
         return null;
+    }
+
+    /// Resolve complete authored-face selection from resident triangle bits.
+    /// `false` means at least one selected render triangle was only a fragment of
+    /// its authored face; topology tools must reject that ambiguous identity.
+    pub fn selectedFaceIds(
+        mesh: *const Mesh,
+        selected_triangles: []const bool,
+        out: *std.ArrayListUnmanaged(u32),
+    ) !bool {
+        var selected_triangle_count: usize = 0;
+        for (selected_triangles) |selected| if (selected) {
+            selected_triangle_count += 1;
+        };
+        var covered_triangle_count: usize = 0;
+        for (mesh.faces.items) |*face| {
+            if (!faceFullySelected(face, selected_triangles)) continue;
+            try out.append(mesh.allocator, face.id);
+            covered_triangle_count += face.source_triangles.items.len;
+        }
+        return selected_triangle_count > 0 and covered_triangle_count == selected_triangle_count;
+    }
+
+    fn facePolygonFrame(mesh: *const Mesh, face_id: u32) ?FacePolygonFrame {
+        if (face_id >= mesh.faces.items.len) return null;
+        const face = &mesh.faces.items[face_id];
+        if (!face.alive or face.vertices.items.len < 3 or
+            face.vertices.items.len > FacePolygonTuning.maximum_target_sides or
+            face.source_triangles.items.len == 0 or mesh.loopIsConcavePositions(face.vertices.items))
+        {
+            return null;
+        }
+        const normal = faceNormal(mesh, face);
+        if (length3(normal) < 0.5) return null;
+        const center = mesh.faceCentroid(face);
+        for (face.vertices.items) |vertex_id| {
+            const position = mesh.vertices.items[vertex_id].position;
+            if (@abs(dot3(sub3(position, center), normal)) > FacePolygonTuning.planar_epsilon_m) return null;
+        }
+
+        var inradius = std.math.inf(f32);
+        for (face.vertices.items, 0..) |vertex_id, corner| {
+            const next_id = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            const a = mesh.vertices.items[vertex_id].position;
+            const b = mesh.vertices.items[next_id].position;
+            const edge = sub3(b, a);
+            const edge_length = length3(edge);
+            if (edge_length <= IMPORT_WELD_EPS) return null;
+            const distance = @abs(dot3(cross3(edge, sub3(center, a)), normal)) / edge_length;
+            inradius = @min(inradius, distance);
+        }
+        if (!std.math.isFinite(inradius) or
+            inradius * FacePolygonTuning.maximum_width_fraction < FacePolygonTuning.minimum_width_m)
+        {
+            return null;
+        }
+
+        var u = norm3(sub3(mesh.vertices.items[face.vertices.items[0]].position, center));
+        if (length3(u) < 0.5) {
+            const first = mesh.vertices.items[face.vertices.items[0]].position;
+            const second = mesh.vertices.items[face.vertices.items[1]].position;
+            u = norm3(sub3(second, first));
+        }
+        const v = norm3(cross3(normal, u));
+        if (length3(u) < 0.5 or length3(v) < 0.5) return null;
+        return .{ .center = center, .normal = normal, .u = u, .v = v, .inradius = inradius };
+    }
+
+    pub fn facePolygonLimit(mesh: *const Mesh, face_id: u32) ?f32 {
+        const frame = mesh.facePolygonFrame(face_id) orelse return null;
+        return frame.inradius * FacePolygonTuning.maximum_width_fraction;
+    }
+
+    /// One and only one complete selected authored face is the source. The popup
+    /// may then vary width and target sides while rebuilding from the captured mesh.
+    pub fn resolveFacePolygon(mesh: *const Mesh, selected_triangles: []const bool) ?FacePolygonSelection {
+        var selected = std.ArrayListUnmanaged(u32).empty;
+        defer selected.deinit(mesh.allocator);
+        if (!(mesh.selectedFaceIds(selected_triangles, &selected) catch return null) or selected.items.len != 1) return null;
+        const face_id = selected.items[0];
+        const frame = mesh.facePolygonFrame(face_id) orelse return null;
+        const face = &mesh.faces.items[face_id];
+        const max_width = frame.inradius * FacePolygonTuning.maximum_width_fraction;
+        const default_width = std.math.clamp(
+            frame.inradius * FacePolygonTuning.default_width_fraction,
+            FacePolygonTuning.minimum_width_m,
+            max_width,
+        );
+        return .{
+            .face_id = face_id,
+            .selection_triangle = face.source_triangles.items[0],
+            .sides_before = @intCast(face.vertices.items.len),
+            .default_target_sides = @intCast(@max(FacePolygonTuning.default_target_sides, face.vertices.items.len)),
+            .minimum_target_sides = FacePolygonTuning.minimum_target_sides,
+            .maximum_target_sides = FacePolygonTuning.maximum_target_sides,
+            .default_width = default_width,
+            .max_width = max_width,
+        };
     }
 
     /// Assign one texture-role index to every fully selected authored face.
@@ -3304,6 +3702,246 @@ pub const Mesh = struct {
         const id = face.id;
         try mesh.faces.append(mesh.allocator, face);
         return id;
+    }
+
+    fn faceUvAt(mesh: *const Mesh, face_id: u32, position: Vec3) Vec2 {
+        if (face_id >= mesh.faces.items.len) return .{ 0.5, 0.5 };
+        const face = &mesh.faces.items[face_id];
+        if (face.vertices.items.len < 3 or face.uvs.items.len != face.vertices.items.len) return .{ 0.5, 0.5 };
+        const a = mesh.vertices.items[face.vertices.items[0]].position;
+        const uv_a = face.uvs.items[0];
+        var corner: usize = 1;
+        while (corner + 1 < face.vertices.items.len) : (corner += 1) {
+            const b = mesh.vertices.items[face.vertices.items[corner]].position;
+            const c = mesh.vertices.items[face.vertices.items[corner + 1]].position;
+            const v0 = sub3(b, a);
+            const v1 = sub3(c, a);
+            const v2 = sub3(position, a);
+            const d00 = dot3(v0, v0);
+            const d01 = dot3(v0, v1);
+            const d11 = dot3(v1, v1);
+            const d20 = dot3(v2, v0);
+            const d21 = dot3(v2, v1);
+            const denominator = d00 * d11 - d01 * d01;
+            if (@abs(denominator) <= 1e-12) continue;
+            const weight_b = (d11 * d20 - d01 * d21) / denominator;
+            const weight_c = (d00 * d21 - d01 * d20) / denominator;
+            const weight_a = 1.0 - weight_b - weight_c;
+            if (weight_a < -FacePolygonTuning.barycentric_epsilon or
+                weight_b < -FacePolygonTuning.barycentric_epsilon or
+                weight_c < -FacePolygonTuning.barycentric_epsilon)
+            {
+                continue;
+            }
+            const uv_b = face.uvs.items[corner];
+            const uv_c = face.uvs.items[corner + 1];
+            return .{
+                uv_a[0] * weight_a + uv_b[0] * weight_b + uv_c[0] * weight_c,
+                uv_a[1] * weight_a + uv_b[1] * weight_b + uv_c[1] * weight_c,
+            };
+        }
+        var average = Vec2{ 0, 0 };
+        for (face.uvs.items) |uv| {
+            average[0] += uv[0];
+            average[1] += uv[1];
+        }
+        const reciprocal = 1.0 / @as(f32, @floatFromInt(face.uvs.items.len));
+        return .{ average[0] * reciprocal, average[1] * reciprocal };
+    }
+
+    fn appendDerivedFace(
+        mesh: *Mesh,
+        source_face_id: u32,
+        loop: []const u32,
+        uvs: []const Vec2,
+        preserved_group: ?u32,
+    ) !u32 {
+        if (source_face_id >= mesh.faces.items.len or loop.len < 3 or loop.len != uvs.len) return error.InvalidDerivedFace;
+        const source = &mesh.faces.items[source_face_id];
+        const group = preserved_group orelse group: {
+            const fresh = mesh.next_group;
+            mesh.next_group += 1;
+            break :group fresh;
+        };
+        var face = Face{
+            .id = @intCast(mesh.faces.items.len),
+            .group = group,
+            .part = source.part,
+            .material = source.material,
+            .semantic = source.semantic,
+            .source_tessellation_valid = false,
+        };
+        errdefer face.deinit(mesh.allocator);
+        try face.vertices.appendSlice(mesh.allocator, loop);
+        try face.uvs.appendSlice(mesh.allocator, uvs);
+        try face.source_triangles.appendSlice(mesh.allocator, source.source_triangles.items);
+        if (loop.len == 4) face.diagonal = chosenQuadDiagonal(mesh, &face);
+        const id = face.id;
+        try mesh.faces.append(mesh.allocator, face);
+        return id;
+    }
+
+    fn cross2(a: Vec2, b: Vec2) f32 {
+        return a[0] * b[1] - a[1] * b[0];
+    }
+
+    fn faceRayBoundaryDistance(
+        mesh: *const Mesh,
+        face_id: u32,
+        frame: FacePolygonFrame,
+        direction: Vec2,
+    ) ?f32 {
+        const face = &mesh.faces.items[face_id];
+        var nearest = std.math.inf(f32);
+        for (face.vertices.items, 0..) |vertex_id, corner| {
+            const next_id = face.vertices.items[(corner + 1) % face.vertices.items.len];
+            const a3 = sub3(mesh.vertices.items[vertex_id].position, frame.center);
+            const b3 = sub3(mesh.vertices.items[next_id].position, frame.center);
+            const a = Vec2{ dot3(a3, frame.u), dot3(a3, frame.v) };
+            const b = Vec2{ dot3(b3, frame.u), dot3(b3, frame.v) };
+            const edge = Vec2{ b[0] - a[0], b[1] - a[1] };
+            const denominator = cross2(direction, edge);
+            if (@abs(denominator) <= 1e-8) continue;
+            const distance = cross2(a, edge) / denominator;
+            const along_edge = cross2(a, direction) / denominator;
+            if (distance <= IMPORT_WELD_EPS or
+                along_edge < -FacePolygonTuning.barycentric_epsilon or
+                along_edge > 1.0 + FacePolygonTuning.barycentric_epsilon)
+            {
+                continue;
+            }
+            nearest = @min(nearest, distance);
+        }
+        return if (std.math.isFinite(nearest)) nearest else null;
+    }
+
+    fn polygonVertexUv(
+        outer: []const u32,
+        outer_uvs: []const Vec2,
+        inner: []const u32,
+        inner_uvs: []const Vec2,
+        vertex_id: u32,
+    ) ?Vec2 {
+        for (outer, 0..) |candidate, index| if (candidate == vertex_id) return outer_uvs[index];
+        for (inner, 0..) |candidate, index| if (candidate == vertex_id) return inner_uvs[index];
+        return null;
+    }
+
+    fn appendFacePolygonRingCell(
+        mesh: *Mesh,
+        source_face_id: u32,
+        outer: []const u32,
+        outer_uvs: []const Vec2,
+        inner: []const u32,
+        inner_uvs: []const Vec2,
+        loop: []const u32,
+    ) !void {
+        var cell_uvs: [4]Vec2 = undefined;
+        for (loop, 0..) |vertex_id, index| {
+            cell_uvs[index] = polygonVertexUv(outer, outer_uvs, inner, inner_uvs, vertex_id) orelse
+                return error.InvalidFacePolygonVertex;
+        }
+        _ = try mesh.appendDerivedFace(source_face_id, loop, cell_uvs[0..loop.len], null);
+    }
+
+    /// Replace one convex planar authored face with a regular N-gon center and a
+    /// welded transition ring. A normalized perimeter zipper advances the outer
+    /// and inner loops together: equal steps mint quads, unmatched steps mint
+    /// triangles. It therefore supports every target side count without ever
+    /// hiding the transition in six-vertex authored faces.
+    pub fn polygonizeFace(mesh: *Mesh, face_id: u32, width_raw: f32, target_sides: usize) !?u32 {
+        if (target_sides < FacePolygonTuning.minimum_target_sides or
+            target_sides > FacePolygonTuning.maximum_target_sides or
+            !std.math.isFinite(width_raw) or width_raw < FacePolygonTuning.minimum_width_m)
+        {
+            return null;
+        }
+        const frame = mesh.facePolygonFrame(face_id) orelse return null;
+        const source = &mesh.faces.items[face_id];
+        const max_width = frame.inradius * FacePolygonTuning.maximum_width_fraction;
+        if (width_raw > max_width) return null;
+        const outer = source.vertices.items;
+        const outer_uvs = source.uvs.items;
+        if (outer_uvs.len != outer.len) return null;
+
+        // Phase the regular loop from the source face's first directed edge,
+        // not from its first corner. Corner anchoring makes the polygon appear
+        // to rotate as N changes because a different sample becomes nearest
+        // each source edge. Keeping the first inner edge parallel to the first
+        // outer edge gives every side count the same visible orientation and
+        // also starts the perimeter zipper at corresponding corners.
+        const first_edge = sub3(
+            mesh.vertices.items[outer[1]].position,
+            mesh.vertices.items[outer[0]].position,
+        );
+        const edge_angle = std.math.atan2(dot3(first_edge, frame.v), dot3(first_edge, frame.u));
+        const angle_step = 2.0 * std.math.pi / @as(f32, @floatFromInt(target_sides));
+        const phase = edge_angle - std.math.pi / 2.0 - angle_step / 2.0;
+
+        var radius_limit = std.math.inf(f32);
+        for (0..target_sides) |side| {
+            const angle = phase + angle_step * @as(f32, @floatFromInt(side));
+            const direction = Vec2{ @cos(angle), @sin(angle) };
+            radius_limit = @min(radius_limit, mesh.faceRayBoundaryDistance(face_id, frame, direction) orelse return null);
+        }
+        const radius = radius_limit - width_raw;
+        if (!std.math.isFinite(radius) or radius <= IMPORT_WELD_EPS * 2.0) return null;
+
+        var inner = std.ArrayListUnmanaged(u32).empty;
+        defer inner.deinit(mesh.allocator);
+        var inner_uvs = std.ArrayListUnmanaged(Vec2).empty;
+        defer inner_uvs.deinit(mesh.allocator);
+        try inner.ensureTotalCapacity(mesh.allocator, target_sides);
+        try inner_uvs.ensureTotalCapacity(mesh.allocator, target_sides);
+        for (0..target_sides) |side| {
+            const angle = phase + angle_step * @as(f32, @floatFromInt(side));
+            const position = add3(
+                frame.center,
+                add3(mul3(frame.u, @cos(angle) * radius), mul3(frame.v, @sin(angle) * radius)),
+            );
+            const vertex_id: u32 = @intCast(mesh.vertices.items.len);
+            try mesh.vertices.append(mesh.allocator, .{ .position = position });
+            inner.appendAssumeCapacity(vertex_id);
+            inner_uvs.appendAssumeCapacity(mesh.faceUvAt(face_id, position));
+        }
+
+        const source_group = source.group;
+        const center_face = try mesh.appendDerivedFace(face_id, inner.items, inner_uvs.items, source_group);
+        var outer_at: usize = 0;
+        var inner_at: usize = 0;
+        while (outer_at < outer.len or inner_at < inner.items.len) {
+            const outer_step = (outer_at + 1) * inner.items.len;
+            const inner_step = (inner_at + 1) * outer.len;
+            if (outer_step == inner_step) {
+                const cell = [4]u32{
+                    outer[outer_at % outer.len],
+                    outer[(outer_at + 1) % outer.len],
+                    inner.items[(inner_at + 1) % inner.items.len],
+                    inner.items[inner_at % inner.items.len],
+                };
+                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &cell);
+                outer_at += 1;
+                inner_at += 1;
+            } else if (outer_step < inner_step) {
+                const cell = [3]u32{
+                    outer[outer_at % outer.len],
+                    outer[(outer_at + 1) % outer.len],
+                    inner.items[inner_at % inner.items.len],
+                };
+                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &cell);
+                outer_at += 1;
+            } else {
+                const cell = [3]u32{
+                    outer[outer_at % outer.len],
+                    inner.items[(inner_at + 1) % inner.items.len],
+                    inner.items[inner_at % inner.items.len],
+                };
+                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &cell);
+                inner_at += 1;
+            }
+        }
+        mesh.faces.items[face_id].alive = false;
+        return center_face;
     }
 
     fn pruneOrphanVertices(mesh: *Mesh) !void {

@@ -69,6 +69,14 @@
           "zig": "hostMeshSemanticAssign"
         },
         {
+          "js": "__mesh_edge_semantic_assign",
+          "zig": "hostMeshEdgeSemanticAssign"
+        },
+        {
+          "js": "__mesh_edge_semantic_select",
+          "zig": "hostMeshEdgeSemanticSelect"
+        },
+        {
           "js": "__mesh_semantic_extrude_intent",
           "zig": "hostMeshSemanticExtrudeIntent"
         },
@@ -85,8 +93,20 @@
           "zig": "hostMeshSemanticState"
         },
         {
+          "js": "__mesh_semantics_restore_from_rjmd",
+          "zig": "hostMeshSemanticsRestoreFromRjmd"
+        },
+        {
+          "js": "__mesh_semantic_region_edit",
+          "zig": "hostMeshSemanticRegionEdit"
+        },
+        {
           "js": "__mesh_select_query",
           "zig": "hostMeshSelectQuery"
+        },
+        {
+          "js": "__mesh_select_audit",
+          "zig": "hostMeshSelectAudit"
         },
         {
           "js": "__mesh_texture_slot_assign",
@@ -127,6 +147,10 @@
         {
           "js": "__model_cam_set_pose",
           "zig": "hostModelCamSetPose"
+        },
+        {
+          "js": "__model_shot_offscreen",
+          "zig": "hostModelShotOffscreen"
         },
         {
           "js": "__model_orbit_frame",
@@ -201,6 +225,10 @@
           "zig": "hostMeshGizmoScaleBy"
         },
         {
+          "js": "__mesh_align_loop",
+          "zig": "hostMeshAlignLoop"
+        },
+        {
           "js": "__mesh_transform_translate",
           "zig": "hostMeshTransformTranslate"
         },
@@ -265,6 +293,10 @@
           "zig": "hostMeshLcBegin"
         },
         {
+          "js": "__mesh_topo_refusal",
+          "zig": "hostMeshTopoRefusal"
+        },
+        {
           "js": "__mesh_lc_preview",
           "zig": "hostMeshLcPreview"
         },
@@ -327,6 +359,14 @@
         {
           "js": "__mesh_action_document",
           "zig": "hostMeshActionDocument"
+        },
+        {
+          "js": "__mesh_session_select",
+          "zig": "hostMeshSessionSelect"
+        },
+        {
+          "js": "__mesh_session_resident",
+          "zig": "hostMeshSessionResident"
         },
         {
           "js": "__mesh_action_drain",
@@ -553,6 +593,14 @@
           "zig": "hostMeshFollowPatch"
         },
         {
+          "js": "__mesh_walk",
+          "zig": "hostMeshWalk"
+        },
+        {
+          "js": "__mesh_walk_apply",
+          "zig": "hostMeshWalkApply"
+        },
+        {
           "js": "__mesh_follow_action_drain",
           "zig": "hostMeshFollowActionDrain"
         },
@@ -719,6 +767,10 @@
         {
           "js": "__model_meshdoc_write",
           "zig": "hostModelMeshdocWrite"
+        },
+        {
+          "js": "__character_rig_session",
+          "zig": "hostCharacterRigSession"
         },
         {
           "js": "__model_atlas_base",
@@ -1315,6 +1367,18 @@
         {
           "js": "__fs_write_bytes_atomic",
           "zig": "fsWriteBytesAtomic"
+        },
+        {
+          "js": "__fs_directory_fingerprint",
+          "zig": "fsDirectoryFingerprint"
+        },
+        {
+          "js": "__fs_clone_directory_exact",
+          "zig": "fsCloneDirectoryExact"
+        },
+        {
+          "js": "__fs_install_directory_atomic",
+          "zig": "fsInstallDirectoryAtomic"
         },
         {
           "js": "__fs_write_bytes_atomic_if_unchanged",
@@ -2452,6 +2516,10 @@
         {
           "js": "__pose_camera_devices",
           "zig": "hostPoseCameraDevices"
+        },
+        {
+          "js": "__capture_session",
+          "zig": "hostCharacterCaptureSession"
         }
       ]
     },
@@ -3579,6 +3647,18 @@
           "zig": "hostLoadFile"
         },
         {
+          "js": "__map_prepare_file",
+          "zig": "hostPrepareFile"
+        },
+        {
+          "js": "__map_prepare_status",
+          "zig": "hostPrepareStatus"
+        },
+        {
+          "js": "__map_commit_prepared",
+          "zig": "hostCommitPrepared"
+        },
+        {
           "js": "__map_stroke_begin",
           "zig": "hostStrokeBegin"
         },
@@ -3902,24 +3982,16 @@
           "zig": "hostSetResidentMeshes"
         },
         {
-          "js": "__compiled_world_set_player_model",
-          "zig": "hostSetPlayerModel"
+          "js": "__compiled_world_set_player_character",
+          "zig": "hostSetPlayerCharacter"
         },
         {
-          "js": "__compiled_world_set_player_skin",
-          "zig": "hostSetPlayerSkin"
+          "js": "__compiled_world_npc_character_session",
+          "zig": "hostNpcCharacterSession"
         },
         {
-          "js": "__compiled_world_set_player_animation",
-          "zig": "hostSetPlayerAnimation"
-        },
-        {
-          "js": "__compiled_world_set_player_live_pose",
-          "zig": "hostSetPlayerLivePose"
-        },
-        {
-          "js": "__compiled_world_clear_player_live_pose",
-          "zig": "hostClearPlayerLivePose"
+          "js": "__compiled_world_set_player_pose",
+          "zig": "hostSetPlayerPose"
         },
         {
           "js": "__compiled_world_window",

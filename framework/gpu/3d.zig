@@ -26,6 +26,7 @@ const model_source = @import("model_source.zig");
 const mesh_audit = @import("mesh_audit.zig");
 const mesh_edit = @import("mesh_edit.zig");
 const mesh_semantics = @import("mesh_semantics.zig");
+const mesh_semantic_restore = @import("mesh_semantic_restore.zig");
 const mesh_edge_semantics = @import("mesh_edge_semantics.zig");
 const indexed_edit_mesh = @import("indexed_edit_mesh.zig");
 const character_topology_promotion = @import("character_topology_promotion.zig");
@@ -646,6 +647,39 @@ fn adoptIndexedEditMesh(mesh: *indexed_edit_mesh.Mesh, lowered: *const indexed_e
     mesh.* = .{ .allocator = std.heap.c_allocator };
 }
 
+/// Why the last indexed topology session refused to open. Loop cut, Basic Cut, bevel,
+/// merge-faces and tris-to-quads all funnelled every early exit into a bare `null`, so
+/// the seat reported "it needs a face selection" for causes that had nothing to do with
+/// the selection — a message that cost a full debugging session while the user's
+/// selection was fine the whole time (req_4114). Every early exit now names itself, and
+/// the indexed-build errors report their real Zig error name.
+var g_topo_refusal: []const u8 = "";
+
+pub fn topoRefusal() []const u8 {
+    return g_topo_refusal;
+}
+
+fn topoRefuse(why: []const u8) void {
+    g_topo_refusal = why;
+}
+
+var g_topo_refusal_buf: [320]u8 = undefined;
+
+/// An indexed-build error names the face group that caused it. One malformed face group
+/// rejects the WHOLE composite mesh, so without the id the only possible advice is
+/// "rebuild the model" — the offender is repairable once you can select it (req_4114).
+fn topoRefuseIndexedError(err: anyerror) void {
+    if (err != error.MalformedFaceBoundary) {
+        topoRefuse(@errorName(err));
+        return;
+    }
+    g_topo_refusal = std.fmt.bufPrint(
+        &g_topo_refusal_buf,
+        "MalformedFaceBoundary — authored face group {d} (source triangle {d}) does not close a single boundary loop, so the entire mesh refuses to index and every topology op is blocked. Select that face, delete it, and rebuild it with create-face.",
+        .{ indexed_edit_mesh.Mesh.last_malformed_group, indexed_edit_mesh.Mesh.last_malformed_triangle },
+    ) catch @errorName(err);
+}
+
 fn cloneIndexedEditMeshOrImport(
     verts: []const f32,
     tri_count: u32,
@@ -668,7 +702,10 @@ fn cloneIndexedEditMeshOrImport(
                 model_source.logicalVertexCount(),
             ))
         {
-            return mesh.clone() catch null;
+            return mesh.clone() catch |err| {
+                topoRefuseIndexedError(err);
+                return null;
+            };
         }
         // A structural group/part edit can leave triangle positions untouched, and a
         // UV edit can leave every metadata row untouched. Never lower either stale
@@ -687,7 +724,10 @@ fn cloneIndexedEditMeshOrImport(
             model_source.faceSemanticInstances(),
             logical_rows,
             model_source.logicalVertexCount(),
-        ) catch null;
+        ) catch |err| {
+            topoRefuseIndexedError(err);
+            return null;
+        };
     }
     return indexed_edit_mesh.Mesh.fromSoupWithSemantics(
         std.heap.c_allocator,
@@ -698,7 +738,10 @@ fn cloneIndexedEditMeshOrImport(
         materials,
         model_source.faceSemanticRegions(),
         model_source.faceSemanticInstances(),
-    ) catch null;
+    ) catch |err| {
+        topoRefuseIndexedError(err);
+        return null;
+    };
 }
 
 fn ensureIndexedEditMesh() bool {
@@ -1283,8 +1326,16 @@ fn trueFaceColor(f: u32) [4]u8 {
     return model_paint.faceColor(f) orelse model_paint.DEFAULT_FACE;
 }
 
+/// One colour per face of the LIVE MESH — sized by the mesh, never by the paint layout
+/// (req_4114). Topology editing must never require a UV/paint layout to exist, to be
+/// current, or to agree with the mesh: nobody unwraps a model they are still cutting.
+/// `trueFaceColor` already falls back to DEFAULT_FACE for any face the layout does not
+/// cover, so a stale, degenerate, or absent atlas yields default colours here instead of
+/// a null that refused the whole operation. Sizing by `model_paint.faceCount()` also
+/// silently no-op'd every consumer that (correctly) asserts mesh size —
+/// `partitionGlassFaces` and `restoreFaceColorMetadata` among them.
 fn collectCurrentFaceColors() ?[]u8 {
-    const fc = model_paint.faceCount();
+    const fc = g_edit_count / 3;
     const colors = std.heap.c_allocator.alloc(u8, @as(usize, fc) * 4) catch return null;
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
@@ -3443,17 +3494,44 @@ pub const LcInfo = struct { size0: f32, size1: f32 };
 /// those two lengths for the popup, or null when not in face mode /
 /// nothing selected. A prior session (stale popup) is dropped, not committed.
 pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
-    if (g_bevel != null) return null;
+    g_topo_refusal = "";
+    if (g_bevel != null) {
+        topoRefuse("a bevel session is still open — close or cancel it first");
+        return null;
+    }
     lcFree();
-    if (!model_paint.hasTarget()) return null;
-    if (mesh_edit.mode() != .face) return null;
-    const verts = g_edit_verts orelse return null;
+    if (!model_paint.hasTarget()) {
+        topoRefuse("no paint target is bound to this model");
+        return null;
+    }
+    if (mesh_edit.mode() != .face) {
+        topoRefuse("loop cut needs FACE select mode");
+        return null;
+    }
+    const verts = g_edit_verts orelse {
+        topoRefuse("no editable mesh is resident");
+        return null;
+    };
     const tri_count = g_edit_count / 3;
-    if (tri_count == 0 or model_paint.faceCount() < tri_count) return null;
-
-    const mask = std.heap.c_allocator.alloc(bool, model_paint.faceCount()) catch return null;
+    if (tri_count == 0) {
+        topoRefuse("the mesh has no triangles");
+        return null;
+    }
+    // The mask is sized by the MESH, never by the paint layout (req_4114). It used to be
+    // a paint-layout array guarded by `model_paint.faceCount() < tri_count`, which refused
+    // the whole operation whenever the atlas was stale, degenerate, or simply absent —
+    // i.e. exactly while a model is being edited, which is the only time anyone cuts. The
+    // extra headroom keeps buildDeleteMask's own `out.len >= paint faceCount` contract.
+    const mask = std.heap.c_allocator.alloc(bool, @max(tri_count, model_paint.faceCount())) catch {
+        topoRefuse("out of memory building the selection mask");
+        return null;
+    };
     defer std.heap.c_allocator.free(mask);
-    if (mesh_edit.buildDeleteMask(mask) == 0) return null;
+    @memset(mask, false);
+    if (mesh_edit.buildDeleteMask(mask) == 0) {
+        topoRefuse("no faces are selected");
+        return null;
+    }
     // Selection sets can outlive a scope change. The topology session starts from the
     // intersection, never from stale selected faces in sibling outliner parts.
     var selected_in_scope: u32 = 0;
@@ -3462,7 +3540,10 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         mask[scoped_face] = mask[scoped_face] and mesh_edit.faceInScopePub(scoped_face);
         if (mask[scoped_face]) selected_in_scope += 1;
     }
-    if (selected_in_scope == 0) return null;
+    if (selected_in_scope == 0) {
+        topoRefuse("every selected face is outside the focused part's scope");
+        return null;
+    }
 
     var groups: ?[]u32 = null;
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
@@ -3482,6 +3563,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         return null;
     };
     if (base_colors.len != @as(usize, tri_count) * 4) {
+        topoRefuse("per-face colour capture disagreed with the mesh triangle count");
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
@@ -3499,6 +3581,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         return null;
     };
     const seed = base_mesh.seedInfo(base_cut_mask) orelse {
+        topoRefuse("the selected faces give no cuttable seed face (need an authored quad/n-gon, not a lone or degenerate triangle)");
         base_mesh.deinit();
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_cut_mask);
@@ -3803,14 +3886,32 @@ pub const BevelInfo = struct {
 /// Boundary loops and filled faces expose target-side ranges; the latter rebuilds
 /// as a welded N-gon center ready for immediate face extrusion.
 pub fn meshBevelBegin() ?BevelInfo {
-    if (g_lc != null) return null;
+    g_topo_refusal = "";
+    if (g_lc != null) {
+        topoRefuse("a loop cut session is still open — commit or cancel it first");
+        return null;
+    }
     if (g_bevel != null) _ = meshBevelEnd(false);
-    if (!model_paint.hasTarget()) return null;
+    if (!model_paint.hasTarget()) {
+        topoRefuse("no paint target is bound to this model");
+        return null;
+    }
     const original_mode = mesh_edit.mode();
-    if (original_mode != .vertex and original_mode != .edge and original_mode != .face) return null;
-    const verts = g_edit_verts orelse return null;
+    if (original_mode != .vertex and original_mode != .edge and original_mode != .face) {
+        topoRefuse("bevel needs vertex, edge, or face select mode");
+        return null;
+    }
+    const verts = g_edit_verts orelse {
+        topoRefuse("no editable mesh is resident");
+        return null;
+    };
     const tri_count = g_edit_count / 3;
-    if (tri_count == 0 or model_paint.faceCount() < tri_count) return null;
+    // No paint-layout gate here either (req_4114): a bevel/chamfer is topology work, and
+    // demanding a current UV atlas to perform it inverts the authoring order outright.
+    if (tri_count == 0) {
+        topoRefuse("the mesh has no triangles");
+        return null;
+    }
 
     var groups: ?[]u32 = null;
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
@@ -11740,6 +11841,55 @@ pub fn meshEditSetFaceSemantics(regions: []const u32, instances: []const u32, ta
     if (!model_source.setSemanticState(regions, instances, table_json)) return false;
     clearIndexedEditMesh();
     return true;
+}
+
+pub const MeshSemanticRestoreResult = union(enum) {
+    restore: u32,
+    refuse: mesh_semantic_restore.Refusal,
+};
+
+/// Restore the semantic channel without treating saved geometry as a fallback
+/// source. This is a narrow recovery capability for the state where hydration
+/// lost names but every saved named triangle still exists uniquely in the live
+/// resident. It never guesses by proximity and never overwrites a named face.
+pub fn meshSemanticRestoreFromDocument(
+    candidate_verts: []const f32,
+    candidate_regions: ?[]const u32,
+    candidate_instances: ?[]const u32,
+    candidate_table_json: ?[]const u8,
+) MeshSemanticRestoreResult {
+    // Hidden blocks have their own source-order row arrays. With none present,
+    // model_source is the complete resident document and—unlike the save
+    // snapshot's opaque/glass ordering—its face order is exactly the order the
+    // installed semantic rows must address.
+    const resident_verts_all = model_source.verts() orelse
+        return .{ .refuse = .no_resident_document };
+    const resident_len = std.math.mul(usize, model_source.count(), 8) catch
+        return .{ .refuse = .no_resident_document };
+    if (resident_len == 0 or resident_verts_all.len < resident_len)
+        return .{ .refuse = .no_resident_document };
+    const decision = mesh_semantic_restore.evaluate(std.heap.c_allocator, .{
+        .verts = candidate_verts,
+        .semantic_regions = candidate_regions,
+        .semantic_instances = candidate_instances,
+        .semantic_table_json = candidate_table_json,
+    }, .{
+        .verts = resident_verts_all[0..resident_len],
+        .semantic_regions = model_source.faceSemanticRegions(),
+        .semantic_instances = model_source.faceSemanticInstances(),
+        .semantic_table_json = model_source.semanticTableJson(),
+        .hidden_part_count = g_hidden_groups.items.len,
+    });
+    var plan = switch (decision) {
+        .refuse => |reason| return .{ .refuse = reason },
+        .restore => |value| value,
+    };
+    defer plan.deinit(std.heap.c_allocator);
+    const table_json = candidate_table_json orelse return .{ .refuse = .candidate_semantics_invalid };
+    if (!model_source.setSemanticState(plan.semantic_regions, plan.semantic_instances, table_json))
+        return .{ .refuse = .install_failed };
+    clearIndexedEditMesh();
+    return .{ .restore = plan.restored_named_faces };
 }
 
 /// Author meaning onto the current face selection. Membership and dictionary
