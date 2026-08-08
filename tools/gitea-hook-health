@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# gitea-hook-health — Claude Code SessionStart + UserPromptSubmit hook.
+#
+# Gitea holds the server-backed edit trail outside the working repository's
+# single reflog. A running HTTP server is not enough:
+# the repository's main branch must also be readable, otherwise the service can
+# report healthy while pushes land in a repository that cannot be recovered.
+#
+# Registered in .claude/settings.json after the Lore health hook.
+#
+# Contract: stdout on exit 0 becomes session context. It NEVER exits non-zero and never
+# blocks intentionally — a health probe that can stop the user working is worse than
+# the outage it reports.
+
+set -uo pipefail
+
+HEALTH_URL="http://127.0.0.1:29418/api/healthz"
+BRANCH_URL="http://127.0.0.1:29418/api/v1/repos/siah/reactjit-edit-trail/branches/main"
+UNIT="gitea.service"
+STORE="/home/siah/.local/share/gitea"
+
+# Both probes are required. Gitea's service health endpoint checks infrastructure,
+# while the branch endpoint proves the edit-trail repository itself can resolve main.
+# Keep each timeout short because this hook runs on every prompt.
+health_code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$HEALTH_URL" 2>/dev/null)" || health_code="000"
+branch_code="$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$BRANCH_URL" 2>/dev/null)" || branch_code="000"
+
+if [ "$health_code" = "200" ] && [ "$branch_code" = "200" ]; then
+  exit 0
+fi
+
+state="$(systemctl --user is-active "$UNIT" 2>/dev/null || true)"
+enabled="$(systemctl --user is-enabled "$UNIT" 2>/dev/null || true)"
+
+# Last few journal lines turn "it is unavailable" into an actionable diagnosis.
+why="$(journalctl --user -u "$UNIT" -n 5 --no-pager -o cat 2>/dev/null | tr '\n' ' | ' | cut -c1-400)"
+
+cat <<EOF
+[gitea] THE EDIT-TRAIL SERVER IS NOT HEALTHY — edit commits are not durably reachable.
+[gitea]   service: ${HEALTH_URL} returned '${health_code}' (expected 200)
+[gitea]   branch:  ${BRANCH_URL} returned '${branch_code}' (expected 200)
+[gitea]   unit:    ${UNIT} is-active=${state:-unknown} is-enabled=${enabled:-unknown}
+[gitea]   recent:  ${why:-<no journal output>}
+[gitea]
+[gitea] RESTORE BOTH THE SERVICE AND EDIT-TRAIL BRANCH BEFORE RELYING ON THE REMOTE TRAIL.
+[gitea]   systemctl --user start ${UNIT}
+[gitea]   systemctl --user status ${UNIT} --no-pager
+[gitea]   journalctl --user -u ${UNIT} -n 50 --no-pager
+[gitea]   curl -i -m 2 ${BRANCH_URL}
+[gitea] Store: ${STORE} (durable; survives restarts).
+EOF
+exit 0
