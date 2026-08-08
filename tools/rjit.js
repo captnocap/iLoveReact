@@ -5252,7 +5252,7 @@ ${entry}
     }
     return count;
   }
-  function scanDevHosts2(rjitHome, socketPath) {
+  function scanDevHosts(rjitHome, socketPath) {
     const binary = `${rjitHome}/${DEV_HOST_BINARY}`;
     const listed = spawnSync("ps", ["-eo", "pid,ppid,rss,stat,etime,args", "--no-headers"]);
     const hosts = parseDevHostProcesses(listed.stdout ?? "", binary);
@@ -5270,39 +5270,65 @@ ${entry}
     }
     return !isAlive(pid);
   }
-  function killOrphanHosts2(rjitHome, socketPath, pids) {
-    const scan2 = scanDevHosts2(rjitHome, socketPath);
-    const stillOrphaned = new Set(scan2.orphans.map((row) => row.pid));
-    const outcomes = [];
-    for (const pid of pids) {
-      if (!Number.isInteger(pid) || pid <= 1) {
-        outcomes.push({ pid, ok: false, reason: "not a valid pid" });
-        continue;
-      }
-      if (!stillOrphaned.has(pid)) {
-        outcomes.push({ pid, ok: false, reason: "no longer classifies as an orphan \u2014 it was spared" });
-        continue;
-      }
-      const termed = spawnSync("kill", [String(pid)]);
-      if (termed.code !== 0) {
-        outcomes.push({ pid, ok: false, reason: (termed.stderr ?? "").trim() || `kill exited ${termed.code}` });
-        continue;
-      }
-      if (waitForExit(pid, 20)) {
-        outcomes.push({ pid, ok: true, how: "exited on SIGTERM" });
-        continue;
-      }
-      spawnSync("kill", ["-KILL", String(pid)]);
-      if (waitForExit(pid, 10)) {
-        outcomes.push({ pid, ok: true, how: "wedged \u2014 needed SIGKILL" });
-        continue;
-      }
-      outcomes.push({ pid, ok: false, reason: "survived SIGTERM and SIGKILL \u2014 likely stuck in an uninterruptible syscall (state D)" });
+  function retirePid(pid) {
+    if (!Number.isInteger(pid) || pid <= 1) return { pid, ok: false, reason: "not a valid pid" };
+    const termed = spawnSync("kill", [String(pid)]);
+    if (termed.code !== 0) {
+      return { pid, ok: false, reason: (termed.stderr ?? "").trim() || `kill exited ${termed.code}` };
     }
-    return outcomes;
+    if (waitForExit(pid, 20)) return { pid, ok: true, how: "exited on SIGTERM" };
+    spawnSync("kill", ["-KILL", String(pid)]);
+    if (waitForExit(pid, 10)) return { pid, ok: true, how: "wedged \u2014 needed SIGKILL" };
+    return { pid, ok: false, reason: "survived SIGTERM and SIGKILL \u2014 likely stuck in an uninterruptible syscall (state D)" };
+  }
+  function killOrphanHosts(rjitHome, socketPath, pids) {
+    const scan2 = scanDevHosts(rjitHome, socketPath);
+    const stillOrphaned = new Set(scan2.orphans.map((row) => row.pid));
+    return pids.map((pid) => {
+      if (!Number.isInteger(pid) || pid <= 1) return { pid, ok: false, reason: "not a valid pid" };
+      if (!stillOrphaned.has(pid)) return { pid, ok: false, reason: "no longer classifies as an orphan \u2014 it was spared" };
+      return retirePid(pid);
+    });
   }
   function formatGb(kb) {
     return `${(kb / 1048576).toFixed(1)} GB`;
+  }
+  function parseDevWatchers(psOutput, rjitScript, selfPid) {
+    const watchers = [];
+    for (const line of psOutput.split("\n")) {
+      const fields = line.trim().split(/\s+/);
+      if (fields.length < 9) continue;
+      if (fields[6] !== rjitScript) continue;
+      if (fields[7] !== "watch-and-push") continue;
+      const pid = Number(fields[0]);
+      const ppid = Number(fields[1]);
+      if (!Number.isInteger(pid) || pid <= 1 || pid === selfPid) continue;
+      watchers.push({ pid, ppid, elapsed: fields[4] ?? "", cart: fields[8] ?? "?" });
+    }
+    return watchers;
+  }
+  function scanDevWatchers(rjitHome, selfPid) {
+    const listed = spawnSync("ps", ["-eo", "pid,ppid,rss,stat,etime,args", "--no-headers"]);
+    return parseDevWatchers(listed.stdout ?? "", `${rjitHome}/tools/rjit.js`, selfPid);
+  }
+  var ORPHAN_APPROVAL_FILENAME = "dev-orphan-cleanup.json";
+  var ORPHAN_TOKEN_PREFIX = "orphan-hosts-v1:";
+  function orphanApprovalPath(rjitHome) {
+    return `${rjitHome}/.cache/${ORPHAN_APPROVAL_FILENAME}`;
+  }
+  function orphanCleanupToken(pids) {
+    return `${ORPHAN_TOKEN_PREFIX}${[...pids].sort((a, b) => a - b).join("-")}`;
+  }
+  function parseOrphanCleanupApproval(raw) {
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw);
+      if (typeof value?.token !== "string" || !value.token.startsWith(ORPHAN_TOKEN_PREFIX)) return null;
+      const pids = Array.isArray(value?.pids) ? value.pids.filter((pid) => Number.isInteger(pid) && pid > 1) : [];
+      return pids.length > 0 ? { token: value.token, pids } : null;
+    } catch {
+      return null;
+    }
   }
 
   // cli/host/net.ts
@@ -5662,7 +5688,7 @@ done
     const verdicts = surveyOutputDir(rjitHome, "zig-out");
     announce(verdicts, out);
     if (bin) {
-      const running = scanDevHosts2(rjitHome, DEV_SOCKET_PATH);
+      const running = scanDevHosts(rjitHome, DEV_SOCKET_PATH);
       const live = running.live.map((host) => host.pid);
       if (live.length > 0) {
         out(`[clean] ${live.length} dev host(s) still running (pid ${live.join(", ")}) \u2014 keeping zig-out/dev-modules and zig-out/bin/reactjit-dev`);
@@ -5739,7 +5765,7 @@ done
       }
     }
     const rjitHome = __env("RJIT_HOME") || __cwd();
-    const scan2 = scanDevHosts2(rjitHome, DEV_SOCKET_PATH);
+    const scan2 = scanDevHosts(rjitHome, DEV_SOCKET_PATH);
     if (!kill) {
       if (json) out(JSON.stringify(scan2));
       else report(scan2);
@@ -5750,7 +5776,7 @@ done
       else out("[orphans] nothing to retire");
       return 0;
     }
-    const outcomes = killOrphanHosts2(rjitHome, DEV_SOCKET_PATH, scan2.orphans.map((row) => row.pid));
+    const outcomes = killOrphanHosts(rjitHome, DEV_SOCKET_PATH, scan2.orphans.map((row) => row.pid));
     const retired = outcomes.filter((row) => row.ok);
     if (json) {
       out(JSON.stringify({ killed: outcomes, reclaimedKb: scan2.reclaimableKb }));
@@ -5768,15 +5794,84 @@ done
     return retired.length === outcomes.length ? 0 : 1;
   }
 
+  // cli/commands/stop.ts
+  var stop_exports = {};
+  __export(stop_exports, {
+    run: () => run10
+  });
+  function usage() {
+    err("Usage: rjit stop [--dry-run]");
+    err("  Stops the running dev host and its bundle watcher(s).");
+    err("  --dry-run   list what would be stopped, signal nothing");
+    return 1;
+  }
+  function parseArgs2(argv) {
+    let dryRun = false;
+    for (const arg of argv) {
+      if (arg === "--dry-run" || arg === "-n") dryRun = true;
+      else {
+        err(`[stop] unknown arg: ${arg}`);
+        return usage();
+      }
+    }
+    return { dryRun };
+  }
+  function describeOutcome(outcome) {
+    if (outcome.ok) return outcome.how ?? "stopped";
+    return outcome.reason ?? "did not stop";
+  }
+  async function run10(argv) {
+    const parsed = parseArgs2(argv);
+    if (typeof parsed === "number") return parsed;
+    const rjitHome = __env("RJIT_HOME") || __cwd();
+    const scan2 = scanDevHosts(rjitHome, DEV_SOCKET_PATH);
+    const watchers = scanDevWatchers(rjitHome, __pid());
+    if (scan2.hosts.length === 0 && watchers.length === 0) {
+      out("[stop] no dev host or watcher running");
+      return 0;
+    }
+    for (const host of scan2.hosts) {
+      const note = host.keptBecause.length > 0 ? host.keptBecause.join("; ") : "reparented to init, no socket, no window";
+      out(`[stop]   host pid ${host.pid} (${host.elapsed}, ${formatGb(host.rssKb)}) \u2014 ${note}`);
+    }
+    for (const watcher of watchers) {
+      const launcher = watcher.ppid === 1 ? "its launcher is gone" : `launched by pid ${watcher.ppid}`;
+      out(`[stop]   watcher pid ${watcher.pid} (${watcher.elapsed}) \u2014 watching '${watcher.cart}', ${launcher}`);
+    }
+    if (parsed.dryRun) {
+      out(`[stop] --dry-run: ${scan2.hosts.length + watchers.length} process(es) left running`);
+      return 0;
+    }
+    let failures = 0;
+    for (const watcher of watchers) {
+      const outcome = retirePid(watcher.pid);
+      if (!outcome.ok) failures += 1;
+      out(`[stop] watcher ${watcher.pid} \u2014 ${describeOutcome(outcome)}`);
+    }
+    let reclaimedKb = 0;
+    for (const host of scan2.hosts) {
+      const outcome = retirePid(host.pid);
+      if (outcome.ok) reclaimedKb += host.rssKb;
+      else failures += 1;
+      out(`[stop] host ${host.pid} \u2014 ${describeOutcome(outcome)}`);
+    }
+    if (failures > 0) {
+      err(`[stop] ${failures} process(es) did not stop \u2014 see the reasons above`);
+      return 1;
+    }
+    out(`[stop] dev session stopped \xB7 ${formatGb(reclaimedKb)} reclaimed`);
+    return 0;
+  }
+
   // cli/commands/codegen-bindings.ts
   var codegen_bindings_exports = {};
   __export(codegen_bindings_exports, {
-    run: () => run10
+    run: () => run11
   });
   var HUMANOID_SOURCE_PATH = "runtime/skeleton/data/humanoid-v1.json";
   var HUMANOID_TS_PATH = "runtime/skeleton/generated/humanoid-v1.ts";
   var HUMANOID_ZIG_PATH = "framework/skeleton/generated/humanoid_v1.zig";
-  async function run10(argv) {
+  async function run11(argv) {
     const args = parseArgs(argv, { flags: { check: "bool", strict: "bool" } });
     const ingredients = loadIngredients();
     const humanoid = loadHumanoidSource();
@@ -6272,7 +6367,7 @@ done
   // cli/commands/dev.ts
   var dev_exports = {};
   __export(dev_exports, {
-    run: () => run11
+    run: () => run12
   });
 
   // cli/dev/native-modules.ts
@@ -6465,8 +6560,14 @@ ${digest.stderr || digest.stdout}`);
     return `${rjitHome}/.cache/dev-native-session.json`;
   }
 
+  // cli/dev/child-lifetime.ts
+  var DIE_WITH_PARENT_ENV = "RJIT_DIE_WITH_PARENT";
+  function spawnTiedToUs(cmd, args, extraEnv = []) {
+    return spawn("env", [`${DIE_WITH_PARENT_ENV}=1`, ...extraEnv, cmd, ...args]);
+  }
+
   // cli/commands/dev.ts
-  async function run11(argv) {
+  async function run12(argv) {
     const parsed = parseDevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
@@ -6547,9 +6648,9 @@ ${digest.stderr || digest.stdout}`);
       writeCoreRecord(rjitHome, fingerprints.core.hash, bin);
     }
     if (substrate === "tui") {
-      const child2 = spawn("env", [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
+      const child2 = spawnTiedToUs(bin, [], [`RJIT_DEV_CART_DIR=${cart.dir}`]);
       const watchArgs2 = ["watch-and-push", parsed.name, cart.entry, perCartBundle, "--rjit-home", rjitHome, "--tui"];
-      const watcher2 = spawn(`${rjitHome}/tools/rjit`, watchArgs2);
+      const watcher2 = spawnTiedToUs(`${rjitHome}/tools/rjit`, watchArgs2);
       out(`[dev] TUI host child=${child2.id}`);
       drainUntilExit(child2.id, watcher2.id);
       return 0;
@@ -6563,7 +6664,7 @@ ${digest.stderr || digest.stdout}`);
     const watchArgs = ["watch-and-push", parsed.name, cart.entry, perCartBundle, "--rjit-home", rjitHome];
     watchArgs.push("--core-build-id", fingerprints.core.hash);
     if (substrate === "tui") watchArgs.push("--tui");
-    const watcher = spawn(`${rjitHome}/tools/rjit`, watchArgs);
+    const watcher = spawnTiedToUs(`${rjitHome}/tools/rjit`, watchArgs);
     const approvalPath = nativeApprovalPath(rjitHome);
     if (fsExists(approvalPath)) fsRemove(approvalPath);
     const orphanApproval = orphanApprovalPath(rjitHome);
@@ -6602,18 +6703,18 @@ ${digest.stderr || digest.stdout}`);
         substrateFlag = "gui";
       } else if (arg.startsWith("--")) {
         err(`[dev] unknown flag: ${arg}`);
-        return usage();
+        return usage2();
       } else if (name) {
         err(`[dev] unexpected positional arg: ${arg}`);
-        return usage();
+        return usage2();
       } else {
         name = arg;
       }
     }
-    if (!name) return usage();
+    if (!name) return usage2();
     return { name, substrateFlag };
   }
-  function usage() {
+  function usage2() {
     err("Usage: scripts/dev <cart-name>");
     err(`  Cart expected at: ${__cwd()}/cart/<name>/index.tsx or ${__cwd()}/cart/<name>.tsx`);
     return 1;
@@ -6800,8 +6901,7 @@ socket=${DEV_SOCKET_PATH}`, hot: base };
       `RJIT_DEV_GAME_HASH=${game.artifactHash}`
     ];
     if (hotstateHandoff) env.push(`RJIT_DEV_HOTSTATE_HANDOFF=${hotstateHandoff}`);
-    env.push(bin);
-    return spawn("env", env);
+    return spawnTiedToUs(bin, [], env);
   }
   function sessionTab(name, bundlePath) {
     return { name, bundlePath, bundleHash: sha256File(bundlePath) };
@@ -7122,11 +7222,11 @@ socket=${DEV_SOCKET_PATH}`, hot: base };
   // cli/commands/firecracker-build.ts
   var firecracker_build_exports = {};
   __export(firecracker_build_exports, {
-    run: () => run12
+    run: () => run13
   });
-  async function run12(argv) {
+  async function run13(argv) {
     const root = __cwd();
-    const parsed = parseArgs2(argv, root);
+    const parsed = parseArgs3(argv, root);
     if (typeof parsed === "number") return parsed;
     log2(`bundling recipe: ${parsed}`);
     const bundled = spawnSync(`${root}/tools/esbuild`, [
@@ -7192,7 +7292,7 @@ socket=${DEV_SOCKET_PATH}`, hot: base };
     log2(`done. output: ${outPath} (${(sizeBytes / 1024 / 1024).toFixed(1)} MB)`);
     return 0;
   }
-  function parseArgs2(argv, root) {
+  function parseArgs3(argv, root) {
     let recipePath = "";
     for (const arg of argv) {
       if (arg.startsWith("--")) return fail5(`unknown flag: ${arg}`);
@@ -7304,7 +7404,7 @@ socket=${DEV_SOCKET_PATH}`, hot: base };
   // cli/commands/game.ts
   var game_exports = {};
   __export(game_exports, {
-    run: () => run13
+    run: () => run14
   });
   var GAME_DIR = "cart/hmsc-int/game";
   var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "cart/hmsc-int/compile", "docs/game/_index"];
@@ -7381,7 +7481,7 @@ socket=${DEV_SOCKET_PATH}`, hot: base };
     "cutscene",
     "telemetry"
   ];
-  async function run13(argv) {
+  async function run14(argv) {
     const subcommand = argv[0];
     if (subcommand === "compile") return retiredCompileCommand();
     if (subcommand === "bake") return bake(__cwd(), argv.slice(1));
@@ -8004,8 +8104,8 @@ if (failures.length > 0) {
       `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
       "ZIGOS_SCREENSHOT_FRAMES=8"
     ].join(" ");
-    const run29 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-    const runOut = run29.stdout.trim();
+    const run30 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+    const runOut = run30.stdout.trim();
     if (runOut) out(runOut);
     if (!assertPng(root, outPath)) return false;
     const match = runOut.match(/built (\d+) mesh instances/);
@@ -8071,10 +8171,10 @@ if (failures.length > 0) {
       return 1;
     }
     out("[game] launching live window \u2014 close it or press ESC to exit...");
-    const run29 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
-    if (run29.stdout.trim()) out(run29.stdout.trim());
-    if (run29.stderr.trim()) err(run29.stderr.trim());
-    return run29.code === 0 ? 0 : 1;
+    const run30 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+    if (run30.stdout.trim()) out(run30.stdout.trim());
+    if (run30.stderr.trim()) err(run30.stderr.trim());
+    return run30.code === 0 ? 0 : 1;
   }
   function verify(root) {
     if (bundleVerifyHarness(root) !== 0) {
@@ -8124,13 +8224,13 @@ if (failures.length > 0) {
   // cli/commands/gdev.ts
   var gdev_exports = {};
   __export(gdev_exports, {
-    run: () => run14
+    run: () => run15
   });
   var DEFAULT_GAME_CART = "hmsc-int";
   var PROFILE_VERSION = "gdev-v1";
   var GDEV_SOCKET_GUI = "/tmp/reactjit-gdev.sock";
   var GDEV_SOCKET_TUI = "/tmp/reactjit-gdev-tui.sock";
-  async function run14(argv) {
+  async function run15(argv) {
     const parsed = parseGdevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
@@ -8198,24 +8298,24 @@ if (failures.length > 0) {
     let name = "";
     let substrateFlag = null;
     for (const arg of argv) {
-      if (arg === "--help" || arg === "-h") return usage2(0);
+      if (arg === "--help" || arg === "-h") return usage3(0);
       if (arg === "--tui" || arg === "--headless") {
         substrateFlag = "tui";
       } else if (arg === "--gui") {
         substrateFlag = "gui";
       } else if (arg.startsWith("--")) {
         err(`[gdev] unknown flag: ${arg}`);
-        return usage2(1);
+        return usage3(1);
       } else if (name) {
         err(`[gdev] unexpected positional arg: ${arg}`);
-        return usage2(1);
+        return usage3(1);
       } else {
         name = arg;
       }
     }
     return { name: name || DEFAULT_GAME_CART, substrateFlag };
   }
-  function usage2(code = 1) {
+  function usage3(code = 1) {
     err("Usage: rjit gdev [cart-name] [--gui|--tui]");
     err(`  Default cart: ${DEFAULT_GAME_CART}`);
     err("  Game dev host: source-driven native flags, separate gdev socket, no embedded Postgres bootstrap.");
@@ -8397,10 +8497,10 @@ ${digest.stderr || digest.stdout}`);
   var help_exports = {};
   __export(help_exports, {
     printTopLevel: () => printTopLevel,
-    run: () => run15
+    run: () => run16
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  var SUBCOMMANDS = ["init", "dev", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "clean", "orphans", "bake-icons", "pack-sdk", "firecracker-build", "help"];
+  var SUBCOMMANDS = ["init", "dev", "stop", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "clean", "orphans", "bake-icons", "pack-sdk", "firecracker-build", "help"];
   var SUBCOMMAND_DOC = {
     init: {
       summary: "scaffold a new cart from a template",
@@ -8547,6 +8647,28 @@ ${digest.stderr || digest.stdout}`);
         "suggestions."
       ]
     },
+    stop: {
+      summary: "stop the running dev host and its bundle watcher(s)",
+      usage: ["rjit stop", "rjit stop --dry-run"],
+      detail: [
+        "The counterpart to `rjit dev`. Closing the terminal is not a reliable stop:",
+        "a supervisor killed outright never runs its exit path, and the host keeps",
+        "its window and its gigabyte of RSS (req_4109).",
+        "",
+        "This is an ORDER, not a sweep. `rjit orphans --kill` spares anything holding",
+        "the dev socket or a window \u2014 correct for an automatic sweep, wrong when you",
+        'have said "stop it". `stop` retires the host you can see, plus the bundle',
+        "watchers, which nothing else scanned at all.",
+        "",
+        "Every pid is printed with what it is before anything is signalled, exact",
+        "numeric pids only, and each is verified GONE (SIGTERM, verify, escalate,",
+        "verify) before it is reported stopped.",
+        "",
+        "Hosts launched after this change also die with their supervisor on their own:",
+        "they arm the kernel parent-death signal (framework/proc_lifetime.zig), which",
+        "covers the SIGKILLs and crashes no exit path can."
+      ]
+    },
     orphans: {
       summary: "find dev hosts nothing is attached to, and retire them by exact pid",
       usage: ["rjit orphans", "rjit orphans --kill", "rjit orphans --json"],
@@ -8621,7 +8743,7 @@ ${digest.stderr || digest.stdout}`);
       detail: []
     }
   };
-  async function run15(argv) {
+  async function run16(argv) {
     const target = argv[0];
     const registry = readRegistry();
     if (!target) {
@@ -8662,7 +8784,7 @@ ${digest.stderr || digest.stdout}`);
     }
     const doc = SUBCOMMAND_DOC[name];
     const lines = [`rjit ${name} - ${doc.summary}`, "", "Usage:"];
-    for (const usage8 of doc.usage) lines.push(`  ${usage8}`);
+    for (const usage9 of doc.usage) lines.push(`  ${usage9}`);
     if (doc.detail.length) {
       lines.push("");
       lines.push(...doc.detail);
@@ -8700,11 +8822,11 @@ ${digest.stderr || digest.stdout}`);
   // cli/commands/init.ts
   var init_exports = {};
   __export(init_exports, {
-    run: () => run16
+    run: () => run17
   });
   var TEMPLATE_NAMES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  async function run16(argv) {
-    const parsed = parseArgs3(argv);
+  async function run17(argv) {
+    const parsed = parseArgs4(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
     const template = TEMPLATES2[parsed.template];
@@ -8745,9 +8867,9 @@ ${digest.stderr || digest.stdout}`);
     else out("[init] run ./scripts/dev <cart-name> after moving it under cart/");
     return 0;
   }
-  function parseArgs3(argv) {
+  function parseArgs4(argv) {
     if (argv.length === 0) {
-      usage3();
+      usage4();
       return 2;
     }
     for (const arg of argv) {
@@ -8766,7 +8888,7 @@ ${digest.stderr || digest.stdout}`);
     }
     return fail7("too many positional arguments", 2);
   }
-  function usage3() {
+  function usage4() {
     out([
       "usage:",
       "  tools/v8cli scripts/init.js <directory>",
@@ -9058,7 +9180,7 @@ export default function App() {
   // cli/commands/lab.ts
   var lab_exports = {};
   __export(lab_exports, {
-    run: () => run17
+    run: () => run18
   });
   var LABS_DIR = "cart/hmsc-int/labs";
   var SCAFFOLD_SCENE = `${LABS_DIR}/_scaffold.tsx`;
@@ -9066,7 +9188,7 @@ export default function App() {
   var REGISTRY = `${LABS_DIR}/index.ts`;
   var IMPORTS_MARKER = "// rjit:lab-imports";
   var ENTRIES_MARKER = "// rjit:lab-entries";
-  async function run17(argv) {
+  async function run18(argv) {
     if (argv[0] !== "new" && argv[0] !== "remove") {
       err("Usage: rjit lab new <name>");
       err("       rjit lab remove <name>");
@@ -9150,7 +9272,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run18
+    run: () => run19
   });
 
   // cli/cart/metafile.ts
@@ -9275,7 +9397,7 @@ ${IMPORTS_MARKER}`).replace(
   }
 
   // cli/commands/metafile-gate.ts
-  async function run18(argv) {
+  async function run19(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -9363,9 +9485,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack.ts
   var pack_exports = {};
   __export(pack_exports, {
-    run: () => run19
+    run: () => run20
   });
-  async function run19(argv) {
+  async function run20(argv) {
     const name = argv[0];
     let outDir = "";
     for (let i = 1; i < argv.length; i += 1) {
@@ -9373,11 +9495,11 @@ ${IMPORTS_MARKER}`).replace(
       if (arg === "--out" || arg === "-o") {
         outDir = argv[++i] ?? "";
       } else {
-        return usage4(`unknown argument: ${arg}`);
+        return usage5(`unknown argument: ${arg}`);
       }
     }
-    if (!name) return usage4("missing package name");
-    if (name !== "hmsc") return usage4(`unsupported package for slice 1: ${name}`);
+    if (!name) return usage5("missing package name");
+    if (name !== "hmsc") return usage5(`unsupported package for slice 1: ${name}`);
     const root = __cwd();
     const rjitHome = __env("RJIT_HOME") || root;
     const packageDir = outDir || `${root}/cart/hmsc-int/exports/hmsc.rjpkg`;
@@ -9420,7 +9542,7 @@ ${IMPORTS_MARKER}`).replace(
     out(`[pack] done -> ${packageDir}`);
     return 0;
   }
-  function usage4(message) {
+  function usage5(message) {
     err(`[pack] ${message}`);
     err("Usage: rjit pack hmsc [--out path/to/hmsc.rjpkg]");
     return 2;
@@ -9436,7 +9558,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack-sdk.ts
   var pack_sdk_exports = {};
   __export(pack_sdk_exports, {
-    run: () => run20
+    run: () => run21
   });
   var ROOT = __cwd();
   var EXCLUDES = [
@@ -9499,7 +9621,7 @@ ${IMPORTS_MARKER}`).replace(
     "/lib/x86_64-linux-gnu/libresolv.so.2",
     "/lib64/ld-linux-x86-64.so.2"
   ];
-  async function run20(argv) {
+  async function run21(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
     const registryPath = `${ROOT}/sdk/dependency-registry.json`;
@@ -9748,11 +9870,11 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/play.ts
   var play_exports = {};
   __export(play_exports, {
-    run: () => run21
+    run: () => run22
   });
-  async function run21(argv) {
+  async function run22(argv) {
     const pkg = argv[0];
-    if (!pkg || argv.length > 1) return usage5(pkg ? "too many arguments" : "missing package path");
+    if (!pkg || argv.length > 1) return usage6(pkg ? "too many arguments" : "missing package path");
     const root = __cwd();
     const binary = `${root}/zig-out/bin/rjit-player`;
     if (!fsExists(binary)) {
@@ -9765,7 +9887,7 @@ ${IMPORTS_MARKER}`).replace(
     writeSpawnOutput5(result);
     return result.code;
   }
-  function usage5(message) {
+  function usage6(message) {
     err(`[play] ${message}`);
     err("Usage: rjit play path/to/game.rjpkg");
     return 2;
@@ -9778,11 +9900,11 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run22
+    run: () => run23
   });
   var SOCKET_PATH = __env("RJIT_DEV_SOCKET_PATH") || "/tmp/reactjit.sock";
   var TIMEOUT_MS2 = 3e3;
-  async function run22(argv) {
+  async function run23(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -9861,7 +9983,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/repo.ts
   var repo_exports = {};
   __export(repo_exports, {
-    run: () => run23
+    run: () => run24
   });
 
   // cli/dev/publishable.ts
@@ -10206,7 +10328,7 @@ ${IMPORTS_MARKER}`).replace(
   }
 
   // cli/commands/repo.ts
-  async function run23(argv) {
+  async function run24(argv) {
     const verb = argv[0];
     if (verb === "archive" || verb === "unpublish") {
       const rest = argv.slice(1);
@@ -10490,9 +10612,9 @@ ${rule}
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run24
+    run: () => run25
   });
-  async function run24(argv) {
+  async function run25(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -11036,18 +11158,18 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run25
+    run: () => run26
   });
-  async function run25(argv) {
-    return run24([...argv, "--tui"]);
+  async function run26(argv) {
+    return run25([...argv, "--tui"]);
   }
 
   // cli/commands/shot.ts
   var shot_exports = {};
   __export(shot_exports, {
-    run: () => run26
+    run: () => run27
   });
-  async function run26(argv) {
+  async function run27(argv) {
     let name = null;
     let outPath = null;
     let route = null;
@@ -11076,14 +11198,14 @@ __ARCHIVE__
         timeoutS = Math.max(5, Number(argv[++i] ?? 120) || 120);
         continue;
       }
-      if (arg.startsWith("-")) return usage6(`unknown flag: ${arg}`);
+      if (arg.startsWith("-")) return usage7(`unknown flag: ${arg}`);
       if (name === null) {
         name = arg;
         continue;
       }
-      return usage6("too many positional args");
+      return usage7("too many positional args");
     }
-    if (!name) return usage6("missing cart name");
+    if (!name) return usage7("missing cart name");
     const root = __cwd();
     const cartEntry = resolveCartEntry(root, name);
     if (!cartEntry) return fail10(`[shot] no cart found for ${name} (expected cart/${name}/index.tsx or cart/${name}.tsx)`);
@@ -11166,7 +11288,7 @@ __ARCHIVE__
   function shellQuote4(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
-  function usage6(message) {
+  function usage7(message) {
     err(`[shot] ${message}`);
     err("Usage: rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S] [-- app-args...]");
     err("  Captures the cart's OWN rendered frame headless (hidden window \u2014 the");
@@ -11181,9 +11303,9 @@ __ARCHIVE__
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run27
+    run: () => run28
   });
-  async function run27(argv) {
+  async function run28(argv) {
     const parsed = parseTuiArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
@@ -11218,24 +11340,24 @@ __ARCHIVE__
     let appArgs = [];
     for (let i = 0; i < argv.length; i += 1) {
       const arg = argv[i];
-      if (arg === "--help" || arg === "-h") return usage7(0);
+      if (arg === "--help" || arg === "-h") return usage8(0);
       if (arg === "--") {
         appArgs = argv.slice(i + 1);
         break;
       }
       if (arg.startsWith("--")) {
         err(`[tui] unknown flag: ${arg}`);
-        return usage7(1);
+        return usage8(1);
       }
       if (target) {
         err(`[tui] unexpected positional arg: ${arg}`);
-        return usage7(1);
+        return usage8(1);
       }
       target = arg;
     }
     return { target: target || "tui/examples/counter.tsx", appArgs };
   }
-  function usage7(code = 1) {
+  function usage8(code = 1) {
     err("Usage: rjit tui [cart-name|entry.tsx] [-- app-args...]");
     err("  Builds a TUI bundle and execs the headless app in the foreground terminal.");
     err("  Use `rjit dev <cart-name> --tui` for the experimental persistent TUI dev host.");
@@ -11359,10 +11481,10 @@ __ARCHIVE__
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run28
+    run: () => run29
   });
   var POLL_MS = 200;
-  async function run28(argv) {
+  async function run29(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -11460,6 +11582,7 @@ __ARCHIVE__
     "ship": ship_exports,
     "ship-tui": ship_tui_exports,
     "shot": shot_exports,
+    "stop": stop_exports,
     "tui": tui_exports,
     "watch-and-push": watch_and_push_exports
   };

@@ -50,6 +50,13 @@ import {
   sameNativeFingerprints,
   type PendingNativeUpdate,
 } from '../dev/native-approval.ts';
+import {
+  killOrphanHosts,
+  orphanApprovalPath,
+  orphanCleanupToken,
+  parseOrphanCleanupApproval,
+  scanDevHosts,
+} from '../dev/orphan-hosts.ts';
 import { spawnTiedToUs } from '../dev/child-lifetime.ts';
 
 type Substrate = 'gui' | 'tui';
