@@ -1,0 +1,6 @@
+2026-08-08 Phase 1 complete: surveyed resident, saved, derived, Lore, bridge, UI, concurrency, and verification owners.
+2026-08-08 Phase 2 complete: fixed the target shape, non-goals, and measurable done standard.
+2026-08-08 Phase 3 complete: traced face inspection, diff, snapshot, Save, retention, preview, restore, status, and mutation flows.
+2026-08-08 Phase 4 complete: decomposed every high-fragility native, bridge, editor, persistence, and verification owner.
+2026-08-08 Phase 5 complete: selected canonical shared services, contracts, leases, and retention shapes; rejected parallel implementations.
+2026-08-08 Phase 6 complete: wrote 276 sequential executable steps; validator reports zero task-shaped rows.
