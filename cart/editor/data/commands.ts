@@ -38,14 +38,6 @@ const ADD_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
   id: `add-mesh-${p.kind}`, menu: 'Edit', submenu: 'Add Primitive', name: p.name, icon: p.icon,
   key: '', context: true, native: true, undoable: true, tool: false, scope: 'model',
 }));
-// Starter models under File → New Mesh — a fresh MULTI-PART document seeded as a whole
-// authored thing (the player/NPC body, req_2761: one part per body bone, skeleton on the
-// package). No size dialog: a starter's dimensions ARE its data table.
-const NEW_PLAYER_MODEL_COMMAND: Command = {
-  id: 'new-model-player', menu: 'File', submenu: 'New Mesh', name: 'Player / NPC Model', icon: 'PersonStanding',
-  key: '', context: false, native: true, undoable: false, scope: 'global',
-};
-
 // Semantic building bases under File → New Mesh → Build Pieces. Unlike generic
 // primitives these open at the build catalog's real module dimensions and shape.
 const NEW_BUILD_STARTER_COMMANDS: Command[] = BUILD_PIECE_STARTERS.map((starter) => ({
@@ -127,7 +119,6 @@ export const COMMANDS: Command[] = [
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false, scope: 'global' },
   ...NEW_MESH_COMMANDS,
   ...NEW_BUILD_STARTER_COMMANDS,
-  NEW_PLAYER_MODEL_COMMAND,
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'open-file-explorer', menu: 'File', name: 'Open Project Asset Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'find-import-source', menu: 'File', name: 'Find Import Source', icon: 'SearchCode', key: 'Ctrl+Shift+P', context: false, native: true, undoable: false, scope: 'global' },
@@ -223,12 +214,15 @@ export const COMMANDS: Command[] = [
   // UV direction collection (req_3388): one selected 3D face expands to every
   // atlas island projected from the same signed axis, without joining the mesh.
   { id: 'mesh-select-uv-orientation', menu: 'Edit', scope: 'model', name: 'Collect Same UV Orientation', icon: 'Layers3', key: '', context: true, native: true, undoable: false, tool: true, needsSelection: true },
-  // GUI semantic naming (req_3872/req_3880): a blocking popover, not an action-bar
-  // chip — the bar is full. N in face mode; assigns the selection to a durable region.
-  { id: 'mesh-name-faces', menu: 'Edit', scope: 'model', name: 'Name Faces…', icon: 'Tag', key: 'N', context: true, native: true, undoable: true, needsSelection: true },
+  // One blocking semantic-naming lane: N names faces in Face mode and canonical
+  // logical-edge paths in Edge mode.
+  { id: 'mesh-name-selection', menu: 'Edit', scope: 'model', name: 'Name Selection…', icon: 'Tag', key: 'N', context: true, native: true, undoable: true, needsSelection: true },
   { id: 'mesh-move', menu: 'Edit', scope: 'model', name: 'Move Gizmo', icon: 'Move', key: 'G', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-scale', menu: 'Edit', scope: 'model', name: 'Scale Gizmo', icon: 'Scale3d', key: 'S', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-scale-by', menu: 'Edit', scope: 'model', name: 'Scale By…', icon: 'Scale3d', key: '', context: true, native: true, undoable: true },
+  // Collapse one selected vertex row / edge loop onto its least-varying X/Y/Z
+  // coordinate at the selection center. Native mirror twins follow in the same undo.
+  { id: 'mesh-align-loop', menu: 'Edit', scope: 'model', name: 'Align Loop', icon: 'AlignCenter', key: 'A', context: true, native: true, undoable: true, tool: true, needsSelection: true },
   { id: 'mesh-rotate', menu: 'Edit', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-path-plane', menu: 'Edit', scope: 'model', name: 'Pen Plane', icon: 'PenTool', key: '', context: true, native: true, undoable: true, tool: true },
@@ -254,6 +248,10 @@ export const COMMANDS: Command[] = [
   // Contextual topology ops — edge mode has edge extrude/create-face; face mode has face extrude.
   { id: 'mesh-extrude', menu: 'Edit', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-extrude-face', menu: 'Edit', scope: 'model', name: 'Extrude Face', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
+  // Replace one filled authored face with a welded regular N-gon center and a
+  // deterministic triangle/quad transition ring. The center stays selected so
+  // the ordinary Extrude verb grows a cylinder directly from a square panel.
+  { id: 'mesh-face-polygon', menu: 'Edit', scope: 'model', name: 'Face to N-gon', icon: 'Circle', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
   // Weld (req_3382): merge the selected vertices at their center — Blender's
   // Merge-at-Center. Edge mode collapses the selected edges' endpoints.
@@ -272,6 +270,11 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-detach', menu: 'Edit', scope: 'model', name: 'Detach Faces', icon: 'Ungroup', key: 'D', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-glass', menu: 'Edit', scope: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-solidify', menu: 'Edit', scope: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
+  // Assign the selected faces to a UV MASK zone: they unfold as ONE chart for texturing
+  // while the authored face distribution is left completely alone. This is the thing to
+  // reach for INSTEAD of merging faces to fix a UV -- merging also creases the shading
+  // and makes the mesh miserable to edit (req_4152).
+  { id: 'mesh-uv-zone', menu: 'Edit', scope: 'model', name: 'Assign UV Mask Zone', icon: 'Layers', key: 'Shift+M', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-merge-faces', menu: 'Edit', scope: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
   // Whole-topology tris-to-quads recovery (req_3511/3512): dry-run the exact
   // maximum pairing, preview alternatives, then commit once on confirmation.
@@ -304,6 +307,7 @@ export const COMMANDS: Command[] = [
 export type BlockingOverlay = { id: string; label: string; closerCommandId?: string };
 export function blockingOverlay(state: EditorState): BlockingOverlay | null {
   const mv = state.modelTool.blocking;
+  if (mv === 'extrude') return { id: 'extrude', label: 'Extrude' };
   if (mv === 'bevel') return { id: 'bevel', label: 'Bevel' };
   if (mv === 'loop-cut') return { id: 'loop-cut', label: 'Loop Cut' };
   if (mv === 'paint-conflict') return { id: 'paint-conflict', label: 'Live / Disk Paint Conflict' };
@@ -322,12 +326,23 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
 // (__mesh_history — the door cart code never called before this), on the world the real
 // worldUndo/worldRedo stacks. Menus, the dock buttons, and the hotkey gate all read this — a
 // button that would do nothing renders disabled with the reason instead.
-export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' | 'strokes' | 'material' | 'knowledge' };
+export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'rig' | 'world' | 'strokes' | 'material' | 'knowledge' };
 let g_colorStudioUndoDepths: UndoDepths = { undo: 0, redo: 0, source: 'material' };
+let g_characterRigUndoDepths: UndoDepths & { active: boolean } = { undo: 0, redo: 0, source: 'rig', active: false };
 export function undoDepths(state: EditorState): UndoDepths {
   if (activeSurface(state) === 'knowledge') return { undo: 0, redo: 0, source: 'knowledge' };
   if (activeSurface(state) === 'material') return g_colorStudioUndoDepths;
   if (activeSurface(state) === 'model') {
+    // A visible, input-owning Character Rig pane has its own native authored
+    // history. Mesh selection/paint modes suspend it, so the ordinary mesh or
+    // stroke journal immediately becomes authoritative again.
+    if (g_characterRigUndoDepths.active) {
+      return {
+        undo: g_characterRigUndoDepths.undo,
+        redo: g_characterRigUndoDepths.redo,
+        source: 'rig',
+      };
+    }
     // While the paint session is live the STROKE journal is the undo truth (req_2672):
     // menu rows read "Undo (N strokes)" and an empty journal refuses honestly instead
     // of silently falling through to the mesh journal.
@@ -361,6 +376,14 @@ export function publishUndoDepths(d: UndoDepths): void { g_undoDepths = d; }
 export function publishColorStudioUndoDepths(undo: number, redo: number): void {
   g_colorStudioUndoDepths = { undo, redo, source: 'material' };
 }
+export function publishCharacterRigUndoDepths(undo: number, redo: number, active: boolean): void {
+  g_characterRigUndoDepths = {
+    undo: Math.max(0, undo | 0),
+    redo: Math.max(0, redo | 0),
+    source: 'rig',
+    active,
+  };
+}
 
 // ── Enablement (the sane-app grayed-with-reason gate) ─────────────────────────────────────────
 // A command is off when: a blocking overlay is unresolved (modal discipline), its surface isn't
@@ -391,8 +414,8 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
       return {
         on: false,
         reason: cmd.id === 'undo-local'
-          ? (d.source === 'strokes' ? 'nothing to undo in paint' : d.source === 'mesh' ? 'mesh journal empty' : d.source === 'material' ? 'nothing to undo in Color Studio' : 'nothing to undo on the world')
-          : (d.source === 'strokes' ? 'nothing to redo in paint' : d.source === 'mesh' ? 'nothing to redo in the mesh journal' : d.source === 'material' ? 'nothing to redo in Color Studio' : 'nothing to redo on the world'),
+          ? (d.source === 'strokes' ? 'nothing to undo in paint' : d.source === 'rig' ? 'character rig history empty' : d.source === 'mesh' ? 'mesh journal empty' : d.source === 'material' ? 'nothing to undo in Color Studio' : 'nothing to undo on the world')
+          : (d.source === 'strokes' ? 'nothing to redo in paint' : d.source === 'rig' ? 'nothing to redo in character rig history' : d.source === 'mesh' ? 'nothing to redo in the mesh journal' : d.source === 'material' ? 'nothing to redo in Color Studio' : 'nothing to redo on the world'),
       };
     }
   }
@@ -415,8 +438,8 @@ const section = (label: string): MenuNode => ({ kind: 'section', label });
 const MESH_SUBMENU: MenuNode = {
   kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
   children: [
-    section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-faces'),
-    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
+    section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
+    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-align-loop'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
@@ -437,7 +460,6 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
           kind: 'sub', id: 'Build Pieces', label: 'Build Pieces', icon: 'Building2', scope: 'global',
           children: NEW_BUILD_STARTER_COMMANDS.map((c) => cmd(c.id)),
         },
-        section('Characters'), cmd('new-model-player'),
       ],
     },
     cmd('open-map'), cmd('open-file-explorer'), cmd('find-import-source'), cmd('import-model-file'), cmd('save-snapshot'),
@@ -488,7 +510,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
     return [
       ...(tool.sel < 1 ? [] : [
         commandById('mesh-select-uv-orientation'),
-        ...(tool.sel === 1 ? [commandById('mesh-extrude-face')] : []),
+        ...(tool.sel === 1 ? [commandById('mesh-face-polygon'), commandById('mesh-extrude-face')] : []),
         commandById('mesh-flip-face'), commandById('mesh-loopcut'), commandById('mesh-cut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
         // Outliner multi-select is represented host-side by selecting every authored face
         // in those parts. Offering Merge Faces here would collapse all of those groups to
@@ -502,7 +524,9 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
   if (tool.sel < 1) return [];
   // Vertex mode: one real corner bevels; two or more selected verts weld at center.
   if (tool.selMode === 1) {
-    return tool.sel === 1 ? [commandById('mesh-bevel')] : [commandById('mesh-weld')];
+    return tool.sel === 1
+      ? [{ ...commandById('mesh-extrude'), name: 'Extrude Edge to Vertex' }, commandById('mesh-bevel')]
+      : [commandById('mesh-align-loop'), commandById('mesh-weld')];
   }
   if (tool.selMode === 2) {
     // Weld collapses the selected edges' endpoints — one edge = an edge collapse.
@@ -511,6 +535,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
       : [
           commandById('mesh-create-face'),
           ...(tool.sel >= 3 ? [{ ...commandById('mesh-bevel'), name: 'Chamfer Boundary' }] : []),
+          commandById('mesh-align-loop'),
           commandById('mesh-weld'),
         ];
   }

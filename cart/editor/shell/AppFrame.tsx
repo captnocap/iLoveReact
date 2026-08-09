@@ -19,8 +19,10 @@ import ScaleByDialog from './ScaleByDialog';
 import NameSelectionDialog from './NameSelectionDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
 import { characterPreparedSaveExportReady, characterSnapshotExportReady } from './characterExportReadiness';
-import { attachCharacterRigCapability, hasCharacterRigCapability } from '../skeleton/characterRigCapability';
+import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
+import { establishCharacterRigCapability } from '../skeleton/characterRigAttachTransaction';
 import { characterRigBodyPartRow, characterRigPartMetadata } from '../skeleton/characterRigPartMetadata';
+import { characterRigPackagePath } from '../skeleton/characterRigPackagePath';
 import { playerCharacterPackage as boundPlayerCharacterPackage } from '../world/playerCharacterLoader';
 import { PaintPanel } from './PaintSidePanel';
 import PerformancePopover from './PerformancePopover';
@@ -125,7 +127,12 @@ import {
   readPaintLayoutDiskFacts,
   type PaintLayoutKeepLiveOptions,
 } from '../model/paintLayoutConflict';
-import { modelSaveAuthority, type ModelSaveIntent } from '../model/modelSaveAuthority';
+import {
+  commitOrdinaryModelSave,
+  modelSaveAuthority,
+  saveLiveModelBeforeExport,
+  type ModelSaveIntent,
+} from '../model/modelSaveAuthority';
 import {
   loreSnapshotObjectIds,
   modelPackageGeometryPath,
@@ -260,7 +267,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { resolvePackageDir, hasStoredModelPaint, materializeCharacterSaveSnapshot, materializeModelPackage, modelPaintLayoutIsStale, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage, settleRenamedPackageDir, removeModelPackage, stageModelThumbnail, type ThumbnailStageResult } from '../data/modelPackageStore';
+import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -424,6 +431,12 @@ export default function AppFrame() {
   );
   const activeSessionTokenRef = useRef(0);
   const activeSessionModelIdRef = useRef<string | null>(null);
+  const residentModelForRigAttachRef = useRef<{
+    documentId: string;
+    modelId: string;
+    modelSourceKey: string;
+    lifecycleId: string;
+  } | null>(null);
   const seatSessionWedgedRef = useRef(false);
   const backgroundSeatByModelRef = useRef(new Map<string, AgentSeat>());
   // Agent UV plans are bounded, mutation-free proposals. Only the latest plan is
@@ -631,6 +644,9 @@ export default function AppFrame() {
   // toolbar + context menu remote-control the SAME tools through this ref, and
   // the viewer mirrors its live state back into state.modelTool for highlights.
   const modelToolApiRef = useRef<ModelToolApi | null>(null);
+  // Next UV mask zone id to hand out. Shift+M allocates in order so repeated presses
+  // build up separate charts instead of piling every selection into zone 0 (req_4152).
+  const nextUvZoneRef = useRef(0);
 
   // ── Modal discipline (req_2626 gap HH, USER LAW) ────────────────────────────
   // While ANY blocking session/dialog is unresolved — the viewer's bevel/loop-cut
@@ -1578,6 +1594,18 @@ export default function AppFrame() {
       state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId) ?? null,
     );
   }
+  // An adoption key belongs to one exact visible document lifetime. Clear it
+  // synchronously during render when navigation, native-session selection, or
+  // an explicit reload changes that lifetime; a fast close/reopen can therefore
+  // never attach against the previous ModelView's dead source key.
+  const rigAttachResidentLifecycleId = [
+    state.activeWorkspaceDocumentId,
+    activeSessionModelIdRef.current ?? '',
+    String(modelReloadRevision),
+  ].join('|');
+  if (residentModelForRigAttachRef.current?.lifecycleId !== rigAttachResidentLifecycleId) {
+    residentModelForRigAttachRef.current = null;
+  }
   // Native journal outcomes are drained asynchronously. Stamp the resident mesh
   // with this document's compact identity so a tab switch cannot attribute an
   // already-queued transform to the newly active model. Keep prior mappings for
@@ -1853,23 +1881,62 @@ export default function AppFrame() {
       textureSlots,
       lights,
     };
-    const result = materializeModelPackage(pkgToSave);
-    const artifactsOk = result.ok && writeModelArtifacts(
-      pkg,
-      partsMetaFromRows(liveRows),
-      meshDocPartRangesFromRows(liveRows) ?? undefined,
-      {
-        ...structuralSaveOptions,
-        allowPartShrink: saveAuthority.allowLiveDiskPartCountMismatch
-          || keepLiveOptions.allowPartShrink === true
-          || structuralSaveOptions.allowPartShrink,
-        allowSemanticClear: saveAuthority.allowSemanticClear
-          || keepLiveOptions.allowSemanticClear === true
-          || structuralSaveOptions.allowSemanticClear,
-      },
-    );
-    const ok = result.ok && artifactsOk;
-    if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
+    const preparedSave = prepareOrdinaryModelSaveStage(pkg);
+    if (!preparedSave.ok) {
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        status: `${reason} failed: ${preparedSave.error}`,
+      }));
+      return false;
+    }
+    const saveStage = preparedSave.stage;
+    const saveParts = partsMetaFromRows(liveRows);
+    const transaction = commitOrdinaryModelSave({
+      writeArtifacts: () => writeModelArtifactsAtDirectory(
+        saveStage.stagingDir,
+        saveParts,
+        meshDocPartRangesFromRows(liveRows) ?? undefined,
+        {
+          ...structuralSaveOptions,
+          allowPartShrink: saveAuthority.allowLiveDiskPartCountMismatch
+            || keepLiveOptions.allowPartShrink === true
+            || structuralSaveOptions.allowPartShrink,
+          allowSemanticClear: saveAuthority.allowSemanticClear
+            || keepLiveOptions.allowSemanticClear === true
+            || structuralSaveOptions.allowSemanticClear,
+        },
+      ),
+      writeManifest: () => materializeModelPackageAtDirectory(pkgToSave, saveStage.stagingDir),
+      manifestSucceeded: (manifestResult) => manifestResult.ok,
+      installPrepared: () => installOrdinaryModelSaveStage(saveStage, saveParts),
+      validateInstalled: () => validateInstalledOrdinaryModelSaveStage(saveStage, saveParts),
+      rollbackInstalled: () => rollbackOrdinaryModelSaveStage(saveStage),
+      discardPrepared: () => discardOrdinaryModelSaveStage(saveStage),
+      acceptInstalled: () => acceptInstalledOrdinaryModelSaveStage(saveStage),
+    });
+    const artifactsOk = transaction.artifactsCommitted;
+    const manifestResult = transaction.manifestResult ?? {
+      ok: false,
+      id: pkg.id,
+      dir: saveStage.targetDir,
+      error: meshDocLastWriteFailure() ?? 'model artifacts were not written',
+    };
+    const ok = transaction.ok;
+    const transactionError = !artifactsOk
+      ? (meshDocLastWriteFailure() ?? 'model artifacts were not written')
+      : !manifestResult.ok
+        ? (manifestResult.error ?? 'atomic staged manifest write failed')
+        : !transaction.installed
+          ? transaction.recoveryRetained
+            ? `atomic package install encountered an I/O failure; complete recovery trees were retained at ${saveStage.targetDir} and ${saveStage.stagingDir}`
+            : 'atomic package install refused because the target changed'
+          : transaction.rolledBack
+            ? 'installed package failed read-back validation; the exact prior revision was restored'
+            : transaction.recoveryRetained
+              ? `installed package failed read-back and rollback; complete recovery trees were retained at ${saveStage.targetDir} and ${saveStage.stagingDir}`
+              : 'installed package failed read-back validation';
     let recoveryStatus = '';
     if (ok) {
       consumeModelSaveAuthorizations(pkg.id);
@@ -1891,7 +1958,7 @@ export default function AppFrame() {
       savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
       recoveryStatus = archiveCommittedModelSave(
         pkgToSave,
-        result.dir,
+        saveStage.targetDir,
         liveRows,
         reason,
       ).statusSuffix;
@@ -1905,8 +1972,8 @@ export default function AppFrame() {
         ? [...prev.modelDupes, pkgToSave]
         : prev.modelDupes,
       status: ok
-        ? `${reason}: "${pkg.name}" → ${result.dir}${recoveryStatus}`
-        : `${reason} failed: ${result.error ?? (artifactsOk ? 'unknown error' : (meshDocLastWriteFailure() ?? 'model artifacts were not written'))}`,
+        ? `${reason}: "${pkg.name}" → ${saveStage.targetDir}${recoveryStatus}`
+        : `${reason} failed: ${transactionError}`,
     }));
     return ok;
   };
@@ -2515,6 +2582,22 @@ export default function AppFrame() {
       else runFaceOp('merge-faces', source);
       return;
     }
+    // Shift+M — assign the face selection to a UV mask zone. Zones are allocated in
+    // order; this is the mask alternative to merging faces for a clean UV (req_4152).
+    if (commandId === 'mesh-uv-zone') {
+      const assigned = withNativeMeshActionSource(source, () => modelToolApiRef.current?.assignUvZone(nextUvZoneRef.current) ?? false);
+      const zone = nextUvZoneRef.current;
+      if (assigned) nextUvZoneRef.current += 1;
+      setState((prev) => ({
+        ...prev,
+        contextOpen: false,
+        openMenu: null,
+        status: assigned
+          ? `UV mask zone ${zone} — those faces now unfold as ONE chart; the mesh is untouched`
+          : 'UV mask zone needs a face selection in Face mode',
+      }));
+      return;
+    }
     if (commandId === 'mesh-tris-to-quads') { runFaceOp('tris-to-quads', source); return; }
     if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1, source); return; }
     if (commandId === 'mesh-path-array') { pathArraySourceRef.current = source; openPathArrayPrompt(); return; }
@@ -2798,17 +2881,15 @@ export default function AppFrame() {
           return;
         }
       }
-      const docWritten = writeModelArtifacts(
-        pkg,
-        partsMetaFromRows(liveParts ?? []),
-        meshDocPartRangesFromRows(liveParts ?? []) ?? undefined,
-        partShrinkSaveOptions(pkg.id, liveParts?.length ?? 0),
-      );
+      const docWritten = saveLiveModelBeforeExport((request) => saveModelDocumentNow(
+        pkg.id,
+        request.reason,
+        request.intent,
+      ));
       if (!docWritten) {
-        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export stopped: the model document could not be saved without losing part ranges.' }));
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export stopped: the explicit model save did not commit the live resident.' }));
         return;
       }
-      consumeModelSaveAuthorizations(pkg.id);
       // Resolve the geometry through the ONE resolver the viewer uses — the package
       // meshdoc just written (host truth), else live seed parts, else the package
       // resolver. Cache it so the resident builder draws exactly what you see.
@@ -3373,8 +3454,23 @@ export default function AppFrame() {
       : null;
     if (bodyRow) objectIds.push(bodyRow.id);
     try {
-      const attached = attachCharacterRigCapability(pkg, objectIds);
-      setCharacterRigSnapshot(null);
+      const activeDocument = current.workspaceDocuments.find((document) =>
+        document.id === current.activeWorkspaceDocumentId);
+      const resident = residentModelForRigAttachRef.current;
+      if (activeDocument?.kind !== 'model' || activeDocument.sourceId !== pkg.id ||
+          !resident || resident.documentId !== activeDocument.id || resident.modelId !== pkg.id) {
+        throw new Error('the visible model has not finished native adoption; its ordinary mesh remains unchanged and saveable');
+      }
+      const established = establishCharacterRigCapability({
+        package: pkg,
+        orderedObjectIds: objectIds,
+        resident,
+        expectedLifecycleId: rigAttachResidentLifecycleId,
+        packagePath: characterRigPackagePath(pkg),
+        open: (payload) => characterRigApiRef.current!.open(payload),
+      });
+      const attached = established.package;
+      setCharacterRigSnapshot(established.snapshot);
       setState((prev) => ({
         ...prev,
         modelDupes: prev.modelDupes.some((model) => model.id === attached.id)
@@ -3395,9 +3491,10 @@ export default function AppFrame() {
       }));
       return attached;
     } catch (error) {
+      setCharacterRigSnapshot(null);
       setState((prev) => ({
         ...prev,
-        status: `Humanoid rig could not attach: ${error instanceof Error ? error.message : String(error)}`,
+        status: `Humanoid rig could not attach: ${error instanceof Error ? error.message : String(error)} — no rig capability was installed; the ordinary model remains saveable.`,
       }));
       return null;
     }
@@ -6671,7 +6768,7 @@ export default function AppFrame() {
                 capability: 'attached',
                 bodyObjectId: attachedBodyObjectId,
                 preflight,
-                sessionState: 'opening',
+                sessionState: 'open',
               })
             : fail('humanoid rig attachment was refused; the editor status contains the exact package error');
         }
@@ -8290,6 +8387,18 @@ export default function AppFrame() {
             onSavePaintConflictLive={(options) => saveActiveModelNow('Saved after choosing Keep LIVE', 'explicit', true, options)}
             onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas', 'explicit')}
             onModelDocumentMutated={markActiveModelDirty}
+            onResidentModelReady={(modelId, modelSourceKey) => {
+              const current = stateRef.current;
+              const document = current.workspaceDocuments.find((candidate) =>
+                candidate.id === current.activeWorkspaceDocumentId);
+              if (document?.kind !== 'model' || document.sourceId !== modelId) return;
+              residentModelForRigAttachRef.current = {
+                documentId: document.id,
+                modelId,
+                modelSourceKey,
+                lifecycleId: rigAttachResidentLifecycleId,
+              };
+            }}
             characterRigApi={characterRigApiRef.current}
             characterRigSnapshot={characterRigSnapshot}
             onCharacterRigSnapshot={setCharacterRigSnapshot}

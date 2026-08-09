@@ -74,7 +74,6 @@ import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import {
   captureCurrentPaintLook,
   ensureImportedTexturePaintVariant,
-  importedTextureVariantNeedsUvUpgrade,
   IMPORTED_TEXTURE_UV_MAPPING_VERSION,
   listPaintVariants,
   removePaintVariant,
@@ -119,7 +118,8 @@ import {
   writeUvTextureWorkspace,
 } from '../data/uvTextureWorkspaceStore';
 import { rasterizeUvWireframe } from '../model/uvWireframe';
-import { claimModelDocSession, modelDocSessionId, readModelDocSession } from '../model/docSession';
+import { claimModelDocSession, MODEL_DOC_SESSION_PROTOCOL, modelDocSessionId, readModelDocSession } from '../model/docSession';
+import { modelDocumentResidentResumeEligible } from '../model/modelDocumentColdMount';
 import { hydratePersistedModelPaint, residentPaintResumeAction, type DecodedPaintRaster, type PaintHydrationPort, type PaintHydrationResult } from '../model/paintHydration';
 import { shouldRestoreSavedGlass } from '../model/glassHydration';
 import {
@@ -405,6 +405,7 @@ export type ModelToolApi = {
   detachSelection: () => { lo: number; hi: number } | null;
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   mergeFaces: () => boolean;
+  assignUvZone: (zone: number) => boolean;
   trisToQuads: () => boolean;
   glassSelection: () => boolean;
   solidifySelection: () => boolean;
@@ -454,9 +455,6 @@ export type ModelViewProps = {
   initialTitle?: string;
   initialMesh?: ModelViewInitialMesh;
   initialFileParts?: ModelViewFileParts;
-  /** Original GLB/OBJ retained beside a saved meshdoc. Used only for a one-time
-   * embedded-texture provenance repair before the saved document is restored. */
-  importedTextureSourcePath?: string;
   allowFilePicker?: boolean;
   trackAttribution?: boolean;
   // When the editor hosts the viewer, its toolbar + context menu own the tool
@@ -515,6 +513,12 @@ export type ModelViewProps = {
   /** Fires once the host has adopted or resumed this model source. The key is
    * opaque and is the only geometry reference the rig session receives. */
   onResidentModel?: (modelSourceKey: string) => void;
+  /** Reports every successfully adopted/resumed source, including ordinary
+   * models before a humanoid capability is attached in place. */
+  onResidentReady?: (modelSourceKey: string) => void;
+  /** One-shot disk-authority handshake. Fires only after a cold RJMD seed was
+   * accepted by the host; a resumed live session never reports this result. */
+  onColdRjmdApplied?: (modelSourceKey: string) => void;
 };
 
 type PaintLayoutConflictSession = {
@@ -872,6 +876,16 @@ const meshDetach = () => readTopoResult(host.__mesh_topo_detach?.());
 const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) =>
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
+// UV MASK ZONES (req_4152): assign the face selection to one unfold chart WITHOUT
+// touching the authored face distribution. op 1 = assign.
+const meshUvZoneAssign = (zone: number): { ok?: number; changed?: number } | null => {
+  try {
+    const j = host.__mesh_uv_zone?.(1, zone);
+    return typeof j === 'string' && j ? (JSON.parse(j) as { ok?: number; changed?: number }) : null;
+  } catch {
+    return null;
+  }
+};
 const meshTrisToQuads = () => readTopoResult(host.__mesh_topo_tris_to_quads?.());
 // Mirror quad symmetrize (req_3855): fuse twin triangle pairs into quads wherever the
 // reflected authored face across the axis plane is already a quad — the retroactive
@@ -1102,7 +1116,7 @@ const PAINT_CONFLICT_LAYOUT = {
   savedLooksHeight: 92,
 } as const;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, importedTextureSourcePath, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, documentDirty, onDiscardLive, onKeepLive, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [], characterRigMode = false, characterRigSpecimenSeparation = 0, characterRigBound = false, characterRigBindVisible = true, characterRigDeformedVisible = true, onCharacterRigVertexPress, onCharacterRigJointTransform, onResidentModel }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, onPathPlaneCreated, paintTarget, paintTargetOnDisk = true, documentDirty, onDiscardLive, onKeepLive, onRequireFirstSave, onDocumentMutated, authoredLights = [], textureSlots = [], characterRigMode = false, characterRigSpecimenSeparation = 0, characterRigBound = false, characterRigBindVisible = true, characterRigDeformedVisible = true, onCharacterRigVertexPress, onCharacterRigJointTransform, onResidentModel, onResidentReady, onColdRjmdApplied }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -1714,6 +1728,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // The native source key is opaque. Publishing it after adoption lets the
   // shell open one rig session without ever lifting geometry arrays into React.
   useEffect(() => {
+    if (model) {
+      onResidentReady?.(model.key);
+    }
     if (model && onResidentModel) {
       // The rig-open boundary may promote one rangeless resident mesh into one
       // stable body range. Re-read immediately so the native range mirror and
@@ -1721,7 +1738,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       onResidentModel(model.key);
       resyncPartRanges();
     }
-  }, [model?.key, Boolean(onResidentModel)]);
+  }, [model?.key, Boolean(onResidentModel), Boolean(onResidentReady)]);
 
   // Only the paint stroke is JS-driven now (and only while in paint mode). Orbit, select,
   // marquee, focus, and zoom are owned entirely by the host's native input loop — there is
@@ -2911,7 +2928,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // resumes the live session only when doc AND key both still match the host.
   // (hotDocId itself is derived once with the state seeds at the top of the component.)
   useEffect(() => {
-    if (model && hotDocId) claimModelDocSession(hotDocId, model.key);
+    if (model && hotDocId) claimModelDocSession(hotDocId, model.key, MODEL_DOC_SESSION_PROTOCOL);
   }, [model?.key, hotDocId]);
 
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
@@ -3172,6 +3189,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setSemanticRevision((value) => value + 1);
       return { changed };
     },
+    editEdgeRegion: (id, edit) => {
+      if (!host.__mesh_semantic_region_edit || !host.__mesh_semantic_state) return null;
+      let table: SemanticTable | null = null;
+      try {
+        const parsed = JSON.parse(String(host.__mesh_semantic_state() ?? 'null'));
+        table = parseMeshSemanticTable(parsed?.table);
+      } catch { return null; }
+      if (!table) return null;
+      const rewritten = rewriteEdgeRegion(table, id, edit);
+      if (!rewritten) return null;
+      // The native semantic edit door commits the whole validated table in the same
+      // journal transaction. Edge ids never appear in face membership, so removing
+      // an edge path correctly reports zero changed faces while still landing the row edit.
+      const remove = 'remove' in edit;
+      const changed = Number(host.__mesh_semantic_region_edit(id, remove ? 1 : 0, JSON.stringify(rewritten.table)) ?? -1);
+      if (changed < 0) return null;
+      sessionDroppedNamesRef.current.add(rewritten.previous.name);
+      setSemanticRevision((value) => value + 1);
+      return { changed };
+    },
     selectRegion: (id, additive = false) => {
       let reply: { ok?: boolean; faces?: number } | null = null;
       try {
@@ -3181,6 +3218,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (reply?.ok !== true) return null;
       adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: Number(reply.faces) || 0 });
       return { faces: Number(reply.faces) || 0 };
+    },
+    selectEdgeRegion: (id, additive = false) => {
+      if (!host.__mesh_edge_semantic_select) return null;
+      const edges = Number(host.__mesh_edge_semantic_select(id, additive ? 1 : 0) ?? 0);
+      if (!Number.isInteger(edges) || edges < 1) return null;
+      adoptHostSelection({ mode: 2, verts: 0, edges, sel: edges });
+      return { edges };
     },
     selectAuditFaces: (kind) => {
       const ordinal = kind === 'intersecting' ? 0 : kind === 'unreachable' ? 1 : 2;
@@ -3309,6 +3353,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return { lo: r.lo, hi: r.hi };
     },
     mergeFaces: () => adoptMesh(meshMergeFaces()),
+    assignUvZone: (zone: number) => {
+      const result = meshUvZoneAssign(zone);
+      if (!result || result.ok !== 1 || (result.changed ?? 0) < 1) return false;
+      setSelectionRevision((value) => value + 1);
+      return true;
+    },
     trisToQuads: openQuadify,
     glassSelection: () => adoptMesh(meshGlass()),
     solidifySelection: () => adoptMesh(meshSolidify()),
@@ -3629,6 +3679,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       persist: () => (globalThis as any).__seatShellBridge?.persist?.() === true,
       retopoStateChanged: (clearWhenAbsent) => persistRetopoGuide(clearWhenAbsent),
       partPercept: () => (globalThis as any).__seatShellBridge?.partPercept?.() ?? { activePartId: null, parts: [] },
+      rigPercept: () => (globalThis as any).__seatShellBridge?.rigPercept?.() ?? null,
       shellAction: (action, args) => seatViewActionRef.current(action, args)
         ?? (globalThis as any).__seatShellBridge?.shellAction?.(action, args)
         ?? { ok: false, reason: 'editor shell action bridge unavailable' },
@@ -3806,7 +3857,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         : null,
       selectAuditFaces: (kind) => toolApiRef.current?.selectAuditFaces(kind) ?? null,
       selectRegion: (id, additive) => toolApiRef.current?.selectRegion(id, additive) ?? null,
+      selectEdgeRegion: (id, additive) => toolApiRef.current?.selectEdgeRegion(id, additive) ?? null,
       editRegion: (id, edit) => toolApiRef.current?.editRegion(id, edit) ?? null,
+      editEdgeRegion: (id, edit) => toolApiRef.current?.editEdgeRegion(id, edit) ?? null,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
       // Route through the api ref so the bridge's verbs always close over fresh state,
       // exactly like the shell's tool dispatch.
@@ -3925,8 +3978,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         }
       }
       setModel(current);
+      // applyMesh is reached from the boot effect only after resumeHostSession
+      // declined the resident mesh. Publish disk authority after every native
+      // channel and saved range has landed, never for a resumed/live document.
+      if (mesh.source === 'rjmd') onColdRjmdApplied?.(mesh.key);
     } else {
-      setError(`Could not load ${mesh.name}`);
+      setModel(null);
+      setError(mesh.source === 'rjmd'
+        ? `Could not apply saved model document ${mesh.name} — source fallback is disabled`
+        : `Could not load ${mesh.name}`);
     }
   };
 
@@ -3938,7 +3998,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     sourcePath: string,
     hasAppendedParts: boolean,
     loaded: Loaded,
-    options: { allowBaseAdoption?: boolean } = {},
   ): boolean => {
     const texture = loaded.texture;
     if (!texture) return false;
@@ -3973,7 +4032,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       );
     }
 
-    if (options.allowBaseAdoption === false) return false;
     if (!storedPaintBefore && variantsBefore.length === 0) {
       // First import: this source look is also the model's current/base look.
       writeModelArtifacts(paintTarget);
@@ -3987,23 +4045,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     // The model-key effect will hydrate the already-authored base after mount.
     return false;
-  };
-
-  /** A saved meshdoc wins over its source file, but a still-provenance-bearing
-   * v1 Imported Texture row needs one last source-resident capture. Load the
-   * source only long enough to refresh that generated variant; applyMesh runs
-   * immediately afterward and restores the saved geometry/base as document
-   * truth. Current provenance skips both parsing and native state churn. */
-  const refreshLegacyImportedTextureLook = (sourcePath: string) => {
-    if (!paintTarget || !paintTargetOnDisk) return;
-    const sourceIdentity = fileSha(sourcePath) || sourcePath;
-    if (!importedTextureVariantNeedsUvUpgrade(paintTarget, sourceIdentity)) return;
-    const loaded = loadModelFile(sourcePath);
-    if (!loaded?.texture) {
-      console.error(`[paint-import] could not refresh legacy source UVs from ${sourcePath}`);
-      return;
-    }
-    registerImportedTextureLook(sourcePath, false, loaded, { allowBaseAdoption: false });
   };
 
   // Mount a FILE-BACKED multi-part model: host-parse the imported file as the base part,
@@ -4088,10 +4129,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (!hotDocId) return false;
       const twig = readModelDocSession();
       const session = readModelSession();
-      const twigMatches = !!(twig && twig.docId === hotDocId && session && session.key === twig.key);
-      if (!twigMatches && (globalThis as any).__mesh_session_resident?.() !== 1) return false;
       if (!session) return false;
-      claimModelDocSession(hotDocId, session.key);
+      if (!modelDocumentResidentResumeEligible({
+        hotDocumentId: hotDocId,
+        twig,
+        sessionKey: session.key,
+        resident: (globalThis as any).__mesh_session_resident?.() === 1,
+        requiredProtocol: MODEL_DOC_SESSION_PROTOCOL,
+        expectedRjmdKey: initialMesh?.source === 'rjmd' ? initialMesh.key : null,
+      })) return false;
+      claimModelDocSession(hotDocId, session.key, MODEL_DOC_SESSION_PROTOCOL);
       hostSessionResumedRef.current = true;
       setModel({ key: session.key, count: session.count, radius: session.radius, name: initialTitle ?? initialMesh?.name ?? 'model' });
       setError(null);
@@ -4152,7 +4199,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     } else if (initialMesh) {
       resumed = resumeHostSession();
       if (!resumed) {
-        if (importedTextureSourcePath) refreshLegacyImportedTextureLook(importedTextureSourcePath);
+        // A decoded RJMD is the resident geometry boundary. Retained import
+        // paths are provenance only and must never call __mesh_load_file here:
+        // doing so temporarily replaced the edited mesh, and an RJMD apply
+        // failure then stranded the original source as the live document. Old
+        // Imported Texture rows remain intact until a non-mutating extractor is
+        // available; skipping that optional upgrade is lossless for geometry.
         applyMesh(initialMesh);
       }
     } else {

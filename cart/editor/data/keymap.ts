@@ -56,7 +56,12 @@ const WORLD_KEYS: Record<string, string> = {
 // whose commands never coexist: B is Fill while painting / Glass in face mode; X is Face Safety
 // while painting / Flip Face in face mode.
 // (Delete/Backspace/Escape stay ModelView-local — they're viewport-native, not registry commands.)
-export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'face' | 'vertex' | 'edge' }[] = [
+export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'face' | 'vertex' | 'edge'; shift?: boolean }[] = [
+  // Shift-qualified rows sit FIRST so they win the scan. Without `shift`, a binding
+  // matches only when shift is UP — otherwise Shift+M would silently fire plain M
+  // (req_4152). Assign UV Mask Zone is Shift+M: the mask sibling of Merge Faces, and
+  // deliberately next to it because it is what you reach for INSTEAD of merging.
+  { key: 'm', commandId: 'mesh-uv-zone', mode: 'face', shift: true },
   { key: '1', commandId: 'mesh-vertex' },
   { key: '2', commandId: 'mesh-edge' },
   { key: '3', commandId: 'mesh-face' },
@@ -69,6 +74,8 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'k', commandId: 'mesh-cam-lock' },
   { key: 'h', commandId: 'mesh-cam-recall' },
   { key: 'e', commandId: 'mesh-extrude' },
+  { key: 'a', commandId: 'mesh-align-loop', mode: 'vertex' },
+  { key: 'a', commandId: 'mesh-align-loop', mode: 'edge' },
   { key: 'l', commandId: 'mesh-loopcut' },
   { key: 't', commandId: 'mesh-cut' },
   { key: 'c', commandId: 'mesh-create-face' },
@@ -89,9 +96,10 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'b', commandId: 'mesh-paint-fill', mode: 'paint' },
   { key: 'b', commandId: 'mesh-glass', mode: 'face' },
   { key: 'n', commandId: 'mesh-paint-brush', mode: 'paint' },
-  // N is contextual like B/M/X: Free Brush while painting (above), Name Faces on a
-  // face selection — the popover lane for durable semantic regions (req_3880).
-  { key: 'n', commandId: 'mesh-name-faces', mode: 'face' },
+  // N is contextual like B/M/X: Free Brush while painting (above), semantic naming
+  // for a face region or canonical edge path in the matching selection mode.
+  { key: 'n', commandId: 'mesh-name-selection', mode: 'edge' },
+  { key: 'n', commandId: 'mesh-name-selection', mode: 'face' },
   { key: 'x', commandId: 'mesh-paint-safety', mode: 'paint' },
   { key: 'y', commandId: 'mesh-paint-detail', mode: 'paint' },
 ];
@@ -138,9 +146,10 @@ function chord(key: string, mods: Modifiers): string {
 // Resolve a bare model key against the live tool mode. Returns the first binding for the key whose
 // mode matches (unmoded bindings always match): B → Fill while painting, Glass in face mode, else
 // nothing; the paint sub-tools (N/X/Y) only while painting.
-function modelCommandForKey(key: string, tool: ModelToolSnapshot): string | null {
+function modelCommandForKey(key: string, tool: ModelToolSnapshot, mods: Modifiers): string | null {
   for (const b of MODEL_KEYS) {
     if (b.key !== key) continue;
+    if (!!b.shift !== !!mods.shift) continue;
     if (!b.mode) return b.commandId;
     if (b.mode === 'paint' && tool.paint) return b.commandId;
     if (b.mode === 'face' && tool.selMode === 3 && !tool.paint) return b.commandId;
@@ -166,7 +175,7 @@ export function commandForKeyEvent(state: EditorState, key: string, mods: Modifi
     const world = WORLD_KEYS[key];
     if (world) return gate(world);
   } else if (surface === 'model') {
-    const model = modelCommandForKey(key, state.modelTool);
+    const model = modelCommandForKey(key, state.modelTool, mods);
     if (model) return gate(model);
   }
   return null;
