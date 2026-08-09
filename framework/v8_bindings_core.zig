@@ -2147,6 +2147,50 @@ fn hostMeshMergeParts(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 
 /// __mesh_topo_merge_faces() → JSON {"ok","key","count"}. Fuse the selected faces
 /// (2+ authored groups, face mode) into one authored face (shared group id).
+/// __mesh_uv_zone(op, zone) → JSON {"ok","changed","assigned","unassigned","zones":[...]}.
+/// UV MASK ZONES (req_4152). op: 0 read, 1 assign selection to `zone`, 2 delete `zone`,
+/// 3 clear all. A zone groups faces into ONE unfold chart for texturing and NEVER touches
+/// the authored face distribution — USER RULING: the view never rewrites the model.
+fn hostMeshUvZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const op = argToI32(info, 0) orelse 0;
+    const zone_raw = argToI32(info, 1) orelse -1;
+    const zone: u16 = if (zone_raw < 0 or zone_raw > 65535)
+        scene3d.UV_ZONE_UNASSIGNED
+    else
+        @intCast(zone_raw);
+    var changed: u32 = 0;
+    switch (op) {
+        1 => changed = scene3d.uvZoneAssignSelection(zone),
+        2 => changed = scene3d.uvZoneDelete(zone),
+        3 => changed = if (scene3d.uvZoneClearAll()) 1 else 0,
+        else => {},
+    }
+    if (changed > 0) state.markDirty();
+
+    var counts: [128]u32 = undefined;
+    const assigned = scene3d.uvZoneCounts(counts[0..]);
+    var buf: [2048]u8 = undefined;
+    var stream = std.io.fixedBufferStream(buf[0..]);
+    const out = stream.writer();
+    out.print("{{\"ok\":1,\"changed\":{d},\"assigned\":{d},\"zones\":[", .{ changed, assigned }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var wrote: u32 = 0;
+    for (counts[0..], 0..) |face_count, zone_id| {
+        if (face_count == 0) continue;
+        if (wrote > 0) out.writeAll(",") catch break;
+        out.print("{{\"id\":{d},\"faces\":{d}}}", .{ zone_id, face_count }) catch break;
+        wrote += 1;
+    }
+    out.writeAll("]}") catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, stream.getWritten());
+}
+
 fn hostMeshTopoMergeFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const ok = scene3d.meshMergeSelectedFaces();
@@ -5052,6 +5096,8 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_topo_detach", hostMeshTopoDetach);
         v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
         v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
+    v8_runtime.registerHostFn("__mesh_uv_zone", hostMeshUvZone);
+        v8_runtime.registerHostFn("__mesh_uv_zone", hostMeshUvZone);
         v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
         v8_runtime.registerHostFn("__mesh_topo_mirror_quads", hostMeshTopoMirrorQuads);
         v8_runtime.registerHostFn("__mesh_topo_mirror_replace", hostMeshTopoMirrorReplace);

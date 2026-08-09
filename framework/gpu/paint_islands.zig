@@ -482,6 +482,22 @@ const OverlapGrid = struct {
     }
 };
 
+/// UV MASK ZONES (req_4152). A per-face zone row published by the layer that owns it;
+/// null means "no mask, behave exactly as before". This is a build-scoped INPUT rather
+/// than a parameter because the unfolder is reached through model_paint, which has no
+/// business knowing what a zone is.
+///
+/// USER RULING (req_4149): "UV grouping is a view; face distribution is the model; the
+/// view never rewrites the model." So a zone changes only which faces share a CHART —
+/// it never merges, moves, or regroups an authored face.
+var g_uv_zone_mask: ?[]const u16 = null;
+
+pub const UV_ZONE_UNASSIGNED: u16 = std.math.maxInt(u16);
+
+pub fn setUvZoneMask(mask: ?[]const u16) void {
+    g_uv_zone_mask = mask;
+}
+
 fn unfoldCharts(
     ret_alloc: std.mem.Allocator,
     positions: []const f32,
@@ -589,6 +605,19 @@ fn unfoldCharts(
             const na = normals[owner.raw];
             const nb = normals[tri_raw[face]];
             const fold = na[0] * nb[0] + na[1] * nb[1] + na[2] * nb[2];
+            // A UV zone is an explicit instruction, so it OVERRIDES the automatic fold
+            // limit in both directions: same zone hinges open however hard the crease
+            // (that is the whole point — one continuous chart with no internal seam to
+            // texture across), and different zones stay a seam however flat they are.
+            // Unassigned on both sides keeps the original curvature behaviour.
+            const zone_a: u16 = if (g_uv_zone_mask) |zones| (if (owner.face < zones.len) zones[owner.face] else UV_ZONE_UNASSIGNED) else UV_ZONE_UNASSIGNED;
+            const zone_b: u16 = if (g_uv_zone_mask) |zones| (if (face < zones.len) zones[face] else UV_ZONE_UNASSIGNED) else UV_ZONE_UNASSIGNED;
+            const zoned_fold_ok: bool = if (zone_a != zone_b)
+                false
+            else if (zone_a != UV_ZONE_UNASSIGNED)
+                true
+            else
+                fold >= max_fold_cos;
             hinges.append(arena, .{
                 .raw_a = owner.raw,
                 .raw_b = tri_raw[face],
@@ -600,7 +629,7 @@ fn unfoldCharts(
                     .{ corner_local[(@as(usize, face) * 3 + m_first) * 2 + 0], corner_local[(@as(usize, face) * 3 + m_first) * 2 + 1] },
                     .{ corner_local[(@as(usize, face) * 3 + m_second) * 2 + 0], corner_local[(@as(usize, face) * 3 + m_second) * 2 + 1] },
                 },
-                .fold_ok = fold >= max_fold_cos,
+                .fold_ok = zoned_fold_ok,
             }) catch return null;
             hinge_pairs.append(arena, pair) catch return null;
         }

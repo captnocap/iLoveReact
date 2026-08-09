@@ -2877,6 +2877,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const had_retopo_bands = g_retopo_manual_bands != null;
     var retopo_bands = prepareRetopoBandAppend(@intCast(old_faces), @intCast(added / 3), inherited_retopo_band);
     defer if (retopo_bands) |labels| std.heap.c_allocator.free(labels);
+    // UV mask zones ride the same carry: appended faces start unassigned (req_4152).
+    const had_uv_zone = g_uv_zone != null;
+    var uv_zone_carry = prepareZoneAppend(&g_uv_zone, @intCast(old_faces), @intCast(added / 3), UV_ZONE_UNASSIGNED);
+    defer if (uv_zone_carry) |labels| std.heap.c_allocator.free(labels);
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
     if (replaced) {
@@ -2892,6 +2896,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             return false;
         }
         commitRetopoBandCarry(had_retopo_bands, &retopo_bands);
+        commitZoneCarry(&g_uv_zone, had_uv_zone, &uv_zone_carry);
         g_retopo_pending_band = mesh_edit.RETOPO_BAND_UNASSIGNED;
         g_retopo_pending_band_generation = 0;
         // Create Face hands the next edit to its result: Face mode + exactly the new
@@ -4795,6 +4800,10 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
     const had_retopo_bands = g_retopo_manual_bands != null;
     var retopo_bands = prepareRetopoBandCompaction(mask, @intCast(kept / 3));
     defer if (retopo_bands) |labels| std.heap.c_allocator.free(labels);
+    // UV mask zones compact through the same survivor order (req_4152).
+    const had_uv_zone = g_uv_zone != null;
+    var uv_zone_carry = prepareZoneCompaction(&g_uv_zone, mask, @intCast(kept / 3));
+    defer if (uv_zone_carry) |labels| std.heap.c_allocator.free(labels);
     const deleted_retopo_band: ?u16 = if (std.mem.eql(u8, label, "delete selection"))
         if (g_retopo_manual_bands) |labels| mesh_edit.uniformRetopoManualBand(labels, mask) else null
     else
@@ -4869,6 +4878,7 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
             model_source.setPartRanges(&.{});
         }
         commitRetopoBandCarry(had_retopo_bands, &retopo_bands);
+        commitZoneCarry(&g_uv_zone, had_uv_zone, &uv_zone_carry);
         if (retopo_carry_ready and deleted_retopo_band != null and g_retopo_manual_bands != null) {
             g_retopo_pending_band = deleted_retopo_band.?;
             g_retopo_pending_band_generation = g_edit_generation;
@@ -9122,8 +9132,22 @@ fn ensureRetopoSourceGhost(face_count: usize) bool {
     return captureRetopoSourceGhost(empty);
 }
 
-fn prepareRetopoBandInheritance(source_faces: []const u32) ?[]u16 {
-    const current = g_retopo_manual_bands orelse return null;
+// ── Per-face zone rows ───────────────────────────────────────────────────────────
+// A retopology band and a UV mask zone are the SAME SHAPE of data: one u16 label per
+// face that has to survive every topology op that renumbers faces. They share ONE set
+// of carry paths instead of each keeping a copy (req_4152) — a cloned carry is exactly
+// what goes stale the first time a new topology op updates one row and forgets the
+// other, and this repo has already paid for hand-synced copies once.
+//
+// UV zones are a MASK: they group faces into one unfold chart for texturing without
+// touching the authored face distribution. USER RULING (req_4149): "UV grouping is a
+// view; face distribution is the model; the view never rewrites the model."
+var g_uv_zone: ?[]u16 = null;
+
+pub const UV_ZONE_UNASSIGNED: u16 = mesh_edit.RETOPO_BAND_UNASSIGNED;
+
+fn prepareZoneInheritance(row: *?[]u16, source_faces: []const u32) ?[]u16 {
+    const current = row.* orelse return null;
     const next = std.heap.c_allocator.alloc(u16, source_faces.len) catch return null;
     if (!mesh_edit.inheritRetopoManualBands(current, source_faces, next)) {
         std.heap.c_allocator.free(next);
@@ -9132,8 +9156,8 @@ fn prepareRetopoBandInheritance(source_faces: []const u32) ?[]u16 {
     return next;
 }
 
-fn prepareRetopoBandCompaction(removed: []const bool, kept_faces: usize) ?[]u16 {
-    const current = g_retopo_manual_bands orelse return null;
+fn prepareZoneCompaction(row: *?[]u16, removed: []const bool, kept_faces: usize) ?[]u16 {
+    const current = row.* orelse return null;
     const next = std.heap.c_allocator.alloc(u16, kept_faces) catch return null;
     if (!mesh_edit.compactRetopoManualBands(current, removed, next)) {
         std.heap.c_allocator.free(next);
@@ -9142,8 +9166,8 @@ fn prepareRetopoBandCompaction(removed: []const bool, kept_faces: usize) ?[]u16 
     return next;
 }
 
-fn prepareRetopoBandAppend(old_faces: usize, added_faces: usize, inherited: u16) ?[]u16 {
-    const current = g_retopo_manual_bands orelse return null;
+fn prepareZoneAppend(row: *?[]u16, old_faces: usize, added_faces: usize, inherited: u16) ?[]u16 {
+    const current = row.* orelse return null;
     if (current.len != old_faces) return null;
     const next = std.heap.c_allocator.alloc(u16, old_faces + added_faces) catch return null;
     @memcpy(next[0..old_faces], current);
@@ -9151,14 +9175,129 @@ fn prepareRetopoBandAppend(old_faces: usize, added_faces: usize, inherited: u16)
     return next;
 }
 
+fn commitZoneCarry(row: *?[]u16, had_row: bool, prepared: *?[]u16) void {
+    if (!had_row) return;
+    if (row.*) |old| std.heap.c_allocator.free(old);
+    row.* = prepared.*;
+    prepared.* = null;
+    if (row == &g_uv_zone) publishUvZoneMask();
+}
+
+fn prepareRetopoBandInheritance(source_faces: []const u32) ?[]u16 {
+    return prepareZoneInheritance(&g_retopo_manual_bands, source_faces);
+}
+
+fn prepareRetopoBandCompaction(removed: []const bool, kept_faces: usize) ?[]u16 {
+    return prepareZoneCompaction(&g_retopo_manual_bands, removed, kept_faces);
+}
+
+fn prepareRetopoBandAppend(old_faces: usize, added_faces: usize, inherited: u16) ?[]u16 {
+    return prepareZoneAppend(&g_retopo_manual_bands, old_faces, added_faces, inherited);
+}
+
+// ── UV mask zones (req_4152) ─────────────────────────────────────────────────────
+// Assigning faces to a zone groups them into ONE unfold chart for texturing. It does
+// not merge, move, or regroup a single authored face — merging to get a clean UV also
+// creases the shading and makes the result miserable to edit, which is why the mask
+// exists instead.
+
+fn uvZoneFaceCount() u32 {
+    return g_edit_count / 3;
+}
+
+/// Hand the current zone row to the unfolder. Called after EVERY mutation of the row —
+/// including the topology carry — so the chart layout can never be built from a row that
+/// has since been renumbered, freed, or resized.
+fn publishUvZoneMask() void {
+    paint_islands_mod.setUvZoneMask(if (g_uv_zone) |row| row else null);
+}
+
+fn ensureUvZoneRow() ?[]u16 {
+    const fc = uvZoneFaceCount();
+    if (fc == 0) return null;
+    if (g_uv_zone) |row| {
+        if (row.len == fc) return row;
+        std.heap.c_allocator.free(row);
+        g_uv_zone = null;
+    }
+    const row = std.heap.c_allocator.alloc(u16, fc) catch return null;
+    @memset(row, UV_ZONE_UNASSIGNED);
+    g_uv_zone = row;
+    publishUvZoneMask();
+    return row;
+}
+
+/// Assign every selected face to `zone`, or release them with UV_ZONE_UNASSIGNED.
+/// Returns how many faces changed. The mask is sized by the MESH and fully cleared —
+/// sizing a selection mask by the paint layout is the bug that silently fed phantom
+/// faces to the Face-to-N-gon resolver (req_4114).
+pub fn uvZoneAssignSelection(zone: u16) u32 {
+    if (mesh_edit.mode() != .face) return 0;
+    if (zone != UV_ZONE_UNASSIGNED and zone >= mesh_edit.RetopoBandTuning.max_bands) return 0;
+    const fc = uvZoneFaceCount();
+    if (fc == 0) return 0;
+    const mask = std.heap.c_allocator.alloc(bool, @max(fc, model_paint.faceCount())) catch return 0;
+    defer std.heap.c_allocator.free(mask);
+    @memset(mask, false);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
+    const row = ensureUvZoneRow() orelse return 0;
+    var changed: u32 = 0;
+    var face: u32 = 0;
+    while (face < fc) : (face += 1) {
+        if (!mask[face] or row[face] == zone) continue;
+        row[face] = zone;
+        changed += 1;
+    }
+    return changed;
+}
+
+/// The zone a face belongs to, or UV_ZONE_UNASSIGNED. Safe for any index.
+pub fn uvZoneOfFace(face: u32) u16 {
+    const row = g_uv_zone orelse return UV_ZONE_UNASSIGNED;
+    return if (face < row.len) row[face] else UV_ZONE_UNASSIGNED;
+}
+
+/// Drop one zone entirely (its faces go back to unassigned). Returns faces released.
+pub fn uvZoneDelete(zone: u16) u32 {
+    if (zone == UV_ZONE_UNASSIGNED) return 0;
+    const row = g_uv_zone orelse return 0;
+    var released: u32 = 0;
+    for (row) |*slot| {
+        if (slot.* != zone) continue;
+        slot.* = UV_ZONE_UNASSIGNED;
+        released += 1;
+    }
+    return released;
+}
+
+/// Face count per zone id, plus the unassigned tally, for the panel and the seat
+/// percept. `out` is indexed by zone id; returns the number of ASSIGNED faces.
+pub fn uvZoneCounts(out: []u32) u32 {
+    @memset(out, 0);
+    const row = g_uv_zone orelse return 0;
+    var assigned: u32 = 0;
+    for (row) |zone| {
+        if (zone == UV_ZONE_UNASSIGNED) continue;
+        assigned += 1;
+        if (zone < out.len) out[zone] += 1;
+    }
+    return assigned;
+}
+
+pub fn uvZoneClearAll() bool {
+    const row = g_uv_zone orelse return false;
+    std.heap.c_allocator.free(row);
+    g_uv_zone = null;
+    publishUvZoneMask();
+    return true;
+}
+
 /// Commit a prepared overlay only after the geometry + metadata transaction has
 /// succeeded. Allocation failure degrades to clearing view state; it must never
 /// reject or roll back authored geometry.
 fn commitRetopoBandCarry(had_manual: bool, prepared: *?[]u16) void {
     if (!had_manual) return;
-    if (g_retopo_manual_bands) |old| std.heap.c_allocator.free(old);
-    g_retopo_manual_bands = prepared.*;
-    prepared.* = null;
+    commitZoneCarry(&g_retopo_manual_bands, true, prepared);
     _ = clearRetopoBandPlan();
 }
 

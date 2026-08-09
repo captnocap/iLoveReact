@@ -409,6 +409,14 @@
           "zig": "hostMeshTopoMergeFaces"
         },
         {
+          "js": "__mesh_uv_zone",
+          "zig": "hostMeshUvZone"
+        },
+        {
+          "js": "__mesh_uv_zone",
+          "zig": "hostMeshUvZone"
+        },
+        {
           "js": "__mesh_topo_tris_to_quads",
           "zig": "hostMeshTopoTrisToQuads"
         },

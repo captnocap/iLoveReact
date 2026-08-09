@@ -1478,6 +1478,17 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     adapter.adoptTopology?.(result);
     return result;
   };
+  /** UV MASK ZONES (req_4152). A zone groups faces into ONE unfold chart for texturing.
+   *  It never merges, moves, or regroups an authored face — USER RULING (req_4149): "UV
+   *  grouping is a view; face distribution is the model; the view never rewrites the
+   *  model." Merging faces to get the same UV also creases the shading and makes the
+   *  result miserable to edit, which is the whole reason this layer exists. */
+  const uvZone = (operation: string, zone: number): Record<string, unknown> | null => {
+    const op = operation === 'assign' ? 1 : operation === 'delete' ? 2 : operation === 'clear' ? 3 : 0;
+    const raw = automation(() => host.__mesh_uv_zone?.(op, Number.isFinite(zone) ? zone : -1));
+    const parsed = parseJson<Record<string, unknown>>(raw);
+    return parsed && parsed.ok === 1 ? parsed : null;
+  };
   const trisToQuads = (): TopologyReceipt | null => topology(() => host.__mesh_topo_tris_to_quads?.());
   // Mirror quad symmetrize (req_3855): fuse twin triangle pairs into quads wherever the
   // reflected authored face across the model-origin axis plane is already a quad. The
@@ -2078,7 +2089,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
-    undo, redo, symmetrize, loopCut, trisToQuads, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
+    undo, redo, symmetrize, loopCut, trisToQuads, uvZone, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
     measure, stats, align, oracle, walk, setPosition,
   };
@@ -2495,6 +2506,13 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'basic-cut': {
         const result = seat.loopCut(Number(args.direction ?? 0), Number(args.cuts ?? 1), Number(args.offset ?? 0.5), true);
         return seat.reply('basic-cut', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('basic cut rejected — select one or more faces (basic-cut subdivides ONLY the selection; use cut when you want the ring to propagate around the body)'));
+      }
+      case 'uv-zone': {
+        const operation = String(args.operation ?? 'read');
+        const result = seat.uvZone(operation, Number(args.zone ?? -1));
+        return seat.reply('uv-zone', !!result, result ?? undefined, result
+          ? undefined
+          : 'uv-zone rejected — assign needs FACE mode, a face selection, and zone 0..127; operations are read|assign|delete|clear');
       }
       case 'tris-to-quads': {
         const result = seat.trisToQuads();
