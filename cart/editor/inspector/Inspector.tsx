@@ -11,6 +11,7 @@ import type { ModelFocusBridge, ModelFocusShape } from '../stage/ModelView';
 import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, SNAP_MODES, effectiveModelPackage } from '../data/content';
 import { resolvedPanelId, rightPanelsFor, type RightPanelId } from '../data/panelSystem';
+import { WORLD_VIEW_SLOT_COUNT } from '../data/keymap';
 import { objectMetricRows } from '../data/readouts';
 import type { Asset, EditorState, ModelTextureSlot, WorkspaceDocumentKind, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
@@ -528,14 +529,24 @@ export type WorldViewHandlers = {
   activeId: string | null;
   onStore: () => void;
   onRecall: (id: string) => void;
+  onRename: (id: string, name: string) => void;
   onRemove: (id: string) => void;
 };
 
-// ── SAVED VIEWS (req_4168) ──────────────────────────────────────────────────────────
+// ── SAVED VIEWS (req_4168, named + slotted req_4172) ────────────────────────────────
 // The world twin of the model surface's bookmark card, and deliberately the same card:
 // one editor, one bookmark vocabulary. The difference is what a pin carries and how
 // long it lives — a world view restores the ACTIVE STOREY along with the camera, and
 // it rides world.json, so a 3 km map still knows your places after a cold restart.
+//
+// Each row leads with its SLOT NUMBER, because bare 1..9 on the world surface jumps
+// straight to that pin: the key is only muscle memory if the panel says which digit
+// belongs to which place. Past nine the badge goes quiet rather than lying about a
+// key that does nothing.
+//
+// The name is editable on the ACTIVE row and a jump target on the others — the paint
+// layers panel's convention. The bookmark icon jumps on EVERY row, so the active pin
+// is still one click away after you have panned off it.
 function WorldViewsSection({ handlers }: { handlers: WorldViewHandlers }) {
   return (
     <C.HW_Section>
@@ -552,21 +563,36 @@ function WorldViewsSection({ handlers }: { handlers: WorldViewHandlers }) {
           <C.HW_FormLabel>saved</C.HW_FormLabel>
           <C.HW_ReadValue>none — Store View pins this spot</C.HW_ReadValue>
         </C.HW_ReadRow>
-      ) : handlers.views.map((view) => (
-        <Row key={view.id} style={{ alignItems: 'center', gap: 6, height: REGIONS.grid.rowHeight, width: '100%' }}>
-          <Pressable
-            onPress={() => handlers.onRecall(view.id)}
-            tooltip={`Jump to ${view.name} (floor ${view.floor})`}
-            style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-          >
-            <Icon name="Bookmark" size={11} color={accentFor(view.id === handlers.activeId ? 'primary' : 'textDim')} />
-            <C.HW_ReadValue>{view.name}</C.HW_ReadValue>
-          </Pressable>
-          <C.HW_MiniVerb onPress={() => handlers.onRemove(view.id)} tooltip="Remove this view">
-            <Icon name="Trash2" size={11} color={accentFor('textDim')} />
-          </C.HW_MiniVerb>
-        </Row>
-      ))}
+      ) : handlers.views.map((view, index) => {
+        const active = view.id === handlers.activeId;
+        const slot = index < WORLD_VIEW_SLOT_COUNT ? String(index + 1) : '';
+        return (
+          <Row key={view.id} style={{ alignItems: 'center', gap: 6, height: REGIONS.grid.rowHeight, width: '100%' }}>
+            <Pressable
+              onPress={() => handlers.onRecall(view.id)}
+              tooltip={slot ? `Jump to ${view.name} — floor ${view.floor}, key ${slot}` : `Jump to ${view.name} — floor ${view.floor}`}
+              style={{ height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 5 }}
+            >
+              <Icon name="Bookmark" size={11} color={accentFor(active ? 'primary' : 'textDim')} />
+              <C.HW_ViewSlotKey>{slot}</C.HW_ViewSlotKey>
+            </Pressable>
+            {active ? (
+              <C.HW_RenameInput value={view.name} onChange={(name: string) => handlers.onRename(view.id, name)} />
+            ) : (
+              <Pressable
+                onPress={() => handlers.onRecall(view.id)}
+                tooltip={`Jump to ${view.name} — floor ${view.floor}`}
+                style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center' }}
+              >
+                <C.HW_ReadValue>{view.name}</C.HW_ReadValue>
+              </Pressable>
+            )}
+            <C.HW_MiniVerb onPress={() => handlers.onRemove(view.id)} tooltip="Remove this view">
+              <Icon name="Trash2" size={11} color={accentFor('textDim')} />
+            </C.HW_MiniVerb>
+          </Row>
+        );
+      })}
     </C.HW_Section>
   );
 }

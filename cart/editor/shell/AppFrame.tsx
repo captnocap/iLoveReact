@@ -82,6 +82,7 @@ import { cancelWorldSave, emptyWorldSave, flushWorldSave, readWorldSave, saveWor
 import {
   activeWorldView,
   removeWorldView,
+  renameWorldView,
   storeWorldView,
   worldViewPoseFrom,
   WORLD_VIEW_LIMITS,
@@ -245,7 +246,7 @@ import {
 } from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
-import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
+import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge, worldViewSlotForKey } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
 import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry, meshDocUnreadableDiagnostic } from '../data/meshDoc';
@@ -4384,6 +4385,22 @@ export default function AppFrame() {
     });
   };
 
+  const renameWorldViewById = (id: string, name: string) => {
+    setState((prev) => ({ ...prev, worldViews: renameWorldView(prev.worldViews, id, name) }));
+  };
+
+  // Bare 1..9 on the world surface (req_4172): jump straight to the Nth pin. A
+  // slot past the end of the list is a no-op with a readout, not a silent miss —
+  // pressing 5 with four views saved should say so.
+  const recallWorldViewSlot = (slot: number) => {
+    const view = stateRef.current.worldViews[slot - 1];
+    if (!view) {
+      setState((prev) => ({ ...prev, status: `no view in slot ${slot} — ${prev.worldViews.length} saved on this map` }));
+      return;
+    }
+    recallWorldViewById(view.id);
+  };
+
   const storeWorldViewNow = () => runCommand('world-view-store', 'panel');
 
   const armPiece = (pieceId: string) => {
@@ -7181,6 +7198,10 @@ export default function AppFrame() {
   // first, so typing in a field never triggers a command.)
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
+  // The keydown subscription mounts once, so the slot jump rides a live ref like
+  // every other command it dispatches.
+  const recallWorldViewSlotRef = useRef(recallWorldViewSlot);
+  recallWorldViewSlotRef.current = recallWorldViewSlot;
   seatShellActionRef.current = (action, args, targetModelId) => {
     const live = stateRef.current;
     const modelId = targetModelId ?? activePartsModelId(live);
@@ -8460,6 +8481,13 @@ export default function AppFrame() {
       if (rows.length) duplicateOutlinerRowsRef.current(rows);
       return;
     }
+    // Saved-view slots (req_4172) resolve before the command table: a digit on the
+    // world surface is a jump with an argument, which no menu verb can carry.
+    const slot = worldViewSlotForKey(s, key, mods);
+    if (slot !== null) {
+      recallWorldViewSlotRef.current(slot);
+      return;
+    }
     const id = commandForKeyEvent(s, key, mods);
     if (id) runCommandRef.current(id, 'hotkey');
   }), []);
@@ -9648,6 +9676,7 @@ export default function AppFrame() {
               activeId: state.activeWorldViewId,
               onStore: storeWorldViewNow,
               onRecall: recallWorldViewById,
+              onRename: renameWorldViewById,
               onRemove: removeWorldViewById,
             }}
             onBrowseMaterials={browseMaterials}

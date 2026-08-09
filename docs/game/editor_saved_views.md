@@ -1,13 +1,13 @@
 # Editor saved camera views (Store View / Recall View)
 
 Active surface: `cart/editor/` world document + its iso build viewport.
-Last verified: 2026-08-09. USER ASK req_4168.
+Last verified: 2026-08-09. USER ASK req_4168, completed by req_4172.
 
 ## In one sentence
 
 A saved view pins the whole iso authoring context — orbit centre, facing, tilt,
-zoom, AND the active storey — under a name you can jump back to from the VIEWS
-card, the `H` key, or a gold pin on the linked city map.
+zoom, AND the active storey — under a name you type, reachable by bare `1`–`9`,
+by `H`, from the VIEWS card, or from a gold pin on the linked city map.
 
 ## Why it exists
 
@@ -75,22 +75,44 @@ back to next week is exactly the map that needed the pin.
   under PIECE FOCUS/BUILD: `BookmarkPlus` stores, a row click jumps, the trash
   verb removes, and the active pin carries the primary accent.
 - `cart/editor/stage/MiniMap.tsx` — each view draws as a gold world-metre ring
-  plus a labelled `Canvas.Node` that recalls on click. On a 3 km map the
-  overview is where you actually reach for a pin, so it renders under the cyan
-  camera marker (the live view is never hidden by a pin).
+  plus a labelled `Canvas.Node` that recalls on click, its label leading with the
+  `1`–`9` jump key. On a 3 km map the overview is where you actually reach for a
+  pin, so pins render under the cyan camera marker (the live view is never hidden
+  by one).
+- `cart/editor/data/keymap.ts worldViewSlotForKey` (req_4172) — bare `1`–`9` on
+  the world surface resolves a 1-based slot. Not a command id: a slot is a
+  navigation gesture with an argument, and nine menu verbs to carry that argument
+  would be worse. `AppFrame` resolves it just before the command table. Typing a
+  digit into a view's name is safe — `framework/engine.zig` consumes a bare
+  printable keydown while a text field is focused, so it never reaches the JS key
+  bus (the req_2745 fix).
+
+## Naming and slots (req_4172)
+
+A pin opens as `View N` and is renamed in place: the ACTIVE row's name is an
+`HW_RenameInput`, the others are jump targets — the paint layers panel's
+convention. The bookmark icon jumps on EVERY row, so the active pin is still one
+click away after you have panned off it.
+
+The first nine pins answer to bare `1`–`9`, and both the panel row and the
+minimap label lead with that digit, because the key is only muscle memory if the
+UI says which digit belongs to which place. Past nine the badge goes quiet
+rather than advertising a key that does nothing, and a slot past the end of the
+list reports what it found instead of missing silently.
+
+Slots are world-only by necessity, not preference: the model surface's `1`/`2`/`3`
+are vertex/edge/face select modes and outrank any bookmark reading of a digit.
+The vocabulary the two surfaces share is the one that matters — Store View,
+Recall View, `H`, a VIEWS list — and digits are an extra the world can afford
+because nothing else on it wants them.
 
 ## Reach
 
 - **Per map, by design.** A pin on one map means nothing on another, so views
   live in that document's `world.json` and `activeWorldViewId` resets across a
   document switch (`data/persistView.ts`).
-- **Auto-named `View N`.** `renameWorldView` exists and is covered, but no UI
-  reaches it yet — the VIEWS row has no text field. Naming a pin "Downtown core"
-  is the obvious next increment.
-- **No numbered hotkey slots.** `H` recalls the ACTIVE pin (last stored or
-  clicked); direct access to a specific pin is a panel/minimap click. A
-  `Ctrl+1..9` set / `1..9` jump scheme was considered and not built — it would
-  be a second vocabulary the model surface does not share.
+- **64 pins per map**, `WORLD_VIEW_LIMITS.maxViews`. Past that the list is the
+  problem; the store refuses and says so.
 - **Editor-only.** A view is authoring navigation; it is not a `camera_marker`
   WorldMarker (V24) and never bakes into cinematic shots.
 
@@ -102,3 +124,7 @@ the cap refuses without faking an edit, recall falls back from a stale active
 id, the applied pose keeps every field, rename trims and refuses empty, and the
 persistence gate rejects zero/NaN zoom, fractional or negative storeys, empty
 and overlong names, out-of-world centres, and duplicate ids.
+
+`cart/editor/data/commands.test.ts` — `H` reaches Recall View on the world, bare
+`1`–`9` resolve slots, `0` and letters do not, every modifier suppresses the slot
+reading, and the model surface never resolves a digit to a view.

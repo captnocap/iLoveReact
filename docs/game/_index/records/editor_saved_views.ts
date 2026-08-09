@@ -6,7 +6,7 @@ export const editor_saved_views: DocIndex = {
   cart: 'cart/editor/world/worldViews.ts',
   purpose: ['building', 'camera', 'ui'],
   summary:
-    'Saved camera views (req_4168): a pin captures the WHOLE iso authoring context — orbit centre, facing, tilt, zoom, and the active storey — and Recall restores all of it. Asked for at 625 chunks (25x25 at the 120m module = 3km a side), where returning to a block by panning is a search, not navigation. Same Store View / Recall View / VIEWS-list vocabulary as the model surface bookmarks (req_3067/3074) per V25, including the H key; the difference is lifetime — model pins live in a hot twig, world views ride world.json. Reachable from the VIEWS card, H, and gold pins on the linked city map.',
+    'Saved camera views (req_4168, completed by req_4172): a pin captures the WHOLE iso authoring context — orbit centre, facing, tilt, zoom, and the active storey — and Recall restores all of it. Asked for at 625 chunks (25x25 at the 120m module = 3km a side), where returning to a block by panning is a search, not navigation. Same Store View / Recall View / VIEWS-list vocabulary as the model surface bookmarks (req_3067/3074) per V25, including the H key; the difference is lifetime — model pins live in a hot twig, world views ride world.json. Named in place on the active row, and the first nine answer to bare 1..9 with the digit shown on both the panel row and the minimap label. Reachable from the VIEWS card, H, a slot key, and gold pins on the linked city map.',
   interfaces: [
     {
       name: 'worldViews.ts (the pure view model)',
@@ -42,6 +42,17 @@ export const editor_saved_views: DocIndex = {
       status: 'live',
     },
     {
+      name: 'worldViewSlotForKey (bare 1..9 on the world surface)',
+      purpose: ['ui', 'camera'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/data/keymap.ts',
+      description:
+        'req_4172: a 1-based saved-view slot for a bare digit, world surface only. Deliberately NOT a command id — a slot is a navigation gesture with an argument, and nine menu verbs to carry that argument would be worse — but it lives in keymap.ts so that file stays the one place a key means something. AppFrame resolves it just before the command table, through a live ref because the keydown subscription mounts once. World-only by necessity: the model surface 1/2/3 are vertex/edge/face select modes and outrank any bookmark reading. Typing a digit into a view name is safe — engine.zig consumes a bare printable keydown while a text field is focused so it never reaches the JS key bus (the req_2745 fix).',
+      dependsOn: ['cart/editor/data/surfaces.ts activeSurface'],
+      consumers: ['cart/editor/shell/AppFrame.tsx', 'cart/editor/inspector/Inspector.tsx', 'cart/editor/stage/MiniMap.tsx'],
+      status: 'live',
+    },
+    {
       name: 'world-view-store / world-view-recall (View menu, H)',
       purpose: ['ui', 'camera'],
       kind: 'utility',
@@ -73,19 +84,11 @@ export const editor_saved_views: DocIndex = {
   ],
   hazards: [
     {
-      name: 'views are auto-named View N with no rename UI',
-      purpose: ['ui'],
-      description:
-        'renameWorldView exists in the pure module and is covered by the suite, but nothing reaches it — the VIEWS row has no text field. On a 3km map "View 7" stops meaning anything quickly; naming a pin after its place is the owed increment.',
-      evidence: ['docs/game/editor_saved_views.md "Reach"'],
-      severity: 'low',
-    },
-    {
-      name: 'no numbered hotkey slots',
+      name: 'slot keys are world-only and the model surface cannot match them',
       purpose: ['ui', 'camera'],
       description:
-        'H recalls only the ACTIVE pin; reaching a specific one is a panel or minimap click. A Ctrl+1..9 store / 1..9 jump scheme was considered and rejected for now because it would be a second bookmark vocabulary the model surface does not share (V25). If muscle-memory slots are wanted, add them to BOTH surfaces.',
-      evidence: ['docs/game/editor_saved_views.md "Reach"'],
+        'Bare 1..9 jumps to a saved view on the WORLD surface only; the model surface cannot mirror it because 1/2/3 are its vertex/edge/face select modes. The shared half of the vocabulary (Store View, Recall View, H, a VIEWS list) is intact, but anyone adding a digit binding to either surface must check the other first — this is exactly the ~30-camera-approaches drift V25 exists to prevent.',
+      evidence: ['docs/game/editor_saved_views.md "Naming and slots"', 'cart/editor/data/keymap.ts MODEL_KEYS'],
       severity: 'low',
     },
   ],

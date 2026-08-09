@@ -137,6 +137,28 @@ export function syntheticKeyEdge(parts: string[]): { sym: number; mod: number } 
   return { sym, mod };
 }
 
+// Saved-view slot keys (req_4172). Bare 1..9 on the WORLD surface jumps straight
+// to the Nth saved view — the muscle-memory half of req_4168, which shipped with
+// only "H recalls the active pin" and made reaching a specific one a mouse trip.
+//
+// World-only by necessity, not by preference: the model surface's 1/2/3 are
+// vertex/edge/face select modes and outrank any bookmark reading of a digit. The
+// vocabulary the two surfaces DO share is the one that matters — Store View,
+// Recall View, H, a VIEWS list — and digits are an extra the world can afford
+// because nothing else on it wants them.
+export const WORLD_VIEW_SLOT_COUNT = 9;
+
+/** 1-based saved-view slot for a bare digit on the world surface, else null.
+ *  Not a command id: a slot is a direct navigation gesture with an argument,
+ *  and inventing nine menu verbs to carry that argument would be worse. It
+ *  still lives here so this file remains the ONE place a key means something. */
+export function worldViewSlotForKey(state: EditorState, key: string, mods: Modifiers): number | null {
+  if (mods.ctrl || mods.meta || mods.alt || mods.shift) return null;
+  if (activeSurface(state) !== 'world') return null;
+  if (key.length !== 1 || key < '1' || key > '9') return null;
+  return Number(key);
+}
+
 function chord(key: string, mods: Modifiers): string {
   const parts: string[] = [];
   if (mods.ctrl || mods.meta) parts.push('ctrl');

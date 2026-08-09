@@ -9,6 +9,7 @@ import {
 } from '../../../runtime/game/map';
 import type { PlacedPiece } from '../world/pieces';
 import type { WorldView } from '../world/worldViews';
+import { WORLD_VIEW_SLOT_COUNT } from '../data/keymap';
 import { COASTAL_CITY_TUNING } from '../data/coastalCity';
 import {
   CITY_MAP_TUNING,
@@ -285,7 +286,7 @@ export default function MiniMap(props: {
             strokeWidth={6}
           />
         ))}
-        {props.views.map((view) => (
+        {props.views.map((view, index) => (
           <Canvas.Node
             key={`view-label-${view.id}`}
             gx={view.centerX}
@@ -294,7 +295,11 @@ export default function MiniMap(props: {
             gh={MAP_VIEW.viewPinLabelHeightM}
           >
             <Pressable onPress={() => props.onRecallView(view.id)} tooltip={`Jump to ${view.name}`} style={{ width: '100%', height: '100%' }}>
-              <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1211c8', borderWidth: 2, borderColor: MAP_VIEW.palette.viewPin, borderRadius: 8 }}>
+              <Box style={{ width: '100%', height: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#0b1211c8', borderWidth: 2, borderColor: MAP_VIEW.palette.viewPin, borderRadius: 8 }}>
+                {/* The 1..9 jump key, so the map teaches the shortcut it belongs to (req_4172). */}
+                {index < WORLD_VIEW_SLOT_COUNT ? (
+                  <Text fontSize={MAP_VIEW.viewPinLabelFontM} color={MAP_VIEW.palette.viewPin} style={{ fontWeight: '800' }}>{String(index + 1)}</Text>
+                ) : null}
                 <Text fontSize={MAP_VIEW.viewPinLabelFontM} color="#fff3d0" style={{ fontWeight: '700' }}>{view.name}</Text>
               </Box>
             </Pressable>

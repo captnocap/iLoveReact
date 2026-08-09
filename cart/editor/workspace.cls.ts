@@ -514,6 +514,41 @@ classifier({
   // The no-whole-panel-scroll body (req_2627): sections inside are budgeted
   // slices with their OWN bounded nested scrolls; the panel itself never scrolls.
   HW_InspectorBodyFixed: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, overflow: 'hidden' } },
+  // Character Rig is a bounded two-column inspection surface. Each column
+  // owns its scroll range so the bone/object inventory never pushes the
+  // selected-joint diagnostics or readiness report out of reach.
+  HW_RigWorkspace: { type: 'Box', style: { flexGrow: 1, minWidth: 0, minHeight: 0, flexDirection: 'row', gap: 8, overflow: 'hidden' } },
+  HW_RigColumn: { type: 'ScrollView', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, minHeight: 0, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' }, contentContainerStyle: { flexDirection: 'column', paddingTop: 2, paddingBottom: 10 } },
+  HW_RigSection: { type: 'Box', style: { flexDirection: 'column', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft', paddingTop: 8, paddingBottom: 8 } },
+  HW_RigNotice: { type: 'Box', style: { minHeight: 34, flexDirection: 'column', gap: 3, marginLeft: 12, marginRight: 12, marginBottom: 5, padding: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
+  HW_RigNoticeLabel: { type: 'Text', fontSize: 9, color: 'theme:warning', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.8 } },
+  HW_RigWrapText: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', style: { flexGrow: 1, flexShrink: 1, minWidth: 0, fontFamily: MONO, fontWeight: 700, lineHeight: 13 } },
+  HW_RigBoneRow: { type: 'Pressable', style: { minHeight: 31, flexDirection: 'column', justifyContent: 'center', gap: 2, marginLeft: 6, marginRight: 6, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
+  HW_RigBoneRowOn: { type: 'Pressable', style: { minHeight: 31, flexDirection: 'column', justifyContent: 'center', gap: 2, marginLeft: 6, marginRight: 6, paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:primary' } },
+  HW_RigBoneTitle: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { minWidth: 0, fontFamily: MONO, fontWeight: 800, lineHeight: 13 } },
+  HW_RigBoneTitleOn: { type: 'Text', fontSize: 10, color: 'theme:stageBadgeText', style: { minWidth: 0, fontFamily: MONO, fontWeight: 900, lineHeight: 13 } },
+  HW_RigBoneMeta: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { minWidth: 0, fontFamily: MONO, fontWeight: 700, lineHeight: 11 } },
+  HW_RigBoneMetaOn: { type: 'Text', fontSize: 8, color: 'theme:stageBadgeText', style: { minWidth: 0, fontFamily: MONO, fontWeight: 800, lineHeight: 11 } },
+  HW_RigBindingCard: { type: 'Box', style: { flexDirection: 'column', gap: 5, marginLeft: 12, marginRight: 12, marginBottom: 7, padding: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
+  HW_RigBindingName: { type: 'Text', fontSize: 10, color: 'theme:text', style: { minWidth: 0, fontFamily: MONO, fontWeight: 900, lineHeight: 13 } },
+  HW_RigBindingSummary: { type: 'Text', fontSize: 8, color: 'theme:textDim', style: { minWidth: 0, fontFamily: MONO, fontWeight: 700, lineHeight: 11 } },
+  HW_RigModeRow: { type: 'Box', style: { minWidth: 0, flexDirection: 'row', gap: 5 } },
+  HW_RigModeButton: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 23, alignItems: 'center', justifyContent: 'center', paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
+  HW_RigModeButtonOn: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 23, alignItems: 'center', justifyContent: 'center', paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
+  HW_RigModeText: { type: 'Text', fontSize: 8, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { minWidth: 0, fontFamily: MONO, fontWeight: 800 } },
+  HW_RigModeTextOn: { type: 'Text', fontSize: 8, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { minWidth: 0, fontFamily: MONO, fontWeight: 900 } },
+  HW_RigSliderRow: { type: 'Box', style: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
+  HW_RigSliderValue: { type: 'Text', fontSize: 10, color: 'theme:valNum', style: { width: 52, fontFamily: MONO, fontWeight: 800, textAlign: 'right' } },
+  HW_RigLimitCard: { type: 'Box', style: { flexDirection: 'column', gap: 2, marginLeft: 12, marginRight: 12, marginBottom: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
+  HW_RigLimitTitle: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', style: { paddingLeft: 8, paddingRight: 8, paddingBottom: 2, fontFamily: MONO, fontWeight: 900 } },
+  HW_RigLimitEdgeRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8 } },
+  HW_RigLimitEdgeLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { width: 58, fontFamily: MONO, fontWeight: 700 } },
+  HW_RigPoseCard: { type: 'Box', style: { flexDirection: 'column', gap: 5, marginLeft: 12, marginRight: 12, marginBottom: 6, padding: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
+  HW_RigPoseLabel: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_RigSideButton: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_RigSideButtonText: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_RigWrapRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 3, paddingBottom: 3 } },
+  HW_RigReadinessLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { width: 58, fontFamily: MONO, fontWeight: 900 } },
   HW_RightRail: { type: 'Box', style: { width: REGIONS.focusPanel.railWidth, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_ObjectHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Tag: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:success' } },
@@ -536,6 +571,9 @@ classifier({
   HW_FormLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, minWidth: REGIONS.grid.labelWidth } },
   HW_FormValue: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_ReadValue: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  // The saved-view row's slot digit (req_4172) — the 1..9 key that jumps to it.
+  // Fixed width so every name in the VIEWS list starts on the same column.
+  HW_ViewSlotKey: { type: 'Text', fontSize: 9, color: 'theme:textFaint', noWrap: true, numberOfLines: 1, style: { width: 8, fontFamily: MONO, fontWeight: 800 } },
   // A named face-texture role gets its own two-row budget: the editable name
   // never competes with verbs, and the verbs split the full inspector width.
   HW_TextureRole: { type: 'Box', style: { flexDirection: 'column', gap: 3, paddingTop: 4, paddingBottom: 5, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft' } },
@@ -653,6 +691,11 @@ classifier({
   HW_UvFrame: { type: 'Box', style: { alignSelf: 'center', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_UvImage: { type: 'Image', style: { width: '100%', height: '100%' } },
   HW_UvNote: { type: 'Text', fontSize: 9, color: 'theme:warning', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  // Focus remains a full-height workspace even before an atlas exists. A fixed
+  // one-line read row made the transition look vertically broken on new meshes.
+  HW_UvEmptyWorkspace: { type: 'Box', style: { flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:stageBg' } },
+  HW_UvEmptyTitle: { type: 'Text', fontSize: 10, color: 'theme:warning', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.2 } },
+  HW_UvEmptyCopy: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { maxWidth: 320, fontFamily: MONO, fontWeight: 700, textAlign: 'center', lineHeight: 13 } },
   // UV focus is a workspace transition, not an optional micro-action. Its
   // labeled affordance remains obvious in both the compact and focused shapes.
   HW_UvFocusVerb: { type: 'Pressable', style: { height: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },

@@ -10,13 +10,13 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  COMMANDS, MENUS, blockingOverlay, commandById, deviceToolReplayable, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
-  menuDropdownLeft, worldActionBarCommands, type MenuNode,
+  COMMANDS, MENUS, blockingOverlay, commandById, commandEnabled, deviceToolReplayable, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  menuDropdownLeft, publishCharacterRigUndoDepths, undoDepths, worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
-import { commandForKeyEvent } from './keymap';
+import { commandForKeyEvent, worldViewSlotForKey, WORLD_VIEW_SLOT_COUNT } from './keymap';
 import type { EditorState } from './types';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
 
@@ -36,10 +36,40 @@ test('Save and Preferences are application commands on every document surface', 
   assert(preferences.menu === 'Edit' && preferences.scope === 'global' && preferences.key === 'Ctrl+,', 'Preferences is not globally discoverable');
 });
 
+test('input-owning character rig history overrides mesh undo depth and enablement', () => {
+  const state = {
+    workspaceDocuments: [{ id: 'model', kind: 'model', sourceId: 'model-1', title: 'Model' }],
+    activeWorkspaceDocumentId: 'model',
+    materialFocused: false,
+    modelTool: { blocking: null, paint: false },
+    worldUndo: [],
+    worldRedo: [],
+  } as unknown as EditorState;
+  publishCharacterRigUndoDepths(3, 1, true);
+  try {
+    const depths = undoDepths(state);
+    assert(depths.source === 'rig' && depths.undo === 3 && depths.redo === 1,
+      'active rig did not own the global undo depths');
+    assert(commandEnabled(commandById('undo-local'), state).on, 'rig Undo was disabled with history available');
+    assert(commandEnabled(commandById('redo-local'), state).on, 'rig Redo was disabled with history available');
+    publishCharacterRigUndoDepths(0, 0, true);
+    const refusal = commandEnabled(commandById('undo-local'), state);
+    assert(!refusal.on && refusal.reason === 'character rig history empty', 'empty rig history reported the wrong owner');
+  } finally {
+    publishCharacterRigUndoDepths(0, 0, false);
+  }
+});
+
 test('the live/disk paint picker blocks every competing editor command', () => {
   const state = { modelTool: { blocking: 'paint-conflict' } } as unknown as EditorState;
   const block = blockingOverlay(state);
   assert(block?.id === 'paint-conflict' && block.label.includes('Live / Disk'), 'paint conflict escaped modal discipline');
+});
+
+test('the exact extrusion panel blocks competing editor commands', () => {
+  const state = { modelTool: { blocking: 'extrude' } } as unknown as EditorState;
+  const block = blockingOverlay(state);
+  assert(block?.id === 'extrude' && block.label === 'Extrude', 'extrusion inputs escaped modal discipline');
 });
 
 test('wide menu panels center on their chrome trigger before edge clamping', () => {
@@ -56,10 +86,17 @@ test('ordinary face selection still offers authored-face merge', () => {
 
 test('a single face exposes winding correction and the whole-topology quad scan', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 1 }, 1));
+  assert(commands.includes('mesh-face-polygon'), 'single-face Face to N-gon disappeared');
   assert(commands.includes('mesh-extrude-face'), 'single-face Extrude disappeared');
   assert(commands.includes('mesh-flip-face'), 'single-face Flip disappeared');
   assert(commands.includes('mesh-select-uv-orientation'), 'single-face UV orientation collection disappeared');
   assert(commands.includes('mesh-tris-to-quads'), 'whole-topology Tris to Quads still depends on a multi-face selection');
+});
+
+test('Face to N-gon is strict to one selected authored face', () => {
+  assert(ids(meshTopoCommands({ selMode: 3, sel: 1 }, 1)).includes('mesh-face-polygon'), 'one face cannot reach Face to N-gon');
+  assert(!ids(meshTopoCommands({ selMode: 3, sel: 2 }, 1)).includes('mesh-face-polygon'), 'multi-face selection incorrectly exposes Face to N-gon');
+  assert(!ids(meshTopoCommands({ selMode: 3, sel: 0 }, 1)).includes('mesh-face-polygon'), 'empty face selection incorrectly exposes Face to N-gon');
 });
 
 test('face mode exposes the whole-topology quad scan without a selection', () => {
@@ -73,12 +110,48 @@ test('bevel is contextual to one corner, one sharp edge, or a 3+ edge boundary l
   const edge = ids(meshTopoCommands({ selMode: 2, sel: 1 }));
   const edges = ids(meshTopoCommands({ selMode: 2, sel: 2 }));
   const boundary = ids(meshTopoCommands({ selMode: 2, sel: 4 }));
-  assert(vertex.join('|') === 'mesh-bevel', 'single-vertex Bevel is not the strict contextual action');
-  assert(!vertices.includes('mesh-bevel') && vertices.includes('mesh-weld'), 'multi-vertex selection still exposes Bevel');
+  assert(vertex.includes('mesh-bevel') && vertex.includes('mesh-extrude'), 'single target vertex lost Bevel or mixed extrusion');
+  assert(!vertices.includes('mesh-bevel') && vertices.includes('mesh-align-loop') && vertices.includes('mesh-weld'), 'multi-vertex selection lost Align Loop/Weld or still exposes Bevel');
   assert(edge.includes('mesh-bevel'), 'single-edge Bevel disappeared');
-  assert(!edges.includes('mesh-bevel'), 'multi-edge selection still exposes Bevel');
+  assert(!edges.includes('mesh-bevel') && edges.includes('mesh-align-loop'), 'multi-edge selection lost Align Loop or still exposes Bevel');
   assert(boundary.includes('mesh-bevel'), 'closed 3+ edge boundary loop cannot reach Chamfer Boundary');
   assert(meshTopoCommands({ selMode: 2, sel: 4 }).find((command) => command.id === 'mesh-bevel')?.name === 'Chamfer Boundary', 'boundary-loop action kept the ambiguous single-edge label');
+});
+
+test('one target vertex exposes the mixed edge-to-vertex extrusion', () => {
+  const vertex = meshTopoCommands({ selMode: 1, sel: 1 });
+  const extrude = vertex.find((command) => command.id === 'mesh-extrude');
+  assert(extrude?.name === 'Extrude Edge to Vertex', 'mixed edge+vertex extrusion is not discoverable from the target vertex');
+});
+
+test('Align Loop is one contextual A action for vertex rows and multi-edge loops', () => {
+  const command = commandById('mesh-align-loop');
+  assert(command.key === 'A', 'Align Loop lost its direct hotkey');
+  assert(!ids(meshTopoCommands({ selMode: 1, sel: 1 })).includes(command.id), 'one vertex incorrectly exposes loop alignment');
+  assert(ids(meshTopoCommands({ selMode: 1, sel: 4 })).includes(command.id), 'selected vertex loop cannot reach alignment');
+  assert(!ids(meshTopoCommands({ selMode: 2, sel: 1 })).includes(command.id), 'one edge incorrectly exposes loop alignment');
+  assert(ids(meshTopoCommands({ selMode: 2, sel: 4 })).includes(command.id), 'selected edge loop cannot reach alignment');
+  assert(!ids(meshTopoCommands({ selMode: 3, sel: 1 })).includes(command.id), 'face mode incorrectly exposes vertex-loop alignment');
+  const base = {
+    workspaceDocuments: [{ id: 'model', kind: 'model', title: 'Model' }],
+    activeWorkspaceDocumentId: 'model',
+    materialFocused: false,
+    newMeshPrompt: null,
+    fileExplorerOpen: false,
+    mapDocumentOpen: false,
+    buildDialogOpen: false,
+    addChunkOpen: false,
+    worldUndo: [],
+    worldRedo: [],
+  } as unknown as EditorState;
+  const mods = { ctrl: false, shift: false, alt: false, meta: false };
+  const resolve = (selMode: number, sel: number) => commandForKeyEvent({
+    ...base,
+    modelTool: { blocking: null, paint: false, selMode, sel },
+  } as EditorState, 'a', mods);
+  assert(resolve(1, 4) === command.id, 'Vertex-mode A did not resolve Align Loop');
+  assert(resolve(2, 4) === command.id, 'Edge-mode A did not resolve Align Loop');
+  assert(resolve(3, 1) === null, 'Face-mode A stole a key it does not own');
 });
 
 test('B invokes Bevel in vertex and edge modes without stealing Face or Paint B', () => {
@@ -160,7 +233,8 @@ test('New Mesh exposes every semantic build starter under one nested menu', () =
   const commandIds = build!.children.filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
   const expected = BUILD_PIECE_STARTERS.map((starter) => `new-build-starter-${starter.id}`);
   assert(commandIds.join('|') === expected.join('|'), `starter menu drifted: ${commandIds.join(', ')}`);
-  assert(newMesh!.children.some((node) => node.kind === 'cmd' && node.id === 'new-model-player'), 'Player / NPC starter disappeared');
+  assert(!newMesh!.children.some((node) => node.kind === 'cmd' && node.id === 'new-model-player'), 'Player / NPC creation must remain an export-time role');
+  assert(!COMMANDS.some((command) => command.id === 'new-model-player'), 'removed Player / NPC creation command remains registered');
 });
 
 test('Export Build Piece exposes explicit door-wall meanings without a door tile', () => {
@@ -243,6 +317,20 @@ test('the live world key bridge reaches every authority-backed tool identity', (
   const selected = { ...state, selectedPieceId: 'bp_7' } as EditorState;
   assert(commandForKeyEvent(selected, 'r', mods) === WORLD_PIECE_ROTATE_COMMAND_ID, 'R did not resolve the authored rotate identity');
   assert(commandForKeyEvent(selected, 'delete', mods) === WORLD_PIECE_DELETE_COMMAND_ID, 'Delete did not resolve the authored delete identity');
+
+  // Saved views (req_4168/req_4172): H recalls the active pin, bare 1..9 jump to a slot.
+  assert(commandForKeyEvent(state, 'h', mods) === 'world-view-recall', 'H did not reach Recall View on the world');
+  assert(worldViewSlotForKey(state, '1', mods) === 1, '1 did not resolve the first view slot');
+  assert(worldViewSlotForKey(state, '9', mods) === WORLD_VIEW_SLOT_COUNT, '9 did not resolve the last view slot');
+  assert(worldViewSlotForKey(state, '0', mods) === null, '0 resolved a slot — the list is 1-based');
+  assert(worldViewSlotForKey(state, 'a', mods) === null, 'a letter resolved a slot');
+  // A digit only means a slot BARE: chords belong to the command table, and the
+  // model surface's 1/2/3 are vertex/edge/face and outrank any bookmark reading.
+  for (const held of ['ctrl', 'shift', 'alt', 'meta'] as const) {
+    assert(worldViewSlotForKey(state, '1', { ...mods, [held]: true }) === null, `${held}+1 resolved a view slot`);
+  }
+  const onModel = { ...state, activeWorkspaceDocumentId: 'model-doc', workspaceDocuments: [{ id: 'model-doc', kind: 'model', sourceId: 'm1' }] } as unknown as EditorState;
+  assert(worldViewSlotForKey(onModel, '1', mods) === null, '1 resolved a view slot on the model surface — it is the vertex mode there');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
