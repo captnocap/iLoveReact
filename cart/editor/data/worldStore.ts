@@ -6,7 +6,7 @@
 // The document stem is carried INSIDE world.json as well as in its directory.
 // That cheap invariant makes a copied/misrouted save fail loudly instead of
 // pairing one map's pieces with another map's ground.
-import { mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { exists, mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import { textBytes } from '../../../runtime/workspace/lumps';
 import {
   GENERATED_SITE_GENERATOR,
@@ -21,6 +21,7 @@ import { validFacade, type Facade } from '../world/facades';
 import type { MapZoneDef } from '../stage/mapPaint';
 import type { WorldObject } from './types';
 import { validWorldPrefab, type WorldPrefab } from '../world/prefabs';
+import { validWorldView, validateUniqueViewIds, WORLD_VIEW_LIMITS, type WorldView } from '../world/worldViews';
 import { SURFACE_FLORA_TUNING, type SurfaceFloraPatch, type WorldFloraPatch } from '../world/surfaceFlora';
 import {
   LEGACY_WORLD_FILE,
@@ -47,6 +48,10 @@ export type WorldSave = {
   zones: MapZoneDef[];
   /** Graffiti facades (req_3057) — plane-anchored paint programs, never pixels. */
   facades: Facade[];
+  /** Saved camera views (req_4168). Per-map by nature: a pin on one map means
+   *  nothing on another, and a 25×25-chunk map is exactly the one you come back
+   *  to next week — so they persist with the document, not in a hot twig. */
+  views: WorldView[];
 };
 
 export type WorldLoadResult =
@@ -60,6 +65,20 @@ type ParseOptions = { allowLegacyV1?: boolean };
 // redirect to a clean recovery map, but even if that pointer write fails the
 // first debounce cannot destroy the only forensic/recoverable copy.
 const writeProtectedDocuments = new Set<string>();
+const persistedWorldSaves = new Map<string, WorldSave>();
+
+function sameWorldSnapshot(a: WorldSave | undefined, b: WorldSave): boolean {
+  return !!a
+    && a.document === b.document
+    && a.seq === b.seq
+    && a.pieces === b.pieces
+    && a.worldFlora === b.worldFlora
+    && a.prefabs === b.prefabs
+    && a.objects === b.objects
+    && a.zones === b.zones
+    && a.facades === b.facades
+    && a.views === b.views;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -254,6 +273,7 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     facades?: unknown;
     prefabs?: unknown;
     worldFlora?: unknown;
+    views?: unknown;
   };
   const legacy = raw.version === 1 && options.allowLegacyV1 === true;
   const priorV2 = raw.version === 2;
@@ -268,6 +288,9 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
   validatePrefabPayloads(prefabs);
   const worldFlora = validatedArray(raw.worldFlora, 'worldFlora', validWorldFloraPatch, true);
   if (worldFlora.length > SURFACE_FLORA_TUNING.maxWorldPatches) throw new Error('worldFlora exceeds its bounded recipe budget');
+  const views = validatedArray(raw.views, 'views', validWorldView, true);
+  if (views.length > WORLD_VIEW_LIMITS.maxViews) throw new Error('views exceeds its bounded budget');
+  validateUniqueViewIds(views);
   return {
     version: 4,
     document: expected,
@@ -278,11 +301,12 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     objects: validatedArray(raw.objects, 'objects', validObject, true),
     zones: validatedArray(raw.zones, 'zones', validZone, true),
     facades: validatedArray(raw.facades ?? [], 'facades', validFacade, true),
+    views,
   };
 }
 
 export function emptyWorldSave(stem: string, seq = 1): WorldSave {
-  return { version: 4, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], worldFlora: [], prefabs: [], objects: [], zones: [], facades: [] };
+  return { version: 4, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], worldFlora: [], prefabs: [], objects: [], zones: [], facades: [], views: [] };
 }
 
 /** Read one named document without changing any active state. Open uses the
@@ -297,18 +321,22 @@ export function readWorldSave(stem: string): WorldLoadResult {
   }
   if (text === null) {
     writeProtectedDocuments.delete(paths.stem);
+    persistedWorldSaves.delete(paths.stem);
     return { status: 'missing', save: null, migratedLegacy: false };
   }
   try {
+    const save = parseWorldSaveText(text, paths.stem, { allowLegacyV1: migratedLegacy });
     const result: WorldLoadResult = {
       status: 'ok',
-      save: parseWorldSaveText(text, paths.stem, { allowLegacyV1: migratedLegacy }),
+      save,
       migratedLegacy,
     };
     writeProtectedDocuments.delete(paths.stem);
+    persistedWorldSaves.set(paths.stem, save);
     return result;
   } catch (error) {
     writeProtectedDocuments.add(paths.stem);
+    persistedWorldSaves.delete(paths.stem);
     return { status: 'invalid', save: null, migratedLegacy: false, error: (error as Error).message };
   }
 }
@@ -320,11 +348,15 @@ function writeWorldSave(save: WorldSave): boolean {
     console.error(`[world-store] REFUSED to overwrite malformed ${paths.world}; open/create another map or repair the file explicitly`);
     return false;
   }
+  if (sameWorldSnapshot(persistedWorldSaves.get(paths.stem), save) && exists(paths.world)) return true;
   mkdir(paths.dir);
   const text = JSON.stringify(save);
   const ok = writeFileBytesAtomic(paths.world, textBytes(text)) || writeFile(paths.world, text);
   if (!ok) console.error(`[world-store] SAVE FAILED: ${paths.world}`);
-  if (ok) finishLegacyMapImport(paths.stem);
+  if (ok) {
+    persistedWorldSaves.set(paths.stem, save);
+    finishLegacyMapImport(paths.stem);
+  }
   return ok;
 }
 
@@ -341,6 +373,7 @@ function snapshot(
   facades: readonly Facade[],
   prefabs: readonly WorldPrefab[],
   worldFlora: readonly WorldFloraPatch[],
+  views: readonly WorldView[],
 ): WorldSave {
   return {
     version: 4,
@@ -352,6 +385,7 @@ function snapshot(
     objects: objects as WorldObject[],
     zones: zones as MapZoneDef[],
     facades: facades as Facade[],
+    views: views as WorldView[],
   };
 }
 
@@ -378,12 +412,13 @@ export function scheduleWorldSave(
   facades: readonly Facade[] = [],
   prefabs: readonly WorldPrefab[] = [],
   worldFlora: readonly WorldFloraPatch[] = [],
+  views: readonly WorldView[] = [],
 ): void {
   if (options.enabled === false) {
     cancelWorldSave();
     return;
   }
-  queued = snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora);
+  queued = snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora, views);
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(writeQueued, Math.max(0, options.delayMs ?? 400));
 }
@@ -407,7 +442,8 @@ export function flushWorldSave(
   facades: readonly Facade[] = [],
   prefabs: readonly WorldPrefab[] = [],
   worldFlora: readonly WorldFloraPatch[] = [],
+  views: readonly WorldView[] = [],
 ): boolean {
   cancelWorldSave();
-  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora));
+  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora, views));
 }

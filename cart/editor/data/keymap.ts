@@ -39,6 +39,9 @@ const WORLD_KEYS: Record<string, string> = {
   c: 'open-color-studio',
   m: 'toggle-minimap',
   f: 'focus-selection',
+  // Saved views (req_4168) — H recalls the active pin, matching the model surface's
+  // Recall View key exactly so one editor has one bookmark vocabulary.
+  h: 'world-view-recall',
   // W/A/S/D are the camera pan (WorldViewport owns them) — so no bare-key world command may claim
   // them. 'd' used to be Duplicate, which fired on every strafe and spammed copies of the phantom
   // selection (req_2558); 's' was the inert Set Spawn placeholder. Neither owns a world key now.

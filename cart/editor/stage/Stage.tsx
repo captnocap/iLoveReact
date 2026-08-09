@@ -2,12 +2,14 @@
 // viewport — world / model / playtest / animation / material-focus surfaces +
 // their in-viewport docks (BuildBar, MapPaintDock). Section F (StageTabs)
 // renders below the viewport inside this same panel.
+import { useMemo } from 'react';
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
+import type { WorldView } from '../world/worldViews';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import type { OklchColor } from '../../../runtime/paint/colors';
-import { modelPackageById } from '../data/content';
+import { effectiveModelPackage } from '../data/content';
 import { modelDocument } from '../data/documents';
 import ContextMenu from '../shell/ContextMenu';
 import AnimationCaptureSurface from './AnimationCaptureSurface';
@@ -24,9 +26,14 @@ import WorldBibleSurface from '../worldBible/WorldBibleSurface';
 import type { PieceSelectionIntent } from '../world/selection';
 import type { FloraPaintSample, WorldFloraBrush } from '../world/surfaceFlora';
 import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
+import type { CharacterRigApi, CharacterRigSnapshot } from '../../../runtime/skeleton';
+import { MODEL_PACKAGES } from '../data/catalog';
+import { playerCharacterPackage } from '../world/playerCharacterLoader';
+import { characterRigViewportShouldOwnInput } from './characterRigViewport';
 
 export default function Stage(props: {
   state: EditorState;
+  mapSwitchPending: boolean;
   activeAsset: Asset;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
@@ -42,9 +49,18 @@ export default function Stage(props: {
   onSavePaintConflictLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
+  onResidentModelReady: (modelId: string, modelSourceKey: string) => void;
+  characterRigApi: CharacterRigApi | null;
+  characterRigSnapshot: CharacterRigSnapshot | null;
+  onCharacterRigSnapshot: (snapshot: CharacterRigSnapshot | null) => void;
+  onCharacterRigStatus: (message: string) => void;
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
+  /** Saved-view recall (req_4168): the pin to jump to plus the nonce that makes a
+   *  repeat recall of the same pin re-fire. `onRecallView` is the minimap pin click. */
+  viewRecall: { view: WorldView; nonce: number } | null;
+  onRecallView: (id: string) => void;
   onPlacePiece: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null, intent: PieceSelectionIntent) => void;
@@ -76,7 +92,7 @@ export default function Stage(props: {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
   const activeModel = activeDocument.kind === 'model' && activeDocument.sourceId
-    ? modelPackageById(activeDocument.sourceId)
+    ? effectiveModelPackage(activeDocument.sourceId, props.state.modelOverrides, props.state.modelDupes)
     : null;
   // The outliner drives multi-part models: present only when this model carries parts state
   // (primitive-authored). Combines the live parts with the stable handlers from AppFrame.
@@ -84,22 +100,70 @@ export default function Stage(props: {
   const outliner = activeModel && activeParts
     ? { parts: activeParts, activePartId: props.state.modelActivePartId, ...props.outlinerHandlers }
     : null;
+  // Session packages override the boot scan by stable package id so a freshly
+  // exported bound player/NPC is the exact declaration `/play` stages now.
+  const playtestCharacterPackages = useMemo(() => {
+    const current = new Map(MODEL_PACKAGES.map((model) => [model.id, model]));
+    for (const model of props.state.modelDupes) current.set(model.id, model);
+    return [...current.values()].filter((model) => model.placeable?.as === 'character');
+  }, [props.state.modelDupes]);
+  // A retired segmented package may retain its historical player declaration
+  // on disk, but it cannot shadow the current bound welded target in capture.
+  const capturePlayer = playerCharacterPackage(playtestCharacterPackages);
   // Tab titles are DERIVED from the live model, not the doc's frozen snapshot — a model's
   // name (e.g. a generic "Model 3") can change out from under an old persisted doc, and the
   // tab must follow it rather than show a stale seed name like "Cone 1" (req_2406).
   const tabDocuments = props.state.workspaceDocuments.map((doc) => {
     if (doc.kind !== 'model' || !doc.sourceId) return doc;
-    const live = modelPackageById(doc.sourceId);
+    const live = effectiveModelPackage(doc.sourceId, props.state.modelOverrides, props.state.modelDupes);
     return live ? modelDocument(live) : doc;
   });
+  const characterRigViewportActive = characterRigViewportShouldOwnInput(
+    activeModel,
+    props.state.rightPane,
+    props.state.rightPanelCollapsed,
+    props.state.modelTool,
+  );
+  const worldActive = activeDocument.kind === 'world';
   return (
     <C.HW_StagePanel>
       <C.HW_StageViewport>
         {activeDocument.kind === 'world' || activeDocument.kind === 'model' || activeDocument.kind === 'playtest' || activeDocument.kind === 'animation' || activeDocument.kind === 'knowledge' ? null : <C.HW_CanvasGrid />}
-        {activeDocument.kind === 'knowledge' ? (
+        <WorldEditorSurface
+          active={worldActive}
+          interactionLocked={props.mapSwitchPending}
+          mapOverviewOpen={props.state.mapOverviewOpen}
+          onToggleMap={() => props.onCommand('toggle-minimap', 'stage')}
+          paintActive={props.state.mapPaint.active}
+          mapPaint={props.state.mapPaint}
+          mapStem={props.state.activeMapStem}
+          mapZones={props.state.mapPaint.zones}
+          floor={props.state.floorIndex}
+          viewRecall={props.viewRecall}
+          views={props.state.worldViews}
+          onRecallView={props.onRecallView}
+          wallsDown={props.state.wallsDown}
+          activeCommandId={props.state.activeCommandId}
+          pieces={props.state.worldPieces}
+          selectedIds={props.state.selectedPieceIds}
+          armedPieceId={props.state.armedPieceId}
+          armedYawDegrees={props.state.armedYawDegrees}
+          authoredPieces={props.state.authoredBuildPieces}
+          prefabs={props.state.worldPrefabs}
+          worldFlora={props.state.worldFlora}
+          floraSpecies={props.state.authoredFloraSpecies}
+          onPlace={props.onPlacePiece}
+          onMove={props.onMovePiece}
+          onSelect={props.onSelectPiece}
+          onPieceContext={props.onPieceContext}
+          onPaintFaces={props.onPaintFaces}
+          onStampSticker={props.onStampSticker}
+          onPaintFlora={props.onPaintFlora}
+        />
+        {worldActive ? null : activeDocument.kind === 'knowledge' ? (
           <WorldBibleSurface />
         ) : activeDocument.kind === 'animation' ? (
-          <AnimationCaptureSurface />
+          <AnimationCaptureSurface targetPackage={capturePlayer} />
         ) : activeDocument.kind === 'playtest' ? (
           <PlaytestSurface
             globals={props.state.worldGlobals}
@@ -108,6 +172,7 @@ export default function Stage(props: {
             worldFlora={props.state.worldFlora}
             floraSpecies={props.state.authoredFloraSpecies}
             prefabs={props.state.worldPrefabs}
+            characterPackages={playtestCharacterPackages}
           />
         ) : activeDocument.kind === 'facade' ? (
           (() => {
@@ -125,36 +190,10 @@ export default function Stage(props: {
               />
             ) : null;
           })()
-        ) : activeDocument.kind === 'world' ? (
-          <WorldEditorSurface
-            mapOverviewOpen={props.state.mapOverviewOpen}
-            onToggleMap={() => props.onCommand('toggle-minimap', 'stage')}
-            paintActive={props.state.mapPaint.active}
-            mapPaint={props.state.mapPaint}
-            mapStem={props.state.activeMapStem}
-            mapZones={props.state.mapPaint.zones}
-            floor={props.state.floorIndex}
-            wallsDown={props.state.wallsDown}
-            activeCommandId={props.state.activeCommandId}
-            pieces={props.state.worldPieces}
-            selectedIds={props.state.selectedPieceIds}
-            armedPieceId={props.state.armedPieceId}
-            armedYawDegrees={props.state.armedYawDegrees}
-            authoredPieces={props.state.authoredBuildPieces}
-            prefabs={props.state.worldPrefabs}
-            worldFlora={props.state.worldFlora}
-            floraSpecies={props.state.authoredFloraSpecies}
-            onPlace={props.onPlacePiece}
-            onMove={props.onMovePiece}
-            onSelect={props.onSelectPiece}
-            onPieceContext={props.onPieceContext}
-            onPaintFaces={props.onPaintFaces}
-            onStampSticker={props.onStampSticker}
-            onPaintFlora={props.onPaintFlora}
-          />
         ) : activeDocument.kind === 'model' ? (
           <ModelDocumentSurface
             model={activeModel}
+            documentId={activeDocument.id}
             lights={activeModel ? (props.state.modelLights[activeModel.id] ?? activeModel.lights ?? []) : []}
             textureSlots={activeModel ? (props.state.modelTextureSlots[activeModel.id] ?? activeModel.textureSlots ?? []) : []}
             triggerProps={props.modelContextTrigger}
@@ -168,6 +207,12 @@ export default function Stage(props: {
             onKeepLive={props.onSavePaintConflictLive}
             onRequireFirstSave={props.onRequireFirstModelSave}
             onDocumentMutated={props.onModelDocumentMutated}
+            onResidentModelReady={props.onResidentModelReady}
+            characterRigApi={props.characterRigApi}
+            characterRigSnapshot={props.characterRigSnapshot}
+            onCharacterRigSnapshot={props.onCharacterRigSnapshot}
+            onCharacterRigStatus={props.onCharacterRigStatus}
+            characterRigViewportActive={characterRigViewportActive}
           />
         ) : (
           <MaterialFocusSurface

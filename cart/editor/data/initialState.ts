@@ -161,6 +161,9 @@ export function initialState(): EditorState {
     worldRedo: [],
     worldPieces: [],
     worldPrefabs: [],
+    worldViews: [],
+    activeWorldViewId: null,
+    worldViewRecallNonce: 0,
     selectedPieceId: null,
     // Default armed piece = a concrete floor (the placeholder Place piece the
     // surface always dropped). The Build bar (Phase 2) overwrites this on pick.

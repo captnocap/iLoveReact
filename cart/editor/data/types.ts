@@ -25,6 +25,7 @@ import type { FloraLane } from '../world/floraKinds';
 import type { AuthoredFloraSpecies } from '../world/floraSpecies';
 import type { WorldFloraPatch } from '../world/surfaceFlora';
 import type { WorldPrefab } from '../world/prefabs';
+import type { WorldView } from '../world/worldViews';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Globals' | 'Window';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -650,6 +651,14 @@ export type EditorState = {
   worldPieces: PlacedPiece[];
   /** Named, decomposable compositions captured from ordinary world pieces. */
   worldPrefabs: WorldPrefab[];
+  /** Saved camera views on the active map (req_4168) — persisted with world.json.
+   *  `activeWorldViewId` is the one a bare Recall (H) returns to: the last one
+   *  stored or jumped to. */
+  worldViews: WorldView[];
+  activeWorldViewId: string | null;
+  /** Bumped by every Recall. The viewport keys its restore effect on this, so
+   *  recalling the pin you are already "active" on still takes you back after a pan. */
+  worldViewRecallNonce: number;
   selectedPieceId: string | null;
   /** Additive world selection. `selectedPieceId` remains the primary/focused
    *  member for the existing Inspector and edit commands. */

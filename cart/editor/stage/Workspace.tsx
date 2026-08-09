@@ -2,15 +2,18 @@ import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { OklchColor } from '../../../runtime/paint/colors';
+import type { WorldView } from '../world/worldViews';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
 import type { PieceSelectionIntent } from '../world/selection';
 import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
+import type { CharacterRigApi, CharacterRigSnapshot } from '../../../runtime/skeleton';
 
 export default function Workspace(props: {
   state: EditorState;
+  mapSwitchPending: boolean;
   activeAsset: Asset;
   onCommand: (id: string, source: string) => void;
   onModelToolApi: (api: ModelToolApi) => void;
@@ -23,6 +26,11 @@ export default function Workspace(props: {
   onSavePaintConflictLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
+  onResidentModelReady: (modelId: string, modelSourceKey: string) => void;
+  characterRigApi: CharacterRigApi | null;
+  characterRigSnapshot: CharacterRigSnapshot | null;
+  onCharacterRigSnapshot: (snapshot: CharacterRigSnapshot | null) => void;
+  onCharacterRigStatus: (message: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: (delta: number) => void;
@@ -39,6 +47,10 @@ export default function Workspace(props: {
   onContext: () => void;
   onObject: (id: string) => void;
   /** World-piece model callbacks (req_2563 Phase 1) — routed down to WorldEditorSurface. */
+  /** Saved-view recall (req_4168): the pin to jump to plus the nonce that makes a
+   *  repeat recall of the same pin re-fire. `onRecallView` is the minimap pin click. */
+  viewRecall: { view: WorldView; nonce: number } | null;
+  onRecallView: (id: string) => void;
   onPlacePiece: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null, intent: PieceSelectionIntent) => void;

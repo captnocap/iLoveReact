@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react';
 import { EDITOR_DATA_ROOT } from '../data/editorDataRoot';
 import { C } from '../workspace.cls';
 import WorldViewport from '../world/WorldViewport';
+import type { WorldView } from '../world/worldViews';
 import { worldToolFor } from '../world/worldTool';
 import { retainPieceSequence, visibleStoreyPieces, type ArmedPiece, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
@@ -40,6 +41,12 @@ export default function WorldEditorSurface(props: {
   mapStem: string;
   mapZones: readonly MapZoneDef[];
   floor: number;
+  /** Saved-view recall request (req_4168) — the pin's whole pose, plus the nonce
+   *  that lets the SAME pin be recalled twice. */
+  viewRecall: { view: WorldView; nonce: number } | null;
+  /** Saved views drawn as jump pins on the minimap. */
+  views: readonly WorldView[];
+  onRecallView: (id: string) => void;
   wallsDown: boolean;
   activeCommandId: string;
   // req_2563 Phase 1: the world model is UNIFIED into EditorState now — the piece
@@ -111,6 +118,9 @@ export default function WorldEditorSurface(props: {
         onPlace={props.onPlace}
         onMove={props.onMove}
         floor={props.floor}
+        viewRecall={props.viewRecall}
+        views={props.views}
+        onRecallView={props.onRecallView}
         paintActive={!props.interactionLocked && props.paintActive}
         mapPaint={props.mapPaint}
         mapStem={props.mapStem}

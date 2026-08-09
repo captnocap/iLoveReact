@@ -7,9 +7,10 @@
 // editor VIEW into one atom and rehydrate it on boot. Map-authored slices are
 // redacted: named document files are their only truth.
 //
-// Survives hot reload; resets on a cold process restart (hotstate is
-// in-process) — which is the wanted behaviour for VIEW state: a fresh launch
-// starts with clean chrome. World CONTENT is different (SESSIONSAVE req_2765):
+// Survives hot reload and the dev supervisor's managed exact-child replacement.
+// A genuinely separate cold launch still starts clean because only the
+// supervisor supplies a one-shot handoff. World CONTENT is different
+// (SESSIONSAVE req_2765):
 // placed pieces / zone defs / the id seq rehydrate from the on-disk world save
 // (data/worldStore.ts) so a session's building survives the restart; the
 // painted map reloads host-side from its RMAP on the same boot.
@@ -87,6 +88,7 @@ export function loadPersistedState(): EditorState {
     base.worldFlora = world.worldFlora;
     base.worldPrefabs = world.prefabs;
     base.worldFacades = world.facades;
+    base.worldViews = world.views;
     base.objects = world.objects;
     base.selectedObjectId = world.objects.find((object) => !object.hidden)?.id ?? 'obj-tile';
     base.seq = Math.max(base.seq, world.seq);
@@ -139,6 +141,9 @@ export function loadPersistedState(): EditorState {
     worldFlora: base.worldFlora,
     worldPrefabs: base.worldPrefabs,
     worldFacades: base.worldFacades,
+    worldViews: base.worldViews,
+    activeWorldViewId: null,
+    worldViewRecallNonce: 0,
     objects: base.objects,
     selectedObjectId: base.selectedObjectId,
     selectedPieceId: null,
@@ -211,6 +216,9 @@ export function persistState(state: EditorState): void {
     worldFlora: [],
     worldPrefabs: [],
     worldFacades: [],
+    worldViews: [],
+    activeWorldViewId: null,
+    worldViewRecallNonce: 0,
     objects: [],
     selectedObjectId: 'obj-tile',
     selectedPieceId: null,

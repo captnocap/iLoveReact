@@ -6,7 +6,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { C } from '../workspace.cls';
 import { Box } from '../../../runtime/primitives';
-import type { CommandAppliedOutcome } from '../../../runtime/commands';
+import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
 import LeftRail from './LeftRail';
@@ -38,6 +38,19 @@ import WorldBibleIndexPanel from '../worldBible/WorldBibleIndexPanel';
 import { requestWorldBibleReview, worldBibleController, worldBibleHasDrafts } from '../worldBible/controller';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
+import {
+  faceAddressKey,
+  recoveryRestoreConfirmationAction,
+  type BlobExplorerFacePage,
+  type BlobExplorerFaceQuery,
+  type BlobExplorerFaceSelection,
+  type BlobExplorerBuildIssueSelection,
+  type BlobExplorerHistoryStateV1,
+  type BlobExplorerServerStatusV1,
+  type BlobExplorerStableRowActionV1,
+  type BlobExplorerSurfaceProps,
+  type BlobExplorerWidthPreset,
+} from '../stage/BlobExplorerSurface';
 import { FacadePaintLayersSection, ModelPaintLayersSection } from '../inspector/PaintLayerSections';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import StlConversionDialog from '../dialogs/StlConversionDialog';
@@ -66,6 +79,14 @@ import { basePaintingSkinId, listPaintSkins } from '../data/paintVariants';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { cancelWorldSave, emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
+import {
+  activeWorldView,
+  removeWorldView,
+  storeWorldView,
+  worldViewPoseFrom,
+  WORLD_VIEW_LIMITS,
+} from '../world/worldViews';
+import { liveIsoPose } from '../world/WorldViewport';
 import { generateCoastalCity } from '../data/coastalCity';
 import { coastalCityWorldSave } from '../data/coastalCityDocument';
 import {
@@ -139,12 +160,44 @@ import {
   snapshotNormalModelSave,
 } from '../model/modelLoreSnapshots';
 import {
-  loreHistory,
-  lorePin,
-  lorePreview,
-  loreServerStatus,
-  loreSnapshot,
+  captureRecoverySnapshotV1,
+  recoveryHistoryV1,
+  recoveryPinV1,
+  recoveryRestoreCandidateV1,
+  recoveryStatusV1,
+  restoreModelTransactionV1,
+  RECOVERY_STATUS_CHANNEL_V1,
 } from '../../../runtime/vcs/lore';
+import {
+  historicalPreviewMutationRefusalV1,
+  historicalPreviewMustCloseBeforeModelTargetV1,
+  openHistoricalPreviewPairV1,
+  releaseHistoricalPreviewPairV1,
+  type ActiveHistoricalPreviewV1,
+  type HistoricalPreviewUiActionV1,
+} from '../model/historicalPreviewLifecycle';
+import {
+  captureVerifiedNormalSnapshotV1,
+  issueVerifiedSaveReceiptV1,
+} from '../../../runtime/vcs/loreSaveCoordinator';
+import {
+  cursorForFaceAddress,
+  faceTable as inspectFaceTable,
+  meshSessionIdentity,
+  publishSessionObjectIds,
+  selectFaceAddress,
+  subscribeMeshAnalysisReady,
+  type FaceAddressV1,
+  type FaceDiffRequestV1,
+  type FaceTableErrorV1,
+  type FaceTableRequestV1,
+} from '../../../runtime/model/faceTable';
+import {
+  applyModelFaceFieldEditV1,
+  hasModelFaceFieldEditCoordinatorV1,
+} from '../../../runtime/model/faceFieldEdit';
+import { joinFaceTableDisplayNames } from '../model/faceTableDisplay';
+import { blobAnalysisReadyMatches, blobPageContainsAddress, type PendingBlobAnalysisV1 } from '../model/blobExplorerState';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
@@ -197,7 +250,7 @@ import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPacka
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
 import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry, meshDocUnreadableDiagnostic } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
-import { hydrateModelDocumentPartsAfterMount } from '../model/modelDocumentColdMount';
+import { hydrateModelDocumentPartsAfterMount, modelDocumentMetadataByRange } from '../model/modelDocumentColdMount';
 import { parseModelHistory } from '../model/uvHistory';
 import {
   choosePartAppendRoute,
@@ -267,7 +320,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
+import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, loadMaterializedPackages, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -403,6 +456,63 @@ function mapEventPayload(event: MapAuthoringEvent, mapPaint: EditorState['mapPai
   };
 }
 
+const INITIAL_BLOB_FACE_QUERY: BlobExplorerFaceQuery = {
+  source: 'resident',
+  sort: { column: 'area', direction: 'asc' },
+  filters: [],
+  cursor: null,
+  limit: 200,
+};
+
+const EMPTY_BLOB_HISTORY: BlobExplorerHistoryStateV1 = {
+  loading: false,
+  error: null,
+  rows: [],
+  cursor: null,
+  nextCursor: null,
+  indexedRepair: 'not_needed',
+};
+
+const CHECKING_BLOB_SERVICE: BlobExplorerServerStatusV1 = {
+  state: 'checking',
+  library: { available: false, version: null },
+  repository: { ready: false, path: 'checking', revision: null },
+  service: {
+    healthy: false,
+    healthUrl: 'http://127.0.0.1:41339/health_check',
+    httpCode: null,
+    unitName: 'loreserver.service',
+    active: false,
+    enabled: false,
+    journalTail: [],
+    restoreCommands: [],
+  },
+  stores: { snapshotRoot: 'checking', localBytes: 0, serverBytes: null },
+  retention: {
+    days: 60,
+    nowMs: 0,
+    lastPruneMs: null,
+    nextPruneMs: null,
+    immediatelyExpired: 0,
+    localTombstones: 0,
+    remotePendingTombstones: 0,
+    logicallyRemovedEntries: 0,
+    logicallyRemovedBytes: 0,
+    physicallyReclaimedBytes: 0,
+    remoteWatermark: null,
+    legacyUnexpiredPending: 0,
+    legacyCorruptPending: 0,
+    legacyLayoutCutover: false,
+    lastError: null,
+  },
+  history: { pushed: 0, local: 0, unknown: 0 },
+  probe: { lastCompletedMs: null, lastTransitionMs: null },
+};
+
+function blobFaceError(detail: string): FaceTableErrorV1 {
+  return { ok: false, version: 1, code: 'internal_error', detail };
+}
+
 export default function AppFrame() {
   // The shell for BOTH routes. AppFrame stays mounted across the Editor/Play
   // switch (it's rendered directly under <Router>, not swapped by a <Route>), so
@@ -426,6 +536,35 @@ export default function AppFrame() {
   const seatShellActionRef = useRef<(action: string, args: Record<string, unknown>, targetModelId?: string) => SeatShellReceipt>(
     () => ({ ok: false, reason: 'Agent Seat shell actions are not ready' }),
   );
+  const [blobFaceQuery, setBlobFaceQuery] = useState<BlobExplorerFaceQuery>(INITIAL_BLOB_FACE_QUERY);
+  const [blobFacePage, setBlobFacePage] = useState<BlobExplorerFacePage | null>(null);
+  const [blobFaceErrorState, setBlobFaceErrorState] = useState<FaceTableErrorV1 | null>(null);
+  const [blobFaceLoading, setBlobFaceLoading] = useState(false);
+  const [blobSelectedAddress, setBlobSelectedAddress] = useState<FaceAddressV1 | null>(null);
+  const [blobSelectedTriangles, setBlobSelectedTriangles] = useState<number | null>(null);
+  const [blobHistory, setBlobHistory] = useState<BlobExplorerHistoryStateV1>(EMPTY_BLOB_HISTORY);
+  const [blobService, setBlobService] = useState<BlobExplorerServerStatusV1>(CHECKING_BLOB_SERVICE);
+  const [blobSnapshotInFlight, setBlobSnapshotInFlight] = useState(false);
+  const [blobSnapshotStatus, setBlobSnapshotStatus] = useState<string | null>(null);
+  const [blobFieldEditInFlight, setBlobFieldEditInFlight] = useState(false);
+  const [blobFieldEditStatus, setBlobFieldEditStatus] = useState<string | null>(null);
+  const blobFieldEditInFlightRef = useRef(false);
+  const [blobRestoreInFlight, setBlobRestoreInFlight] = useState(false);
+  const [blobRestoreConfirmSnapshotId, setBlobRestoreConfirmSnapshotId] = useState<string | null>(null);
+  const blobRestoreInFlightRef = useRef(false);
+  const blobRestoreProjectionBlockedRef = useRef<string | null>(null);
+  const savedMeshDepthRef = useRef<Record<string, number>>({});
+  const [blobActivePreview, setBlobActivePreview] = useState<ActiveHistoricalPreviewV1 | null>(null);
+  const blobActivePreviewRef = useRef<ActiveHistoricalPreviewV1 | null>(null);
+  const blobPreviewTransitionErrorRef = useRef<string | null>(null);
+  const blobPreviewReleasedDuringTransitionRef = useRef(false);
+  blobActivePreviewRef.current = blobPreviewReleasedDuringTransitionRef.current ? null : blobActivePreview;
+  const [blobWidthPreset, setBlobWidthPreset] = useState<BlobExplorerWidthPreset>('compact');
+  const [blobAnalysisRevision, setBlobAnalysisRevision] = useState(0);
+  const blobFaceCursorBackRef = useRef<(string | null)[]>([]);
+  const blobHistoryCursorBackRef = useRef<(string | null)[]>([]);
+  const blobRequestGenerationRef = useRef(0);
+  const blobPendingAnalysisRef = useRef<PendingBlobAnalysisV1 | null>(null);
   const stageThumbnailRef = useRef<() => ThumbnailStageResult>(
     () => ({ ok: false, reason: 'the thumbnail verb is not ready' }),
   );
@@ -1357,12 +1496,43 @@ export default function AppFrame() {
       dispatchCommandOutcome(outcome);
     });
   }
+  const refuseHistoricalPreviewMutation = (action: HistoricalPreviewUiActionV1): string | null => {
+    const transaction = blobRestoreInFlightRef.current
+      ? 'Historical Restore owns the exact resident/package transaction; wait for its verified receipt.'
+      : blobFieldEditInFlightRef.current
+        ? 'Guarded field edit owns the exact resident/package transaction; wait for its verified receipt.'
+        : blobRestoreProjectionBlockedRef.current
+          ? 'The restored package projection could not be re-read exactly. Close and reopen this model before any mutation, save, or export.'
+        : null;
+    const refusal = transaction ?? historicalPreviewMutationRefusalV1(blobActivePreviewRef.current, action);
+    if (!refusal) return null;
+    const previous = stateRef.current;
+    const next = { ...previous, openMenu: null, status: refusal };
+    stateRef.current = next;
+    setState(next);
+    return refusal;
+  };
+
   const invokeApplicationCommand = (
     commandId: string,
     args: unknown,
     source: string,
     correlation: { actionId?: string; causedBy?: string } = {},
-  ) => {
+  ): CommandOutcome => {
+    if (isModelOutlinerActionCommandId(commandId)) {
+      const reason = refuseHistoricalPreviewMutation('model_mutation');
+      if (reason) return {
+        invocationId: 'historical-preview-read-only',
+        commandId,
+        source: commandSource(source),
+        origin: source,
+        causedBy: correlation.causedBy,
+        status: 'rejected',
+        phase: 'rejected',
+        code: 'disabled',
+        reason,
+      };
+    }
     const outcome = applicationCommandsRef.current!.invoke({
       commandId,
       args,
@@ -1391,6 +1561,10 @@ export default function AppFrame() {
     if (block) { refuseBlocked(block); return; }
     fn(...a);
   };
+  const guardedModelMutation = <A extends unknown[]>(fn: (...a: A) => void) => guarded((...a: A) => {
+    if (refuseHistoricalPreviewMutation('model_mutation')) return;
+    fn(...a);
+  });
 
   // The model surface's right-click menu. Lives at the app ROOT (rendered below,
   // as the last child of HW_App) so it lands at the cursor — an absolutely-placed
@@ -1463,8 +1637,8 @@ export default function AppFrame() {
     scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq, {
       enabled: persistenceSettings.autosave,
       delayMs: persistenceSettings.autosaveDelayMs,
-    }, state.worldFacades, state.worldPrefabs, state.worldFlora);
-  }, [state.activeMapStem, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+    }, state.worldFacades, state.worldPrefabs, state.worldFlora, state.worldViews);
+  }, [state.activeMapStem, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
 
   // Facade quads follow the active map into every world view (req_3057) —
   // livePush reads this registry when it re-pushes resident meshes/refs.
@@ -1574,6 +1748,11 @@ export default function AppFrame() {
   // parent effect, so an effect-based select would arrive too late. Non-model
   // documents select token 0 (the primordial no-document session).
   const selectNativeModelSession = (doc: WorkspaceDocument | null) => {
+    const targetModelId = doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
+    const preview = blobActivePreviewRef.current;
+    if (historicalPreviewMustCloseBeforeModelTargetV1(preview, targetModelId)) {
+      if (!closeBlobPreview('Historical preview closed before switching documents.', false)) return;
+    }
     const reconciled = reconcileNativeModelSession(
       { token: activeSessionTokenRef.current, modelId: activeSessionModelIdRef.current },
       doc,
@@ -1687,6 +1866,733 @@ export default function AppFrame() {
   const liveUndoDepths = undoDepths(state);
   publishUndoDepths(liveUndoDepths);
   const activeModelOnDisk = activeModelPkg ? isMaterialized(activeModelPkg.kind, activeModelPkg.id) : false;
+  const blobExplorerOpen = !playing && !!activeModelId && state.rightPane === 'recovery' && !state.rightPanelCollapsed;
+
+  const refreshBlobHistory = (modelId: string, cursor: string | null = null) => {
+    setBlobRestoreConfirmSnapshotId(null);
+    setBlobHistory((current) => ({ ...current, loading: true, error: null }));
+    const response = recoveryHistoryV1({
+      version: 1,
+      modelId,
+      ...(cursor ? { cursor } : {}),
+      limit: 100,
+    });
+    if (!response.ok) {
+      setBlobHistory((current) => ({ ...current, loading: false, error: response.detail }));
+      return;
+    }
+    setBlobHistory({
+      loading: false,
+      error: null,
+      rows: response.rows,
+      cursor: response.cursor,
+      nextCursor: response.nextCursor,
+      indexedRepair: response.indexedRepair,
+    });
+  };
+
+  const refreshBlobServiceStatus = () => {
+    const status = recoveryStatusV1({ version: 1 });
+    setBlobService(status.ok ? status.status : {
+      ...CHECKING_BLOB_SERVICE,
+      state: 'blocked',
+      repository: { ...CHECKING_BLOB_SERVICE.repository, path: 'unavailable' },
+      service: {
+        ...CHECKING_BLOB_SERVICE.service,
+        journalTail: [status.detail],
+      },
+      retention: { ...CHECKING_BLOB_SERVICE.retention, lastError: status.detail },
+    });
+  };
+
+  const publishBlobObjectNamespace = (modelId: string) => {
+    const identity = meshSessionIdentity({ version: 1, modelId });
+    if (!identity.ok) return identity;
+    const objectIds = loreSnapshotObjectIds(stateRef.current.modelParts[modelId] ?? []);
+    if (!objectIds) {
+      return { ok: false as const, version: 1 as const, code: 'object_ids_unpublished' as const, detail: 'one stable object id is required for every resident part range' };
+    }
+    const publication = publishSessionObjectIds({
+      version: 1,
+      modelId,
+      sessionToken: identity.sessionToken,
+      expectedGeneration: identity.generation,
+      ranges: objectIds.map((objectId, rank) => ({ rank, objectId })),
+    });
+    return publication.ok ? meshSessionIdentity({ version: 1, modelId }) : publication;
+  };
+
+  useEffect(() => {
+    blobRequestGenerationRef.current += 1;
+    blobFaceCursorBackRef.current = [];
+    blobHistoryCursorBackRef.current = [];
+    setBlobFaceQuery(INITIAL_BLOB_FACE_QUERY);
+    setBlobFacePage(null);
+    setBlobFaceErrorState(null);
+    setBlobFaceLoading(false);
+    blobPendingAnalysisRef.current = null;
+    setBlobSelectedAddress(null);
+    setBlobSelectedTriangles(null);
+    setBlobHistory(EMPTY_BLOB_HISTORY);
+    setBlobService(CHECKING_BLOB_SERVICE);
+    setBlobSnapshotInFlight(false);
+    setBlobSnapshotStatus(null);
+    blobFieldEditInFlightRef.current = false;
+    setBlobFieldEditInFlight(false);
+    setBlobFieldEditStatus(null);
+    blobRestoreInFlightRef.current = false;
+    blobRestoreProjectionBlockedRef.current = null;
+    setBlobRestoreInFlight(false);
+    setBlobRestoreConfirmSnapshotId(null);
+    if (blobActivePreviewRef.current === null) setBlobActivePreview(null);
+  }, [activeModelId]);
+
+  useEffect(() => subscribeMeshAnalysisReady((event) => {
+    const pending = blobPendingAnalysisRef.current;
+    if (!blobAnalysisReadyMatches(pending, blobRequestGenerationRef.current, event)) return;
+    blobPendingAnalysisRef.current = null;
+    if (event.status === 'failed') {
+      setBlobFaceLoading(false);
+      setBlobFacePage(null);
+      setBlobFaceErrorState(blobFaceError(event.detail ?? event.code ?? 'native face analysis failed'));
+      return;
+    }
+    setBlobAnalysisRevision((revision) => revision + 1);
+  }), []);
+
+  useEffect(() => {
+    if (!blobExplorerOpen || !activeModelId) return;
+    const preview = blobActivePreviewRef.current;
+    if (blobFaceQuery.source === 'preview' && (!preview || preview.modelId !== activeModelId)) {
+      setBlobFaceLoading(false);
+      setBlobFacePage(null);
+      setBlobFaceErrorState(blobFaceError('open one historical preview for this model before inspecting the PREVIEW plane'));
+      return;
+    }
+    const requestGeneration = ++blobRequestGenerationRef.current;
+    setBlobFaceLoading(true);
+    setBlobFaceErrorState(null);
+    const receipt = seatShellActionRef.current('face-table', {
+      source: blobFaceQuery.source,
+      sort: blobFaceQuery.sort,
+      filters: blobFaceQuery.filters,
+      ...(blobFaceQuery.cursor ? { cursor: blobFaceQuery.cursor } : {}),
+      ...(blobFaceQuery.source === 'preview' && preview ? {
+        previewToken: preview.previewToken,
+        expectedSha256: preview.sha256,
+      } : {}),
+      limit: blobFaceQuery.limit,
+    }, activeModelId);
+    if (requestGeneration !== blobRequestGenerationRef.current) return;
+    setBlobFaceLoading(false);
+    if (!receipt.ok) {
+      const result = receipt.result as FaceTableErrorV1 | undefined;
+      setBlobFacePage(null);
+      const error = result?.ok === false ? result : blobFaceError(receipt.reason ?? 'face analysis failed');
+      setBlobFaceErrorState(error);
+      if (error.code === 'analysis_pending') {
+        blobPendingAnalysisRef.current = {
+          requestGeneration,
+          modelId: activeModelId,
+          source: blobFaceQuery.source,
+          analysisId: error.analysisId,
+          planeIdentityHash: error.planeIdentityHash,
+        };
+      } else {
+        blobPendingAnalysisRef.current = null;
+      }
+      return;
+    }
+    blobPendingAnalysisRef.current = null;
+    setBlobFacePage(receipt.result as BlobExplorerFacePage);
+    setBlobFaceErrorState(null);
+  }, [
+    blobExplorerOpen,
+    activeModelId,
+    blobFaceQuery.source,
+    blobFaceQuery.sort.column,
+    blobFaceQuery.sort.direction,
+    blobFaceQuery.filters,
+    blobFaceQuery.cursor,
+    blobFaceQuery.limit,
+    blobActivePreview?.previewToken,
+    blobActivePreview?.sha256,
+    liveUndoDepths.undo,
+    blobAnalysisRevision,
+  ]);
+
+  useEffect(() => {
+    const timer = setTimeout(refreshBlobServiceStatus, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => subscribe(RECOVERY_STATUS_CHANNEL_V1, () => {
+    // Native already performed the blocking probe on its worker. This door is
+    // an immutable cached read, so a service transition never stalls a frame.
+    refreshBlobServiceStatus();
+  }), []);
+
+  useEffect(() => {
+    if (!blobExplorerOpen || !activeModelId) return;
+    refreshBlobServiceStatus();
+    refreshBlobHistory(activeModelId);
+  }, [blobExplorerOpen, activeModelId]);
+
+  const changeBlobFaceQuery = (next: BlobExplorerFaceQuery) => {
+    setBlobFaceQuery((current) => {
+      const sameQuery = current.source === next.source &&
+        current.sort.column === next.sort.column &&
+        current.sort.direction === next.sort.direction &&
+        JSON.stringify(current.filters) === JSON.stringify(next.filters) &&
+        current.limit === next.limit;
+      if (sameQuery && next.cursor !== current.cursor) blobFaceCursorBackRef.current.push(current.cursor);
+      else if (!sameQuery) blobFaceCursorBackRef.current = [];
+      return next;
+    });
+  };
+
+  const previousBlobFacePage = () => {
+    const cursor = blobFaceCursorBackRef.current.pop();
+    if (cursor === undefined) return;
+    setBlobFaceQuery((current) => ({ ...current, cursor }));
+  };
+
+  const residentBlobPlane = () => {
+    if (!blobFacePage) return null;
+    if (blobFacePage.source === 'resident') {
+      return { source: 'resident' as const, sessionToken: blobFacePage.sessionToken, expectedGeneration: blobFacePage.generation };
+    }
+    if (blobFacePage.source === 'diff' && blobFacePage.resident.source === 'resident') {
+      return {
+        source: 'resident' as const,
+        sessionToken: blobFacePage.resident.sessionToken,
+        expectedGeneration: blobFacePage.resident.generation,
+      };
+    }
+    return null;
+  };
+
+  const residentBlobObjectNamespaceHash = () => {
+    if (!blobFacePage) return null;
+    if (blobFacePage.source === 'resident') return blobFacePage.objectNamespaceHash;
+    if (blobFacePage.source === 'diff' && blobFacePage.resident.source === 'resident') {
+      return blobFacePage.resident.objectNamespaceHash;
+    }
+    return null;
+  };
+
+  const selectBlobFace = (selection: BlobExplorerFaceSelection) => {
+    if (!activeModelId || selection.plane === 'saved_preview') {
+      setBlobSnapshotStatus('Saved rows are inspectable but cannot replace the live viewport without an explicit preview capability.');
+      return;
+    }
+    const preview = blobActivePreviewRef.current;
+    const plane = selection.plane === 'preview'
+      ? preview && preview.modelId === activeModelId
+        ? { source: 'preview' as const, previewToken: preview.previewToken, expectedSha256: preview.sha256 }
+        : null
+      : residentBlobPlane();
+    if (!plane) {
+      setBlobFaceErrorState(blobFaceError(`${selection.plane} face identity is unavailable; refresh that plane`));
+      return;
+    }
+    const response = selectFaceAddress({
+      version: 1,
+      modelId: activeModelId,
+      plane,
+      target: { kind: 'face', address: selection.address },
+      additive: selection.additive,
+      frame: selection.frame,
+    });
+    if (!response.ok) {
+      setBlobFaceErrorState(response);
+      return;
+    }
+    setBlobSelectedAddress(selection.address);
+    setBlobSelectedTriangles(response.selectedTriangles);
+  };
+
+  const selectBlobBuildIssue = (selection: BlobExplorerBuildIssueSelection) => {
+    if (!activeModelId || selection.source === 'saved') {
+      setBlobSnapshotStatus('Saved build issues cannot select the live viewport.');
+      return;
+    }
+    const preview = blobActivePreviewRef.current;
+    const plane = selection.source === 'preview'
+      ? preview && preview.modelId === activeModelId
+        ? { source: 'preview' as const, previewToken: preview.previewToken, expectedSha256: preview.sha256 }
+        : null
+      : residentBlobPlane();
+    if (!plane) return;
+    const response = selectFaceAddress({
+      version: 1,
+      modelId: activeModelId,
+      plane,
+      target: {
+        kind: 'build_issue',
+        objectId: selection.issue.objectId,
+        sourceGroup: selection.issue.sourceGroup,
+      },
+      additive: selection.additive,
+      frame: selection.frame,
+    });
+    if (!response.ok) {
+      setBlobFaceErrorState(response);
+      return;
+    }
+    setBlobSelectedAddress(null);
+    setBlobSelectedTriangles(response.selectedTriangles);
+  };
+
+  const captureBlobRecoverySnapshot: BlobExplorerSurfaceProps['onRecoverySnapshot'] = (draft) => {
+    if (!activeModelId || blobSnapshotInFlight) return;
+    setBlobSnapshotInFlight(true);
+    setBlobSnapshotStatus('Capturing the native-resident mesh…');
+    setState((current) => ({ ...current, status: 'capturing native-resident recovery snapshot…' }));
+    const identity = meshSessionIdentity({ version: 1, modelId: activeModelId });
+    if (!identity.ok) {
+      setBlobSnapshotInFlight(false);
+      setBlobSnapshotStatus(identity.detail);
+      setState((current) => ({ ...current, status: `recovery snapshot refused: ${identity.detail}` }));
+      return;
+    }
+    // Exact stable IDs improve the snapshot when available, but panic capture
+    // must survive precisely the broken metadata state it exists to rescue.
+    // Native capture persists deterministic recovery IDs and typed degradation
+    // when this best-effort publication is absent or refused.
+    const objectIds = loreSnapshotObjectIds(stateRef.current.modelParts[activeModelId] ?? []);
+    if (objectIds) publishSessionObjectIds({
+      version: 1,
+      modelId: activeModelId,
+      sessionToken: identity.sessionToken,
+      expectedGeneration: identity.generation,
+      ranges: objectIds.map((objectId, rank) => ({ rank, objectId })),
+    });
+    const response = captureRecoverySnapshotV1({
+      version: 1,
+      modelId: activeModelId,
+      sessionToken: identity.sessionToken,
+      expectedGeneration: identity.generation,
+      kind: 'panic',
+      label: draft.label,
+      ...(draft.note ? { note: draft.note } : {}),
+      push: false,
+    });
+    setBlobSnapshotInFlight(false);
+    if (!response.ok) {
+      setBlobSnapshotStatus(`${response.code}: ${response.detail}`);
+      setState((current) => ({ ...current, status: `recovery snapshot failed: ${response.code} — ${response.detail}` }));
+      return;
+    }
+    setBlobSnapshotStatus(`Captured ${response.triangles} tris / ${response.authoredFaces} faces as ${response.snapshotId}.`);
+    setState((current) => ({
+      ...current,
+      status: `recovery snapshot ${response.snapshotId} captured from memory · ${response.triangles} tris · ${response.pushState}`,
+    }));
+    blobHistoryCursorBackRef.current = [];
+    refreshBlobHistory(activeModelId);
+  };
+
+  const pageBlobHistory = (cursor: string | null) => {
+    if (!activeModelId) return;
+    blobHistoryCursorBackRef.current.push(blobHistory.cursor);
+    refreshBlobHistory(activeModelId, cursor);
+  };
+
+  const previousBlobHistoryPage = () => {
+    if (!activeModelId) return;
+    const cursor = blobHistoryCursorBackRef.current.pop();
+    if (cursor === undefined) return;
+    refreshBlobHistory(activeModelId, cursor);
+  };
+
+  const pinBlobSnapshot = (row: BlobExplorerStableRowActionV1, pinned: boolean) => {
+    if (!activeModelId) return;
+    const response = recoveryPinV1({
+      version: 1,
+      modelId: activeModelId,
+      snapshotId: row.snapshotId,
+      expectedRevision: row.expectedRevision,
+      expectedSha256: row.expectedSha256,
+      pinned,
+      push: false,
+    });
+    setBlobSnapshotStatus(response.ok
+      ? `${response.pinned ? 'Pinned' : 'Unpinned'} ${response.snapshotId}. Retention remains capped at 60 days.`
+      : `${response.code}: ${response.detail}`);
+    if (response.ok) refreshBlobHistory(activeModelId, blobHistory.cursor);
+  };
+
+  function closeBlobPreview(reason = 'Historical preview closed.', publishUi = true) {
+    const active = blobActivePreviewRef.current;
+    if (!active) return true;
+    const response = releaseHistoricalPreviewPairV1(active);
+    if (!response.ok) {
+      const detail = `${response.code}: ${response.detail}`;
+      if (publishUi) {
+        blobPreviewTransitionErrorRef.current = null;
+        setBlobSnapshotStatus(detail);
+      } else blobPreviewTransitionErrorRef.current = detail;
+      return false;
+    }
+    blobPreviewTransitionErrorRef.current = null;
+    blobActivePreviewRef.current = null;
+    blobPreviewReleasedDuringTransitionRef.current = !publishUi;
+    if (publishUi) {
+      setBlobActivePreview(null);
+      setBlobFaceQuery((current) => current.source === 'preview'
+        ? { ...current, source: 'resident', cursor: null }
+        : current);
+      setBlobFacePage(null);
+      setBlobSelectedAddress(null);
+      setBlobSelectedTriangles(null);
+      setBlobSnapshotStatus(reason);
+    }
+    return true;
+  }
+
+  const previewBlobSnapshot = (row: BlobExplorerStableRowActionV1) => {
+    if (!activeModelId) return;
+    if (blobActivePreviewRef.current && !closeBlobPreview('Replacing the prior historical preview…')) return;
+    const response = openHistoricalPreviewPairV1({
+      version: 1,
+      modelId: activeModelId,
+      snapshotId: row.snapshotId,
+      expectedRevision: row.expectedRevision,
+      expectedSha256: row.expectedSha256,
+    });
+    if (!response.ok) {
+      setBlobSnapshotStatus(`${response.code}: ${response.detail}`);
+      return;
+    }
+    const active = response.active;
+    blobPreviewReleasedDuringTransitionRef.current = false;
+    blobActivePreviewRef.current = active;
+    setBlobActivePreview(active);
+    setBlobFaceQuery((current) => ({ ...current, source: 'preview', cursor: null }));
+    setBlobFacePage(null);
+    setBlobSelectedAddress(null);
+    setBlobSelectedTriangles(null);
+    setBlobSnapshotStatus(`Previewing ${active.snapshotId} read-only · ${active.triangleCount} tris.`);
+  };
+
+  const followBlobViewportSelection: NonNullable<BlobExplorerSurfaceProps['onViewportFaceSelection']> = (selection) => {
+    if (!selection) {
+      setBlobSelectedAddress(null);
+      setBlobSelectedTriangles(null);
+      return;
+    }
+    setBlobSelectedAddress((current) => current && faceAddressKey(current) === faceAddressKey(selection.address)
+      ? current
+      : selection.address);
+    setBlobSelectedTriangles(selection.selectedTriangles);
+    if (!activeModelId || !blobFacePage || blobFaceQuery.source === 'saved') return;
+    if (blobPageContainsAddress(blobFacePage, selection.address)) return;
+    const preview = blobActivePreviewRef.current;
+    const plane = blobFaceQuery.source === 'preview'
+      ? preview && preview.modelId === activeModelId
+        ? { source: 'preview' as const, previewToken: preview.previewToken, expectedSha256: preview.sha256 }
+        : null
+      : residentBlobPlane();
+    if (!plane) return;
+    const seek = cursorForFaceAddress({
+      version: 1,
+      modelId: activeModelId,
+      plane,
+      address: selection.address,
+      sort: blobFaceQuery.sort,
+      filters: blobFaceQuery.filters,
+      limit: blobFaceQuery.limit,
+    });
+    if (!seek.ok) {
+      if (seek.code !== 'address_not_in_query') setBlobFaceErrorState(seek);
+      return;
+    }
+    if (seek.cursor === blobFaceQuery.cursor) return;
+    blobFaceCursorBackRef.current.push(blobFaceQuery.cursor);
+    setBlobFaceQuery((current) => ({ ...current, cursor: seek.cursor }));
+  };
+
+  const restoreBlobSnapshot: BlobExplorerSurfaceProps['onRestore'] = (row) => {
+    const modelId = activeModelId;
+    if (!modelId || blobRestoreInFlightRef.current) return;
+    if (recoveryRestoreConfirmationAction(blobRestoreConfirmSnapshotId, row.snapshotId) === 'arm') {
+      setBlobRestoreConfirmSnapshotId(row.snapshotId);
+      setBlobSnapshotStatus('Restore replaces the resident mesh and saved geometry in one native transaction. It creates exactly one Ctrl-Z action; character skin binding becomes NEEDS BIND. Press CONFIRM RESTORE to continue.');
+      return;
+    }
+    setBlobRestoreConfirmSnapshotId(null);
+
+    const historyRow = blobHistory.rows.find((entry) =>
+      !('state' in entry) && entry.snapshotId === row.snapshotId &&
+      entry.revision === row.expectedRevision && entry.sha256 === row.expectedSha256);
+    const host = globalThis as any;
+    if (!historyRow || 'state' in historyRow || historyRow.identityQuality !== 'exact' ||
+      historyRow.recoveryDegradations.length !== 0 ||
+      historyRow.objectNamespaceHash !== row.expectedObjectNamespaceHash ||
+      !activeModelPkg || !activeModelOnDisk || blobService.state === 'blocked' ||
+      blobActivePreviewRef.current || blobFieldEditInFlightRef.current ||
+      typeof host.__lore_restore !== 'function' ||
+      typeof host.__model_recovery_transaction !== 'function')
+    {
+      setBlobSnapshotStatus('Restore refused: exact history identity, on-disk package, idle resident session, and native transaction coordinator are all required.');
+      return;
+    }
+
+    const published = publishBlobObjectNamespace(modelId);
+    if (!published.ok || published.identityQuality !== 'exact' ||
+      published.recoveryDegradations.length !== 0 || published.modelId !== modelId ||
+      activeSessionModelIdRef.current !== modelId ||
+      String(activeSessionTokenRef.current) !== published.sessionToken)
+    {
+      setBlobSnapshotStatus(`Restore refused: ${published.ok ? 'resident identity is not exact' : published.detail}.`);
+      return;
+    }
+
+    blobRestoreInFlightRef.current = true;
+    setBlobRestoreInFlight(true);
+    setBlobSnapshotStatus('Opening immutable Lore candidate and acquiring the native resident/package write lease…');
+    let candidateToken: string | null = null;
+    let cleanupWarning: string | null = null;
+    try {
+      const candidate = recoveryRestoreCandidateV1({
+        version: 1,
+        operation: 'open_candidate',
+        modelId,
+        snapshotId: row.snapshotId,
+        expectedRevision: row.expectedRevision,
+        expectedSha256: row.expectedSha256,
+      });
+      if (!candidate.ok || !('candidateToken' in candidate)) {
+        setBlobSnapshotStatus(candidate.ok ? 'Restore candidate receipt was incomplete.' : `${candidate.code}: ${candidate.detail}`);
+        return;
+      }
+      candidateToken = candidate.candidateToken;
+      if (candidate.identityQuality !== 'exact' || candidate.recoveryDegradations.length !== 0 ||
+        candidate.objectNamespaceHash !== row.expectedObjectNamespaceHash ||
+        candidate.sha256 !== row.expectedSha256 || candidate.resolvedRevision !== row.expectedRevision)
+      {
+        setBlobSnapshotStatus('Restore refused: immutable candidate provenance differs from the selected exact history row.');
+        return;
+      }
+
+      const result = restoreModelTransactionV1({
+        version: 1,
+        operation: 'restore',
+        modelId,
+        sessionToken: published.sessionToken,
+        expectedGeneration: published.generation,
+        snapshotId: row.snapshotId,
+        resolvedRevision: candidate.resolvedRevision,
+        expectedSha256: candidate.sha256,
+        expectedObjectNamespaceHash: candidate.objectNamespaceHash,
+        candidateToken,
+        push: false,
+      });
+      if (!result.ok) {
+        setBlobSnapshotStatus(`${result.code}: ${result.detail}`);
+        return;
+      }
+
+      const history = parseModelHistory(host.__mesh_history?.());
+      savedMeshDepthRef.current[modelId] = history.undo;
+      const committed = loadMaterializedPackages().find((pkg) => pkg.id === modelId) ?? null;
+      blobRestoreProjectionBlockedRef.current = committed ? null : modelId;
+      if (committed) upsertSavedPackage(committed);
+      if (result.characterBindingInvalidated) {
+        try { characterRigApiRef.current?.close(); } catch { /* durable manifest is already needs_bind */ }
+        residentModelForRigAttachRef.current = null;
+        setCharacterRigSnapshot(null);
+      }
+      setState((previous) => {
+        const next = {
+          ...previous,
+          modelDirty: { ...previous.modelDirty, [modelId]: false },
+          modelDupes: committed
+            ? upsertModelPackageProjection(previous.modelDupes, committed)
+            : previous.modelDupes,
+          status: committed
+            ? `Restored ${row.snapshotId} · resident = target = saved ${result.sha256.slice(0, 12)} · Ctrl-Z action ${result.journalActionId}${result.characterBindingInvalidated ? ' · character bind invalidated' : ''}`
+            : `⚠ Restore committed exactly, but the editor could not re-read its package projection. Close and reopen this model before further save/export.`,
+        };
+        stateRef.current = next;
+        return next;
+      });
+      setBlobSelectedAddress(null);
+      setBlobSelectedTriangles(null);
+      setBlobFacePage(null);
+      setBlobAnalysisRevision((revision) => revision + 1);
+      refreshBlobHistory(modelId);
+      setBlobSnapshotStatus(committed
+        ? `Restore verified: resident, target, and saved SHA ${result.sha256.slice(0, 12)} match; all ${result.diff.changedFieldCounts.length} native diff channels are zero. Ctrl-Z restores the prior resident mesh.`
+        : 'Restore committed, but package projection re-read failed. Close and reopen this model before any save or export; no fallback projection was synthesized.');
+    } finally {
+      if (candidateToken) {
+        const released = recoveryRestoreCandidateV1({
+          version: 1,
+          operation: 'release_candidate',
+          candidateToken,
+        });
+        if (!released.ok) cleanupWarning = `${released.code}: ${released.detail}`;
+      }
+      blobRestoreInFlightRef.current = false;
+      setBlobRestoreInFlight(false);
+      if (cleanupWarning) setBlobSnapshotStatus(`Restore candidate cleanup warning: ${cleanupWarning}`);
+    }
+  };
+
+  const applyBlobGuardedField: NonNullable<BlobExplorerSurfaceProps['onGuardedFieldApply']> = (edit) => {
+    const modelId = activeModelId;
+    if (!modelId || blobFieldEditInFlightRef.current) return;
+    const refusal = refuseHistoricalPreviewMutation('model_mutation');
+    if (refusal) {
+      setBlobFieldEditStatus(refusal);
+      return;
+    }
+    const resident = residentBlobPlane();
+    const objectNamespaceHash = residentBlobObjectNamespaceHash();
+    if (!hasModelFaceFieldEditCoordinatorV1() || !resident || !objectNamespaceHash ||
+      activeSessionModelIdRef.current !== modelId || edit.address.stability !== 'stable') {
+      setBlobFieldEditStatus('Guarded edit refused: the exact resident model/session/face identity or native coordinator is unavailable.');
+      return;
+    }
+
+    blobFieldEditInFlightRef.current = true;
+    setBlobFieldEditInFlight(true);
+    setBlobFieldEditStatus('Validating resident identity, package transaction, and Lore recovery bookends…');
+    try {
+      const result = applyModelFaceFieldEditV1({
+        version: 1,
+        operation: 'apply',
+        modelId,
+        sessionToken: resident.sessionToken,
+        expectedGeneration: resident.expectedGeneration,
+        expectedObjectNamespaceHash: objectNamespaceHash,
+        address: edit.address,
+        field: edit.field,
+        value: edit.value,
+        push: false,
+      });
+      if (!result.ok) {
+        setBlobFieldEditStatus(`${result.code}: ${result.detail}`);
+        return;
+      }
+
+      const history = parseModelHistory((globalThis as any).__mesh_history?.());
+      savedMeshDepthRef.current[modelId] = history.undo;
+      const committed = loadMaterializedPackages().find((pkg) => pkg.id === modelId) ?? null;
+      if (committed) upsertSavedPackage(committed);
+      if (result.characterBindingInvalidated) {
+        try { characterRigApiRef.current?.close(); } catch { /* transaction is already durable; reopen will read needs_bind */ }
+        setCharacterRigSnapshot(null);
+      }
+      setState((previous) => {
+        const next = {
+          ...previous,
+          modelDirty: { ...previous.modelDirty, [modelId]: false },
+          modelDupes: committed
+            ? upsertModelPackageProjection(previous.modelDupes, committed)
+            : previous.modelDupes,
+          status: `Guarded ${result.field.replace('_', ' ')} edit committed · ${result.triangleCount} tris · undo action ${result.journalActionId}${result.characterBindingInvalidated ? ' · character bind now needs rebuild' : ''}`,
+        };
+        stateRef.current = next;
+        return next;
+      });
+      setBlobSelectedAddress(null);
+      setBlobSelectedTriangles(null);
+      setBlobFacePage(null);
+      setBlobAnalysisRevision((revision) => revision + 1);
+      refreshBlobHistory(modelId);
+      setBlobFieldEditStatus(
+        `Committed ${result.field.replace('_', ' ')} ${result.before} → ${result.after}; resident and saved SHA ${result.sha256.slice(0, 12)} match.${committed ? '' : ' Package projection refresh failed; reopen the recovery pane before export.'}`,
+      );
+    } finally {
+      blobFieldEditInFlightRef.current = false;
+      setBlobFieldEditInFlight(false);
+    }
+  };
+
+  useEffect(() => {
+    const active = blobActivePreviewRef.current;
+    if (!active) {
+      if (blobPreviewReleasedDuringTransitionRef.current) {
+        blobPreviewReleasedDuringTransitionRef.current = false;
+        setBlobActivePreview(null);
+        setBlobFaceQuery((current) => current.source === 'preview'
+          ? { ...current, source: 'resident', cursor: null }
+          : current);
+        setBlobFacePage(null);
+        setBlobSelectedAddress(null);
+        setBlobSelectedTriangles(null);
+      }
+      const transitionError = blobPreviewTransitionErrorRef.current;
+      if (transitionError) {
+        blobPreviewTransitionErrorRef.current = null;
+        setBlobSnapshotStatus(transitionError);
+      }
+      return;
+    }
+    if (!blobExplorerOpen || !activeModelId || active.modelId !== activeModelId)
+      closeBlobPreview('Historical preview closed before leaving its model recovery pane.');
+  }, [blobExplorerOpen, activeModelId]);
+
+  useEffect(() => () => {
+    const active = blobActivePreviewRef.current;
+    if (!active) return;
+    // Component teardown cannot publish React state, but native ownership must
+    // still be paired before the host/session disappears.
+    releaseHistoricalPreviewPairV1(active);
+    blobActivePreviewRef.current = null;
+  }, []);
+
+  const blobExplorerProps: BlobExplorerSurfaceProps | undefined = activeModelId ? {
+    modelId: activeModelId,
+    widthPreset: blobWidthPreset,
+    onWidthPreset: setBlobWidthPreset,
+    faceQuery: blobFaceQuery,
+    facePage: blobFacePage,
+    faceError: blobFaceErrorState,
+    faceLoading: blobFaceLoading,
+    selectedAddress: blobSelectedAddress,
+    selectedTriangles: blobSelectedTriangles,
+    canPageFacesBackward: blobFaceCursorBackRef.current.length > 0,
+    onFaceQueryChange: changeBlobFaceQuery,
+    onPreviousFacePage: previousBlobFacePage,
+    onSelectFace: selectBlobFace,
+    onSelectBuildIssue: selectBlobBuildIssue,
+    onViewportFaceSelection: followBlobViewportSelection,
+    guardedFieldEditEnabled: hasModelFaceFieldEditCoordinatorV1() && !blobFieldEditInFlight &&
+      activeSessionModelIdRef.current === activeModelId && residentBlobPlane() !== null &&
+      residentBlobObjectNamespaceHash() !== null,
+    guardedFieldEditStatus: blobFieldEditStatus,
+    onGuardedFieldApply: applyBlobGuardedField,
+    history: blobHistory,
+    recoverySnapshotEnabled: blobService.state !== 'blocked' && activeSessionModelIdRef.current === activeModelId,
+    recoverySnapshotInFlight: blobSnapshotInFlight,
+    recoverySnapshotStatus: blobSnapshotStatus,
+    onRecoverySnapshot: captureBlobRecoverySnapshot,
+    onHistoryPage: pageBlobHistory,
+    canPageHistoryBackward: blobHistoryCursorBackRef.current.length > 0,
+    onPreviousHistoryPage: previousBlobHistoryPage,
+    onPin: pinBlobSnapshot,
+    onPreview: previewBlobSnapshot,
+    activePreview: blobActivePreview,
+    onClosePreview: () => { closeBlobPreview(); },
+    restoreEnabled: activeModelOnDisk && blobService.state !== 'blocked' &&
+      !blobRestoreInFlight && !blobFieldEditInFlight && !blobSnapshotInFlight &&
+      !blobRestoreProjectionBlockedRef.current &&
+      !blobActivePreview && activeSessionModelIdRef.current === activeModelId &&
+      residentBlobPlane() !== null && residentBlobObjectNamespaceHash() !== null &&
+      typeof (globalThis as any).__lore_restore === 'function' &&
+      typeof (globalThis as any).__model_recovery_transaction === 'function',
+    restoreConfirmSnapshotId: blobRestoreConfirmSnapshotId,
+    onRestore: restoreBlobSnapshot,
+    onCopySnapshotId: (snapshotId) => {
+      (globalThis as any).__clipboard_set?.(snapshotId);
+      setBlobSnapshotStatus(`Copied ${snapshotId}.`);
+    },
+    service: blobService,
+  } : undefined;
   useEffect(() => {
     if (!playing && hasCharacterRigCapability(activeModelPkg)) return;
     try { characterRigApiRef.current?.close(); } catch { /* host teardown is best-effort */ }
@@ -1697,7 +2603,6 @@ export default function AppFrame() {
   // ABOVE the baseline = host-side edits since the last materialize (gizmo, paint,
   // topology and part ops all journal) → the doc is dirty. Rename marks explicitly
   // (names never journal); Save/autosave clear the flag and re-baseline.
-  const savedMeshDepthRef = useRef<Record<string, number>>({});
   useEffect(() => {
     if (activeModelId) savedMeshDepthRef.current[activeModelId] = 0;
   }, [state.activeWorkspaceDocumentId]);
@@ -1732,17 +2637,22 @@ export default function AppFrame() {
   const archiveCommittedModelSave = (
     pkg: ModelPackage,
     packageDir: string,
-    liveRows: readonly ModelPart[],
     label: string,
-  ) => snapshotNormalModelSave({
-    saveSucceeded: true,
-    modelId: pkg.id,
-    activeResidentModelId: activeSessionModelIdRef.current,
-    packageGeometryPath: modelPackageGeometryPath(packageDir, pkg.skeleton),
-    objectRows: liveRows,
-    label,
-    note: 'validated package Save',
-  }, loreSnapshot);
+  ) => {
+    const packageGeometryPath = modelPackageGeometryPath(packageDir, pkg.skeleton);
+    const packageGeometrySha256 = String(
+      (globalThis as any).__file_sha256?.(packageGeometryPath) ?? '',
+    ).trim().toLowerCase();
+    return snapshotNormalModelSave({
+      saveSucceeded: true,
+      modelId: pkg.id,
+      activeResidentModelId: activeSessionModelIdRef.current,
+      packageGeometryPath,
+      packageGeometrySha256,
+      label,
+      note: 'validated package Save',
+    }, issueVerifiedSaveReceiptV1, captureVerifiedNormalSnapshotV1);
+  };
 
   /** The single model commit path used by File → Save, first-atlas gating,
    * close/switch boundaries, and background autosave after first save. */
@@ -1753,6 +2663,7 @@ export default function AppFrame() {
     allowStalePaintLayout = false,
     keepLiveOptions: PaintLayoutKeepLiveOptions = {},
   ): boolean => {
+    if (refuseHistoricalPreviewMutation('save')) return false;
     const current = stateRef.current;
     const pkg = modelId
       ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes)
@@ -1851,7 +2762,6 @@ export default function AppFrame() {
         recoveryStatus = archiveCommittedModelSave(
           committed,
           result.dir,
-          liveRows,
           reason,
         ).statusSuffix;
       }
@@ -1959,7 +2869,6 @@ export default function AppFrame() {
       recoveryStatus = archiveCommittedModelSave(
         pkgToSave,
         saveStage.targetDir,
-        liveRows,
         reason,
       ).statusSuffix;
     }
@@ -2039,7 +2948,7 @@ export default function AppFrame() {
 
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
     const current = stateRef.current;
-    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq, current.worldFacades, current.worldPrefabs, current.worldFlora);
+    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq, current.worldFacades, current.worldPrefabs, current.worldFlora, current.worldViews);
     const mapOk = flushMapDocumentPainting(current.activeMapStem);
     const globalsOk = saveGlobalsNow(current.worldGlobals);
     const ok = worldOk && mapOk && globalsOk;
@@ -2165,7 +3074,7 @@ export default function AppFrame() {
 
     const outgoingStem = state.activeMapStem;
     const outgoingZones = state.mapPaint.zones;
-    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq, state.worldFacades, state.worldPrefabs, state.worldFlora)) {
+    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq, state.worldFacades, state.worldPrefabs, state.worldFlora, state.worldViews)) {
       setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/world.json` }));
       return;
     }
@@ -2447,6 +3356,15 @@ export default function AppFrame() {
   };
 
   const runCommand = (commandId: string, source: string) => {
+    const previewCommand = commandById(commandId);
+    const previewAction: HistoricalPreviewUiActionV1 | null = commandId === 'save-snapshot'
+      ? 'save'
+      : commandId.startsWith('export-')
+        ? 'export'
+        : previewCommand?.scope === 'model' && commandId !== 'select-tool'
+          ? 'model_mutation'
+          : null;
+    if (previewAction && refuseHistoricalPreviewMutation(previewAction)) return;
     // Per-device tool memory (req_3089, GIMP semantics): activating a TOOL
     // command stamps the active device's slot for that tool's surface scope.
     // The device-flip subscription (below, next to runCommandRef) replays the
@@ -3136,7 +4054,35 @@ export default function AppFrame() {
         contextOpen: source === 'context' ? false : prev.contextOpen,
       };
 
-      if (command.id === 'toggle-minimap') {
+      if (command.id === 'world-view-store') {
+        const pose = liveIsoPose();
+        if (!pose) {
+          next = { ...next, status: 'no world view to store yet — move the camera once first' };
+        } else {
+          const result = storeWorldView(prev.worldViews, worldViewPoseFrom(pose, prev.floorIndex), () => `view-${prev.seq}`);
+          next = result.stored === null
+            ? { ...next, status: `saved views are full (${WORLD_VIEW_LIMITS.maxViews}) — remove one first` }
+            : {
+              ...next,
+              worldViews: result.views,
+              activeWorldViewId: result.stored.id,
+              status: `stored ${result.stored.name} — H recalls it, or click its pin on the map (M)`,
+            };
+        }
+      } else if (command.id === 'world-view-recall') {
+        const view = activeWorldView(prev.worldViews, prev.activeWorldViewId);
+        if (!view) {
+          next = { ...next, status: 'no saved views on this map yet — Store View pins where you are' };
+        } else {
+          next = {
+            ...next,
+            activeWorldViewId: view.id,
+            floorIndex: view.floor,
+            worldViewRecallNonce: prev.worldViewRecallNonce + 1,
+            status: `recalled ${view.name}`,
+          };
+        }
+      } else if (command.id === 'toggle-minimap') {
         const mapOverviewOpen = !prev.mapOverviewOpen;
         next = {
           ...next,
@@ -3404,6 +4350,41 @@ export default function AppFrame() {
       }
     });
   };
+
+  // ── Saved camera views (req_4168) ──────────────────────────────────────────
+  // A 25×25-chunk map is 3 km on a side; returning to the block you were working
+  // on has to be a jump. Store (the View menu verb) pins the whole authoring
+  // context; recall restores it INCLUDING the storey, because landing a floor off
+  // is the miss the pin exists to prevent. The list lives in world.json, so the
+  // map you come back to next week still knows where you were standing.
+  const recallWorldViewById = (id: string) => {
+    setState((prev) => {
+      const view = prev.worldViews.find((candidate) => candidate.id === id);
+      if (!view) return prev;
+      return {
+        ...prev,
+        activeWorldViewId: view.id,
+        floorIndex: view.floor,
+        worldViewRecallNonce: prev.worldViewRecallNonce + 1,
+        status: `recalled ${view.name}`,
+      };
+    });
+  };
+
+  const removeWorldViewById = (id: string) => {
+    setState((prev) => {
+      const view = prev.worldViews.find((candidate) => candidate.id === id);
+      if (!view) return prev;
+      return {
+        ...prev,
+        worldViews: removeWorldView(prev.worldViews, id),
+        activeWorldViewId: prev.activeWorldViewId === id ? null : prev.activeWorldViewId,
+        status: `removed ${view.name}`,
+      };
+    });
+  };
+
+  const storeWorldViewNow = () => runCommand('world-view-store', 'panel');
 
   const armPiece = (pieceId: string) => {
     setState((prev) => ({
@@ -4756,6 +5737,7 @@ export default function AppFrame() {
   // the solver: the same immutable RJMD/RJSK transaction used by Save lands
   // first, then that manifest advertises player/NPC placeability.
   const exportCharacterAs = (role: CharacterRole) => {
+    if (refuseHistoricalPreviewMutation('export')) return;
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
     if (!pkg || !hasCharacterRigCapability(pkg)) {
@@ -5194,6 +6176,7 @@ export default function AppFrame() {
   };
 
   const applyPartVisibility = (mid: string, parts: ModelPart[], targetIds: string[], hide: boolean, label: string, source = 'dock') => {
+    if (refuseHistoricalPreviewMutation('visibility')) return;
     const targetSet = new Set(targetIds);
     const targets = parts.filter((part) => targetSet.has(part.id) && part.visible === hide);
     const flipped = new Set<string>();
@@ -6246,35 +7229,161 @@ export default function AppFrame() {
       if (action === 'lore') {
         const operation = String(args.operation ?? 'history');
         if (operation === 'status') {
-          const response = loreServerStatus(args);
-          return response.ok ? ok(response) : { ok: false, result: response, reason: response.error ?? 'Lore status failed' };
+          const response = recoveryStatusV1({ version: 1 });
+          return response.ok ? ok(response) : { ok: false, result: response, reason: response.detail };
         }
         if (!modelId) return fail('open a model document first');
-        const request = { ...args, modelId };
-        let response: ReturnType<typeof loreSnapshot>;
         if (operation === 'snapshot') {
           if (activeSessionModelIdRef.current !== modelId) return fail('Lore snapshot needs this model to own the resident native session');
-          const pkg = effectiveModelPackage(modelId, live.modelOverrides, live.modelDupes);
-          const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
+          const identity = meshSessionIdentity({ version: 1, modelId });
+          if (!identity.ok) return { ok: false, result: identity, reason: identity.detail };
           const objectIds = loreSnapshotObjectIds(parts);
-          response = loreSnapshot({
-            ...request,
+          if (objectIds) publishSessionObjectIds({
+            version: 1,
+            modelId,
+            sessionToken: identity.sessionToken,
+            expectedGeneration: identity.generation,
+            ranges: objectIds.map((objectId, rank) => ({ rank, objectId })),
+          });
+          const response = captureRecoverySnapshotV1({
+            version: 1,
+            modelId,
+            sessionToken: identity.sessionToken,
+            expectedGeneration: identity.generation,
             kind: 'panic',
             push: false,
             label: typeof args.label === 'string' ? args.label : 'Agent Seat panic snapshot',
-            ...(pkg && dir ? { packageGeometryPath: modelPackageGeometryPath(dir, pkg.skeleton) } : {}),
-            ...(objectIds ? { objectIds } : {}),
+            ...(typeof args.note === 'string' && args.note ? { note: args.note } : {}),
           });
-        } else if (operation === 'history') {
-          response = loreHistory(request);
-        } else if (operation === 'preview') {
-          response = lorePreview(request);
-        } else if (operation === 'pin') {
-          response = lorePin(request);
-        } else {
-          return fail('Lore operation must be snapshot, history, preview, pin, or status');
+          return response.ok ? ok(response) : { ok: false, result: response, reason: response.detail };
         }
-        return response.ok ? ok(response) : { ok: false, result: response, reason: response.error ?? `Lore ${operation} failed` };
+        if (operation === 'history') {
+          const response = recoveryHistoryV1({
+            version: 1,
+            modelId,
+            ...(typeof args.cursor === 'string' && args.cursor ? { cursor: args.cursor } : {}),
+            ...(Number.isInteger(args.limit) ? { limit: Number(args.limit) } : {}),
+          });
+          return response.ok ? ok(response) : { ok: false, result: response, reason: response.detail };
+        }
+        const snapshotId = typeof args.snapshotId === 'string' ? args.snapshotId : '';
+        const expectedRevision = typeof args.expectedRevision === 'string' ? args.expectedRevision : '';
+        const expectedSha256 = typeof args.expectedSha256 === 'string' ? args.expectedSha256 : '';
+        if (!snapshotId || !expectedRevision || !expectedSha256) {
+          return fail(`Lore ${operation} needs snapshotId, expectedRevision, and expectedSha256 from a history row`);
+        }
+        if (operation === 'preview') {
+          return fail('Lore preview is a paired Versions-pane session; open it from Recovery → Versions so Scene3D and Lore capabilities close together');
+        }
+        if (operation === 'pin') {
+          const response = recoveryPinV1({
+            version: 1,
+            modelId,
+            snapshotId,
+            expectedRevision,
+            expectedSha256,
+            pinned: args.pinned === true,
+            push: false,
+          });
+          return response.ok ? ok(response) : { ok: false, result: response, reason: response.detail };
+        }
+        return fail('Lore operation must be snapshot, history, preview, pin, or status');
+      }
+      if (action === 'face-table') {
+        if (background) return fail('face inspection belongs to the visible model document; open that model first');
+        if (!modelId || activeSessionModelIdRef.current !== modelId) {
+          return fail('face inspection needs this model to own the resident native session');
+        }
+        const pkg = effectiveModelPackage(modelId, live.modelOverrides, live.modelDupes);
+        if (!pkg) return fail(`no model package "${modelId}"`);
+        const source = String(args.source ?? 'resident');
+        const sort = (args.sort ?? { column: 'area', direction: 'asc' }) as FaceTableRequestV1['sort'];
+        const filters = Array.isArray(args.filters) ? args.filters as FaceTableRequestV1['filters'] : [];
+        const paging = {
+          ...(typeof args.cursor === 'string' && args.cursor ? { cursor: args.cursor } : {}),
+          ...(args.limit === undefined ? {} : { limit: Number(args.limit) }),
+        };
+        const identity = source === 'resident' || source === 'diff'
+          ? meshSessionIdentity({ version: 1, modelId })
+          : null;
+        if (identity && !identity.ok) {
+          return { ok: false, result: identity, reason: identity.detail };
+        }
+        if (identity?.ok) {
+          const objectIds = loreSnapshotObjectIds(parts);
+          if (!objectIds) return fail('face inspection needs one stable object id for every resident part range');
+          const publication = publishSessionObjectIds({
+            version: 1,
+            modelId,
+            sessionToken: identity.sessionToken,
+            expectedGeneration: identity.generation,
+            ranges: objectIds.map((objectId, rank) => ({ rank, objectId })),
+          });
+          if (!publication.ok) return { ok: false, result: publication, reason: publication.detail };
+        }
+        const packageDir = resolvePackageDir(pkg.kind, pkg.id);
+        const geometryPath = modelPackageGeometryPath(packageDir, pkg.skeleton);
+        const savedSha256 = String((globalThis as any).__file_sha256?.(geometryPath) ?? '').trim().toLowerCase();
+        let response;
+        if (source === 'resident' && identity?.ok) {
+          response = inspectFaceTable({
+            version: 1, modelId, source,
+            sessionToken: identity.sessionToken,
+            expectedGeneration: identity.generation,
+            sort, filters, ...paging,
+          });
+        } else if (source === 'saved') {
+          if (!/^[0-9a-f]{64}$/.test(savedSha256)) return fail('saved face inspection needs a readable package geometry artifact');
+          response = inspectFaceTable({
+            version: 1, modelId, source,
+            geometryPath, expectedSha256: savedSha256,
+            sort, filters, ...paging,
+          });
+        } else if (source === 'preview') {
+          response = inspectFaceTable({
+            version: 1, modelId, source,
+            previewToken: String(args.previewToken ?? ''),
+            expectedSha256: String(args.expectedSha256 ?? ''),
+            sort, filters, ...paging,
+          });
+        } else if (source === 'diff' && identity?.ok) {
+          if (!/^[0-9a-f]{64}$/.test(savedSha256)) return fail('resident/saved diff needs a readable package geometry artifact');
+          const request: FaceDiffRequestV1 = {
+            version: 1, source, modelId,
+            sessionToken: identity.sessionToken,
+            expectedGeneration: identity.generation,
+            geometryPath,
+            expectedSavedSha256: savedSha256,
+            sort, filters, ...paging,
+          };
+          response = inspectFaceTable(request);
+        } else {
+          return fail('face-table source must be resident, saved, preview, or diff');
+        }
+        if (!response.ok) return { ok: false, result: response, reason: response.detail };
+        if (response.source === 'diff') return ok(response);
+        const semanticRows = ((globalThis as any).__modelFocusBridge?.semantics?.rows ?? [])
+          .filter((row: any) => row?.kind === 'face' && Number.isInteger(row.id));
+        return ok(joinFaceTableDisplayNames(response, {
+          objects: parts.map((part) => ({ objectId: part.id, name: part.name ?? null })),
+          materials: (pkg.textureSlots ?? []).map((slot, material) => ({ material, name: slot.label ?? null })),
+          semantics: semanticRows.map((row: any) => ({ region: row.id, name: typeof row.name === 'string' ? row.name : null })),
+        }));
+      }
+      if (action === 'face-select') {
+        if (background) return fail('face selection belongs to the visible model document; open that model first');
+        if (!modelId || activeSessionModelIdRef.current !== modelId) {
+          return fail('face selection needs this model to own the resident native session');
+        }
+        const response = selectFaceAddress({
+          version: 1,
+          modelId,
+          plane: args.plane as Parameters<typeof selectFaceAddress>[0]['plane'],
+          target: args.target as Parameters<typeof selectFaceAddress>[0]['target'],
+          additive: args.additive === true,
+          frame: args.frame !== false,
+        });
+        return response.ok ? ok(response) : { ok: false, result: response, reason: response.detail };
       }
       if (action === 'rig-status') {
         if (background) return fail('character rig status belongs to the visible model document; open that model before inspecting its resident rig');
@@ -7485,9 +8594,13 @@ export default function AppFrame() {
         // A materialized package hydrates from its OWN meshdoc (req_2753): rows are
         // metadata + the SAVED [lo,hi) ranges; the surface mounts the same doc.blob, so
         // the outliner and the mesh agree by construction — this is what brings the
-        // outliner (and the edits) back after a cold restart. parts.json rows pair with
-        // ranges by rank; a legacy package (base.blob only) recovers as one part.
-        const meta = savedMeta;
+        // outliner (and the edits) back after a cold restart. v2 parts.json rows join
+        // ranges by stable object id; only legacy v1 metadata pairs by rank.
+        const meta = modelDocumentMetadataByRange({
+          rangeCount: meshDoc.ranges.length,
+          rangeObjectIds: meshDoc.rangeObjectIds,
+          savedParts: savedMeta,
+        });
         parts = meshDoc.ranges.map((r, i) => ({
           id: meshDoc.rangeObjectIds?.[i] ?? meta[i]?.objectId ?? `part:doc:${mid}:${i}`,
           name: meta[i]?.name ?? (meshDoc.ranges.length === 1 ? (pkg?.name ?? 'part 1') : `part ${i + 1}`),
@@ -7884,7 +8997,8 @@ export default function AppFrame() {
   // a cold restart. The session override stays as the live mirror either way; for
   // a not-yet-saved model the override is the PENDING value the first save writes
   // (save-snapshot resolves through effectiveModelPackage).
-  const favoriteModel = (id: string) =>
+  const favoriteModel = (id: string) => {
+    if (blobActivePreviewRef.current?.modelId === id && refuseHistoricalPreviewMutation('model_mutation')) return;
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
       const next = !(prev.modelOverrides[id]?.favorite ?? pkg?.favorite ?? false);
@@ -7895,6 +9009,7 @@ export default function AppFrame() {
         status: `${next ? 'favorited' : 'unfavorited'} model${durable ? '' : ' (in session — saves with the model)'}`,
       };
     });
+  };
 
   // Delete REMOVES the package from disk (req_3370, USER RULING — the old
   // hidden:true soft-delete kept every "deleted" folder squatting the models
@@ -7902,7 +9017,8 @@ export default function AppFrame() {
   // an open roster entry vanishes immediately; an unmaterialized model has
   // nothing on disk and just hides. A failed removal falls back to the old
   // manifest hide and SAYS so.
-  const deleteModel = (id: string) =>
+  const deleteModel = (id: string) => {
+    if (blobActivePreviewRef.current?.modelId === id && refuseHistoricalPreviewMutation('model_mutation')) return;
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
       const removed = pkg ? removeModelPackage(pkg.kind, id) : false;
@@ -7917,6 +9033,7 @@ export default function AppFrame() {
             : 'deleted model (hidden from browser)',
       };
     });
+  };
 
   const startRenameModel = (id: string) => setState((prev) => ({ ...prev, modelRenamingId: id, status: 'renaming model' }));
   // Rename writes through to the manifest AS YOU TYPE for a materialized model
@@ -7965,6 +9082,7 @@ export default function AppFrame() {
   // CURRENT one (the same mount-frozen-closure rule the other shell refs follow).
   stageThumbnailRef.current = stageActiveModelThumbnail;
   const renameModel = (id: string, name: string) => {
+    if (blobActivePreviewRef.current?.modelId === id && refuseHistoricalPreviewMutation('rename')) return;
     setState((prev) => {
       const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
       const durable = pkg ? updateManifestIdentity(pkg.kind, id, { name }, { deferRenameFollow: true }) : false;
@@ -8080,20 +9198,20 @@ export default function AppFrame() {
     // Read through the ref: the row's registered handler may predate the session.
     onSelectPart: guarded((id: string) => (roleNamerRef.current ? assignRoleToPart(id) : selectPart(id))),
     onFocusSelectionOwner: guarded(focusSelectionOwner),
-    onRenamePart: guarded(renamePart),
-    onToggleVisiblePart: guarded(toggleVisiblePart),
-    onDeletePart: guarded(deletePart),
+    onRenamePart: guardedModelMutation(renamePart),
+    onToggleVisiblePart: guardedModelMutation(toggleVisiblePart),
+    onDeletePart: guardedModelMutation(deletePart),
     onSelectPartGroup: guarded(selectPartGroup),
-    onRenamePartGroup: guarded(renamePartGroup),
-    onToggleVisiblePartGroup: guarded(toggleVisiblePartGroup),
-    onDuplicatePartGroup: guarded(duplicatePartGroup),
-    onDissolvePartGroup: guarded(dissolvePartGroup),
-    onGroupSelectedParts: guarded(groupSelectedParts),
-    onUngroupSelectedParts: guarded(ungroupSelectedParts),
-    onMoveOutlinerItem: guarded(moveOutlinerItem),
-    onAddPart: guarded(addPart),
-    onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
-    onImportModel: guarded(() => setImportPartOpen(true)),
+    onRenamePartGroup: guardedModelMutation(renamePartGroup),
+    onToggleVisiblePartGroup: guardedModelMutation(toggleVisiblePartGroup),
+    onDuplicatePartGroup: guardedModelMutation(duplicatePartGroup),
+    onDissolvePartGroup: guardedModelMutation(dissolvePartGroup),
+    onGroupSelectedParts: guardedModelMutation(groupSelectedParts),
+    onUngroupSelectedParts: guardedModelMutation(ungroupSelectedParts),
+    onMoveOutlinerItem: guardedModelMutation(moveOutlinerItem),
+    onAddPart: guardedModelMutation(addPart),
+    onDuplicatePart: guardedModelMutation((id: string) => duplicatePartById(id, -1)),
+    onImportModel: guardedModelMutation(() => setImportPartOpen(true)),
     onStampRanges: stampModelPartRanges,
     onColdRjmdApplied: acceptColdRjmdApply,
     onPathPlaneCreated: registerPathPlanePart,
@@ -8126,6 +9244,13 @@ export default function AppFrame() {
   const workspaceState = state.mapPaint.active && (state.mapPaint.texturePickerOpen || blockingOverlay(state) !== null)
     ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
     : state;
+  // The live recall request (req_4168): the ACTIVE pin plus the nonce every Recall
+  // bumps. Derived rather than stored so a renamed or removed pin can never leave a
+  // stale copy of itself queued at the viewport.
+  const activeWorldViewPin = state.worldViews.find((view) => view.id === state.activeWorldViewId) ?? null;
+  const worldViewRecall = activeWorldViewPin && state.worldViewRecallNonce > 0
+    ? { view: activeWorldViewPin, nonce: state.worldViewRecallNonce }
+    : null;
   const facadePaintActive = activeDocumentKind === 'facade';
   const activePaintBrush = facadePaintActive ? state.facadePaint.brush : state.modelTool.brush;
   const activePaintTool = facadePaintActive ? state.facadePaint.tool : state.modelTool.brushTool;
@@ -8455,6 +9580,8 @@ export default function AppFrame() {
             onFacadeClear={clearFacadePaint}
             onFacadeSave={saveFacadePainting}
             onArmPiece={armPiece}
+            viewRecall={worldViewRecall}
+            onRecallView={recallWorldViewById}
             onExitMaterialFocus={() => {
               selectNativeModelSession(state.workspaceDocuments.find((doc) => doc.id === WORLD_DOCUMENT_ID) ?? null);
               setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }));
@@ -8499,6 +9626,7 @@ export default function AppFrame() {
             characterRigApi={characterRigApiRef.current}
             characterRigSnapshot={characterRigSnapshot}
             onCharacterRigSnapshot={setCharacterRigSnapshot}
+            blobExplorer={blobExplorerProps}
             onCharacterRigMutated={() => {
               const modelId = activeSessionModelIdRef.current;
               if (modelId) markModelDirty(modelId);
@@ -8515,6 +9643,13 @@ export default function AppFrame() {
             // ROLE — the target piece is the live selection at click time.
             onAssignSlot={(role) => { const id = stateRef.current.selectedPieceId; if (id) assignPieceSlot(id, role); }}
             onClearSlot={(role) => { const id = stateRef.current.selectedPieceId; if (id) clearPieceSlot(id, role); }}
+            worldViews={{
+              views: state.worldViews,
+              activeId: state.activeWorldViewId,
+              onStore: storeWorldViewNow,
+              onRecall: recallWorldViewById,
+              onRemove: removeWorldViewById,
+            }}
             onBrowseMaterials={browseMaterials}
             // PIECE FOCUS instance editing (req_3442, stale-proofed req_3449):
             // Pressable handlers register once and re-register only on clean-prop
@@ -8615,6 +9750,13 @@ export default function AppFrame() {
           nativeUpdateReady={nativeUpdateNotice !== null}
           nativeUpdateOpen={nativeUpdateNotice?.collapsed === false}
           onNativeUpdate={() => setNativeUpdateNotice((current) => current ? { ...current, collapsed: !current.collapsed } : null)}
+          loreStatus={blobService}
+          onLore={() => setState((current) => {
+            const document = current.workspaceDocuments.find((row) => row.id === current.activeWorkspaceDocumentId);
+            return document?.kind === 'model'
+              ? { ...current, rightPane: 'recovery', rightPanelCollapsed: false, status: `Lore recovery ${blobService.state}` }
+              : { ...current, status: `Lore recovery ${blobService.state} — open a model to inspect snapshots` };
+          })}
         />
       </RenderProbe>
       {state.eventbusPopoverOpen ? (

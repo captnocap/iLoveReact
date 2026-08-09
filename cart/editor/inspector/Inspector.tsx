@@ -14,6 +14,7 @@ import { resolvedPanelId, rightPanelsFor, type RightPanelId } from '../data/pane
 import { objectMetricRows } from '../data/readouts';
 import type { Asset, EditorState, ModelTextureSlot, WorkspaceDocumentKind, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
+import type { WorldView } from '../world/worldViews';
 import { assetById, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
 import RigSection from './RigSection';
@@ -28,11 +29,15 @@ import ModelPaintVariants from '../library/ModelPaintVariants';
 import NamesPanel from './NamesPanel';
 import type { ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
+import BlobExplorerSurface, {
+  type BlobExplorerSurfaceProps,
+} from '../stage/BlobExplorerSurface';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
-import { uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
+import { UV_WORKSPACE_FLEX_STYLE, uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import type { LightRig } from '../model/editMesh';
+import { blobViewportFaceSelection } from '../model/blobExplorerState';
 import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
 import {
@@ -434,7 +439,7 @@ function UvSection({
   const uv = bridge?.uv ?? null;
   const FocusVerb = workspace.focused ? C.HW_UvFocusVerbOn : C.HW_UvFocusVerb;
   return (
-    <C.HW_Section style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
+    <C.HW_Section style={{ ...UV_WORKSPACE_FLEX_STYLE, flexDirection: 'column' }}>
       <C.HW_SectionHead>
         <C.HW_AccentBar />
         <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}${extraCount > 0 ? ` +${extraCount}` : ''}`}</C.HW_SectionTitle>
@@ -450,6 +455,11 @@ function UvSection({
       </C.HW_SectionHead>
       {uv && uv.rgba && bridge ? (
         <UvEditor uv={uv} bridge={bridge} focused={workspace.focused} />
+      ) : workspace.emptyState === 'workspace' ? (
+        <C.HW_UvEmptyWorkspace>
+          <C.HW_UvEmptyTitle>NO UV ATLAS</C.HW_UvEmptyTitle>
+          <C.HW_UvEmptyCopy>{uv?.note ?? 'Use Paint or import a texture to create the editable atlas.'}</C.HW_UvEmptyCopy>
+        </C.HW_UvEmptyWorkspace>
       ) : uv ? (
         <C.HW_ReadRow>
           <C.HW_UvNote>{uv.note ?? 'no atlas'}</C.HW_UvNote>
@@ -512,6 +522,55 @@ function ViewBookmarksSection({ bridge }: { bridge: ModelFocusBridge | null }) {
   );
 }
 
+/** The world surface's saved-view verbs, mirroring the model surface's bookmark set. */
+export type WorldViewHandlers = {
+  views: readonly WorldView[];
+  activeId: string | null;
+  onStore: () => void;
+  onRecall: (id: string) => void;
+  onRemove: (id: string) => void;
+};
+
+// ── SAVED VIEWS (req_4168) ──────────────────────────────────────────────────────────
+// The world twin of the model surface's bookmark card, and deliberately the same card:
+// one editor, one bookmark vocabulary. The difference is what a pin carries and how
+// long it lives — a world view restores the ACTIVE STOREY along with the camera, and
+// it rides world.json, so a 3 km map still knows your places after a cold restart.
+function WorldViewsSection({ handlers }: { handlers: WorldViewHandlers }) {
+  return (
+    <C.HW_Section>
+      <C.HW_SectionHead>
+        <C.HW_AccentBar />
+        <C.HW_SectionTitle>VIEWS</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_MiniVerb onPress={handlers.onStore} tooltip="Pin where you are standing — camera, facing, zoom and storey">
+          <Icon name="BookmarkPlus" size={11} color={accentFor('textDim')} />
+        </C.HW_MiniVerb>
+      </C.HW_SectionHead>
+      {handlers.views.length === 0 ? (
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>saved</C.HW_FormLabel>
+          <C.HW_ReadValue>none — Store View pins this spot</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ) : handlers.views.map((view) => (
+        <Row key={view.id} style={{ alignItems: 'center', gap: 6, height: REGIONS.grid.rowHeight, width: '100%' }}>
+          <Pressable
+            onPress={() => handlers.onRecall(view.id)}
+            tooltip={`Jump to ${view.name} (floor ${view.floor})`}
+            style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          >
+            <Icon name="Bookmark" size={11} color={accentFor(view.id === handlers.activeId ? 'primary' : 'textDim')} />
+            <C.HW_ReadValue>{view.name}</C.HW_ReadValue>
+          </Pressable>
+          <C.HW_MiniVerb onPress={() => handlers.onRemove(view.id)} tooltip="Remove this view">
+            <Icon name="Trash2" size={11} color={accentFor('textDim')} />
+          </C.HW_MiniVerb>
+        </Row>
+      ))}
+    </C.HW_Section>
+  );
+}
+
 // The FOCUS PANEL's pane-switch rail — the fixed 40px icon column on the
 // panel's right edge (REGIONS.focusPanel.railWidth). One component, every
 // branch: the rail is part of the region, not of any one panel mode.
@@ -540,6 +599,86 @@ function FocusRail(props: {
       })}
     </C.HW_RightRail>
   );
+}
+
+/**
+ * AppFrame owns recovery coordination. When it supplies no contract, keep the
+ * seam explicit: the pane is visible and truthful, but every unavailable
+ * operation remains disabled and no component reaches for a host global.
+ */
+function unavailableBlobExplorerProps(modelId: string): BlobExplorerSurfaceProps {
+  const detail = 'Recovery coordinator is unavailable in AppFrame.';
+  return {
+    modelId,
+    widthPreset: 'compact',
+    onWidthPreset: () => {},
+    faceQuery: {
+      source: 'resident',
+      sort: { column: 'address', direction: 'asc' },
+      filters: [],
+      cursor: null,
+      limit: 200,
+    },
+    facePage: null,
+    faceError: { ok: false, version: 1, code: 'module_unavailable', detail },
+    faceLoading: false,
+    selectedAddress: null,
+    selectedTriangles: null,
+    onFaceQueryChange: () => {},
+    onSelectFace: () => {},
+    history: {
+      loading: false,
+      error: detail,
+      rows: [],
+      cursor: null,
+      nextCursor: null,
+      indexedRepair: 'not_needed',
+    },
+    recoverySnapshotEnabled: false,
+    recoverySnapshotInFlight: false,
+    recoverySnapshotStatus: detail,
+    onRecoverySnapshot: () => {},
+    onHistoryPage: () => {},
+    onPin: () => {},
+    onPreview: () => {},
+    restoreEnabled: false,
+    onRestore: () => {},
+    service: {
+      state: 'blocked',
+      library: { available: false, version: null },
+      repository: { ready: false, path: 'unavailable', revision: null },
+      service: {
+        healthy: false,
+        healthUrl: 'unavailable',
+        httpCode: null,
+        unitName: 'unavailable',
+        active: false,
+        enabled: false,
+        journalTail: [detail],
+        restoreCommands: [],
+      },
+      stores: { snapshotRoot: 'unavailable', localBytes: 0, serverBytes: null },
+      retention: {
+        days: 60,
+        nowMs: 0,
+        lastPruneMs: null,
+        nextPruneMs: null,
+        immediatelyExpired: 0,
+        localTombstones: 0,
+        remotePendingTombstones: 0,
+        logicallyRemovedEntries: 0,
+        logicallyRemovedBytes: 0,
+        physicallyReclaimedBytes: 0,
+        remoteWatermark: null,
+        legacyUnexpiredPending: 0,
+        legacyCorruptPending: 0,
+        legacyLayoutCutover: false,
+        lastError: detail,
+      },
+      history: { pushed: 0, local: 0, unknown: 0 },
+      probe: { lastCompletedMs: null, lastTransitionMs: null },
+    },
+  };
 }
 
 export default function Inspector(props: {
@@ -584,6 +723,8 @@ export default function Inspector(props: {
   // req_3446: the MATERIAL SLOTS `selected` row jumps the left panel to the
   // Materials library — the place the slot-bind material is actually picked.
   onBrowseMaterials: () => void;
+  // Saved camera views (req_4168) — the world surface's VIEWS card.
+  worldViews: WorldViewHandlers;
   // World-globals tuning (GLOBALS req_2770) — the playtest tab's focus panel.
   onSetGlobal: (field: string, value: number) => void;
   onResetGlobal: (field: string) => void;
@@ -601,6 +742,8 @@ export default function Inspector(props: {
   onSelectCharacterRigFaces: (indices: readonly number[]) => number;
   onAssignHumanoidSemantic: (membership: HumanoidSemanticMembership) => void;
   onAttachCharacterRig: (pkgId: string) => void;
+  /** AppFrame-owned, already-parsed recovery state and explicit callbacks. */
+  blobExplorer?: BlobExplorerSurfaceProps;
 }) {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
@@ -701,6 +844,14 @@ export default function Inspector(props: {
   useEffect(() => {
     setUvWorkspaceFocused(false);
   }, [activeDocument?.id, activePane]);
+  useEffect(() => {
+    const publish = props.blobExplorer?.onViewportFaceSelection;
+    if (!publish || activePane !== 'recovery' || !activeModel || !focusBridge) return;
+    publish(blobViewportFaceSelection(
+      focusBridge.readSelection(),
+      props.state.modelParts[activeModel.id] ?? [],
+    ));
+  }, [focusBridge, activePane, activeModel?.id, props.state.modelParts, props.blobExplorer?.modelId]);
   // Collapse removes only the body. The rail remains at the stage edge so the
   // same active button can restore it without a separate hidden affordance.
   if (props.state.rightPanelCollapsed) {
@@ -791,6 +942,7 @@ export default function Inspector(props: {
               // the library shows NOW, not a stale synthesized id.
               modelNameFor={(pkgId) => effectiveModelPackage(pkgId, props.state.modelOverrides, props.state.modelDupes)?.name ?? null}
             />
+            <WorldViewsSection handlers={props.worldViews} />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
         <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
@@ -798,6 +950,15 @@ export default function Inspector(props: {
     );
   }
   if (activeModel) {
+    const blobExplorer = props.blobExplorer?.modelId === activeModel.id
+      ? props.blobExplorer
+      : unavailableBlobExplorerProps(activeModel.id);
+    const quickRecoveryEnabled = blobExplorer.recoverySnapshotEnabled && !blobExplorer.recoverySnapshotInFlight;
+    const quickRecoverySnapshot = () => blobExplorer.onRecoverySnapshot({
+      kind: 'panic',
+      label: 'Manual recovery snapshot',
+      push: false,
+    });
     const hasCharacterRig = hasCharacterRigCapability(activeModel);
     const residentHumanoidSemanticRoles = (focusBridge?.semantics.rows ?? [])
       .filter((row) => row.presence === 'resident' || row.presence === 'not-visible')
@@ -822,13 +983,18 @@ export default function Inspector(props: {
     const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle
       : activePane === 'rig' ? (hasCharacterRig ? 'CHARACTER · RIG' : 'MODEL · RIG')
         : activePane === 'names' ? 'MODEL · NAMES'
-          : 'MODEL FOCUS';
+          : activePane === 'recovery' ? 'MODEL · RECOVERY'
+            : 'MODEL FOCUS';
     return (
       <C.HW_RightPanel style={{ width: activePane === 'paint'
         ? uvWorkspace.panelWidth
         : activePane === 'rig' && hasCharacterRig
           ? REGIONS.focusPanel.characterRigWidth
-        : REGIONS.focusPanel.width }}>
+          : activePane === 'recovery'
+            ? blobExplorer.widthPreset === 'wide'
+              ? REGIONS.focusPanel.blobWideWidth
+              : REGIONS.focusPanel.blobCompactWidth
+            : REGIONS.focusPanel.width }}>
         {activePane === 'paint' ? (
           <C.HW_RightResizeGrip
             tooltip="Drag to resize the UV workspace"
@@ -845,9 +1011,14 @@ export default function Inspector(props: {
             <C.HW_Kicker>{paneTitle}</C.HW_Kicker>
             <C.HW_Spacer />
             {activePane === 'paint' && uvWorkspace.focused ? (
-              <C.HW_PanelHeadButton tooltip={`Save ${activeModel.name}`} onPress={props.onSaveModel}>
-                <Icon name="Save" size={12} color={accentFor(modelDirty ? 'warning' : 'textFaint')} />
-              </C.HW_PanelHeadButton>
+              <>
+                <C.HW_PanelHeadButton tooltip="Capture native-resident recovery snapshot (does not invoke Save)" onPress={quickRecoveryEnabled ? quickRecoverySnapshot : undefined}>
+                  <Icon name="DatabaseBackup" size={12} color={accentFor(quickRecoveryEnabled ? 'warning' : 'textFaint')} />
+                </C.HW_PanelHeadButton>
+                <C.HW_PanelHeadButton tooltip={`Save ${activeModel.name}`} onPress={props.onSaveModel}>
+                  <Icon name="Save" size={12} color={accentFor(modelDirty ? 'warning' : 'textFaint')} />
+                </C.HW_PanelHeadButton>
+              </>
             ) : null}
             <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
               <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
@@ -856,10 +1027,12 @@ export default function Inspector(props: {
           {/* Each model pane remains a fixed column of budgeted slices (req_2627).
               Lists carry their own bounded scrolling; switching panes replaces the
               body instead of stacking every authoring concern into one column. */}
-          <C.HW_InspectorBodyFixed>
+          <C.HW_InspectorBodyFixed style={activePane === 'recovery'
+            ? { paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0, gap: 0 }
+            : {}}>
             {/* Identity + save state stay present across Model/Paint/Rig. UV Focus
                 replaces the tall rows with the compact header save verb above. */}
-            {uvWorkspace.showIdentity || activePane !== 'paint' ? (
+            {activePane !== 'recovery' && (uvWorkspace.showIdentity || activePane !== 'paint') ? (
               <>
                 <C.HW_RenameBar>
                   <C.HW_FormLabel>name</C.HW_FormLabel>
@@ -873,6 +1046,10 @@ export default function Inspector(props: {
                     <C.HW_TagText>{saveChip}</C.HW_TagText>
                   </C.HW_Tag>
                   <C.HW_Spacer />
+                  <C.HW_VerbFixed tooltip="Capture the native-resident mesh without invoking Save" onPress={quickRecoveryEnabled ? quickRecoverySnapshot : undefined}>
+                    <Icon name="DatabaseBackup" size={12} color={accentFor(quickRecoveryEnabled ? 'warning' : 'textFaint')} />
+                    <C.HW_VerbText>Recover</C.HW_VerbText>
+                  </C.HW_VerbFixed>
                   <C.HW_VerbFixed onPress={props.onSaveModel}>
                     <Icon name="Save" size={12} color={accentFor('textDim')} />
                     <C.HW_VerbText>Save</C.HW_VerbText>
@@ -880,7 +1057,9 @@ export default function Inspector(props: {
                 </C.HW_RenameBar>
               </>
             ) : null}
-            {activePane === 'inspector' ? (
+            {activePane === 'recovery' ? (
+              <BlobExplorerSurface {...blobExplorer} />
+            ) : activePane === 'inspector' ? (
               <>
                 <ModelDetailBody
                   model={activeModel}

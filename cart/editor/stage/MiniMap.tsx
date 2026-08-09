@@ -8,6 +8,7 @@ import {
   type MapPathSnapshot,
 } from '../../../runtime/game/map';
 import type { PlacedPiece } from '../world/pieces';
+import type { WorldView } from '../world/worldViews';
 import { COASTAL_CITY_TUNING } from '../data/coastalCity';
 import {
   CITY_MAP_TUNING,
@@ -28,6 +29,12 @@ const MAP_VIEW = {
   snapshotRetryLimit: 120,
   cameraMarkerRadiusM: 24,
   cameraHeadingLengthM: 58,
+  // Saved-view pins (req_4168). Sized in WORLD metres like every other mark here,
+  // so a pin keeps its footprint on the ground as the overview zooms.
+  viewPinRadiusM: 34,
+  viewPinLabelWidthM: 240,
+  viewPinLabelHeightM: 40,
+  viewPinLabelFontM: 22,
   districtLabelWidthM: 300,
   districtLabelHeightM: 46,
   districtLabelFontM: 25,
@@ -47,6 +54,8 @@ const MAP_VIEW = {
     railway: '#c36d58',
     camera: '#43d7e8',
     cameraHeading: '#e8fbff',
+    viewPin: '#e8c15a',
+    viewPinEdge: '#fff3d0',
   },
   districtFill: {
     downtown: '#d0a34b',
@@ -106,6 +115,10 @@ function cameraHeadingD(x: number, z: number, yawDegrees: number): string {
 export default function MiniMap(props: {
   pieces: readonly PlacedPiece[];
   camera: { x: number; z: number; yawDegrees: number };
+  /** Saved camera views (req_4168) — the overview is where you reach for them on a
+   *  3 km map, so each pin is a labelled, clickable jump. */
+  views: readonly WorldView[];
+  onRecallView: (id: string) => void;
   onCenter: (x: number, z: number) => void;
   onClose: () => void;
 }) {
@@ -262,6 +275,32 @@ export default function MiniMap(props: {
           </Canvas.Node>
         ))}
 
+        {props.views.map((view) => (
+          <Canvas.Path
+            key={`view-pin-${view.id}`}
+            d={cameraRingD(view.centerX, view.centerZ, MAP_VIEW.viewPinRadiusM)}
+            fill={MAP_VIEW.palette.viewPin}
+            fillOpacity={0.3}
+            stroke={MAP_VIEW.palette.viewPinEdge}
+            strokeWidth={6}
+          />
+        ))}
+        {props.views.map((view) => (
+          <Canvas.Node
+            key={`view-label-${view.id}`}
+            gx={view.centerX}
+            gy={view.centerZ - MAP_VIEW.viewPinLabelHeightM}
+            gw={MAP_VIEW.viewPinLabelWidthM}
+            gh={MAP_VIEW.viewPinLabelHeightM}
+          >
+            <Pressable onPress={() => props.onRecallView(view.id)} tooltip={`Jump to ${view.name}`} style={{ width: '100%', height: '100%' }}>
+              <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1211c8', borderWidth: 2, borderColor: MAP_VIEW.palette.viewPin, borderRadius: 8 }}>
+                <Text fontSize={MAP_VIEW.viewPinLabelFontM} color="#fff3d0" style={{ fontWeight: '700' }}>{view.name}</Text>
+              </Box>
+            </Pressable>
+          </Canvas.Node>
+        ))}
+
         <Canvas.Path d={cameraHeadingD(props.camera.x, props.camera.z, props.camera.yawDegrees)} fill="none" stroke={MAP_VIEW.palette.cameraHeading} strokeWidth={8} />
         <Canvas.Path d={cameraRingD(props.camera.x, props.camera.z, MAP_VIEW.cameraMarkerRadiusM)} fill={MAP_VIEW.palette.camera} fillOpacity={0.35} stroke={MAP_VIEW.palette.cameraHeading} strokeWidth={7} />
 
@@ -287,7 +326,7 @@ export default function MiniMap(props: {
             </Pressable>
 
             <Box style={{ position: 'absolute', left: 14, bottom: 14, paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, backgroundColor: '#091111dd', borderWidth: 1, borderColor: '#384f49', borderRadius: 6 }}>
-              <Text fontSize={9} color="#b9c8c2">DRAG pan · WHEEL zoom · RIGHT-CLICK move 3D camera · cyan marker = current view</Text>
+              <Text fontSize={9} color="#b9c8c2">DRAG pan · WHEEL zoom · RIGHT-CLICK move 3D camera · cyan marker = current view · gold pin = saved view</Text>
             </Box>
 
             <Box style={{ position: 'absolute', right: 14, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, backgroundColor: '#091111dd', borderWidth: 1, borderColor: '#384f49', borderRadius: 6 }}>

@@ -159,6 +159,13 @@ export const COMMANDS: Command[] = [
   { id: 'add-chunk', menu: 'Map', name: 'Add Chunk...', icon: 'Grid2x2Plus', key: '', context: false, native: true, undoable: false, scope: 'world' },
   // FLOORCTL req_2485: steps the REAL active storey (0 = Ground) up, wrapping past the cap.
   { id: 'world.floor.step', menu: 'Map', name: 'Step Active Floor', icon: 'Layers', key: ']', context: false, native: true, undoable: false, scope: 'world' },
+  // Saved views (req_4168): a 25×25-chunk map is 3 km on a side, so getting back to
+  // the block you were working on has to be a jump, not a pan. Store pins the whole
+  // authoring context (centre, facing, tilt, zoom, AND active storey); Recall returns
+  // to the active pin — the one last stored or clicked in the VIEWS list. Same
+  // vocabulary as the model surface's camera bookmarks, and persisted per map.
+  { id: 'world-view-store', menu: 'View', name: 'Store View', icon: 'BookmarkPlus', key: '', context: false, native: true, undoable: false, scope: 'world' },
+  { id: 'world-view-recall', menu: 'View', name: 'Recall View', icon: 'Bookmark', key: 'H', context: false, native: true, undoable: false, scope: 'world' },
 
   // ── Build (world) ─────────────────────────────────────────────────────────────────────────
   // Select is the neutral default (req_2550): a viewport click picks the piece under it and places
@@ -474,7 +481,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     },
   ],
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), MESH_SUBMENU],
-  View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
+  View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],

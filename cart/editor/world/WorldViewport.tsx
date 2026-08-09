@@ -21,9 +21,9 @@
 //
 // Deliberately not here: host-owned build logic, prefab stamping, and residency
 // beyond the local snapped Move drag. Each arrives through a strict host door.
-import { createElement, useCallback, useEffect, useRef, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
-import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
+import { IsoStage, METERS_PER_LEVEL, type IsoPose, type Rect } from './isoStage';
 import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pieceScaleOf, pickAuthoredPlacement, PIECE_MODULE_METERS, PIECE_SCALE_LIMITS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
 import { findVertexSnap, type VertexSnapHit } from './vertexSnap';
@@ -32,7 +32,7 @@ import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { faceRoleForHit } from './pieceSlots';
 import { stickerLocalFrom } from './pieceSkins';
-import { ensureMapSeeded } from '../stage/mapPaint';
+import { ensureMapSeededAsync } from '../stage/mapPaint';
 import type { MapZoneDef } from '../stage/mapPaint';
 import { mapHeightAt, mapRenderedHeightMax, subscribeMapTerrainChanges } from '../../../runtime/game/map';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -42,6 +42,7 @@ import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
 import { resolvePrefabPlacement, worldPrefabById, type WorldPrefab } from './prefabs';
+import { isoPoseFrom, type WorldView } from './worldViews';
 import type { MapPaintState } from '../stage/mapPaint';
 import type { AuthoredFloraSpecies } from './floraSpecies';
 import {
@@ -55,6 +56,7 @@ import {
 } from './surfaceFlora';
 import { FLORA_KIND_DEFINITIONS } from './floraKinds';
 import MiniMap from '../stage/MiniMap';
+import { worldResidentDemand } from './residentDemand';
 
 // authored placeable id → semantic resident key: authoredResidentKeyOf (authoredRegistry).
 
@@ -74,10 +76,23 @@ const HOVER_READOUT_POLL_MS = 50;
 // target is recomputed at most 30Hz while dragging; mouse-up always resolves the
 // exact final target before committing it.
 const MOVE_PREVIEW_INTERVAL_MS = 33;
+const RESIDENT_STREAM_START_DELAY_MS = 16;
 
 // The iso camera pose's hot twig (req_2898 — framework/state/hotstate.zig): survives
 // dev hot reloads (in-process), resets on a cold launch. Written on every camera push.
 const ISO_POSE_TWIG_KEY = 'editor:isopose:v1';
+
+/** The pose the world viewport is showing RIGHT NOW, or null before the first
+ *  camera push. Every push already mirrors the pose into the twig above, so this
+ *  reads the live view without a second channel or a ref handed upward — which is
+ *  what Store View pins (req_4168). Null when the mirror is absent or partial. */
+export function liveIsoPose(): IsoPose | null {
+  const pose = getHotState<Partial<IsoPose> | null>(ISO_POSE_TWIG_KEY, null);
+  if (!pose) return null;
+  const { centerX, centerZ, yaw, pitch, zoom, level } = pose;
+  const complete = [centerX, centerZ, yaw, pitch, zoom, level].every((v) => typeof v === 'number' && Number.isFinite(v));
+  return complete ? (pose as IsoPose) : null;
+}
 
 // ── Selection gizmo (req_3367) — the studio's transform gizmo brought to placed
 // props: click a placed prop (Select tool) and Move/Rotate/Scale it in place.
@@ -161,6 +176,8 @@ function boxSegments(stage: IsoStage, rect: Rect, cx: number, baseY: number, cz:
 }
 
 export default function WorldViewport(props: {
+  active: boolean;
+  interactionLocked: boolean;
   mapOverviewOpen: boolean;
   onToggleMap: () => void;
   gameFile: string;
@@ -197,12 +214,24 @@ export default function WorldViewport(props: {
   onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
+  /** A Recall View request (req_4168). The nonce is what makes a repeat recall of
+   *  the SAME view move the camera again after you have panned away — the view
+   *  alone is unchanged, so nothing would re-fire on identity. */
+  viewRecall: { view: WorldView; nonce: number } | null;
+  /** Saved views, drawn as jump pins on the minimap — on a 3 km map the overview
+   *  is where you actually reach for them. */
+  views: readonly WorldView[];
+  onRecallView: (id: string) => void;
   paintActive: boolean;
   mapPaint: MapPaintState;
   mapStem: string;
   mapZones: readonly MapZoneDef[];
 }) {
   const loaderRef = useRef<any>(null);
+  const activeRef = useRef(props.active);
+  activeRef.current = props.active;
+  const interactionLockedRef = useRef(props.interactionLocked);
+  interactionLockedRef.current = props.interactionLocked;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1, height: 1 });
   const stageRef = useRef<IsoStage | null>(null);
   // The iso pose survives hot reloads through its hot twig (req_2898): every camera
@@ -284,7 +313,7 @@ export default function WorldViewport(props: {
   // The piece the gizmo serves: Select tool, exactly ONE selected piece, and it
   // is a PROP (grid pieces keep their storey/grid verbs — Move tool, R, floors).
   const gizmoTarget = useCallback((): PlacedPiece | null => {
-    if (toolRef.current !== 'select' || paintActiveRef.current) return null;
+    if (interactionLockedRef.current || toolRef.current !== 'select' || paintActiveRef.current) return null;
     const ids = selectedIdsRef.current;
     if (ids.length !== 1) return null;
     const sel = piecesRef.current.find((piece) => piece.id === ids[0]);
@@ -426,6 +455,7 @@ export default function WorldViewport(props: {
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
   // Returns whether it landed (the node exists + the door is live).
   const pushCamera = useCallback((refreshTerrain = true): boolean => {
+    if (!activeRef.current) return true;
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId || typeof g.__compiled_world_set_camera !== 'function') return false;
     if (refreshTerrain) stage.refreshTerrainElevation();
@@ -446,6 +476,7 @@ export default function WorldViewport(props: {
   // a single delayed shot missed and left the loader's own default framing
   // (the "zoomed out into nothing" boot, req_2492).
   useEffect(() => {
+    if (!props.active) return;
     if (pushCamera()) return;
     let tries = 0;
     const t = setInterval(() => {
@@ -453,36 +484,39 @@ export default function WorldViewport(props: {
       if (pushCamera() || tries > 120) clearInterval(t);
     }, 32);
     return () => clearInterval(t);
-  }, [pushCamera]);
+  }, [props.active, pushCamera]);
 
   // Boot ground (req_2651 gap XX): seed the map layer as soon as the host map
   // doors are live. Before this, no chunk existed until the user armed Map
   // Paint (the only mapGrowChunk call site), so a fresh editor booted into a
   // VOID — pure skybox, placed floors floating in nothing. The host paint
   // mirror renders any seeded chunk as a real ground slab, so load-or-seed at
-  // mount gives boot-time ground + orientation for free. Same retry pattern as
-  // the camera boot push above — the doors land a few frames after mount.
+  // mount gives boot-time ground + orientation for free.
+  const seededMapPublishedRef = useRef<{ stem: string; zones: readonly MapZoneDef[] } | null>(null);
   useEffect(() => {
-    const seedAndAim = (): boolean => {
-      if (!ensureMapSeeded(props.mapZones, props.mapStem)) return false;
-      // Camera boot runs before map activation on a cold host. Re-solve after
-      // activation so a saved mountain map never keeps the sea-level boot pose.
+    if (!props.active) return;
+    const prior = seededMapPublishedRef.current;
+    if (prior?.stem === props.mapStem && prior.zones === props.mapZones) {
       pushCamera();
-      return true;
-    };
-    if (seedAndAim()) return;
-    let tries = 0;
-    const t = setInterval(() => {
-      tries += 1;
-      if (seedAndAim() || tries > 120) clearInterval(t);
-    }, 32);
-    return () => clearInterval(t);
-  }, [props.mapStem, props.mapZones, pushCamera]);
+      return;
+    }
+    let cancelled = false;
+    void ensureMapSeededAsync(props.mapZones, props.mapStem).then((seeded) => {
+      if (!cancelled && seeded) {
+        seededMapPublishedRef.current = { stem: props.mapStem, zones: props.mapZones };
+        // Camera boot runs before map activation on a cold host. Re-solve after
+        // activation so a saved mountain map never keeps the sea-level boot pose.
+        pushCamera();
+      }
+    });
+    return () => { cancelled = true; };
+  }, [props.active, props.mapStem, props.mapZones, pushCamera]);
 
   // Native terrain strokes, history restores, and generated-map installs do
   // not need React state just to re-aim the camera. The map door publishes one
   // completion edge; refresh once, then keep solve/project pure and cached.
   useEffect(() => subscribeMapTerrainChanges(() => {
+    if (!activeRef.current) return;
     if (!stage.refreshTerrainElevation()) return;
     pushCamera(false);
     reprojectOverlays();
@@ -492,11 +526,34 @@ export default function WorldViewport(props: {
   // the camera target rise together so an upper storey never remains framed
   // from ground level. One camera push applies the new solve at the host door.
   useEffect(() => {
+    if (!props.active) return;
     stage.setLevel(props.floor);
     pushCamera();
     reprojectOverlays();
     setSnap(null);
-  }, [props.floor, stage, pushCamera, reprojectOverlays]);
+  }, [props.active, props.floor, stage, pushCamera, reprojectOverlays]);
+
+  // Recall a saved view (req_4168): the whole authoring context lands at once —
+  // centre, facing, tilt, zoom, storey. Deliberately AFTER the floor effect, so a
+  // recall that also changes the storey settles on the view's own level whichever
+  // order the two commits arrive in. Keyed on the nonce: recalling the view you
+  // are already "on" after panning away must still take you back.
+  // Seeded with the nonce present at MOUNT, so a remount (a hot reload, a fresh
+  // pane) applies nothing. Without it the last recall re-fired on every remount
+  // and yanked the camera off wherever you had panned to since.
+  const recallNonce = props.viewRecall?.nonce ?? 0;
+  const appliedRecallRef = useRef(recallNonce);
+  useEffect(() => {
+    if (!props.active || !props.viewRecall) return;
+    if (appliedRecallRef.current === recallNonce) return;
+    appliedRecallRef.current = recallNonce;
+    stage.restore(isoPoseFrom(props.viewRecall.view));
+    pushCamera();
+    reprojectOverlays();
+    setSnap(null);
+    // The view is the request; the nonce is what makes a repeat request fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.active, recallNonce, stage, pushCamera, reprojectOverlays]);
 
   // WASD camera panning (req_2558) — it worked before the world surface moved to this viewport
   // and never got re-wired. Held keys slide the iso centre along the view's own forward/right
@@ -506,6 +563,11 @@ export default function WorldViewport(props: {
   const heldRef = useRef<Set<string>>(new Set());
   const panTimerRef = useRef<any>(null);
   const panStep = useCallback(() => {
+    if (!activeRef.current) {
+      heldRef.current.clear();
+      panTimerRef.current = null;
+      return;
+    }
     const h = heldRef.current;
     let forward = 0, strafe = 0;
     if (h.has('w')) forward += 1;
@@ -523,6 +585,7 @@ export default function WorldViewport(props: {
   const { onKeyDown: onPanKeyDown, onKeyUp: onPanKeyUp } = useModifiers();
   useEffect(() => {
     const offDown = onPanKeyDown((key) => {
+      if (!activeRef.current) return;
       if (!WASD_KEYS.has(key)) return;
       heldRef.current.add(key);
       if (!panTimerRef.current) panTimerRef.current = setTimeout(panStep, 0);
@@ -550,6 +613,14 @@ export default function WorldViewport(props: {
     return () => { offDown(); offUp(); vertexSnapHeldRef.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (props.active) return;
+    heldRef.current.clear();
+    if (panTimerRef.current) {
+      clearTimeout(panTimerRef.current);
+      panTimerRef.current = null;
+    }
+  }, [props.active]);
   // The live lock, for the overlay marker: set while a drag is snapped, null otherwise.
   const [vertexSnapMark, setVertexSnapMark] = useState<VertexSnapHit | null>(null);
 
@@ -568,30 +639,108 @@ export default function WorldViewport(props: {
   // ownership as soon as the cursor is back over ordinary ground.
   useEffect(() => {
     const customFlora = props.mapPaint.channel === 'flora' && !!props.mapPaint.floraSpeciesId;
-    setNativePaintRoute(props.paintActive && !customFlora);
+    setNativePaintRoute(props.active && !props.interactionLocked && props.paintActive && !customFlora);
     return () => setNativePaintRoute(false);
-  }, [props.paintActive, props.mapPaint.channel, props.mapPaint.floraSpeciesId, setNativePaintRoute]);
+  }, [props.active, props.interactionLocked, props.paintActive, props.mapPaint.channel, props.mapPaint.floraSpeciesId, setNativePaintRoute]);
 
   // Live overlay: placed pieces render as real meshes instantly, no rebake.
   // (Shared seam with the playtest tab — world/livePush.ts.)
+  const liveWorldPublishedRef = useRef<{
+    nodeId: number;
+    pieces: readonly PlacedPiece[];
+    authoredPieces: readonly AuthoredBuildPiece[];
+    worldFlora: readonly WorldFloraPatch[];
+    floraSpecies: readonly AuthoredFloraSpecies[];
+  } | null>(null);
   useEffect(() => {
-    const push = () => pushLiveWorld(Number(loaderRef.current?.id ?? 0), props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies);
+    if (!props.active) return;
+    const push = () => {
+      const nodeId = Number(loaderRef.current?.id ?? 0);
+      const prior = liveWorldPublishedRef.current;
+      if (nodeId && prior?.nodeId === nodeId
+        && prior.pieces === props.pieces
+        && prior.authoredPieces === props.authoredPieces
+        && prior.worldFlora === props.worldFlora
+        && prior.floraSpecies === props.floraSpecies) return true;
+      if (!pushLiveWorld(nodeId, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies)) return false;
+      liveWorldPublishedRef.current = {
+        nodeId,
+        pieces: props.pieces,
+        authoredPieces: props.authoredPieces,
+        worldFlora: props.worldFlora,
+        floraSpecies: props.floraSpecies,
+      };
+      return true;
+    };
     if (push()) return;
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
     return () => clearInterval(t);
-  }, [props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies]);
+  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies]);
 
-  // Keep the authored meshes RESIDENT so their placements can draw (req_2577).
-  // Rebuilds + pushes the MESH_PROPS catalog whenever the authored list changes;
-  // retries until the loader node exists (it lands a few frames after mount).
+  const residentDemandCacheRef = useRef<{
+    authoredSource: readonly AuthoredBuildPiece[];
+    floraSource: readonly AuthoredFloraSpecies[];
+    signature: string;
+    demand: ReturnType<typeof worldResidentDemand>;
+  } | null>(null);
+  const residentDemand = useMemo(() => {
+    const next = worldResidentDemand(
+      props.pieces,
+      props.authoredPieces,
+      props.worldFlora,
+      props.floraSpecies,
+      props.armed?.pieceId ?? null,
+    );
+    const signature = JSON.stringify([
+      next.authoredPieces.map((piece) => piece.id),
+      next.floraSpecies.map((species) => species.id),
+      next.builtinFloraSpeciesIds,
+    ]);
+    const prior = residentDemandCacheRef.current;
+    if (prior
+      && prior.authoredSource === props.authoredPieces
+      && prior.floraSource === props.floraSpecies
+      && prior.signature === signature) return prior.demand;
+    residentDemandCacheRef.current = {
+      authoredSource: props.authoredPieces,
+      floraSource: props.floraSpecies,
+      signature,
+      demand: next,
+    };
+    return next;
+  }, [props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.armed?.pieceId]);
+
+  // Keep only referenced authored meshes RESIDENT (req_2577). Palette size is
+  // irrelevant: the active world, its surface flora, and the armed preview are
+  // the complete demand set. Retry until the retained loader node exists.
+  const residentPublishedRef = useRef<{ nodeId: number; demand: typeof residentDemand } | null>(null);
   useEffect(() => {
-    const push = () => pushResidentMeshes(Number(loaderRef.current?.id ?? 0), props.authoredPieces, props.floraSpecies);
-    if (push()) return;
+    if (!props.active) return;
+    const push = () => {
+      const nodeId = Number(loaderRef.current?.id ?? 0);
+      const prior = residentPublishedRef.current;
+      if (nodeId && prior?.nodeId === nodeId && prior.demand === residentDemand) return true;
+      if (!pushResidentMeshes(
+        nodeId,
+        residentDemand.authoredPieces,
+        residentDemand.floraSpecies,
+        residentDemand.builtinFloraSpeciesIds,
+      )) return false;
+      residentPublishedRef.current = { nodeId, demand: residentDemand };
+      return true;
+    };
     let tries = 0;
-    const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
-    return () => clearInterval(t);
-  }, [props.authoredPieces, props.floraSpecies]);
+    let retry: any = null;
+    const start = setTimeout(() => {
+      if (push()) return;
+      retry = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(retry); }, 32);
+    }, RESIDENT_STREAM_START_DELAY_MS);
+    return () => {
+      clearTimeout(start);
+      if (retry) clearInterval(retry);
+    };
+  }, [props.active, residentDemand]);
 
   // Mesh GHOST: an authored piece previews as its real translucent mesh while
   // it is armed OR being moved OR mid-gizmo-drag (req_3367 — the drag preview
@@ -600,6 +749,10 @@ export default function WorldViewport(props: {
   useEffect(() => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId) return;
+    if (!props.active) {
+      if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') g.__compiled_world_clear_live_mesh_ghost(nodeId);
+      return;
+    }
     const armed = props.armed;
     const placementGhost = armed && isAuthoredPiece(armed.pieceId) && props.tool === 'place' && snap
       ? { pieceId: armed.pieceId, x: snap.x, y: snap.y, z: snap.z, yawDegrees: snap.yaw }
@@ -616,7 +769,7 @@ export default function WorldViewport(props: {
     } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
       g.__compiled_world_clear_live_mesh_ghost(nodeId);
     }
-  }, [snap, movePreview, gizmoPreview, props.armed, props.tool]);
+  }, [snap, movePreview, gizmoPreview, props.active, props.armed, props.tool]);
 
   // Unmount: drop the loader runtime + its pending camera.
   useEffect(() => () => {
@@ -778,7 +931,9 @@ export default function WorldViewport(props: {
       if (Number.isFinite(mx) && Number.isFinite(my)) {
         const inside = mx >= r.x && mx < r.x + r.width && my >= r.y && my < r.y + r.height;
         const paint = mapPaintRef.current;
-        if (paint.active && paint.channel === 'flora') {
+        if (interactionLockedRef.current) {
+          setNativePaintRoute(false);
+        } else if (paint.active && paint.channel === 'flora') {
           const customOwns = !!paint.floraSpeciesId;
           const surfaceOwns = inside && !!pickFloraSurfaceAt(mx - r.x, my - r.y);
           // Once a rigged-surface stroke starts, JS owns the whole captured
@@ -794,7 +949,7 @@ export default function WorldViewport(props: {
         if ((armedHover || !inside) && !dragging) setSnap((cur) => (sameSnap(cur, next) ? cur : next));
       } else {
         const paint = mapPaintRef.current;
-        setNativePaintRoute(paint.active && !(paint.channel === 'flora' && !!paint.floraSpeciesId));
+        setNativePaintRoute(!interactionLockedRef.current && paint.active && !(paint.channel === 'flora' && !!paint.floraSpeciesId));
         publishWorldHoverReadout(null);
         if (armedHover && !dragging) setSnap(null);
       }
@@ -916,6 +1071,7 @@ export default function WorldViewport(props: {
   }, []);
 
   const onDown = useCallback((e: any) => {
+    if (interactionLockedRef.current) return;
     const p = local(e);
     const liveModifiers = currentModifiers();
     const shift = !!e?.shiftKey || liveModifiers.shift;
@@ -1145,6 +1301,16 @@ export default function WorldViewport(props: {
   }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt]);
 
   const onUp = useCallback((e: any) => {
+    if (interactionLockedRef.current) {
+      dragRef.current = null;
+      gizmoDragRef.current = null;
+      runRef.current = null;
+      setMovePreview(null);
+      setGizmoPreview(null);
+      setRun(null);
+      publishSnapMark(null);
+      return;
+    }
     publishSnapMark(null); // any release retires the vertex-snap marker
     // Gizmo release (req_3367): commit the previewed transform ONCE through the
     // same undoable move command the Move tool uses (scale rides the transform).
@@ -1259,6 +1425,7 @@ export default function WorldViewport(props: {
   // cursor). A miss is a no-op — empty ground has no quick verbs, and eating the
   // click keeps a stray right-click from dropping the current selection.
   const onRightClick = useCallback((e: any) => {
+    if (interactionLockedRef.current) return;
     const p = local(e);
     const hit = pickFaceAt(p.x, p.y);
     if (hit) onPieceContextRef.current(hit.id, Number(e?.x ?? 0), Number(e?.y ?? 0), hit.role);
@@ -1486,6 +1653,8 @@ export default function WorldViewport(props: {
         <MiniMap
           pieces={props.pieces}
           camera={{ x: stage.pose.centerX, z: stage.pose.centerZ, yawDegrees: stage.pose.yaw }}
+          views={props.views}
+          onRecallView={props.onRecallView}
           onCenter={centerFromMap}
           onClose={props.onToggleMap}
         />

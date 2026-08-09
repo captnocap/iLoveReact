@@ -266,6 +266,20 @@ export class IsoStage {
     this.pose.centerZ = tz;
   }
 
+  // Restore a whole pose at once — the saved-view recall (req_4168). Clamped on
+  // the way in, because a pose that arrives from disk has outlived the limits it
+  // was written under: a map saved before a zoom/tilt range changed must land
+  // somewhere legal, not wherever its stale numbers point. Missing fields keep
+  // their current value, so a partial restore is a partial move.
+  restore(pose: Partial<IsoPose>): void {
+    if (pose.centerX !== undefined) this.pose.centerX = pose.centerX;
+    if (pose.centerZ !== undefined) this.pose.centerZ = pose.centerZ;
+    if (pose.yaw !== undefined) this.pose.yaw = pose.yaw;
+    if (pose.pitch !== undefined) this.pose.pitch = clamp(pose.pitch, MIN_PITCH, MAX_PITCH);
+    if (pose.zoom !== undefined) this.pose.zoom = clamp(pose.zoom, MIN_ZOOM, MAX_ZOOM);
+    if (pose.level !== undefined) this.setLevel(pose.level);
+  }
+
   // The height field picks resolve against: terrain at level 0, else a flat slab.
   private levelHeightSampler(): HeightSampler {
     if (this.pose.level <= 0) return this.sampleHeight;
