@@ -257,6 +257,23 @@ pub const AIM_FOV_DEGREES: f32 = 47.0;
 pub const CAMERA_SPRING_MIN_DISTANCE_METERS: f32 = 0.7;
 pub const CAMERA_SPRING_SKIN_METERS: f32 = 0.14;
 pub const CAMERA_SPRING_SWEEP_RADIUS_METERS: f32 = 0.08;
+// Authoring (external iso) draw distance, req_4167. The baked `far` is solved ONCE
+// at load from the world's INSTANCE extent — right for the player-trailing game
+// camera, which never leaves the ground, and wrong twice over for the editor
+// camera. It orbits out to ~750 m to survey a district (isoStage BASE_DIST 90 /
+// MIN_ZOOM 0.12), and live-placed pieces are pushed as an overlay rather than
+// baked instances, so a map you are actively building contributes NOTHING to that
+// extent: an empty bake floors the plane at 64 m — about half a chunk. Past it the
+// world hard-clipped (a full zoom-out rendered bare sky); short of it the 0.7×far
+// fog band ate the rest, so the selection outline floated over a building nobody
+// could see. The authoring plane is solved from the pose that is actually drawn:
+// the eye's own distance to what it looks at, plus the world behind that point.
+pub const AUTHOR_FAR_MARGIN_METERS: f32 = 256.0;
+// Authoring view is UNFOGGED. Distance haze in an editor is a lie about the
+// material you are placing, and the far plane above already reaches past the
+// whole world, so nothing ever pops at the cull edge for fog to hide.
+pub const AUTHOR_FOG_NEAR_METERS: f32 = 1.0e7;
+pub const AUTHOR_FOG_FAR_METERS: f32 = 2.0e7;
 pub const PLAYER_WALK_SPEED_METERS_PER_SECOND: f32 = 4.5;
 pub const PLAYER_RUN_SPEED_METERS_PER_SECOND: f32 = 8.0;
 pub const PLAYER_RADIUS_METERS: f32 = 0.42;
@@ -276,13 +293,8 @@ pub const RAMP_HEIGHTFIELD_CELL_METERS: f32 = 0.6;
 pub const RAMP_WALKABLE_SLOPE_COS: f32 = 0.6;
 pub const PLAYER_WALK_CYCLES_PER_SECOND: f32 = 1.6;
 pub const PLAYER_RUN_CYCLES_PER_SECOND: f32 = 2.3;
-pub const PLAYER_CLIP_IDLE: u32 = 0;
-pub const PLAYER_CLIP_WALK: u32 = 1;
-pub const PLAYER_CLIP_JUMP: u32 = 2;
-// PROPUSE req_0624 — the seat poses (compile/playerModel.ts CLIP.sit/lay).
-pub const PLAYER_CLIP_SIT: u32 = 3;
-pub const PLAYER_CLIP_LAY: u32 = 4;
 pub const MAX_EMBEDDED_LOADERS: usize = 8;
+pub const MOUNT_RETRY_BACKOFF_MS: i64 = 5_000;
 
 // ── prop interaction (PROPUSE req_0624) — parity with /test's interact frame
 // (cart/hmsc-int/editors/play/PlayRoute.tsx): same reach, same cancel radius,

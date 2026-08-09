@@ -874,6 +874,45 @@ pub fn build(b: *std.Build) void {
     b.step("dev-scene3d-module", "Build the replaceable Scene3D development library")
         .dependOn(&install_scene3d_module.step);
 
+    // Headless resident-edit composition test. This compiles the real Scene3D
+    // journal/cache/gizmo path but never initializes the GPU; its presentation
+    // boundary is the pre-draw host mesh stash.
+    const scene3d_mesh_drag_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/scene3d_mesh_drag_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    scene3d_mesh_drag_test_mod.addOptions("build_options", options);
+    scene3d_mesh_drag_test_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    scene3d_mesh_drag_test_mod.addImport("wgpu", wgpu_mod);
+    scene3d_mesh_drag_test_mod.addImport("tls", tls_mod);
+    scene3d_mesh_drag_test_mod.addImport("pg", pg_dep.module("pg"));
+    scene3d_mesh_drag_test_mod.addImport("v8", v8_headers_mod);
+    scene3d_mesh_drag_test_mod.addIncludePath(b.path("."));
+    scene3d_mesh_drag_test_mod.addIncludePath(b.path("framework/ffi"));
+    scene3d_mesh_drag_test_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
+    scene3d_mesh_drag_test_mod.addIncludePath(b.path("deps/libfvad/include"));
+    if (os_tag == .linux) {
+        scene3d_mesh_drag_test_mod.addIncludePath(.{ .cwd_relative = "/usr/include/luajit-2.1" });
+        scene3d_mesh_drag_test_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+        scene3d_mesh_drag_test_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+    } else if (os_tag == .macos) {
+        scene3d_mesh_drag_test_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
+        scene3d_mesh_drag_test_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
+        scene3d_mesh_drag_test_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
+    scene3d_mesh_drag_test_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
+    scene3d_mesh_drag_test_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
+    const scene3d_mesh_drag_test = b.addTest(.{
+        .name = "scene3d-mesh-drag-test",
+        .root_module = scene3d_mesh_drag_test_mod,
+    });
+    const run_scene3d_mesh_drag_test = b.addRunArtifact(scene3d_mesh_drag_test);
+    b.step("test-scene3d-mesh-drag", "Run the headless retained-cache two-drag regression")
+        .dependOn(&run_scene3d_mesh_drag_test.step);
+
     const game_module_mod = b.createModule(.{
         .root_source_file = b.path("framework/dev_game_module_root.zig"),
         .target = target,
@@ -1155,6 +1194,25 @@ pub fn build(b: *std.Build) void {
     const run_luajit_runtime_test = b.addRunArtifact(luajit_runtime_test);
     const luajit_runtime_test_step = b.step("test-luajit-runtime", "Run the LuaJIT runtime integration test");
     luajit_runtime_test_step.dependOn(&run_luajit_runtime_test.step);
+
+    // ── Authoring draw-distance tests ──────────────────────────────
+    // The editor camera's far plane + fog + streaming residency (req_4167): the
+    // baked load-time plane is the game camera's, and driving the iso authoring
+    // view off it clipped the world away at zoom-out. Its own file is the test
+    // ROOT — inline tests in an imported module never run.
+    const author_draw_distance_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/author_draw_distance_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const author_draw_distance_test = b.addTest(.{
+        .name = "author-draw-distance-test",
+        .root_module = author_draw_distance_test_mod,
+    });
+    const run_author_draw_distance_test = b.addRunArtifact(author_draw_distance_test);
+    const author_draw_distance_test_step = b.step("test-author-draw-distance", "Run the editor authoring draw-distance tests");
+    author_draw_distance_test_step.dependOn(&run_author_draw_distance_test.step);
 
     // ── Process-lifetime tests ─────────────────────────────────────
     // proc_lifetime.zig is what stops a dev host outliving its supervisor, and

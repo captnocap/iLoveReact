@@ -19,13 +19,15 @@ const m_physics = @import("physics.zig");
 const m_streaming_support = @import("streaming_support.zig");
 const m_live_inputs = @import("live_inputs.zig");
 const m_foliage_preview = @import("foliage_preview.zig");
+const m_player_character_pose = @import("player_character_pose.zig");
+const m_npc_character_session = @import("npc_character_session.zig");
+const m_character_specimen = @import("../gpu/character_specimen.zig");
 
 const WIN_W = m_config.WIN_W;
 const WIN_H = m_config.WIN_H;
 const INSTANCE_STRIDE = m_config.INSTANCE_STRIDE;
 const MAX_PAINT_SLOTS = m_config.MAX_PAINT_SLOTS;
 const PlayerState = m_state.PlayerState;
-const NpcRuntime = m_state.NpcRuntime;
 const InteractState = m_state.InteractState;
 const CameraState = m_state.CameraState;
 const PhysicsColliders = m_state.PhysicsColliders;
@@ -123,16 +125,23 @@ pub const Runtime = struct {
     material_batches: []MaterialBatch = &.{},
     materials_ready: bool = false,
     player_geom_keys: std.ArrayList([]u8) = .empty,
-    /// The skinned figure's live bone palette (SKIN-3499): bone_count × 20
-    /// floats (column-major model-space mat4 + rgba tint per bone), rewritten
-    /// every frame by updatePlayerSkinnedNode while the skin node holds a read
-    /// view. Runtime-owned; freed at teardown beside player_geom_keys.
-    player_skin_palette: []f32 = &.{},
-    /// Animation-capture-only spheres at the exact posed bone origins. When
-    /// count is zero, ordinary play constructed no marker nodes and the frame
-    /// updater takes no marker branch.
-    player_pose_marker_first: usize = 0,
-    player_pose_marker_count: usize = 0,
+    /// One palette-pinned local-quaternion source for the strict player asset.
+    /// Canonical clips drive it until an owner-named capture/host stream is
+    /// active; the render node borrows the CharacterAsset palette in place.
+    player_character_pose: m_player_character_pose.State = .{},
+    player_character_pose_faulted: bool = false,
+    /// Capture validates into this candidate before atomically replacing the
+    /// active target. It remains in the mounted world owner—never in capture.
+    player_target_candidate: ?constructor.PlayerCharacter = null,
+    player_target_candidate_owner: m_player_character_pose.OwnerId = .{},
+    player_target_active_owner: m_player_character_pose.OwnerId = .{},
+    /// Owned stride-8 bind copy paired with the active strict character. The
+    /// ordinary mesh node borrows this slice; no second CharacterAsset or skin
+    /// palette is constructed for the diagnostic specimen.
+    player_bind_specimen: ?m_character_specimen.BindSpecimen = null,
+    /// Revisioned mounted owner for strict saved-weight NPC instances. Every
+    /// instance owns its own CharacterAsset, FK clock, and GPU palette.
+    npc_character_session: m_npc_character_session.Session = .{},
     mesh_prop_vertex_buffers: std.ArrayList([]f32) = .empty,
     // LIVESKIN per-slot (req_2025): the live mesh-ref draw runs EVERY frame, so its per-slot
     // geom keys ("{meshKey}:base" / ":slot-N", the SAME keys the baked slotted draw interns)
@@ -145,10 +154,10 @@ pub const Runtime = struct {
     kid_list: std.ArrayList(Node) = .empty,
     root: Node = .{},
     player_first_child: usize = 0,
-    /// Live NPC figures (req_0935) — built from scene.npc_spawns, rendered with
-    /// the player figure's machinery. Their node child-strings are owned by
-    /// player_geom_keys (the shared owned-key bag, freed at teardown).
-    npcs: std.ArrayList(NpcRuntime) = .empty,
+    npc_first_child: usize = 0,
+    /// Stable ordinary-mesh slot reserved after the seven NPC skin slots and
+    /// before every streaming/live tail.
+    player_bind_child: usize = 0,
     player: PlayerState = undefined,
     camera: CameraState = undefined,
     /// Prop interaction (PROPUSE req_0624) — driven by scene.interactables.
@@ -194,6 +203,10 @@ pub const Runtime = struct {
     live_kid: ?usize = null,
     live_buf: []f32 = &.{},
     live_gen: u64 = 0,
+    /// Index of the scene's fog child in the stable prefix (req_4167). Retuned
+    /// every frame beside the camera node: unfogged for the editor's authoring
+    /// camera, scene3d's own far-anchored fade for the game camera.
+    fog_kid: ?usize = null,
     /// Live physics-globals override (GLOBALS req_2770): the editor's Globals →
     /// Physics panel pushes the 13-float PHYSICS_CONFIG tuning through
     /// setPhysicsConfig and the NEXT step reads it — the baked lump value stays
@@ -395,6 +408,13 @@ pub const Runtime = struct {
         return self;
     }
 
+    pub fn createBlank(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, path: []const u8, node_id: u32) !*Runtime {
+        const self = try allocator.create(Runtime);
+        errdefer allocator.destroy(self);
+        try self.initBlankInPlace(io, environ, allocator, path, node_id);
+        return self;
+    }
+
     pub fn destroy(self: *Runtime, io: std.Io) void {
         const allocator = self.allocator;
         self.deinit(io);
@@ -439,6 +459,7 @@ pub const Runtime = struct {
 
     const runtime_lifecycle = @import("runtime_lifecycle.zig");
     pub const initInPlace = runtime_lifecycle.initInPlace;
+    pub const initBlankInPlace = runtime_lifecycle.initBlankInPlace;
     const ensureMaterials = runtime_lifecycle.ensureMaterials;
     pub const deinit = runtime_lifecycle.deinit;
 
@@ -467,7 +488,6 @@ pub const Runtime = struct {
 
     const runtime_stream = @import("runtime_stream.zig");
     const setupStreaming = runtime_stream.setupStreaming;
-    const refreshNpcNodes = runtime_stream.refreshNpcNodes;
     const refreshStreamNodes = runtime_stream.refreshStreamNodes;
     const pollStandaloneEvents = runtime_stream.pollStandaloneEvents;
     pub const mouseLook = runtime_stream.mouseLook;
@@ -507,14 +527,14 @@ pub const Runtime = struct {
         if (self.stream) |*w| {
             return std.fmt.allocPrint(
                 allocator,
-                "loaded {d} instances ({d} pieces), {d} player mesh groups; streaming {d}x{d} grid ({d} occupied), lod {d} rows, {d} draws",
-                .{ self.inst_count, self.piece_count, self.scene.player_model.len, w.cols, w.rows, w.stats.occupied_chunks, w.stats.lod_rows, self.stream_draw_count },
+                "loaded {d} instances ({d} pieces); streaming {d}x{d} grid ({d} occupied), lod {d} rows, {d} draws",
+                .{ self.inst_count, self.piece_count, w.cols, w.rows, w.stats.occupied_chunks, w.stats.lod_rows, self.stream_draw_count },
             );
         }
         return std.fmt.allocPrint(
             allocator,
-            "loaded {d} instances ({d} pieces), {d} player mesh groups",
-            .{ self.inst_count, self.piece_count, self.scene.player_model.len },
+            "loaded {d} instances ({d} pieces)",
+            .{ self.inst_count, self.piece_count },
         );
     }
 };

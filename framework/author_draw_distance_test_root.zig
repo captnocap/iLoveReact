@@ -1,0 +1,6 @@
+// Root at framework/ so the test's world_loader + layout imports stay inside the
+// Zig 0.16 module boundary. The actual test lives under framework/testing/unit/
+// per repository convention.
+test {
+    _ = @import("testing/unit/author_draw_distance.zig");
+}

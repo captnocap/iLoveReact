@@ -8,7 +8,6 @@ const constructor = @import("../world/constructor.zig");
 const game_physics = @import("../game/physics.zig");
 const config = @import("config.zig");
 const CAMERA_FOV_DEGREES = config.CAMERA_FOV_DEGREES;
-const PLAYER_CLIP_IDLE = config.PLAYER_CLIP_IDLE;
 const INTERACT_NOTICE_SECONDS = config.INTERACT_NOTICE_SECONDS;
 const ELEVATOR_ARRIVE_TOLERANCE_METERS = config.ELEVATOR_ARRIVE_TOLERANCE_METERS;
 const DOOR_PANEL_FRICTION = config.DOOR_PANEL_FRICTION;
@@ -78,22 +77,6 @@ pub const PlayerState = struct {
     posture: Posture = .none,
 };
 
-/// One live NPC figure (req_0935): which baked model it wears, where its child
-/// nodes start in the kid list, and its transform/animation state. Stage 1
-/// renders + animates only (clip defaults to IDLE); the Stage-2 Zig combat AI
-/// will drive x/z/yaw/gait/clip. y is grounded on the terrain at build time.
-pub const NpcRuntime = struct {
-    model_index: u32,
-    first_child: usize,
-    group_count: usize,
-    x: f32,
-    y: f32,
-    z: f32,
-    yaw: f32,
-    gait_phase: f32 = 0,
-    clip: u32 = PLAYER_CLIP_IDLE,
-};
-
 /// The interaction frame's live state — what the player can do right now and
 /// what the HUD shows (prompt / search bar / notice). One per Runtime.
 pub const InteractState = struct {
@@ -153,6 +136,10 @@ pub const CameraState = struct {
     ext_pos: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
     ext_look: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
     ext_fov: f32 = CAMERA_FOV_DEGREES,
+    /// Radius of the baked world about its centre, kept so the AUTHORING far
+    /// plane can cover whatever sits behind the point the editor camera looks
+    /// at — not just the eye's own distance to it (req_4167).
+    world_radius: f32 = 0,
 };
 
 pub const PhysicsColliders = struct {

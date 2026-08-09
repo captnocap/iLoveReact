@@ -162,6 +162,49 @@ pub fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 
     };
 }
 
+/// The draw distance the AUTHORING (external iso) camera needs, req_4167.
+///
+/// `cam.far` is solved once at load from the world's instance extent. That is the
+/// right plane for the player-trailing game camera — it stands on the ground and
+/// its distance never changes — and the wrong one for the editor camera, which
+/// orbits from 9 m (detail a wall) out to 750 m (survey a district). Zoomed past
+/// the stale plane, the world clipped away to bare sky; short of it, the fog band
+/// anchored at 0.7×far washed the building out before the clip did.
+///
+/// Solve it from the pose being drawn instead: the eye's real distance to its
+/// look point, plus the world radius so geometry BEHIND that point still draws,
+/// plus a margin. Never shorter than the baked plane.
+pub fn authoringFar(cam: CameraState) f32 {
+    const dx = cam.ext_pos.x - cam.ext_look.x;
+    const dy = cam.ext_pos.y - cam.ext_look.y;
+    const dz = cam.ext_pos.z - cam.ext_look.z;
+    const eye_distance = @sqrt(dx * dx + dy * dy + dz * dz);
+    return @max(cam.far, eye_distance + cam.world_radius + config.AUTHOR_FAR_MARGIN_METERS);
+}
+
+/// Draw distance for whichever camera currently owns the view.
+pub fn drawFar(cam: CameraState) f32 {
+    return if (cam.external) authoringFar(cam) else cam.far;
+}
+
+/// Point the world should be resident around: the editor camera's look target
+/// while it drives the view, else the player. Streaming residency followed the
+/// player unconditionally, so an editor camera panned away from spawn surveyed
+/// a district whose detail rows were still parked where the avatar stood.
+pub fn residencyAnchor(cam: CameraState, player: PlayerState) Vec3 {
+    if (cam.external) return cam.ext_look;
+    return .{ .x = player.x, .y = player.y, .z = player.z };
+}
+
+/// Fog planes for the scene's fog child. The authoring view is unfogged (see
+/// AUTHOR_FOG_*); the game view leaves both planes at 0 so scene3d keeps its
+/// own far-anchored fade.
+pub fn updateFogNode(fog_node: *Node, cam: CameraState) void {
+    fog_node.scene3d_fog = true;
+    fog_node.scene3d_fog_near = if (cam.external) config.AUTHOR_FOG_NEAR_METERS else 0;
+    fog_node.scene3d_fog_far = if (cam.external) config.AUTHOR_FOG_FAR_METERS else 0;
+}
+
 pub fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, colliders: ?PhysicsColliders, dt: f32) void {
     var want = desiredCamera(cam.*, player);
     // External-orbit (editor iso view): no spring-arm (the iso eye must stay at its
@@ -179,7 +222,7 @@ pub fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerSta
         camera_node.scene3d_look_y = cam.current_target.y;
         camera_node.scene3d_look_z = cam.current_target.z;
         camera_node.scene3d_fov = cam.current_fov;
-        camera_node.scene3d_far = cam.far;
+        camera_node.scene3d_far = authoringFar(cam.*);
         return;
     }
     want.pos = springArmEye(want, colliders);

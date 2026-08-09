@@ -16,11 +16,11 @@ const game_physics = @import("../game/physics.zig");
 const log = std.debug;
 const m_config = @import("config.zig");
 const m_state = @import("state.zig");
-const m_player_assets = @import("player_assets.zig");
 const m_instances = @import("instances.zig");
 const m_physics = @import("physics.zig");
 const m_camera = @import("camera.zig");
 const m_animation = @import("animation.zig");
+const m_player_character_pose = @import("player_character_pose.zig");
 const m_streaming_support = @import("streaming_support.zig");
 const runtime_live_scene = @import("runtime_live_scene.zig");
 const runtime_dynamics = @import("runtime_dynamics.zig");
@@ -46,9 +46,6 @@ const PhysicsColliders = m_state.PhysicsColliders;
 const clamp = m_state.clamp;
 const nowNs = m_state.nowNs;
 const keyDown = m_state.keyDown;
-const LIVE_POSE_STALE_FRAMES = m_player_assets.LIVE_POSE_STALE_FRAMES;
-const pendingPoseFor = m_player_assets.pendingPoseFor;
-const advancePlayerLivePose = m_player_assets.advancePlayerLivePose;
 const instanceYawRadians = m_instances.instanceYawRadians;
 const isRampInstance = m_instances.isRampInstance;
 const isNonCollidingFoliage = m_instances.isNonCollidingFoliage;
@@ -69,11 +66,8 @@ const PitchLimits = m_camera.PitchLimits;
 const updateCameraNode = m_camera.updateCameraNode;
 const aimPitchLimitsInOrbitSpace = m_camera.aimPitchLimitsInOrbitSpace;
 const setAimMode = m_camera.setAimMode;
-const updatePlayerModelNodes = m_animation.updatePlayerModelNodes;
-const updatePlayerModelNodesLive = m_animation.updatePlayerModelNodesLive;
-const updatePlayerSkinnedNode = m_animation.updatePlayerSkinnedNode;
-const updatePlayerSkinnedNodeLive = m_animation.updatePlayerSkinnedNodeLive;
-const updateNpcModelNodes = m_animation.updateNpcModelNodes;
+const placeSinglePlayerCharacter = m_animation.placeSinglePlayerCharacter;
+const placePlayerCharacterSpecimens = m_animation.placePlayerCharacterSpecimens;
 const updatePlayerAnimationClock = m_animation.updatePlayerAnimationClock;
 const STREAM_CELL_METERS = m_streaming_support.STREAM_CELL_METERS;
 const StreamProto = m_streaming_support.StreamProto;
@@ -191,25 +185,20 @@ pub fn setupStreaming(self: anytype) !void {
 /// around the player, LOD-shell ranges for the visible rest of the city.
 /// Allocation-free (capacity reserved at build; the streaming world merges
 /// and caps its draw list).
-/// Re-pose every live NPC figure's nodes from its transform + clip
-/// (req_0935). Called each frame beside the player figure update.
-pub fn refreshNpcNodes(self: anytype) void {
-    for (self.npcs.items) |npc| {
-        const mi: usize = @intCast(npc.model_index);
-        if (mi >= self.scene.npc_models.len) continue;
-        updateNpcModelNodes(self.kid_list.items, npc, self.scene.npc_models[mi], self.scene.player_animation);
-    }
-}
-
 pub fn refreshStreamNodes(self: anytype) void {
     const w = if (self.stream) |*world| world else return;
-    w.updateResidency(self.player.x, self.player.z, self.stream_radius);
+    // Residency follows whoever OWNS the view (req_4167). Anchoring it on the
+    // player unconditionally parked the detail bubble at spawn, so an editor
+    // camera panned across the map surveyed a district drawn from the LOD shell
+    // alone — or from nothing, once the stale far plane clipped that too.
+    const anchor = m_camera.residencyAnchor(self.camera, self.player);
+    w.updateResidency(anchor.x, anchor.z, self.stream_radius);
     const draws = w.assembleDraws(.{
         .pos = .{ self.camera.current_pos.x, self.camera.current_pos.y, self.camera.current_pos.z },
         .look = .{ self.camera.current_target.x, self.camera.current_target.y, self.camera.current_target.z },
         .fov_degrees = self.camera.current_fov,
         .aspect = self.last_aspect,
-        .far = self.camera.far,
+        .far = m_camera.drawFar(self.camera),
     });
     self.kid_list.shrinkRetainingCapacity(self.stream_tail_start);
     for (draws) |d| {
@@ -539,39 +528,69 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
     const moving = self.force_gait or (!seated and @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001);
     const airborne = !seated and (!self.player.grounded or @abs(self.player.vy) > 0.05);
     updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
+
+    // The saved character is always deformed by hierarchical FK. Capture owns
+    // the palette only while its explicit session is active; otherwise these
+    // canonical local-quaternion clips are the one runtime animation source.
+    if (self.scene.player_character) |*character| {
+        const clip: m_player_character_pose.clips.ClipId = switch (self.player.posture) {
+            .sit => .sit,
+            .lay => .lay,
+            .none => if (airborne) .jump else if (moving or run_down) .walk else .idle,
+        };
+        const clip_seconds: ?f32 = switch (clip) {
+            .walk => self.player.gait_phase,
+            .jump => self.player.jump_time,
+            .idle, .sit, .lay => null,
+        };
+        if (self.player_character_pose.advance(dt, clip, clip_seconds)) |sampled| {
+            if (character.evaluate(sampled.root_translation, sampled.rotations())) |_| {
+                self.player_character_pose.acceptEvaluated(
+                    sampled.frame_id,
+                    sampled.root_translation,
+                    character.local_rotations,
+                ) catch |err| {
+                    if (!self.player_character_pose_faulted) {
+                        std.log.err("mounted player pose reconciliation failed: {s}", .{@errorName(err)});
+                        self.player_character_pose_faulted = true;
+                    }
+                };
+            } else |err| {
+                if (!self.player_character_pose_faulted) {
+                    std.log.err("mounted player FK rejected pose: {s}", .{@errorName(err)});
+                    self.player_character_pose_faulted = true;
+                }
+            }
+        } else |err| {
+            if (!self.player_character_pose_faulted) {
+                std.log.err("mounted player pose source failed: {s}", .{@errorName(err)});
+                self.player_character_pose_faulted = true;
+            }
+        }
+    }
+    self.npc_character_session.advance(dt);
     stepInteract(self, dt);
     stepCookedDoors(self, dt); // req_1908: swing custom doors toward their target
 
     updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), dt);
-    // A FRESH capture pose overrides the clip sampler (req_2786); stale
-    // (~3/4s without a push) falls back to clips so a dropped tracker
-    // never freezes the body.
-    var live_posed = false;
-    if (self.scene.player_skin) |skin| {
-        const marker_first = if (self.player_pose_marker_count == skin.bones.len) self.player_pose_marker_first else null;
-        // SKINNED figure (SKIN-3499): the same clip/live-pose discipline, but
-        // the pose lands in the bone palette instead of N part nodes.
-        if (pendingPoseFor(self.node_id)) |lp| {
-            if (lp.count == skin.bones.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
-                advancePlayerLivePose(lp, dt);
-                updatePlayerSkinnedNodeLive(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, lp.transforms, self.player);
-                live_posed = true;
-            }
-            lp.age_frames +%= 1;
+    if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
+    if (self.scene.player_character != null) {
+        if (self.player_bind_specimen) |*bind| {
+            placePlayerCharacterSpecimens(
+                self.kid_list.items,
+                self.player_first_child,
+                self.player_bind_child,
+                self.player,
+                bind.separation_x,
+            );
+        } else {
+            placeSinglePlayerCharacter(
+                self.kid_list.items,
+                self.player_first_child,
+                self.player,
+            );
         }
-        if (!live_posed) updatePlayerSkinnedNode(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, self.scene.player_animation, self.player, moving, run_down, airborne);
-    } else {
-        if (pendingPoseFor(self.node_id)) |lp| {
-            if (lp.count == self.scene.player_model.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
-                advancePlayerLivePose(lp, dt);
-                updatePlayerModelNodesLive(self.kid_list.items, self.player_first_child, self.scene.player_model, lp.transforms, self.player);
-                live_posed = true;
-            }
-            lp.age_frames +%= 1;
-        }
-        if (!live_posed) updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
     }
-    refreshNpcNodes(self);
     updateDynamicPropNodes(self);
     stepTickers(self, dt);
     stepTraffic(self, dt); // req_2056: drive the ambient vehicles along their baked routes

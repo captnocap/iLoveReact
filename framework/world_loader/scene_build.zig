@@ -14,6 +14,8 @@ const m_config = @import("config.zig");
 const m_state = @import("state.zig");
 const m_geometry = @import("geometry.zig");
 const m_player_assets = @import("player_assets.zig");
+const m_player_character_pose = @import("player_character_pose.zig");
+const m_npc_character_session = @import("npc_character_session.zig");
 const m_instances = @import("instances.zig");
 const m_physics = @import("physics.zig");
 const m_camera = @import("camera.zig");
@@ -57,7 +59,6 @@ const nowNs = m_state.nowNs;
 const appendMeshPropNode = runtime_live_scene.appendMeshPropNode;
 const cameraColliderSet = runtime_stream.cameraColliderSet;
 const rebuildWindow = runtime_stream.rebuildWindow;
-const refreshNpcNodes = runtime_stream.refreshNpcNodes;
 const refreshStreamNodes = runtime_stream.refreshStreamNodes;
 const setupStreaming = runtime_stream.setupStreaming;
 const buildCube = m_geometry.buildCube;
@@ -77,13 +78,7 @@ const buildBrushRings = m_geometry.buildBrushRings;
 const buildBrushHandles = m_geometry.buildBrushHandles;
 const buildBrushCone = m_geometry.buildBrushCone;
 const buildBrushDome = m_geometry.buildBrushDome;
-const fallbackPlayerModel = m_player_assets.fallbackPlayerModel;
-const geomContentHash = m_player_assets.geomContentHash;
-const pendingPlayerModelCopy = m_player_assets.pendingPlayerModelCopy;
-const pendingPlayerSkinCopy = m_player_assets.pendingPlayerSkinCopy;
-const pendingPlayerAnimationCopy = m_player_assets.pendingPlayerAnimationCopy;
-const m_pose = @import("../skeleton/pose.zig");
-const m_pose_markers = @import("../skeleton/pose_markers.zig");
+const pendingPlayerCharacterCopy = m_player_assets.pendingPlayerCharacterCopy;
 const extrudeTiles = m_instances.extrudeTiles;
 const buildShapeBatches = m_instances.buildShapeBatches;
 const whitenRows = m_instances.whitenRows;
@@ -102,8 +97,6 @@ const sceneTerrainTopAt = m_physics.sceneTerrainTopAt;
 const chooseSpawn = m_physics.chooseSpawn;
 const springArmEye = m_camera.springArmEye;
 const updateCameraNode = m_camera.updateCameraNode;
-const updatePlayerModelNodes = m_animation.updatePlayerModelNodes;
-const updateNpcModelNodes = m_animation.updateNpcModelNodes;
 const streamModeFromEnv = m_streaming_support.streamModeFromEnv;
 const streamRadiusFromEnv = m_streaming_support.streamRadiusFromEnv;
 const BakedRange = m_streaming_support.BakedRange;
@@ -396,6 +389,9 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     // failure leaves stream null and the monolithic path takes over.
     self.stream_radius = streamRadiusFromEnv(environ);
     const full_bounds = instanceBounds(self.insts, self.inst_count, self.stride);
+    // The authoring far plane adds this to the editor camera's own eye distance so
+    // the world BEHIND the look point keeps drawing at any zoom (req_4167).
+    self.camera.world_radius = full_bounds.radius;
     const want_stream = switch (streamModeFromEnv(environ)) {
         .off => false,
         .force => self.inst_count > 0,
@@ -450,165 +446,68 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     });
     try self.kid_list.append(self.allocator, .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity });
     try self.kid_list.append(self.allocator, .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity });
+    // Fog child in the STABLE prefix (streaming only ever rewrites the tail).
+    // updateFogNode retunes it per frame: unfogged while the editor camera drives
+    // the view, scene3d's own far-anchored fade in game (req_4167).
+    self.fog_kid = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{ .scene3d_fog = true });
 
-    // GLOBALS req_2770 / req_2780: a blank/pre-lump world wears the EXPORTED
-    // player model when one is staged (__compiled_world_set_player_model);
-    // only when nothing is staged does the stand-in figure mount. The scene
-    // owns the groups exactly like a decoded lump (Scene.deinit frees them).
-    // SKINNED figure (SKIN-3499): a staged skin WINS over the per-part model —
-    // ONE palette-blended node instead of N part nodes. The palette buffer is
-    // runtime-owned (freed at teardown) because animation.zig rewrites it every
-    // frame while the node holds a read view. When a skin is present the
-    // per-part staging/fallback below is skipped entirely (player_model stays
-    // empty, so the group loop emits nothing).
-    if (self.scene.player_skin == null) {
-        if (pendingPlayerSkinCopy(self.allocator)) |skin| {
-            self.scene.player_skin = skin;
-            log.print("[loader] player skin from live push — {d} verts × {d} bones (SKIN-3499)\n", .{ skin.vertex_count, skin.bones.len });
-        }
+    // One strict saved-character path. Staging was already validated, and the
+    // construction copy revalidates immutable bytes so a file changed between
+    // those operations is a hard error rather than a fallback or rebind.
+    if (self.scene.player_character == null) {
+        self.scene.player_character = try pendingPlayerCharacterCopy(io, self.allocator);
     }
-    if (self.scene.player_skin) |skin| {
-        if (self.scene.player_animation.clips.len == 0) {
-            if (pendingPlayerAnimationCopy(self.allocator, skin.bones.len)) |animation| {
-                self.scene.player_animation = animation;
-                log.print("[loader] player animation from live push — {d} clips (req_2781)\n", .{animation.clips.len});
-            }
-        }
-        if (self.player_skin_palette.len > 0) self.allocator.free(self.player_skin_palette);
-        self.player_skin_palette = try self.allocator.alloc(f32, skin.bones.len * m_pose.BONE_FLOATS);
-        for (skin.bones, 0..) |bone, i| m_pose.writeRestPalette(self.player_skin_palette, i, bone.center, bone.color);
-        const skin_key = try std.fmt.allocPrint(self.allocator, "player-skin-{x}", .{geomContentHash(skin.vertices)});
-        self.player_geom_keys.append(self.allocator, skin_key) catch |err| {
-            self.allocator.free(skin_key);
-            return err;
-        };
-        self.player_first_child = self.kid_list.items.len;
-        try self.kid_list.append(self.allocator, .{
-            .scene3d_skin_geom_key = skin_key,
-            .scene3d_skin_vertices = skin.vertices,
-            .scene3d_skin_vert_count = skin.vertex_count,
-            .scene3d_skin_palette = self.player_skin_palette,
-            .scene3d_skin_bone_count = @intCast(skin.bones.len),
-            .scene3d_color_r = 1,
-            .scene3d_color_g = 1,
-            .scene3d_color_b = 1,
-            .scene3d_color_a = 1,
-        });
-        // Globals → Animation asks for markers through the skin bone table.
-        // Keep one slot per bone so the palette index and marker index are
-        // identical; non-tracked helper/mesh bones are inert nodes. Ordinary
-        // play has no marked bones and constructs no nodes at all.
-        const has_pose_markers = for (skin.bones) |bone| {
-            if (bone.marker_kind != .none) break true;
-        } else false;
-        if (has_pose_markers) {
-            self.player_pose_marker_first = self.kid_list.items.len;
-            self.player_pose_marker_count = skin.bones.len;
-            for (skin.bones) |bone| {
-                const marker_color = m_pose_markers.color(bone.marker_kind);
-                try self.kid_list.append(self.allocator, .{
-                    .scene3d_mesh = bone.marker_kind != .none,
-                    .scene3d_geom_key = "sphere12x8",
-                    .scene3d_vertices = self.sphere[0..],
-                    .scene3d_vert_count = 12 * 8 * 6,
-                    .scene3d_color_r = marker_color[0],
-                    .scene3d_color_g = marker_color[1],
-                    .scene3d_color_b = marker_color[2],
-                    .scene3d_color_a = 1,
-                    .scene3d_scale_x = m_pose_markers.Tuning.diameter_meters,
-                    .scene3d_scale_y = m_pose_markers.Tuning.diameter_meters,
-                    .scene3d_scale_z = m_pose_markers.Tuning.diameter_meters,
-                });
-            }
-        }
-    } else if (self.scene.player_model.len == 0) {
-        if (pendingPlayerModelCopy(self.allocator)) |groups| {
-            self.scene.player_model = groups;
-            log.print("[loader] player model from live push — {d} groups (req_2780)\n", .{groups.len});
-        } else {
-            self.scene.player_model = fallbackPlayerModel(self.allocator) catch &.{};
-            if (self.scene.player_model.len > 0) {
-                log.print("[loader] no player model lump — stand-in figure (GLOBALS req_2770)\n", .{});
-            }
-        }
-    }
-    // Staged basic-shape clips ride in the same way (req_2781) — only when
-    // the gamefile brought none, and only when the node count matches. The
-    // skinned branch above consumed them against its bone count already.
-    if (self.scene.player_skin == null and self.scene.player_animation.clips.len == 0) {
-        if (pendingPlayerAnimationCopy(self.allocator, self.scene.player_model.len)) |animation| {
-            self.scene.player_animation = animation;
-            log.print("[loader] player animation from live push — {d} clips (req_2781)\n", .{animation.clips.len});
-        }
-    }
-    if (self.scene.player_skin == null) self.player_first_child = self.kid_list.items.len;
-    for (self.scene.player_model, 0..) |group, i| {
-        const key = try std.fmt.allocPrint(self.allocator, "player-model-{d}-{x}", .{ i, geomContentHash(group.vertices) });
-        self.player_geom_keys.append(self.allocator, key) catch |err| {
-            self.allocator.free(key);
-            return err;
-        };
-        try self.kid_list.append(self.allocator, .{
-            .scene3d_mesh = group.vertex_count > 0,
-            .scene3d_geom_key = key,
-            .scene3d_vertices = group.vertices,
-            .scene3d_vert_count = group.vertex_count,
-            .scene3d_color_r = group.color[0],
-            .scene3d_color_g = group.color[1],
-            .scene3d_color_b = group.color[2],
-            .scene3d_color_a = group.alpha,
-            .scene3d_tex_w = group.tex_w,
-            .scene3d_tex_h = group.tex_h,
-            .scene3d_tex_rgba = group.tex_rgba,
-        });
-    }
-    if (self.scene.player_skin == null and self.scene.player_model.len == 0) log.print("[loader] no player model lump and stand-in failed — camera target only\n", .{});
 
-    // NPC figures (req_0935): one child node per spawn × model group, posed
-    // every frame by updateNpcModelNodes. Each (spawn, group) gets a unique
-    // geom key — a small Stage-1 population interns well within GEO_CACHE;
-    // sharing keys per model to dedup geometry is a later optimization once
-    // crowds grow. y is grounded on the terrain like the player spawn.
-    self.npcs.clearRetainingCapacity();
-    for (self.scene.npc_spawns) |npc_spawn| {
-        const mi: usize = @intCast(npc_spawn.model_index);
-        if (mi >= self.scene.npc_models.len) continue;
-        const groups = self.scene.npc_models[mi];
-        if (groups.len == 0) continue;
-        const ground = sceneTerrainTopAt(self.scene.heightfields, npc_spawn.x, npc_spawn.z) orelse 0;
-        const first = self.kid_list.items.len;
-        const npc_index = self.npcs.items.len;
-        for (groups, 0..) |group, gi| {
-            const key = try std.fmt.allocPrint(self.allocator, "npc-{d}-{d}-{d}-{x}", .{ npc_index, mi, gi, geomContentHash(group.vertices) });
-            self.player_geom_keys.append(self.allocator, key) catch |err| {
-                self.allocator.free(key);
-                return err;
-            };
-            try self.kid_list.append(self.allocator, .{
-                .scene3d_mesh = group.vertex_count > 0,
-                .scene3d_geom_key = key,
-                .scene3d_vertices = group.vertices,
-                .scene3d_vert_count = group.vertex_count,
-                .scene3d_color_r = group.color[0],
-                .scene3d_color_g = group.color[1],
-                .scene3d_color_b = group.color[2],
-                .scene3d_color_a = group.alpha,
-                .scene3d_tex_w = group.tex_w,
-                .scene3d_tex_h = group.tex_h,
-                .scene3d_tex_rgba = group.tex_rgba,
-            });
-        }
-        try self.npcs.append(self.allocator, .{
-            .model_index = npc_spawn.model_index,
-            .first_child = first,
-            .group_count = groups.len,
-            .x = npc_spawn.x,
-            .y = ground,
-            .z = npc_spawn.z,
-            .yaw = npc_spawn.yaw,
-        });
+    // A stable reserved skinned slot lets capture atomically install a
+    // validated CharacterAsset after this WorldLoader viewport has mounted.
+    self.player_first_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+
+    // Stable slots for the mounted NPC character session. The session opens
+    // after the WorldLoader node exists, so its nodes must already live before
+    // the streaming tail and every later fixed child index.
+    self.npc_first_child = self.kid_list.items.len;
+    for (0..m_npc_character_session.MAX_INSTANCES) |_| {
+        try self.kid_list.append(self.allocator, .{});
     }
-    if (self.npcs.items.len > 0) log.print("[loader] built {d} NPC figure(s) from {d} model(s)\n", .{ self.npcs.items.len, self.scene.npc_models.len });
+
+    // The bind specimen is ordinary stride-8 geometry and therefore lives
+    // after all eight palette-backed player/NPC slots without consuming a
+    // ninth skin palette. It remains before every streaming/live tail.
+    self.player_bind_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+
+    if (self.scene.player_character) |*character| {
+        try self.player_character_pose.resetRig(character.rig_bones);
+        try self.player_geom_keys.ensureUnusedCapacity(self.allocator, 1);
+
+        const skin_key = try std.fmt.allocPrint(
+            self.allocator,
+            "player-character-{x}",
+            .{std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(character.vertices))},
+        );
+        var skin_key_transferred = false;
+        errdefer if (!skin_key_transferred) self.allocator.free(skin_key);
+
+        try m_animation.configureSinglePlayerCharacter(
+            self.kid_list.items,
+            self.player_first_child,
+            .{
+                .geometry_key = skin_key,
+                .vertices = character.vertices,
+                .vertex_count = character.vertex_count,
+                .palette = character.palette,
+                .bone_count = @intCast(character.boneCount()),
+            },
+        );
+        self.player_geom_keys.appendAssumeCapacity(skin_key);
+        skin_key_transferred = true;
+        log.print("[loader] bound player character mounted — {d} verts × {d} stable bones\n", .{ character.vertex_count, character.boneCount() });
+    } else {
+        self.player_character_pose.resetEmpty();
+        log.print("[loader] no bound player character staged — camera target only\n", .{});
+    }
 
     if (self.scene.mesh_props) |mp| {
         // req_1864: cooked-door instances, in mp.instances order, align 1:1 with
@@ -1492,13 +1391,24 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     self.perm_node_count = self.kid_list.items.len; // before any streamed tail / live-mesh nodes
     self.root = .{ .children = self.kid_list.items };
     updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), 0);
-    if (self.scene.player_skin) |skin| {
-        const marker_first = if (self.player_pose_marker_count == skin.bones.len) self.player_pose_marker_first else null;
-        m_animation.updatePlayerSkinnedNode(self.kid_list.items, self.player_first_child, marker_first, skin, self.player_skin_palette, self.scene.player_animation, self.player, false, false, false);
-    } else {
-        updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
+    if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
+    if (self.scene.player_character != null) {
+        if (self.player_bind_specimen) |*bind| {
+            m_animation.placePlayerCharacterSpecimens(
+                self.kid_list.items,
+                self.player_first_child,
+                self.player_bind_child,
+                self.player,
+                bind.separation_x,
+            );
+        } else {
+            m_animation.placeSinglePlayerCharacter(
+                self.kid_list.items,
+                self.player_first_child,
+                self.player,
+            );
+        }
     }
-    refreshNpcNodes(self);
     // Seed the bubble at spawn and assemble the first draw tail — the very
     // first rendered frame already streams (the camera was just solved).
     refreshStreamNodes(self);
