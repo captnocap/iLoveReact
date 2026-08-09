@@ -28,6 +28,13 @@ pub fn build(b: *std.Build) void {
     const dev_build_id = b.option([]const u8, "dev-build-id", "Content fingerprint of native inputs embedded in dev-mode hosts") orelse "unknown";
     const dev_socket_path = b.option([]const u8, "dev-socket-path", "Unix socket path for dev-mode bundle pushes") orelse "/tmp/reactjit.sock";
     const dev_bundle_path = b.option([]const u8, "dev-bundle-path", "Bundle path polled by dev-mode hot reload") orelse "bundle.js";
+    const dev_native_modules = b.option(bool, "dev-native-modules", "Build the development host against replaceable Scene3D/Game libraries") orelse false;
+    const dev_scene3d_module = b.option(bool, "dev-scene3d-module", "Compile the Scene3D implementation library instead of the cold host") orelse false;
+    const dev_game_module = b.option(bool, "dev-game-module", "Compile the Game implementation library instead of the cold host") orelse false;
+    const dev_scene3d_path = b.option([]const u8, "dev-scene3d-path", "Initial Scene3D development library loaded by the modular host") orelse b.pathFromRoot("zig-out/dev-modules/scene3d/staging/librjit_scene3d-dev.so");
+    const dev_scene3d_hash = b.option([]const u8, "dev-scene3d-hash", "Content hash of the initial Scene3D development library") orelse "staging";
+    const dev_game_path = b.option([]const u8, "dev-game-path", "Initial Game development library loaded by the modular host") orelse b.pathFromRoot("zig-out/dev-modules/game/staging/librjit_game-dev.so");
+    const dev_game_hash = b.option([]const u8, "dev-game-hash", "Content hash of the initial Game development library") orelse "staging";
     const custom_chrome = b.option(bool, "custom-chrome", "Cart draws its own window chrome (borderless)") orelse false;
     // -Dhas-gpu=false ships the app binary in headless (TUI) mode: no
     // SDL3/wgpu/freetype/X11 link, no engine.run call, framework/gpu/*
@@ -141,6 +148,13 @@ pub fn build(b: *std.Build) void {
     options.addOption([]const u8, "dev_build_id", dev_build_id);
     options.addOption([]const u8, "dev_socket_path", dev_socket_path);
     options.addOption([]const u8, "dev_bundle_path", dev_bundle_path);
+    options.addOption(bool, "dev_native_modules", dev_native_modules);
+    options.addOption(bool, "dev_scene3d_module", dev_scene3d_module);
+    options.addOption(bool, "dev_game_module", dev_game_module);
+    options.addOption([]const u8, "dev_scene3d_path", dev_scene3d_path);
+    options.addOption([]const u8, "dev_scene3d_hash", dev_scene3d_hash);
+    options.addOption([]const u8, "dev_game_path", dev_game_path);
+    options.addOption([]const u8, "dev_game_hash", dev_game_hash);
     options.addOption(bool, "custom_chrome", custom_chrome);
     options.addOption(bool, "has_physics", has_physics);
     options.addOption(bool, "has_terminal", has_terminal);
@@ -166,12 +180,19 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_debug_server", true);
     options.addOption(bool, "use_v8", use_v8);
 
+    const dev_module_abi_mod = b.createModule(.{
+        .root_source_file = b.path("framework/dev_modules/abi.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const root_mod = b.createModule(.{
         .root_source_file = b.path(app_source),
         .target = target,
         .optimize = optimize,
     });
     root_mod.addOptions("build_options", options);
+    root_mod.addImport("dev_module_abi", dev_module_abi_mod);
     // The cart bundle rides in as a named module: v8_app.zig lives in
     // framework/ and @embedFile can't reach a file outside the module root,
     // absolute path or not — a module name resolves like @import and has no
@@ -221,6 +242,7 @@ pub fn build(b: *std.Build) void {
             .file = b.path("framework/ffi/v8_stack_shim.cpp"),
             .flags = &.{ "-O2", "-std=c++17" },
         });
+        if (dev_native_modules) root_mod.addAssemblyFile(b.path("framework/ffi/v8_dev_module_exports.S"));
         // Real per-frame V8 GC wall-time via the isolate's prologue/epilogue
         // callbacks — feeds the spikewatch's definitive "what fired" attribution
         // (see framework/ffi/v8_gc_shim.cpp). Same mangled-symbol approach as the
@@ -235,6 +257,9 @@ pub fn build(b: *std.Build) void {
         .name = app_name,
         .root_module = root_mod,
     });
+    // Module callbacks resolve cold-host exports (V8 registration, host tree,
+    // GPU ownership) from the executable at dlopen time.
+    exe.rdynamic = dev_native_modules;
     // 64MB stack. Debug frames are massive (SDL_Event union + engine.run locals
     // alone burn through the old 16MB), and recursive hitTest/paint walks on
     // deep trees compound fast. VA-only; no RSS cost until used.
@@ -750,6 +775,146 @@ pub fn build(b: *std.Build) void {
         app_step.dependOn(&install_lore.step);
     }
 
+    // ── Replaceable Scene3D development library ───────────────
+    // Built in a separate invocation with:
+    //   -Ddev-native-modules=true -Ddev-scene3d-module=true
+    // so the same build-options object selects module-side service facades
+    // without changing the independently cached cold executable invocation.
+    // Header-only views intentionally omit the non-PIC static V8/wgpu archives;
+    // their C symbols are resolved from the `-rdynamic` cold executable.
+    const v8_headers_options = b.addOptions();
+    v8_headers_options.addOption(bool, "inspector_subtype", true);
+    const v8_headers_mod = b.createModule(.{
+        .root_source_file = b.path("deps/zig-v8/src/v8.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    v8_headers_mod.addIncludePath(b.path("deps/zig-v8/src"));
+    v8_headers_mod.addImport("default_exports", v8_headers_options.createModule());
+    inline for (.{
+        "std__shared_ptr__v8__BackingStore__get",
+        "std__shared_ptr__v8__BackingStore__reset",
+        "v8__ArrayBufferView__Buffer",
+        "v8__ArrayBufferView__ByteLength",
+        "v8__ArrayBufferView__ByteOffset",
+        "v8__ArrayBuffer__GetBackingStore",
+        "v8__ArrayBuffer__New2",
+        "v8__ArrayBuffer__NewBackingStore2",
+        "v8__BackingStore__Data",
+        "v8__BackingStore__TO_SHARED_PTR",
+        "v8__Context__GetIsolate",
+        "v8__FunctionCallbackInfo__GetIsolate",
+        "v8__FunctionCallbackInfo__GetReturnValue",
+        "v8__FunctionCallbackInfo__INDEX",
+        "v8__FunctionCallbackInfo__Length",
+        "v8__Isolate__GetCurrentContext",
+        "v8__Null",
+        "v8__Number__New",
+        "v8__Object__New",
+        "v8__Object__Set",
+        "v8__ReturnValue__Set",
+        "v8__String__NewFromUtf8",
+        "v8__String__Utf8Length",
+        "v8__String__WriteUtf8",
+        "v8__Value__Int32Value",
+        "v8__Value__BooleanValue",
+        "v8__Value__IsArrayBufferView",
+        "v8__Value__NumberValue",
+        "v8__Value__ToString",
+    }) |symbol| v8_headers_mod.addCMacro(symbol, b.fmt("rjit_{s}", .{symbol}));
+    const wgpu_headers_mod = b.createModule(.{
+        .root_source_file = b.path("deps/wgpu_native_zig/src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const scene3d_module_mod = b.createModule(.{
+        .root_source_file = b.path("framework/dev_scene3d_module_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+        .strip = true,
+    });
+    scene3d_module_mod.addOptions("build_options", options);
+    scene3d_module_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    scene3d_module_mod.addImport("wgpu", wgpu_headers_mod);
+    scene3d_module_mod.addImport("tls", tls_mod);
+    scene3d_module_mod.addImport("pg", pg_dep.module("pg"));
+    scene3d_module_mod.addImport("v8", v8_headers_mod);
+    scene3d_module_mod.addIncludePath(b.path("."));
+    scene3d_module_mod.addIncludePath(b.path("framework/ffi"));
+    scene3d_module_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
+    scene3d_module_mod.addIncludePath(b.path("deps/libfvad/include"));
+    if (os_tag == .linux) {
+        scene3d_module_mod.addIncludePath(.{ .cwd_relative = "/usr/include/luajit-2.1" });
+        scene3d_module_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+        scene3d_module_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+    } else if (os_tag == .macos) {
+        scene3d_module_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
+        scene3d_module_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
+        scene3d_module_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
+    scene3d_module_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
+    scene3d_module_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
+
+    const scene3d_module_lib = b.addLibrary(.{
+        .name = "rjit_scene3d-dev",
+        .root_module = scene3d_module_mod,
+        .linkage = .dynamic,
+    });
+    scene3d_module_lib.linker_allow_shlib_undefined = true;
+    scene3d_module_lib.link_z_lazy = true;
+    const install_scene3d_module = b.addInstallArtifact(scene3d_module_lib, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = b.fmt("dev-modules/scene3d/staging/{s}", .{scene3d_module_lib.out_filename}),
+        .dylib_symlinks = false,
+    });
+    b.step("dev-scene3d-module", "Build the replaceable Scene3D development library")
+        .dependOn(&install_scene3d_module.step);
+
+    const game_module_mod = b.createModule(.{
+        .root_source_file = b.path("framework/dev_game_module_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+        .strip = true,
+    });
+    game_module_mod.addOptions("build_options", options);
+    game_module_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    game_module_mod.addImport("wgpu", wgpu_headers_mod);
+    game_module_mod.addImport("tls", tls_mod);
+    game_module_mod.addImport("pg", pg_dep.module("pg"));
+    game_module_mod.addImport("v8", v8_headers_mod);
+    game_module_mod.addIncludePath(b.path("."));
+    game_module_mod.addIncludePath(b.path("framework/ffi"));
+    game_module_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
+    game_module_mod.addIncludePath(b.path("deps/libfvad/include"));
+    if (os_tag == .linux) {
+        game_module_mod.addIncludePath(.{ .cwd_relative = "/usr/include/luajit-2.1" });
+        game_module_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+        game_module_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+    } else if (os_tag == .macos) {
+        game_module_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
+        game_module_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
+        game_module_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
+    const game_module_lib = b.addLibrary(.{
+        .name = "rjit_game-dev",
+        .root_module = game_module_mod,
+        .linkage = .dynamic,
+    });
+    game_module_lib.linker_allow_shlib_undefined = true;
+    game_module_lib.link_z_lazy = true;
+    const install_game_module = b.addInstallArtifact(game_module_lib, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = b.fmt("dev-modules/game/staging/{s}", .{game_module_lib.out_filename}),
+        .dylib_symlinks = false,
+    });
+    b.step("dev-game-module", "Build the replaceable Game development library")
+        .dependOn(&install_game_module.step);
 
     // ── v8-hello: smoke test for framework/v8_runtime.zig ──────
     const v8_hello_dep = b.dependency("v8", .{
@@ -1338,6 +1503,28 @@ pub fn build(b: *std.Build) void {
     model_paint_test_step.dependOn(&run_model_paint_test.step);
     model_paint_test_step.dependOn(&run_model_paint_carry_test.step);
 
+    // ── gizmo axis→screen mapping (the drag's px→world arithmetic) ──────────
+    const gizmo_axis_map_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/gizmo_axis_map.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const gizmo_axis_map_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/gizmo_axis_map.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    gizmo_axis_map_test_mod.addImport("gizmo_axis_map", gizmo_axis_map_mod);
+    const gizmo_axis_map_test = b.addTest(.{
+        .name = "gizmo-axis-map-test",
+        .root_module = gizmo_axis_map_test_mod,
+    });
+    const run_gizmo_axis_map_test = b.addRunArtifact(gizmo_axis_map_test);
+    const gizmo_axis_map_test_step = b.step("test-gizmo-axis-map", "Run the gizmo axis→screen drag-mapping tests");
+    gizmo_axis_map_test_step.dependOn(&run_gizmo_axis_map_test.step);
+
     // ── paint program journal (UV/texture transaction carry) ────────────────
     const paint_program_journal_impl_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing_paint_program_journal_root.zig"),
@@ -1440,8 +1627,49 @@ pub fn build(b: *std.Build) void {
         .root_module = mesh_semantics_test_mod,
     });
     const run_mesh_semantics_test = b.addRunArtifact(mesh_semantics_test);
+    const mesh_semantic_restore_impl_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_semantic_restore.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_semantic_restore_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_semantic_restore.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_semantic_restore_test_mod.addImport("mesh_semantic_restore", mesh_semantic_restore_impl_test_mod);
+    const mesh_semantic_restore_test = b.addTest(.{
+        .name = "mesh-semantic-restore-test",
+        .root_module = mesh_semantic_restore_test_mod,
+    });
+    const run_mesh_semantic_restore_test = b.addRunArtifact(mesh_semantic_restore_test);
     const mesh_semantics_test_step = b.step("test-mesh-semantics", "Run semantic face membership/debt tests");
     mesh_semantics_test_step.dependOn(&run_mesh_semantics_test.step);
+    mesh_semantics_test_step.dependOn(&run_mesh_semantic_restore_test.step);
+
+    // ── durable named-edge semantic paths — headless, no GPU ───────────────
+    const mesh_edge_semantics_impl_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_edge_semantics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_edge_semantics_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_edge_semantics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_edge_semantics_test_mod.addImport("mesh_edge_semantics", mesh_edge_semantics_impl_test_mod);
+    const mesh_edge_semantics_test = b.addTest(.{
+        .name = "mesh-edge-semantics-test",
+        .root_module = mesh_edge_semantics_test_mod,
+    });
+    const run_mesh_edge_semantics_test = b.addRunArtifact(mesh_edge_semantics_test);
+    const mesh_edge_semantics_test_step = b.step("test-mesh-edge-semantics", "Run durable named-edge semantic path tests");
+    mesh_edge_semantics_test_step.dependOn(&run_mesh_edge_semantics_test.step);
 
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
     const mesh_edit_impl_test_mod = b.createModule(.{
@@ -1482,10 +1710,27 @@ pub fn build(b: *std.Build) void {
         .root_module = indexed_edit_mesh_test_mod,
     });
     const run_indexed_edit_mesh_test = b.addRunArtifact(indexed_edit_mesh_test);
+    const character_topology_promotion_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/character_topology_promotion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const character_topology_promotion_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/character_topology_promotion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    character_topology_promotion_test_mod.addImport("character_topology_promotion", character_topology_promotion_mod);
+    const character_topology_promotion_test = b.addTest(.{
+        .name = "character-topology-promotion-test",
+        .root_module = character_topology_promotion_test_mod,
+    });
+    const run_character_topology_promotion_test = b.addRunArtifact(character_topology_promotion_test);
     const mesh_edit_test_step = b.step("test-mesh-edit", "Run the mesh-edit welding/selection unit tests");
     mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
     mesh_edit_test_step.dependOn(&run_mesh_edit_impl_test.step);
     mesh_edit_test_step.dependOn(&run_indexed_edit_mesh_test.step);
+    mesh_edit_test_step.dependOn(&run_character_topology_promotion_test.step);
 
     // ── mesh journal log (history ownership diagnostics + JSON) unit tests ─
     const mesh_journal_log_impl_test_mod = b.createModule(.{
@@ -1674,6 +1919,190 @@ pub fn build(b: *std.Build) void {
     const mesh_audit_test_step = b.step("test-mesh-audit", "Run penetrating/unreachable triangle fact tests");
     mesh_audit_test_step.dependOn(&run_mesh_audit_test.step);
 
+    // ── Authored-face recovery table (resident/saved/preview facts) ──────
+    const mesh_face_table_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_table.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_table_fixtures_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/fixtures/mesh_face_table_fixtures.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const mesh_face_table_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_table.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_table_test_mod.addImport("mesh_face_table", mesh_face_table_mod_for_tests);
+    mesh_face_table_test_mod.addImport("mesh_face_table_fixtures", mesh_face_table_fixtures_mod);
+    const mesh_face_table_test = b.addTest(.{
+        .name = "mesh-face-table-test",
+        .root_module = mesh_face_table_test_mod,
+    });
+    const run_mesh_face_table_test = b.addRunArtifact(mesh_face_table_test);
+    const mesh_face_table_saved_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_table_saved.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_table_saved_fixtures_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/fixtures/mesh_face_table_saved_fixtures.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const mesh_face_table_package_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_table_package.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_table_saved_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_table_saved.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_table_saved_test_mod.addImport("mesh_face_table_saved", mesh_face_table_saved_mod_for_tests);
+    mesh_face_table_saved_test_mod.addImport("mesh_face_table_saved_fixtures", mesh_face_table_saved_fixtures_mod);
+    const mesh_face_table_saved_test = b.addTest(.{
+        .name = "mesh-face-table-saved-test",
+        .root_module = mesh_face_table_saved_test_mod,
+    });
+    const run_mesh_face_table_saved_test = b.addRunArtifact(mesh_face_table_saved_test);
+    const mesh_face_field_candidate_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_field_candidate.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_field_candidate_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_field_candidate.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_field_candidate_test_mod.addImport("mesh_face_field_candidate", mesh_face_field_candidate_mod_for_tests);
+    const mesh_face_field_candidate_test = b.addTest(.{
+        .name = "mesh-face-field-candidate-test",
+        .root_module = mesh_face_field_candidate_test_mod,
+    });
+    const run_mesh_face_field_candidate_test = b.addRunArtifact(mesh_face_field_candidate_test);
+    const mesh_face_table_worker_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_table_worker.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_table_worker_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_table_worker.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_table_worker_test_mod.addImport("mesh_face_table_worker", mesh_face_table_worker_mod_for_tests);
+    mesh_face_table_worker_test_mod.addImport("mesh_face_table_saved_fixtures", mesh_face_table_saved_fixtures_mod);
+    const mesh_face_table_worker_test = b.addTest(.{
+        .name = "mesh-face-table-worker-test",
+        .root_module = mesh_face_table_worker_test_mod,
+    });
+    const run_mesh_face_table_worker_test = b.addRunArtifact(mesh_face_table_worker_test);
+    const mesh_face_table_package_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_table_package.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_table_package_test_mod.addImport("mesh_face_table_package", mesh_face_table_package_mod_for_tests);
+    mesh_face_table_package_test_mod.addImport("mesh_face_table_saved_fixtures", mesh_face_table_saved_fixtures_mod);
+    const mesh_face_table_package_test = b.addTest(.{
+        .name = "mesh-face-table-package-test",
+        .root_module = mesh_face_table_package_test_mod,
+    });
+    const run_mesh_face_table_package_test = b.addRunArtifact(mesh_face_table_package_test);
+    const mesh_face_diff_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_diff.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_diff_fixtures_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/fixtures/mesh_face_diff_fixtures.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mesh_face_diff_fixtures_mod.addImport("mesh_face_diff", mesh_face_diff_mod_for_tests);
+    const mesh_face_diff_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_diff.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_diff_test_mod.addImport("mesh_face_diff", mesh_face_diff_mod_for_tests);
+    mesh_face_diff_test_mod.addImport("mesh_face_diff_fixtures", mesh_face_diff_fixtures_mod);
+    const mesh_face_diff_test = b.addTest(.{
+        .name = "mesh-face-diff-test",
+        .root_module = mesh_face_diff_test_mod,
+    });
+    const run_mesh_face_diff_test = b.addRunArtifact(mesh_face_diff_test);
+    const mesh_face_restore_proof_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_face_restore_proof.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_face_restore_proof_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_face_restore_proof.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_face_restore_proof_test_mod.addImport("mesh_face_restore_proof", mesh_face_restore_proof_mod_for_tests);
+    mesh_face_restore_proof_test_mod.addImport("mesh_face_table_saved_fixtures", mesh_face_table_saved_fixtures_mod);
+    const mesh_face_restore_proof_test = b.addTest(.{
+        .name = "mesh-face-restore-proof-test",
+        .root_module = mesh_face_restore_proof_test_mod,
+    });
+    const run_mesh_face_restore_proof_test = b.addRunArtifact(mesh_face_restore_proof_test);
+    const model_source_recovery_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/model_source.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const model_source_recovery_test = b.addTest(.{
+        .name = "model-source-recovery-test",
+        .root_module = model_source_recovery_test_mod,
+    });
+    const run_model_source_recovery_test = b.addRunArtifact(model_source_recovery_test);
+    const historical_preview_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/historical_preview.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const historical_preview_test = b.addTest(.{
+        .name = "historical-preview-test",
+        .root_module = historical_preview_test_mod,
+    });
+    const run_historical_preview_test = b.addRunArtifact(historical_preview_test);
+    const historical_preview_test_step = b.step("test-historical-preview", "Run isolated historical preview lifecycle tests");
+    historical_preview_test_step.dependOn(&run_historical_preview_test.step);
+    const mesh_face_table_test_step = b.step("test-mesh-face-table", "Run authored-face recovery table tests");
+    mesh_face_table_test_step.dependOn(&run_mesh_face_table_test.step);
+    mesh_face_table_test_step.dependOn(&run_mesh_face_table_saved_test.step);
+    mesh_face_table_test_step.dependOn(&run_mesh_face_field_candidate_test.step);
+    mesh_face_table_test_step.dependOn(&run_mesh_face_table_worker_test.step);
+    mesh_face_table_test_step.dependOn(&run_mesh_face_table_package_test.step);
+    mesh_face_table_test_step.dependOn(&run_mesh_face_diff_test.step);
+    mesh_face_table_test_step.dependOn(&run_mesh_face_restore_proof_test.step);
+    mesh_face_table_test_step.dependOn(&run_model_source_recovery_test.step);
+    mesh_face_table_test_step.dependOn(&run_historical_preview_test.step);
+
     // ── Game pathing behavior tests (V5 capture, P4) ───────────────
     // Exercises framework/game/pathing.zig: routes found/blocked/
     // deterministic, flow + lane discipline (trio snap, junction apexes),
@@ -1824,11 +2253,31 @@ pub fn build(b: *std.Build) void {
     const run_world_streaming_test = b.addRunArtifact(world_streaming_test);
     const world_streaming_test_step = b.step("test-world-streaming", "Run world active-bubble streaming tests");
     world_streaming_test_step.dependOn(&run_world_streaming_test.step);
+    const world_loader_character_specimens_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader_character_specimens_module.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_loader_character_specimens_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_loader_character_specimens.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_loader_character_specimens_test_mod.addImport(
+        "world_loader_character_specimens",
+        world_loader_character_specimens_mod,
+    );
+    const world_loader_character_specimens_test = b.addTest(.{
+        .name = "world-loader-character-specimens-test",
+        .root_module = world_loader_character_specimens_test_mod,
+    });
+    const run_world_loader_character_specimens_test = b.addRunArtifact(world_loader_character_specimens_test);
     const world_loader_geometry_test_step = b.step("test-world-loader", "Run split world-loader geometry and map-revision tests");
     world_loader_geometry_test_step.dependOn(&run_world_loader_geometry_test.step);
     world_loader_geometry_test_step.dependOn(&run_world_loader_paint_revision_test.step);
     world_loader_geometry_test_step.dependOn(&run_terrain_grid_test.step);
     world_loader_geometry_test_step.dependOn(&run_world_streaming_test.step);
+    world_loader_geometry_test_step.dependOn(&run_world_loader_character_specimens_test.step);
 
     // ── Game camera behavior tests (V23, P4) ───────────────────────
     // Exercises framework/game/camera.zig: Orbit/Aim fidelity against
@@ -2097,23 +2546,302 @@ pub fn build(b: *std.Build) void {
     b.step("test-bones-loader", "Run the skeleton validator unit tests")
         .dependOn(&b.addRunArtifact(bones_loader_test).step);
 
-    // Applied-pose marker wire vocabulary (req_3538): fail-closed ids and the
-    // camera/model shared diagnostic colors. Rendering consumes this tiny pure
-    // module; the unit target pins the framework-side boundary.
-    const pose_markers_mod_t = b.createModule(.{
-        .root_source_file = b.path("framework/skeleton/pose_markers.zig"),
+    // Saved logical-vertex skin bindings remain inspectable at full f32
+    // precision; GPU palette rows are derived only at the upload boundary.
+    const skin_binding_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/skin_binding.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const skin_binding_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/skin_binding.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    skin_binding_test_mod.addImport("skin_binding", skin_binding_mod_t);
+    const skin_binding_test = b.addTest(.{
+        .name = "skin-binding-test",
+        .root_module = skin_binding_test_mod,
+    });
+    b.step("test-skin-binding", "Run saved logical-vertex skin binding tests")
+        .dependOn(&b.addRunArtifact(skin_binding_test).step);
+
+    // The offline catalog guard must use the same native reader/writer as the
+    // editor host door. This target proves old valid envelopes re-encode through
+    // that codec as truthful v5 without inventing logical topology.
+    const model_blob_edge_semantics_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_edge_semantics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const model_blob_meshdoc_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/meshdoc_format.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_blob_meshdoc_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
+    const model_blob_mesh_edit_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    // mesh_edit's model_source dependency names this relative import. Route it
+    // to the exact module instance used by the RJMD guard so Zig never compiles
+    // the production format owner twice in one executable.
+    model_blob_mesh_edit_mod.addImport("meshdoc_format.zig", model_blob_meshdoc_mod);
+    model_blob_mesh_edit_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
+    const model_blob_codec_mod = b.createModule(.{
+        .root_source_file = b.path("framework/tools/model_blob_codec.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_blob_codec_mod.addImport("meshdoc", model_blob_meshdoc_mod);
+    model_blob_codec_mod.addImport("mesh_edit", model_blob_mesh_edit_mod);
+    model_blob_codec_mod.addImport("skin_binding", skin_binding_mod_t);
+    const model_blob_codec_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/model_blob_codec.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_blob_codec_test_mod.addImport("model_blob_codec", model_blob_codec_mod);
+    model_blob_codec_test_mod.addImport("meshdoc", model_blob_meshdoc_mod);
+    model_blob_codec_test_mod.addImport("mesh_edit", model_blob_mesh_edit_mod);
+    model_blob_codec_test_mod.addImport("skin_binding", skin_binding_mod_t);
+    const model_blob_codec_test = b.addTest(.{
+        .name = "model-blob-codec-test",
+        .root_module = model_blob_codec_test_mod,
+    });
+    b.step("test-model-blob-codec", "Run native model catalog guard codec tests")
+        .dependOn(&b.addRunArtifact(model_blob_codec_test).step);
+
+    // Logical-topology body/deformable/rigid binding. This target pins the
+    // 96-cell voxel solve, semantic cores, welded transitions, object-local
+    // adjacency, and exact rigid rows without position-weld discovery.
+    const autoweights_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/autoweights.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const autoweights_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/autoweights.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    autoweights_test_mod.addImport("autoweights", autoweights_mod_t);
+    const autoweights_test = b.addTest(.{
+        .name = "autoweights-test",
+        .root_module = autoweights_test_mod,
+    });
+    b.step("test-autoweights", "Run logical-topology automatic skin-weight tests")
+        .dependOn(&b.addRunArtifact(autoweights_test).step);
+
+    // Read-only logical-weight summaries and model-X mirror diagnostics remain
+    // disjoint from the resident rig session and never repair authoring data.
+    const rig_weight_diagnostics_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/rig_weight_diagnostics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const rig_weight_diagnostics_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/rig_weight_diagnostics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    rig_weight_diagnostics_test_mod.addImport("rig_weight_diagnostics", rig_weight_diagnostics_mod_t);
+    const rig_weight_diagnostics_test = b.addTest(.{
+        .name = "rig-weight-diagnostics-test",
+        .root_module = rig_weight_diagnostics_test_mod,
+    });
+    b.step("test-rig-weight-diagnostics", "Run logical skin-weight diagnostic tests")
+        .dependOn(&b.addRunArtifact(rig_weight_diagnostics_test).step);
+
+    // Read-only deformation quality facts consume the exact logical f32 rows
+    // and already-evaluated LBS matrices, without owning the resident session.
+    const rig_bend_diagnostics_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/rig_bend_diagnostics_module.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const rig_bend_diagnostics_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/rig_bend_diagnostics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    rig_bend_diagnostics_test_mod.addImport("rig_bend_diagnostics", rig_bend_diagnostics_mod_t);
+    const rig_bend_diagnostics_test = b.addTest(.{
+        .name = "rig-bend-diagnostics-test",
+        .root_module = rig_bend_diagnostics_test_mod,
+    });
+    b.step("test-rig-bend-diagnostics", "Run logical LBS bend diagnostic tests")
+        .dependOn(&b.addRunArtifact(rig_bend_diagnostics_test).step);
+
+    // Hierarchical local-quaternion FK, constraints, and inverse-bind output.
+    const rig_pose_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/rig_pose.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const rig_pose_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/rig_pose.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    rig_pose_test_mod.addImport("rig_pose", rig_pose_mod_t);
+    const rig_pose_test = b.addTest(.{
+        .name = "rig-pose-test",
+        .root_module = rig_pose_test_mod,
+    });
+    b.step("test-rig-pose", "Run hierarchical character rig pose tests")
+        .dependOn(&b.addRunArtifact(rig_pose_test).step);
+
+    const humanoid_fit_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/humanoid_fit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const rig_fit_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/rig_fit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    rig_fit_test_mod.addImport("humanoid_fit", humanoid_fit_mod_t);
+    const rig_fit_test = b.addTest(.{
+        .name = "rig-fit-test",
+        .root_module = rig_fit_test_mod,
+    });
+    b.step("test-rig-fit", "Run semantic-boundary humanoid fitting tests")
+        .dependOn(&b.addRunArtifact(rig_fit_test).step);
+
+    // Strict body-connectivity stays topology-authored, while diagnostics expose
+    // the exact detached lowered faces/groups for an explicit editor repair.
+    const character_topology_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/character_topology_module.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const character_topology_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/character_topology.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    character_topology_test_mod.addImport("character_topology", character_topology_mod_t);
+    const character_topology_test = b.addTest(.{
+        .name = "character-topology-test",
+        .root_module = character_topology_test_mod,
+    });
+    b.step("test-character-topology", "Run strict character topology diagnostic tests")
+        .dependOn(&b.addRunArtifact(character_topology_test).step);
+
+    // Runtime character construction is a strict saved-artifact boundary:
+    // draft/stale rigs are rejected, range IDs come from RJMD, and no weight
+    // solver is reachable from the loader.
+    const character_assets_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/character_assets_module.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const character_assets_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/character_assets.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    character_assets_test_mod.addImport("character_assets", character_assets_mod_t);
+    const character_assets_test = b.addTest(.{
+        .name = "character-assets-test",
+        .root_module = character_assets_test_mod,
+    });
+    const player_assets_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/player_assets_module.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const player_assets_test = b.addTest(.{
+        .name = "player-assets-test",
+        .root_module = player_assets_test_mod,
+    });
+    const character_assets_test_step = b.step("test-character-assets", "Run strict saved-character runtime loader tests");
+    character_assets_test_step.dependOn(&b.addRunArtifact(character_assets_test).step);
+    character_assets_test_step.dependOn(&b.addRunArtifact(player_assets_test).step);
+
+    // Saved stride-16 LBS rows yield a separate static bind specimen without
+    // carrying joints, weights, or a palette into the diagnostic render node.
+    const character_specimen_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/character_specimen_module.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const pose_markers_test_mod = b.createModule(.{
-        .root_source_file = b.path("framework/testing/unit/pose_markers.zig"),
+    const character_specimen_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/character_specimen.zig"),
         .target = target,
         .optimize = optimize,
     });
-    pose_markers_test_mod.addImport("pose_markers", pose_markers_mod_t);
-    const pose_markers_test = b.addTest(.{ .name = "pose-markers-test", .root_module = pose_markers_test_mod });
-    b.step("test-pose-markers", "Run applied-pose marker contract tests")
-        .dependOn(&b.addRunArtifact(pose_markers_test).step);
+    character_specimen_test_mod.addImport("character_specimen", character_specimen_mod_t);
+    const character_specimen_test = b.addTest(.{
+        .name = "character-specimen-test",
+        .root_module = character_specimen_test_mod,
+    });
+    b.step("test-character-specimen", "Run static bind-character specimen extraction tests")
+        .dependOn(&b.addRunArtifact(character_specimen_test).step);
+
+    // Mounted NPC instances use the same strict saved CharacterAsset loader,
+    // with explicit transforms, revision ownership, and independent FK state.
+    const npc_character_session_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/npc_character_session_module.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const npc_character_session_test = b.addTest(.{
+        .name = "npc-character-session-test",
+        .root_module = npc_character_session_test_mod,
+    });
+    b.step("test-npc-character-session", "Run strict mounted NPC character session tests")
+        .dependOn(&b.addRunArtifact(npc_character_session_test).step);
+
+    // One revisioned editor character-rig door. The module root stays at
+    // framework/ because the deep boundary consumes both resident GPU
+    // snapshots and skeleton-side fitting/binding services.
+    const character_rig_session_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/character_rig_session_module.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const character_rig_session_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/character_rig_session.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    character_rig_session_test_mod.addImport("character_rig_session", character_rig_session_mod_t);
+    const character_rig_session_test = b.addTest(.{
+        .name = "character-rig-session-test",
+        .root_module = character_rig_session_test_mod,
+    });
+    b.step("test-character-rig-session", "Run revisioned character rig session tests")
+        .dependOn(&b.addRunArtifact(character_rig_session_test).step);
 
     const pose_stream_mod_t = b.createModule(.{
         .root_source_file = b.path("framework/skeleton/pose_stream.zig"),
@@ -2129,6 +2857,86 @@ pub fn build(b: *std.Build) void {
     const pose_stream_test = b.addTest(.{ .name = "pose-stream-test", .root_module = pose_stream_test_mod });
     b.step("test-pose-stream", "Run render-rate live-pose interpolation tests")
         .dependOn(&b.addRunArtifact(pose_stream_test).step);
+
+    const humanoid_clips_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/humanoid_clips.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const humanoid_clips_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/humanoid_clips.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    humanoid_clips_test_mod.addImport("humanoid_clips", humanoid_clips_mod_t);
+    const humanoid_clips_test = b.addTest(.{ .name = "humanoid-clips-test", .root_module = humanoid_clips_test_mod });
+    b.step("test-humanoid-clips", "Run canonical local-quaternion character clip tests")
+        .dependOn(&b.addRunArtifact(humanoid_clips_test).step);
+
+    const player_character_pose_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/player_character_pose_module.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const player_character_pose_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/player_character_pose.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    player_character_pose_test_mod.addImport("player_character_pose", player_character_pose_mod_t);
+    const player_character_pose_test = b.addTest(.{ .name = "player-character-pose-test", .root_module = player_character_pose_test_mod });
+    b.step("test-player-character-pose", "Run mounted character pose ownership and clip fallback tests")
+        .dependOn(&b.addRunArtifact(player_character_pose_test).step);
+
+    const humanoid_retarget_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/humanoid_retarget.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const retarget_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/retarget.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    retarget_test_mod.addImport("humanoid_retarget", humanoid_retarget_mod_t);
+    const retarget_test = b.addTest(.{
+        .name = "retarget-test",
+        .root_module = retarget_test_mod,
+    });
+    b.step("test-retarget", "Run calibrated source-to-target retarget tests")
+        .dependOn(&b.addRunArtifact(retarget_test).step);
+
+    // One revisioned capture door: immutable camera leases, strict command
+    // revisions, calibration, same-frame promotion, and freeze/resume pinning.
+    const capture_session_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/capture_session.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const capture_session_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/capture_session.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    capture_session_test_mod.addImport("capture_session", capture_session_mod_t);
+    const capture_session_test = b.addTest(.{
+        .name = "capture-session-test",
+        .root_module = capture_session_test_mod,
+    });
+    b.step("test-capture-session", "Run native character capture session tests")
+        .dependOn(&b.addRunArtifact(capture_session_test).step);
+
+    // Replacement -> cutover -> severance: keep the deleted part-derived
+    // character path, runtime solver switch, and old staging doors absent from
+    // active editor/runtime/framework implementation sources.
+    const character_severance_check = b.addSystemCommand(&.{
+        "bash",
+        "tools/check-character-severance",
+    });
+    b.step("test-character-severance", "Reject retired character files, symbols, and staging doors")
+        .dependOn(&character_severance_check.step);
 
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
@@ -2213,6 +3021,69 @@ pub fn build(b: *std.Build) void {
     b.step("test-dev-reload-policy", "Run development reload policy tests")
         .dependOn(&b.addRunArtifact(dev_reload_policy_test).step);
 
+    const dev_module_abi_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/dev_module_abi.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const dev_module_loader_mod = b.createModule(.{
+        .root_source_file = b.path("framework/dev_modules/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    dev_module_loader_mod.addImport("dev_module_abi", dev_module_abi_mod);
+
+    const valid_scene3d_fixture_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/fixtures/dev_modules/valid_scene3d.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    valid_scene3d_fixture_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    const valid_scene3d_fixture = b.addLibrary(.{
+        .name = "rjit-test-valid-scene3d",
+        .root_module = valid_scene3d_fixture_mod,
+        .linkage = .dynamic,
+    });
+
+    const wrong_abi_scene3d_fixture_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/fixtures/dev_modules/wrong_abi_scene3d.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    wrong_abi_scene3d_fixture_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    const wrong_abi_scene3d_fixture = b.addLibrary(.{
+        .name = "rjit-test-wrong-abi-scene3d",
+        .root_module = wrong_abi_scene3d_fixture_mod,
+        .linkage = .dynamic,
+    });
+
+    const missing_symbol_fixture_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/fixtures/dev_modules/missing_symbol.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const missing_symbol_fixture = b.addLibrary(.{
+        .name = "rjit-test-missing-symbol",
+        .root_module = missing_symbol_fixture_mod,
+        .linkage = .dynamic,
+    });
+
+    const dev_module_fixture_paths = b.addOptions();
+    dev_module_fixture_paths.addOptionPath("valid_scene3d", valid_scene3d_fixture.getEmittedBin());
+    dev_module_fixture_paths.addOptionPath("wrong_abi_scene3d", wrong_abi_scene3d_fixture.getEmittedBin());
+    dev_module_fixture_paths.addOptionPath("missing_symbol", missing_symbol_fixture.getEmittedBin());
+    dev_module_abi_test_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    dev_module_abi_test_mod.addImport("dev_module_loader", dev_module_loader_mod);
+    dev_module_abi_test_mod.addOptions("dev_module_fixture_paths", dev_module_fixture_paths);
+    dev_module_abi_test_mod.link_libc = true;
+    const dev_module_abi_test = b.addTest(.{
+        .name = "dev-module-abi-test",
+        .root_module = dev_module_abi_test_mod,
+    });
+    b.step("test-dev-module-abi", "Run native development module ABI and loader tests")
+        .dependOn(&b.addRunArtifact(dev_module_abi_test).step);
+
     // Assistant task ownership and cancellation. Root at framework/ so the
     // assistant modules' sibling imports remain in one module.
     const assistant_io_test_mod = b.createModule(.{
@@ -2260,8 +3131,97 @@ pub fn build(b: *std.Build) void {
     lore_snapshot_test.root_module.addRPath(b.path("deps/lore/lib"));
     const run_lore_snapshot_test = b.addRunArtifact(lore_snapshot_test);
     run_lore_snapshot_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
-    b.step("test-lore-snapshot", "Run native resident Lore snapshot boundary tests")
-        .dependOn(&run_lore_snapshot_test.step);
+    const lore_status_monitor_impl_mod = b.createModule(.{
+        .root_source_file = b.path("framework/vcs/status_monitor.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const lore_status_monitor_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/status_monitor.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    lore_status_monitor_test_mod.addImport("status_monitor", lore_status_monitor_impl_mod);
+    const lore_status_monitor_test = b.addTest(.{
+        .name = "lore-status-monitor-test",
+        .root_module = lore_status_monitor_test_mod,
+    });
+    const run_lore_status_monitor_test = b.addRunArtifact(lore_status_monitor_test);
+    const lore_snapshot_test_step = b.step("test-lore-snapshot", "Run native resident Lore snapshot boundary tests");
+    lore_snapshot_test_step.dependOn(&run_lore_snapshot_test.step);
+    lore_snapshot_test_step.dependOn(&run_lore_status_monitor_test.step);
+    const recovery_public_boundary_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_recovery_public_boundary.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const recovery_public_boundary_test = b.addTest(.{
+        .name = "recovery-public-boundary-test",
+        .root_module = recovery_public_boundary_test_mod,
+    });
+    const run_recovery_public_boundary_test = b.addRunArtifact(recovery_public_boundary_test);
+    b.step("test-recovery-public-boundary", "Run Recovery public-door and fallback structural tests")
+        .dependOn(&run_recovery_public_boundary_test.step);
+    lore_snapshot_test_step.dependOn(&run_recovery_public_boundary_test.step);
+
+    // Guarded face-field edit and historical Restore coordinators compile in
+    // the same modular-core shape used by a replaceable Scene3D owner. Tests
+    // are contract-only: no live resident, package, or Lore mutation occurs.
+    const model_recovery_test_options = b.addOptions();
+    model_recovery_test_options.addOption(bool, "dev_native_modules", true);
+    model_recovery_test_options.addOption(bool, "dev_scene3d_module", false);
+    model_recovery_test_options.addOption(bool, "dev_game_module", false);
+
+    const model_field_edit_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_model_field_edit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_field_edit_test_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    model_field_edit_test_mod.addImport("wgpu", wgpu_mod);
+    model_field_edit_test_mod.addOptions("build_options", model_recovery_test_options);
+    const model_field_edit_test = b.addTest(.{
+        .name = "model-field-edit-test",
+        .root_module = model_field_edit_test_mod,
+    });
+    model_field_edit_test.root_module.addIncludePath(b.path("deps/lore/include"));
+    model_field_edit_test.root_module.addLibraryPath(b.path("deps/lore/lib"));
+    model_field_edit_test.root_module.linkSystemLibrary("lore", .{});
+    model_field_edit_test.root_module.addRPath(b.path("deps/lore/lib"));
+    const run_model_field_edit_test = b.addRunArtifact(model_field_edit_test);
+    run_model_field_edit_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
+    const model_field_edit_test_step = b.step("test-model-field-edit", "Run guarded face-field coordinator contract tests");
+    model_field_edit_test_step.dependOn(&run_model_field_edit_test.step);
+
+    const model_restore_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_model_restore.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_restore_test_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    model_restore_test_mod.addImport("wgpu", wgpu_mod);
+    model_restore_test_mod.addOptions("build_options", model_recovery_test_options);
+    const model_restore_test = b.addTest(.{
+        .name = "model-restore-test",
+        .root_module = model_restore_test_mod,
+    });
+    model_restore_test.root_module.addIncludePath(b.path("deps/lore/include"));
+    model_restore_test.root_module.addLibraryPath(b.path("deps/lore/lib"));
+    model_restore_test.root_module.linkSystemLibrary("lore", .{});
+    model_restore_test.root_module.addRPath(b.path("deps/lore/lib"));
+    const run_model_restore_test = b.addRunArtifact(model_restore_test);
+    run_model_restore_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/lore/lib"));
+    const model_restore_test_step = b.step("test-model-restore", "Run historical Restore coordinator contract tests");
+    model_restore_test_step.dependOn(&run_model_restore_test.step);
+
+    // The broad native recovery gate includes both mutation coordinators so a
+    // passing Lore boundary build can never omit their ABI/import closure.
+    lore_snapshot_test_step.dependOn(&run_model_field_edit_test.step);
+    lore_snapshot_test_step.dependOn(&run_model_restore_test.step);
 
     const lore_snapshot_live_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing_lore_snapshot_live.zig"),

@@ -19,11 +19,19 @@ const effect_assemble = @import("effect_assemble.zig");
 const compile_progress = @import("compile_progress.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
+const gizmo_axis_map = @import("gizmo_axis_map.zig");
 const effects_ctx = @import("effects_ctx.zig");
 const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
+const meshdoc_format = @import("meshdoc_format.zig");
 const mesh_audit = @import("mesh_audit.zig");
+const mesh_face_table = @import("mesh_face_table.zig");
+const mesh_face_diff = @import("mesh_face_diff.zig");
+const mesh_face_field_candidate = @import("mesh_face_field_candidate.zig");
+const mesh_face_table_package = @import("mesh_face_table_package.zig");
+const mesh_face_table_worker = @import("mesh_face_table_worker.zig");
+const historical_preview = @import("historical_preview.zig");
 const mesh_edit = @import("mesh_edit.zig");
 const mesh_semantics = @import("mesh_semantics.zig");
 const mesh_semantic_restore = @import("mesh_semantic_restore.zig");
@@ -31,6 +39,9 @@ const mesh_edge_semantics = @import("mesh_edge_semantics.zig");
 const indexed_edit_mesh = @import("indexed_edit_mesh.zig");
 const character_topology_promotion = @import("character_topology_promotion.zig");
 const mesh_journal_log = @import("mesh_journal_log.zig");
+const model_write_lease = @import("model_write_lease.zig");
+const model_adoption_receipt = @import("model_adoption_receipt.zig");
+const model_adoption_finalize = @import("model_adoption_finalize.zig");
 const path_array = @import("path_array.zig");
 const path_plane = @import("path_plane.zig");
 const stage_scale = @import("stage_scale.zig");
@@ -456,6 +467,12 @@ const Orbit = struct {
     locked: bool = false,
 };
 var g_orbit: Orbit = .{};
+var g_historical_preview = historical_preview.Manager.init(std.heap.c_allocator);
+var g_historical_preview_saved_orbit: ?Orbit = null;
+
+fn residentMutationAllowed(domain: historical_preview.ResidentMutationDomain) bool {
+    return g_historical_preview.allowsResidentMutation(domain);
+}
 
 /// Set the mesh editor's camera lock (req_2893 — `__model_orbit_lock`).
 pub fn orbitSetLocked(on: bool) void {
@@ -598,6 +615,9 @@ var g_edit_count: u32 = 0;
 /// Host-internal topology generation under `g_edit_key`. React declares the stable
 /// document handle once; topology replacement never leaks a renamed key again.
 var g_edit_generation: u32 = 0;
+/// Scene3D-owned resident analysis lane. Heavy facts/audit/diff never run in
+/// a V8 callback; this worker retains one resident generation snapshot.
+var g_face_table_worker: mesh_face_table_worker.Worker = .{};
 // A quality slider result remains reversible against model_source's retained baseline
 // while the user scrubs, but Save must persist the mesh they chose and can actually
 // edit. When armed, the durable document snapshot reads the displayed projection;
@@ -799,6 +819,7 @@ const EMPTY_SEMANTIC_TABLE_JSON = "{\"version\":1,\"regions\":[]}";
 /// Multi-object ownership remains strict. The pure planner accepts multipart
 /// requests only when an exact existing range table owns every resident face.
 pub fn characterRigPrepareOpenTopology(expected_range_object_count: usize) CharacterRigOpenPreparation {
+    if (!residentMutationAllowed(.durable_channels)) return .{};
     const source_vertex_count = model_source.count();
     if (source_vertex_count == 0 or source_vertex_count % 3 != 0) return .{};
     // A quality projection or hidden-part projection cannot author the durable
@@ -937,6 +958,7 @@ fn clearActiveEditGeometry() void {
 }
 
 fn clearActiveEditMesh() void {
+    g_face_table_worker.invalidateIdentity();
     clearActiveEditGeometry();
     if (g_edit_key) |k| std.heap.c_allocator.free(k);
     g_edit_key = null;
@@ -946,6 +968,7 @@ fn clearActiveEditMesh() void {
 }
 
 inline fn bumpEditGeneration() void {
+    g_face_table_worker.invalidateIdentity();
     g_edit_generation = stable_geometry_slot.nextGeneration(g_edit_generation);
 }
 
@@ -1045,6 +1068,7 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
 }
 
 fn applyMeshMutation(m: mesh_edit.Mutation) bool {
+    if (!residentMutationAllowed(.geometry_journal)) return false;
     if (!m.changed) return false;
     if (!copyPaintPositionsToEditVerts(m.first_face, m.last_face)) return false;
     var mirror_triangulation_changed = false;
@@ -1077,6 +1101,7 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
 /// stashHostMesh carry the paint mapping. Keyed by the intern key so the draw can find
 /// it. Called by the load door before stashing.
 pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+    if (!residentMutationAllowed(.durable_channels)) return;
     // Manual retopology bands belong to one live document topology. A genuine
     // target load must not let an equal face count make another model inherit
     // stale teaching colours; same-document replaces carry them explicitly.
@@ -1125,6 +1150,7 @@ fn setPaintTargetForGeneration(verts: []f32, count: u32) bool {
 /// the JS door. A structural edit later retains the displayed mesh as the new source and
 /// clears this nomination through replaceActiveEditMesh.
 pub fn setQualityPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+    if (!residentMutationAllowed(.durable_channels)) return;
     _ = key;
     if (!setPaintTargetForGeneration(verts, count)) setPaintTarget("model-quality", verts, count);
     g_save_displayed_projection = g_edit_verts != null and g_edit_count == count;
@@ -1158,6 +1184,7 @@ pub fn paintAtlasImportDimensionsFit(width: u32, height: u32) bool {
 /// quality remesh, this drops the previous document's focused outliner range so it
 /// cannot filter the incoming mesh (req_2953).
 pub fn meshEditBeginModel() void {
+    if (!residentMutationAllowed(.durable_channels)) return;
     g_paint_layout_stale = false;
     g_save_displayed_projection = false;
     clearHiddenGroups();
@@ -1409,6 +1436,7 @@ fn applyExactSourceFaceColors(colors: []const u8, face_count: u32) bool {
 }
 
 fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
+    if (!residentMutationAllowed(.geometry_journal)) return false;
     const need = @as(usize, count) * 8;
     // count == 0 is a LEGITIMATE state (req_2806: deleting the last part empties the
     // model — the old refuse-to-empty guard was never asked for): setPaintTarget
@@ -1491,6 +1519,7 @@ fn replaceActiveEditMeshPreservingAtlas(
     groups: ?[]const u32,
     colors: []const u8,
 ) bool {
+    if (!residentMutationAllowed(.geometry_journal)) return false;
     const need = @as(usize, count) * 8;
     if (count < 3 or count % 3 != 0 or new_verts.len < need) return false;
     if (colors.len != @as(usize, count / 3) * 4 or model_paint.atlas() == null) return false;
@@ -1591,6 +1620,7 @@ fn semanticMintIntentClear() void {
 /// the table only after it succeeds; failure drops the intent without mutating
 /// the document, and the operation's journal snapshot remains truly pre-op.
 pub fn meshSemanticExtrudeIntentSet(cap_region: u32, wall_region: u32, instance: u32, table_json: []const u8) bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (cap_region == model_source.NO_SEMANTIC_ID or wall_region == model_source.NO_SEMANTIC_ID or
         table_json.len < 2 or table_json.len > model_source.MAX_SEMANTIC_TABLE_BYTES or
         table_json[0] != '{' or table_json[table_json.len - 1] != '}') return false;
@@ -5549,6 +5579,185 @@ pub fn modelRecoverySnapshot(allocator: std.mem.Allocator) ?model_source.MeshDoc
     return snapshot;
 }
 
+pub const CurrentDocumentEncodeError = std.mem.Allocator.Error || error{
+    NoResidentDocument,
+    ObjectIdsUnpublished,
+    WrongModel,
+    InvalidDocument,
+};
+
+pub const RecoveryCaptureDegradation = struct {
+    channel: enum { object_ids, range_membership, face_groups, materials, semantic_membership, semantic_table, logical_topology },
+    action_bits: u32,
+    reason_bits: u64,
+    affected_count: u64,
+};
+
+pub const RecoveryCaptureArtifact = struct {
+    bytes: []u8,
+    rjmd_version: u32,
+    generation: u64,
+    triangle_count: u64,
+    authored_face_count: u64,
+    part_count: u32,
+    logical_vertex_count: u32,
+    sha256: [32]u8,
+    object_namespace_hash: [32]u8,
+    identity_quality: u32,
+    degradations: [7]RecoveryCaptureDegradation = undefined,
+    degradation_count: u32 = 0,
+
+    pub fn deinit(self: *RecoveryCaptureArtifact, allocator: std.mem.Allocator) void {
+        allocator.free(self.bytes);
+        self.* = undefined;
+    }
+};
+
+fn recoveryCaptureAppend(
+    artifact: *RecoveryCaptureArtifact,
+    degradation: RecoveryCaptureDegradation,
+) void {
+    if (artifact.degradation_count >= artifact.degradations.len) return;
+    artifact.degradations[artifact.degradation_count] = degradation;
+    artifact.degradation_count += 1;
+    artifact.identity_quality = 1;
+}
+
+/// Owner-thread panic encoding for the ABI capture lane. It never reads package
+/// disk and never adopts the result. Invalid range/group identity is repaired
+/// only in the owned snapshot copy and reported through typed provenance.
+pub fn captureRecoveryArtifactAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+) !RecoveryCaptureArtifact {
+    var document = modelRecoverySnapshot(allocator) orelse return error.NoResidentDocument;
+    defer document.deinit(allocator);
+    const triangle_count = document.verts.len / 24;
+    if (triangle_count == 0) return error.NoResidentDocument;
+
+    var ranges_storage: [2]u32 = .{ 0, 1 };
+    var ranges: []const u32 = if (model_source.partRanges()) |rows| rows else &ranges_storage;
+    const range_repaired = !meshdoc_format.rangesValid(ranges, @intCast(ranges.len / 2)) or
+        !meshdoc_format.rangesOwnEveryFace(ranges, document.groups, @intCast(ranges.len / 2));
+    if (range_repaired) {
+        const fallback_groups = try allocator.alloc(u32, triangle_count);
+        @memset(fallback_groups, 0);
+        if (document.groups) |prior| allocator.free(prior);
+        document.groups = fallback_groups;
+        ranges = &ranges_storage;
+    }
+
+    var object_ids = std.ArrayList([]const u8).empty;
+    defer {
+        for (object_ids.items) |id| allocator.free(id);
+        object_ids.deinit(allocator);
+    }
+    var ids_exact = false;
+    if (!range_repaired) {
+        if (model_source.partObjectModelId()) |published_model| {
+            if (std.mem.eql(u8, published_model, model_id)) {
+                if (model_source.partObjectIdsJson()) |json| {
+                    var parsed = std.json.parseFromSlice([]const []const u8, allocator, json, .{}) catch null;
+                    if (parsed) |*value| {
+                        defer value.deinit();
+                        if (value.value.len == ranges.len / 2 and value.value.len > 0) {
+                            ids_exact = true;
+                            for (value.value) |id| {
+                                if (id.len == 0) {
+                                    ids_exact = false;
+                                    break;
+                                }
+                                try object_ids.append(allocator, try allocator.dupe(u8, id));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (!ids_exact) {
+        for (object_ids.items) |id| allocator.free(id);
+        object_ids.clearRetainingCapacity();
+        for (0..ranges.len / 2) |rank| {
+            var digest: [32]u8 = undefined;
+            std.crypto.hash.sha2.Sha256.hash(model_id, &digest, .{});
+            const hex = std.fmt.bytesToHex(digest, .lower);
+            try object_ids.append(allocator, try std.fmt.allocPrint(allocator, "@recovery/{s}/{d}", .{ hex[0..16], rank }));
+        }
+    }
+
+    const bytes = try meshdoc_format.encodeCurrentSnapshotWithRangeObjectIdsAlloc(
+        allocator,
+        &document,
+        ranges,
+        object_ids.items,
+    );
+    var artifact = RecoveryCaptureArtifact{
+        .bytes = bytes,
+        .rjmd_version = meshdoc_format.VERSION_LOGICAL_TOPOLOGY,
+        .generation = g_edit_generation,
+        .triangle_count = triangle_count,
+        .authored_face_count = meshdoc_format.authoredFaceCount(triangle_count, document.groups),
+        .part_count = @intCast(ranges.len / 2),
+        .logical_vertex_count = document.logical_vertex_count,
+        .sha256 = undefined,
+        .object_namespace_hash = undefined,
+        .identity_quality = 0,
+    };
+    std.crypto.hash.sha2.Sha256.hash(bytes, &artifact.sha256, .{});
+    artifact.object_namespace_hash = meshdoc_format.objectNamespaceDigest(model_id, object_ids.items, ranges);
+    if (range_repaired) recoveryCaptureAppend(&artifact, .{
+        .channel = .range_membership,
+        .action_bits = 1 << 1,
+        .reason_bits = 1 << 1,
+        .affected_count = triangle_count,
+    });
+    if (!ids_exact) recoveryCaptureAppend(&artifact, .{
+        .channel = .object_ids,
+        .action_bits = 1 << 0,
+        .reason_bits = 1 << 0,
+        .affected_count = @intCast(ranges.len / 2),
+    });
+    return artifact;
+}
+
+/// Encode the strict current resident as canonical RJMD v5 with its exact stable
+/// range/object namespace. This is the byte authority used by restore preimage,
+/// post-adopt verification, and package plane comparison.
+pub fn modelEncodeCurrentDocumentAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+) CurrentDocumentEncodeError![]u8 {
+    if (model_id.len == 0 or !modelSessionResident()) return error.NoResidentDocument;
+    const published_model = model_source.partObjectModelId() orelse return error.ObjectIdsUnpublished;
+    if (!std.mem.eql(u8, published_model, model_id)) return error.WrongModel;
+    const object_ids_json = model_source.partObjectIdsJson() orelse return error.ObjectIdsUnpublished;
+    const ranges = model_source.partRanges() orelse return error.ObjectIdsUnpublished;
+    var parsed_ids = std.json.parseFromSlice([]const []const u8, allocator, object_ids_json, .{}) catch
+        return error.ObjectIdsUnpublished;
+    defer parsed_ids.deinit();
+    if (parsed_ids.value.len == 0 or parsed_ids.value.len * 2 != ranges.len)
+        return error.ObjectIdsUnpublished;
+
+    var document = modelDocumentSnapshot(allocator) orelse return error.InvalidDocument;
+    defer document.deinit(allocator);
+    const range_count: u32 = @intCast(parsed_ids.value.len);
+    if (!meshdoc_format.rangesValid(ranges, range_count) or
+        !meshdoc_format.rangesOwnEveryFace(ranges, document.groups, range_count))
+    {
+        return error.InvalidDocument;
+    }
+    return meshdoc_format.encodeCurrentSnapshotWithRangeObjectIdsAlloc(
+        allocator,
+        &document,
+        ranges,
+        parsed_ids.value,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.InvalidDocument,
+    };
+}
+
 /// Paint-space twin used by painted.blob so saving with an eye closed cannot turn
 /// editor visibility into a destructive runtime export.
 pub fn paintedDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
@@ -5559,6 +5768,7 @@ pub fn paintedDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshD
 /// out of the live mesh into a host stash (geometry never crosses the bridge); showing
 /// re-appends them with their original groups. Returns whether the mesh changed.
 pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool, journal: bool) bool {
+    if (!residentMutationAllowed(.visibility)) return false;
     if (hidden and !model_paint.hasTarget()) return false;
     var snap = if (journal) journalSnapshotCurrent(if (hidden) "hide part" else "show part") else null;
     // Hide/show removes or restores whole stable groups, so both the pixels and the
@@ -5889,7 +6099,24 @@ const JournalAtlas = struct {
     w: u32,
     h: u32,
 };
+const JournalSelection = struct {
+    mode: mesh_edit.Mode = .none,
+    vertex_ids: []u32 = &.{},
+    edge_pairs: []mesh_edit.Edge = &.{},
+    face_mask: []bool = &.{},
+
+    fn deinit(self: *JournalSelection) void {
+        if (self.vertex_ids.len > 0) jalloc.free(self.vertex_ids);
+        if (self.edge_pairs.len > 0) jalloc.free(self.edge_pairs);
+        if (self.face_mask.len > 0) jalloc.free(self.face_mask);
+        self.* = .{};
+    }
+};
 const JournalEntry = struct {
+    generation: u32,
+    /// Durable source rows retain imported/historical normals and UVs.  The
+    /// displayed rows below carry paint-atlas UVs and are not byte-equivalent.
+    source_verts: []f32,
     verts: []f32,
     count: u32,
     groups: ?[]u32,
@@ -5900,6 +6127,10 @@ const JournalEntry = struct {
     logical_vertex_count: u32,
     semantic_table_json: ?[]u8,
     part_ranges: ?[]u32,
+    part_object_ids_json: ?[]u8,
+    part_object_model_id: ?[]u8,
+    /// Parsed/owned alongside JSON so install never parses after mutation.
+    part_object_ids: ?[][]u8,
     colors: ?[]u8,
     hidden: []JournalHidden,
     atlas: ?JournalAtlas,
@@ -5911,9 +6142,14 @@ const JournalEntry = struct {
     paint_layout_stale: bool,
     paint_layout_revision: u64,
     note: ?[]u8,
+    selection: JournalSelection,
     label: []const u8, // static string — the op that FOLLOWED this snapshot
     action_id: u32 = 0,
     action_kind: ?mesh_journal_log.ActionKind = null,
+    /// Nonzero only while a mutation is in flight.  Persisted undo/redo rows
+    /// never own a live lease receipt.
+    mutation_lease_receipt: u64 = 0,
+    mutation_lease_owned: bool = false,
 };
 
 fn freeJournalHidden(hidden: JournalHidden) void {
@@ -6003,10 +6239,116 @@ var g_gizmo_snap: ?JournalEntry = null; // taken at gizmo-begin; committed only 
 var g_mesh_action_events: [MESH_ACTION_CAP]MeshActionEvent = undefined;
 var g_mesh_action_len: usize = 0;
 var g_mesh_action_seq: u32 = 0;
+var g_last_committed_action_id: u32 = 0;
 var g_mesh_action_dropped: u32 = 0;
 var g_mesh_action_document_token: u32 = 0;
 var g_mesh_action_source: mesh_journal_log.ActionSource = .native;
 var g_follow_action_queue: mesh_edit.FollowActionQueue = .{};
+var g_model_write_leases = model_write_lease.Registry.init(jalloc);
+var g_model_adoption_receipts: model_adoption_receipt.Registry = .{};
+/// Set only around the exact mutation owned by a retained external receipt.
+/// Ordinary journal snapshots acquire and release their own short receipt.
+var g_authorized_model_write_receipt: u64 = 0;
+
+fn activeLeaseModelId(buffer: []u8) ?[]const u8 {
+    if (model_source.partObjectModelId()) |model_id| return model_id;
+    if (g_model_session_token == 0) return null;
+    return std.fmt.bufPrint(buffer, "session:{d}", .{g_model_session_token}) catch null;
+}
+
+const MutationLease = struct { receipt_id: u64, owned: bool };
+
+fn acquireMutationLease(label: []const u8) ?MutationLease {
+    // A historical specimen owns the viewport while the resident document is
+    // parked. No hidden edit, undo, redo, gizmo, or topology command may obtain
+    // mutation admission until that specimen is explicitly released.
+    if (!residentMutationAllowed(.geometry_journal)) return null;
+    if (g_authorized_model_write_receipt != 0) {
+        if (!g_model_write_leases.owns(g_authorized_model_write_receipt)) return null;
+        return .{ .receipt_id = g_authorized_model_write_receipt, .owned = false };
+    }
+    // A retained restore/field/gizmo receipt blocks every unrelated journal
+    // mutation before the operation can obtain its preimage.
+    if (g_model_write_leases.owner() != null) return null;
+    var model_buffer: [64]u8 = undefined;
+    const model_id = activeLeaseModelId(&model_buffer) orelse return null;
+    const receipt_id = g_model_write_leases.acquire(.{
+        .actor = "native",
+        .operation_id = label,
+        .model_id = model_id,
+        .session_token = g_model_session_token,
+        .generation = g_edit_generation,
+    }) catch return null;
+    return .{ .receipt_id = receipt_id, .owned = true };
+}
+
+fn releaseMutationLease(receipt_id: u64, owned: bool) void {
+    if (!owned or receipt_id == 0) return;
+    _ = g_model_write_leases.release(receipt_id) catch {};
+}
+
+fn captureJournalSelection() ?JournalSelection {
+    const mode = mesh_edit.mode();
+    var result = JournalSelection{ .mode = mode };
+    errdefer result.deinit();
+    switch (mode) {
+        .none => {},
+        .vertex => {
+            if (!mesh_edit.ensureTopologyPub()) return null;
+            var rows: std.ArrayListUnmanaged(u32) = .empty;
+            defer rows.deinit(jalloc);
+            var vertex: u32 = 0;
+            while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+                if (mesh_edit.vertSelectedPub(vertex)) rows.append(jalloc, vertex) catch return null;
+            }
+            if (rows.items.len > 0) result.vertex_ids = rows.toOwnedSlice(jalloc) catch return null;
+        },
+        .edge => {
+            if (!mesh_edit.ensureTopologyPub()) return null;
+            var rows: std.ArrayListUnmanaged(mesh_edit.Edge) = .empty;
+            defer rows.deinit(jalloc);
+            var edge: u32 = 0;
+            while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+                if (mesh_edit.edgeSelectedPub(edge)) rows.append(jalloc, mesh_edit.edgeEndpointsPub(edge)) catch return null;
+            }
+            if (rows.items.len > 0) result.edge_pairs = rows.toOwnedSlice(jalloc) catch return null;
+        },
+        .face => {
+            const face_count: usize = @intCast(g_edit_count / 3);
+            if (face_count > 0) {
+                result.face_mask = jalloc.alloc(bool, face_count) catch return null;
+                for (result.face_mask, 0..) |*selected, face| selected.* = mesh_edit.faceSelectedPub(@intCast(face));
+            }
+        },
+    }
+    return result;
+}
+
+fn restoreJournalSelection(selection: *const JournalSelection) bool {
+    mesh_edit.clearSelection();
+    switch (selection.mode) {
+        .none => mesh_edit.setMode(.none),
+        .vertex => {
+            mesh_edit.setMode(.vertex);
+            for (selection.vertex_ids, 0..) |vertex, index| {
+                if (!mesh_edit.selectVertexByIndex(vertex, index != 0)) return false;
+            }
+        },
+        .edge => {
+            mesh_edit.setMode(.edge);
+            if (selection.edge_pairs.len > 0 and
+                mesh_edit.selectEdgesByEndpointPairsPub(selection.edge_pairs, false) != @as(u32, @intCast(selection.edge_pairs.len)))
+            {
+                return false;
+            }
+        },
+        .face => {
+            mesh_edit.setMode(.face);
+            if (selection.face_mask.len > 0) _ = mesh_edit.selectFacesByTriangleMask(selection.face_mask);
+        },
+    }
+    return true;
+}
 
 fn partCountFromRanges(ranges: ?[]const u32) u32 {
     return if (ranges) |rows| @intCast(rows.len / 2) else 0;
@@ -6120,7 +6462,7 @@ pub fn meshActionDrain(out: []MeshActionEvent) usize {
 }
 
 fn journalEntryBytes(e: *const JournalEntry) usize {
-    var n: usize = e.verts.len * @sizeOf(f32);
+    var n: usize = (e.source_verts.len + e.verts.len) * @sizeOf(f32);
     if (e.groups) |g| n += g.len * @sizeOf(u32);
     if (e.materials) |m| n += m.len * @sizeOf(u32);
     if (e.semantic_regions) |rows| n += rows.len * @sizeOf(u32);
@@ -6128,6 +6470,12 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
     if (e.logical_ids) |rows| n += rows.len * @sizeOf(u32);
     if (e.semantic_table_json) |json| n += json.len;
     if (e.part_ranges) |p| n += p.len * @sizeOf(u32);
+    if (e.part_object_ids_json) |json| n += json.len;
+    if (e.part_object_model_id) |model_id| n += model_id.len;
+    if (e.part_object_ids) |rows| {
+        n += rows.len * @sizeOf([]u8);
+        for (rows) |row| n += row.len;
+    }
     if (e.colors) |c| n += c.len;
     n += e.hidden.len * @sizeOf(JournalHidden);
     for (e.hidden) |h| {
@@ -6144,10 +6492,17 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
         n += guide.source_bands.len * @sizeOf(u16);
     }
     if (e.note) |note| n += note.len;
+    n += e.selection.vertex_ids.len * @sizeOf(u32);
+    n += e.selection.edge_pairs.len * @sizeOf(mesh_edit.Edge);
+    n += e.selection.face_mask.len * @sizeOf(bool);
     return n;
 }
 
 fn journalFreeEntry(e: *JournalEntry) void {
+    releaseMutationLease(e.mutation_lease_receipt, e.mutation_lease_owned);
+    e.mutation_lease_receipt = 0;
+    e.mutation_lease_owned = false;
+    jalloc.free(e.source_verts);
     jalloc.free(e.verts);
     if (e.groups) |g| jalloc.free(g);
     if (e.materials) |m| jalloc.free(m);
@@ -6156,6 +6511,12 @@ fn journalFreeEntry(e: *JournalEntry) void {
     if (e.logical_ids) |rows| jalloc.free(rows);
     if (e.semantic_table_json) |json| jalloc.free(json);
     if (e.part_ranges) |p| jalloc.free(p);
+    if (e.part_object_ids_json) |json| jalloc.free(json);
+    if (e.part_object_model_id) |model_id| jalloc.free(model_id);
+    if (e.part_object_ids) |rows| {
+        for (rows) |row| jalloc.free(row);
+        jalloc.free(rows);
+    }
     if (e.colors) |c| jalloc.free(c);
     for (e.hidden) |h| freeJournalHidden(h);
     if (e.hidden.len > 0) jalloc.free(e.hidden);
@@ -6163,6 +6524,7 @@ fn journalFreeEntry(e: *JournalEntry) void {
     if (e.paint_state) |paint_state| paint_program.journalStateFree(paint_state);
     if (e.retopo_guide) |*guide| guide.deinit(jalloc);
     if (e.note) |n| jalloc.free(n);
+    e.selection.deinit();
 }
 
 fn journalFreeStack(stack: *std.ArrayListUnmanaged(JournalEntry)) void {
@@ -6170,14 +6532,44 @@ fn journalFreeStack(stack: *std.ArrayListUnmanaged(JournalEntry)) void {
     stack.clearRetainingCapacity();
 }
 
+fn cloneStringRows(rows: []const []const u8) ![][]u8 {
+    const cloned = try jalloc.alloc([]u8, rows.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (cloned[0..initialized]) |row| jalloc.free(row);
+        jalloc.free(cloned);
+    }
+    for (rows, 0..) |row, index| {
+        cloned[index] = try jalloc.dupe(u8, row);
+        initialized += 1;
+    }
+    return cloned;
+}
+
 fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?JournalEntry {
+    const mutation_lease = acquireMutationLease(label) orelse return null;
+    var release_lease = true;
+    defer if (release_lease) releaseMutationLease(mutation_lease.receipt_id, mutation_lease.owned);
+    // Reserve the eventual undo slot before any caller is allowed to mutate.
+    // Commit then cannot lose its preimage to an allocation failure.
+    g_journal_undo.ensureUnusedCapacity(jalloc, 1) catch return null;
     const verts = g_edit_verts orelse return null;
     // g_edit_count == 0 is a valid EMPTY snapshot (req_2806): stepping the journal
     // away from an emptied model must be able to record "it was empty" for redo.
     const need = @as(usize, g_edit_count) * 8;
     if (verts.len < need) return null;
-    const v = jalloc.dupe(f32, verts[0..need]) catch return null;
+    const source_rows = if (model_source.verts()) |rows|
+        if (model_source.count() == g_edit_count and rows.len >= need) rows[0..need] else verts[0..need]
+    else
+        verts[0..need];
+    const source_verts = jalloc.dupe(f32, source_rows) catch return null;
+    const v = jalloc.dupe(f32, verts[0..need]) catch {
+        jalloc.free(source_verts);
+        return null;
+    };
     var entry = JournalEntry{
+        .generation = g_edit_generation,
+        .source_verts = source_verts,
         .verts = v,
         .count = g_edit_count,
         .groups = null,
@@ -6188,17 +6580,26 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         .logical_vertex_count = model_source.logicalVertexCount(),
         .semantic_table_json = null,
         .part_ranges = null,
+        .part_object_ids_json = null,
+        .part_object_model_id = null,
+        .part_object_ids = null,
         .colors = null,
         .hidden = &.{},
         .atlas = null,
         .paint_state = null,
         .retopo_guide = null,
         .paint_layout_stale = g_paint_layout_stale,
-        .paint_layout_revision = model_paint.layoutRevision(),
+        // Lore carries RJMD geometry, not the current paint atlas/program. Force
+        // the restore down the stale-layout rebuild path even when counts happen
+        // to match; arbitrary historical topology never inherits atlas validity.
+        .paint_layout_revision = model_paint.layoutRevision() +% 1,
         .note = null,
+        .selection = .{},
         .label = label,
         .action_id = 0,
         .action_kind = null,
+        .mutation_lease_receipt = mutation_lease.receipt_id,
+        .mutation_lease_owned = mutation_lease.owned,
     };
     const restore_domain = mesh_journal_log.restoreDomainForLabel(label);
     if (restore_domain == .atlas or restore_domain == .paint) {
@@ -6225,10 +6626,28 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
             return null;
         };
     }
-    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) entry.groups = captureFaceGroups();
-    if (model_source.faceMaterials()) |rows| entry.materials = jalloc.dupe(u32, rows) catch null;
-    if (model_source.faceSemanticRegions()) |rows| entry.semantic_regions = jalloc.dupe(u32, rows) catch null;
-    if (model_source.faceSemanticInstances()) |rows| entry.semantic_instances = jalloc.dupe(u32, rows) catch null;
+    if (model_source.faceGroups() != null) {
+        entry.groups = captureFaceGroups() orelse {
+            journalFreeEntry(&entry);
+            release_lease = false;
+            return null;
+        };
+    }
+    if (model_source.faceMaterials()) |rows| entry.materials = jalloc.dupe(u32, rows) catch {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
+    if (model_source.faceSemanticRegions()) |rows| entry.semantic_regions = jalloc.dupe(u32, rows) catch {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
+    if (model_source.faceSemanticInstances()) |rows| entry.semantic_instances = jalloc.dupe(u32, rows) catch {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
     if (model_source.renderCornerLogicalIds()) |rows| {
         if (rows.len != g_edit_count) {
             journalFreeEntry(&entry);
@@ -6239,15 +6658,57 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
             return null;
         };
     }
-    if (model_source.semanticTableJson()) |json| entry.semantic_table_json = jalloc.dupe(u8, json) catch null;
-    if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
+    if (model_source.semanticTableJson()) |json| entry.semantic_table_json = jalloc.dupe(u8, json) catch {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
+    if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
+    const object_ids_json = model_source.partObjectIdsJson();
+    const object_model_id = model_source.partObjectModelId();
+    if ((object_ids_json == null) != (object_model_id == null)) {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    }
+    if (object_ids_json) |json| {
+        entry.part_object_ids_json = jalloc.dupe(u8, json) catch {
+            journalFreeEntry(&entry);
+            release_lease = false;
+            return null;
+        };
+        entry.part_object_model_id = jalloc.dupe(u8, object_model_id.?) catch {
+            journalFreeEntry(&entry);
+            release_lease = false;
+            return null;
+        };
+        var parsed_ids = std.json.parseFromSlice([]const []const u8, jalloc, json, .{}) catch {
+            journalFreeEntry(&entry);
+            release_lease = false;
+            return null;
+        };
+        defer parsed_ids.deinit();
+        entry.part_object_ids = cloneStringRows(parsed_ids.value) catch {
+            journalFreeEntry(&entry);
+            release_lease = false;
+            return null;
+        };
+    }
     if (meshRetopoGuideSnapshot()) |guide| {
         entry.retopo_guide = cloneRetopoGuide(guide) orelse {
             journalFreeEntry(&entry);
             return null;
         };
     }
-    entry.colors = collectCurrentFaceColors();
+    entry.colors = collectCurrentFaceColors() orelse {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
     if (g_hidden_groups.items.len > 0) {
         var hs: std.ArrayListUnmanaged(JournalHidden) = .empty;
         defer {
@@ -6271,7 +6732,17 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
             return null;
         };
     }
-    if (g_journal_note) |n| entry.note = jalloc.dupe(u8, n) catch null;
+    if (g_journal_note) |n| entry.note = jalloc.dupe(u8, n) catch {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
+    entry.selection = captureJournalSelection() orelse {
+        journalFreeEntry(&entry);
+        release_lease = false;
+        return null;
+    };
+    release_lease = false;
     return entry;
 }
 
@@ -6445,12 +6916,27 @@ fn meshIntegrityCheck(context: []const u8, act: bool) bool {
 /// Adopt a pre-op snapshot as an undo step (the op SUCCEEDED). Clears redo and
 /// bounds the stack. Sets *snap to null so the op's discard defer no-ops.
 fn journalCommit(snap: *?JournalEntry) void {
+    g_last_committed_action_id = 0;
     var e = snap.* orelse return;
     snap.* = null;
+    const admitted = e.mutation_lease_receipt != 0 and
+        g_model_write_leases.owns(e.mutation_lease_receipt) and
+        (e.mutation_lease_owned or g_authorized_model_write_receipt == e.mutation_lease_receipt);
+    if (!admitted) {
+        // The mutation lost admission after its preimage was captured.  Restore
+        // that exact preimage before returning; a stale/competing operation may
+        // never become an unjournalled resident edit.
+        if (!journalInstall(&e) or !journalResidentDurableMatches(&e)) {
+            std.log.err("[mesh-journal] lost-admission rollback could not verify exact preimage", .{});
+        }
+        journalFreeEntry(&e);
+        return;
+    }
     var follow_kind: u8 = 255; // unmapped journal labels still belong in the firehose
     g_mesh_action_seq +%= 1;
     if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
     e.action_id = g_mesh_action_seq;
+    g_last_committed_action_id = e.action_id;
     if (mesh_journal_log.actionKindForLabel(e.label)) |kind| {
         follow_kind = @intFromEnum(kind);
         if (mesh_journal_log.actionInvalidatesPaintLayout(kind)) g_paint_layout_stale = true;
@@ -6465,6 +6951,11 @@ fn journalCommit(snap: *?JournalEntry) void {
             currentPartCount(),
         );
     }
+    if (mesh_journal_log.faceAnalysisGenerationNeedsAdvance(
+        e.action_kind,
+        e.generation,
+        g_edit_generation,
+    )) bumpEditGeneration();
     enqueueFollowJournalAction(
         e.action_id,
         follow_kind,
@@ -6477,11 +6968,10 @@ fn journalCommit(snap: *?JournalEntry) void {
     );
     armIntegrityRollCall(e.label);
     journalFreeStack(&g_journal_redo);
-    g_journal_undo.append(jalloc, e) catch {
-        var x = e;
-        journalFreeEntry(&x);
-        return;
-    };
+    releaseMutationLease(e.mutation_lease_receipt, e.mutation_lease_owned);
+    e.mutation_lease_receipt = 0;
+    e.mutation_lease_owned = false;
+    g_journal_undo.appendAssumeCapacity(e);
     var total: usize = 0;
     for (g_journal_undo.items) |*it| total += journalEntryBytes(it);
     while (g_journal_undo.items.len > JOURNAL_CAP or (total > JOURNAL_BYTE_BUDGET and g_journal_undo.items.len > 1)) {
@@ -6545,9 +7035,14 @@ pub fn meshJournalClear() void {
     g_journal_note = null;
     g_mesh_action_source = .native;
     g_follow_action_queue.clear(jalloc);
+    g_authorized_model_write_receipt = 0;
+    g_model_write_leases.reset();
+    g_model_adoption_receipts.reset();
+    g_last_committed_action_id = 0;
 }
 
 pub fn meshJournalNoteSet(note: []const u8) bool {
+    if (!residentMutationAllowed(.metadata_journal)) return false;
     const next = jalloc.dupe(u8, note) catch return false;
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = next;
@@ -6566,6 +7061,7 @@ pub fn meshJournalCounts() [2]u32 {
 /// before note makes rapid React commands deterministic even when the effect
 /// that normally mirrors g_journal_note has not run between clicks.
 pub fn meshJournalMetadataCheckpoint(label: []const u8, before_note: []const u8, after_note: []const u8) bool {
+    if (!residentMutationAllowed(.metadata_journal)) return false;
     if (!mesh_journal_log.metadataCheckpointValid(before_note, after_note)) return false;
     if (!meshJournalNoteSet(before_note)) return false;
     var snap = journalSnapshotCurrent(label);
@@ -6780,6 +7276,244 @@ fn journalInstallRetopoGuide(e: *const JournalEntry) bool {
     return true;
 }
 
+/// Prove every channel that can be checked without touching resident state.
+/// Install is intentionally allocation-light after this boundary; any remaining
+/// late allocation refusal is handled by the caller's exact preimage rollback.
+fn journalMeshPreflight(e: *const JournalEntry) bool {
+    if (e.count % 3 != 0) return false;
+    const vertex_rows = @as(usize, e.count) * 8;
+    const face_count = @as(usize, e.count / 3);
+    if (e.verts.len != vertex_rows or e.source_verts.len != vertex_rows) return false;
+    if (e.groups) |rows| if (rows.len != face_count) return false;
+    if (e.materials) |rows| if (rows.len != face_count) return false;
+    if ((e.semantic_regions == null) != (e.semantic_instances == null)) return false;
+    if (e.semantic_regions) |rows| {
+        if (rows.len != face_count or e.semantic_instances.?.len != face_count) return false;
+        for (rows, e.semantic_instances.?) |region, instance| {
+            if (region == model_source.NO_SEMANTIC_ID and instance != model_source.NO_SEMANTIC_ID) return false;
+        }
+    }
+    if (e.colors == null or e.colors.?.len != face_count * 4) return false;
+    if (e.logical_ids) |rows| {
+        if (rows.len != e.count or e.logical_vertex_count == 0 or
+            !meshdoc_format.logicalRowsValid(jalloc, e.source_verts, rows, e.logical_vertex_count, false)) return false;
+    } else if (e.logical_vertex_count != 0) return false;
+
+    const range_count: u32 = if (e.part_ranges) |rows| @intCast(rows.len / 2) else 0;
+    if (!meshdoc_format.rangesValid(e.part_ranges, range_count)) return false;
+    if ((e.part_object_ids_json == null) != (e.part_object_model_id == null) or
+        (e.part_object_ids_json == null) != (e.part_object_ids == null)) return false;
+    if (e.part_object_ids_json) |json| {
+        _ = json;
+        if (e.part_object_model_id.?.len == 0 or range_count == 0) return false;
+        const object_ids = e.part_object_ids.?;
+        if (object_ids.len != range_count) return false;
+        for (object_ids, 0..) |object_id, index| {
+            if (object_id.len == 0 or std.mem.indexOfScalar(u8, object_id, 0) != null) return false;
+            for (object_ids[0..index]) |prior| if (std.mem.eql(u8, prior, object_id)) return false;
+        }
+    }
+
+    switch (e.selection.mode) {
+        .none => if (e.selection.vertex_ids.len != 0 or e.selection.edge_pairs.len != 0 or e.selection.face_mask.len != 0) return false,
+        .vertex => {
+            if (e.selection.edge_pairs.len != 0 or e.selection.face_mask.len != 0) return false;
+            for (e.selection.vertex_ids, 0..) |vertex, index| {
+                for (e.selection.vertex_ids[0..index]) |prior| if (prior == vertex) return false;
+            }
+        },
+        .edge => {
+            if (e.selection.vertex_ids.len != 0 or e.selection.face_mask.len != 0) return false;
+            for (e.selection.edge_pairs, 0..) |edge, index| {
+                if (edge[0] == edge[1]) return false;
+                for (e.selection.edge_pairs[0..index]) |prior| {
+                    const same = (prior[0] == edge[0] and prior[1] == edge[1]) or
+                        (prior[0] == edge[1] and prior[1] == edge[0]);
+                    if (same) return false;
+                }
+            }
+        },
+        .face => if (e.selection.vertex_ids.len != 0 or e.selection.edge_pairs.len != 0 or e.selection.face_mask.len != face_count) return false,
+    }
+    return true;
+}
+
+fn optionalU32RowsEqual(a: ?[]const u32, b: ?[]const u32) bool {
+    if ((a == null) != (b == null)) return false;
+    return a == null or std.mem.eql(u32, a.?, b.?);
+}
+
+fn optionalBytesEqual(a: ?[]const u8, b: ?[]const u8) bool {
+    if ((a == null) != (b == null)) return false;
+    return a == null or std.mem.eql(u8, a.?, b.?);
+}
+
+fn journalSelectionMatches(selection: *const JournalSelection) bool {
+    if (mesh_edit.mode() != selection.mode) return false;
+    switch (selection.mode) {
+        .none => return true,
+        .vertex => {
+            if (!mesh_edit.ensureTopologyPub()) return false;
+            var selected_count: usize = 0;
+            var vertex: u32 = 0;
+            while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+                if (!mesh_edit.vertSelectedPub(vertex)) continue;
+                selected_count += 1;
+                if (std.mem.indexOfScalar(u32, selection.vertex_ids, vertex) == null) return false;
+            }
+            return selected_count == selection.vertex_ids.len;
+        },
+        .edge => {
+            if (!mesh_edit.ensureTopologyPub()) return false;
+            var selected_count: usize = 0;
+            var edge_index: u32 = 0;
+            while (edge_index < mesh_edit.edgeCount()) : (edge_index += 1) {
+                if (!mesh_edit.edgeSelectedPub(edge_index)) continue;
+                selected_count += 1;
+                const edge = mesh_edit.edgeEndpointsPub(edge_index);
+                var found = false;
+                for (selection.edge_pairs) |prior| {
+                    if ((prior[0] == edge[0] and prior[1] == edge[1]) or
+                        (prior[0] == edge[1] and prior[1] == edge[0]))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) return false;
+            }
+            return selected_count == selection.edge_pairs.len;
+        },
+        .face => {
+            if (selection.face_mask.len != g_edit_count / 3) return false;
+            for (selection.face_mask, 0..) |selected, face| {
+                if (mesh_edit.faceSelectedPub(@intCast(face)) != selected) return false;
+            }
+            return true;
+        },
+    }
+}
+
+/// Verification for the exact resident channels represented by the journal.
+/// Working paint UVs may be rebuilt, so durable source rows are the geometry
+/// authority for this comparison.
+fn journalResidentDurableMatches(e: *const JournalEntry) bool {
+    if (g_edit_count != e.count or model_source.count() != e.count) return false;
+    const source = model_source.verts() orelse return e.source_verts.len == 0;
+    if (!std.mem.eql(u8, std.mem.sliceAsBytes(source), std.mem.sliceAsBytes(e.source_verts))) return false;
+    if (!optionalU32RowsEqual(model_source.faceGroups(), e.groups)) return false;
+    if (!optionalU32RowsEqual(model_source.faceMaterials(), e.materials)) return false;
+    if (!optionalU32RowsEqual(model_source.faceSemanticRegions(), e.semantic_regions)) return false;
+    if (!optionalU32RowsEqual(model_source.faceSemanticInstances(), e.semantic_instances)) return false;
+    if (!optionalU32RowsEqual(model_source.renderCornerLogicalIds(), e.logical_ids)) return false;
+    if (model_source.logicalVertexCount() != e.logical_vertex_count) return false;
+    if (!optionalBytesEqual(model_source.semanticTableJson(), e.semantic_table_json)) return false;
+    if (!optionalU32RowsEqual(model_source.partRanges(), e.part_ranges)) return false;
+    if (!optionalBytesEqual(model_source.partObjectIdsJson(), e.part_object_ids_json)) return false;
+    if (!optionalBytesEqual(model_source.partObjectModelId(), e.part_object_model_id)) return false;
+    if (!optionalBytesEqual(model_source.colors(), e.colors)) return false;
+    if (!optionalBytesEqual(g_journal_note, e.note)) return false;
+    if (g_hidden_groups.items.len != e.hidden.len) return false;
+    for (g_hidden_groups.items, e.hidden) |live, saved| {
+        if (live.lo != saved.lo or live.hi != saved.hi or
+            live.logical_vertex_count != saved.logical_vertex_count or
+            !std.mem.eql(u8, std.mem.sliceAsBytes(live.verts), std.mem.sliceAsBytes(saved.verts)) or
+            !std.mem.eql(u8, std.mem.sliceAsBytes(live.source_verts), std.mem.sliceAsBytes(saved.source_verts)) or
+            !std.mem.eql(u32, live.groups, saved.groups) or
+            !std.mem.eql(u32, live.materials, saved.materials) or
+            !std.mem.eql(u32, live.semantic_regions, saved.semantic_regions) or
+            !std.mem.eql(u32, live.semantic_instances, saved.semantic_instances) or
+            !optionalU32RowsEqual(live.logical_ids, saved.logical_ids) or
+            !std.mem.eql(u8, live.colors, saved.colors)) return false;
+    }
+    return journalSelectionMatches(&e.selection);
+}
+
+fn cloneOptionalU32Rows(rows: ?[]const u32) !?[]u32 {
+    return if (rows) |values| try jalloc.dupe(u32, values) else null;
+}
+
+/// Convert one already-validated current RJMD document into the exact state the
+/// resident journal installs. No field is inferred from the current resident.
+fn journalEntryFromDocument(
+    document: *const meshdoc_format.Document,
+    model_id: []const u8,
+    label: []const u8,
+) !JournalEntry {
+    if (document.version != meshdoc_format.VERSION_LOGICAL_TOPOLOGY or
+        document.verts.len == 0 or document.verts.len % 24 != 0 or
+        document.range_object_ids == null or document.range_object_ids.?.len == 0 or
+        document.ranges.len != document.range_object_ids.?.len * 2)
+    {
+        return error.InvalidDocument;
+    }
+    const vertex_count: u32 = @intCast(document.verts.len / 8);
+    const face_count: usize = @intCast(vertex_count / 3);
+    const source_verts = try jalloc.dupe(f32, document.verts);
+    errdefer jalloc.free(source_verts);
+    const displayed_verts = try jalloc.dupe(f32, document.verts);
+    errdefer jalloc.free(displayed_verts);
+    var entry = JournalEntry{
+        .generation = g_edit_generation,
+        .source_verts = source_verts,
+        .verts = displayed_verts,
+        .count = vertex_count,
+        .groups = null,
+        .materials = null,
+        .semantic_regions = null,
+        .semantic_instances = null,
+        .logical_ids = null,
+        .logical_vertex_count = document.logical_vertex_count,
+        .semantic_table_json = null,
+        .part_ranges = null,
+        .part_object_ids_json = null,
+        .part_object_model_id = null,
+        .part_object_ids = null,
+        .colors = null,
+        .hidden = &.{},
+        .atlas = null,
+        .paint_state = null,
+        .retopo_guide = null,
+        .paint_layout_stale = true,
+        .paint_layout_revision = model_paint.layoutRevision(),
+        .note = null,
+        .selection = .{ .mode = .none },
+        .label = label,
+        .action_id = 0,
+        .action_kind = null,
+        .mutation_lease_receipt = 0,
+        .mutation_lease_owned = false,
+    };
+    errdefer journalFreeEntry(&entry);
+    entry.groups = try cloneOptionalU32Rows(document.groups);
+    entry.materials = try cloneOptionalU32Rows(document.materials);
+    entry.semantic_regions = try cloneOptionalU32Rows(document.semantic_regions);
+    entry.semantic_instances = try cloneOptionalU32Rows(document.semantic_instances);
+    entry.logical_ids = try cloneOptionalU32Rows(document.render_corner_logical_ids);
+    if (document.semantic_table_json) |json| entry.semantic_table_json = try jalloc.dupe(u8, json);
+    entry.part_ranges = try jalloc.dupe(u32, document.ranges);
+    entry.part_object_ids_json = try std.json.Stringify.valueAlloc(jalloc, document.range_object_ids.?, .{});
+    entry.part_object_model_id = try jalloc.dupe(u8, model_id);
+    entry.part_object_ids = try cloneStringRows(document.range_object_ids.?);
+    const colors = try jalloc.alloc(u8, face_count * 4);
+    entry.colors = colors;
+    for (0..face_count) |face| {
+        const base = face * 4;
+        colors[base + 0] = model_paint.DEFAULT_FACE[0];
+        colors[base + 1] = model_paint.DEFAULT_FACE[1];
+        colors[base + 2] = model_paint.DEFAULT_FACE[2];
+        colors[base + 3] = model_paint.DEFAULT_FACE[3];
+    }
+    if (document.glass_first_vertex) |first_vertex| {
+        if (first_vertex > vertex_count or first_vertex % 3 != 0) return error.InvalidDocument;
+        var face: usize = first_vertex / 3;
+        while (face < face_count) : (face += 1) colors[face * 4 + 3] = model_paint.GLASS_ALPHA;
+    }
+    if (g_journal_note) |note| entry.note = try jalloc.dupe(u8, note);
+    if (!journalMeshPreflight(&entry)) return error.InvalidDocument;
+    return entry;
+}
+
 /// Install a snapshot as the live mesh (the undo/redo restore path). The entry's
 /// buffers stay owned by the caller — every adopt below copies.
 fn journalInstall(e: *const JournalEntry) bool {
@@ -6790,6 +7524,7 @@ fn journalInstall(e: *const JournalEntry) bool {
         .retopo_guide => return journalInstallRetopoGuide(e),
         .mesh => {},
     }
+    if (!journalMeshPreflight(e)) return false;
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
     defer jalloc.free(vcopy);
     const invalidates_layout = if (mesh_journal_log.actionKindForLabel(e.label)) |kind|
@@ -6829,13 +7564,24 @@ fn journalInstall(e: *const JournalEntry) bool {
             cancelPaintRasterCarry();
         return false;
     }
+    // The displayed edit rows may carry paint-atlas UVs. Journal entries also
+    // retain the exact durable RJMD source rows; put those back before logical
+    // topology validation so Ctrl-Z/Ctrl-Y is byte-faithful, not merely visual.
+    if (e.source_verts.len != @as(usize, e.count) * 8 or
+        !model_source.replaceGeometrySameTriangleCount(e.source_verts, e.count))
+    {
+        return false;
+    }
     // Hidden-part stash: restore AFTER the install succeeded (independent of the mesh).
     clearHiddenGroups();
     for (e.hidden) |h| {
         const clone = cloneHiddenGroup(h) catch continue;
         g_hidden_groups.append(std.heap.c_allocator, clone) catch freeHiddenGroup(clone);
     }
-    if (e.groups) |g| model_source.setFaceGroups(g);
+    if (e.groups) |g|
+        model_source.setFaceGroups(g)
+    else
+        model_source.clearFaceGroups();
     if (e.materials) |materials|
         model_source.setFaceMaterials(materials)
     else
@@ -6856,6 +7602,12 @@ fn journalInstall(e: *const JournalEntry) bool {
         log.print("[mesh] undo/redo restored a snapshot WITHOUT part ranges over a mesh that had {d} parts — ranges cleared (req_3049)\n", .{model_source.partRanges().?.len / 2});
     }
     model_source.setPartRanges(e.part_ranges orelse &.{});
+    if ((e.part_object_ids_json == null) != (e.part_object_model_id == null) or
+        (e.part_object_ids_json == null) != (e.part_object_ids == null)) return false;
+    if (e.part_object_ids != null) {
+        const object_ids: []const []const u8 = e.part_object_ids.?;
+        if (!model_source.setPartObjectIds(e.part_object_model_id.?, object_ids)) return false;
+    } else model_source.clearPartObjectIds();
     if (e.colors) |c| {
         if (!preserve_indexed_atlas) model_paint.applyColors(c);
         if (model_source.colors()) |src| {
@@ -6870,7 +7622,8 @@ fn journalInstall(e: *const JournalEntry) bool {
     _ = ensureDisjointPartRanges("undo/redo restore");
     if (e.count > 0 and !preserve_indexed_atlas) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
     g_paint_layout_stale = e.paint_layout_stale;
-    return journalInstallRetopoGuide(e);
+    if (!journalInstallRetopoGuide(e)) return false;
+    return restoreJournalSelection(&e.selection);
 }
 
 fn journalStep(from_undo: bool) bool {
@@ -6881,11 +7634,19 @@ fn journalStep(from_undo: bool) bool {
     const top_label = top.label;
     const cur = journalSnapshotCurrent(top_label) orelse return false;
     var current = cur;
+    dst.ensureUnusedCapacity(jalloc, 1) catch {
+        journalFreeEntry(&current);
+        return false;
+    };
     current.action_id = top.action_id;
     current.action_kind = top.action_kind;
     var entry = src.items[src.items.len - 1];
     src.items.len -= 1;
-    if (!journalInstall(&entry)) {
+    if (!journalInstall(&entry) or !journalResidentDurableMatches(&entry)) {
+        const rolled_back = journalInstall(&current) and journalResidentDurableMatches(&current);
+        if (!rolled_back) {
+            std.log.err("[mesh-journal] undo/redo target failed and exact resident rollback could not be verified", .{});
+        }
         src.append(jalloc, entry) catch journalFreeEntry(&entry);
         var c = current;
         journalFreeEntry(&c);
@@ -6914,18 +7675,20 @@ fn journalStep(from_undo: bool) bool {
         partCountFromRanges(entry.part_ranges),
     );
     journalFreeEntry(&entry);
-    dst.append(jalloc, current) catch {
-        var c = current;
-        journalFreeEntry(&c);
-    };
+    releaseMutationLease(current.mutation_lease_receipt, current.mutation_lease_owned);
+    current.mutation_lease_receipt = 0;
+    current.mutation_lease_owned = false;
+    dst.appendAssumeCapacity(current);
     armIntegrityRollCall(if (from_undo) "undo" else "redo");
     return true;
 }
 
 pub fn meshUndo() bool {
+    if (!residentMutationAllowed(.geometry_journal)) return false;
     return journalStep(true);
 }
 pub fn meshRedo() bool {
+    if (!residentMutationAllowed(.geometry_journal)) return false;
     return journalStep(false);
 }
 
@@ -8355,6 +9118,7 @@ pub fn meshTrianglesToQuads() u32 {
 /// draw routes through the transparent pipeline (per-face glass on ONE resident mesh).
 /// Toggling faces that are already glass makes them opaque again.
 pub fn meshSetSelectionGlass() bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (!model_paint.hasTarget()) return false;
     if (mesh_edit.mode() != .face) return false;
     const tri_count = g_edit_count / 3;
@@ -8412,6 +9176,7 @@ pub fn meshSetSelectionGlass() bool {
 /// the run so the next save re-serializes the boundary. A LOAD, not an edit:
 /// nothing journals.
 pub fn meshRestoreGlass(glass_first_vertex: u32) bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (!model_paint.hasTarget()) return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
@@ -9232,6 +9997,7 @@ fn ensureUvZoneRow() ?[]u16 {
 /// sizing a selection mask by the paint layout is the bug that silently fed phantom
 /// faces to the Face-to-N-gon resolver (req_4114).
 pub fn uvZoneAssignSelection(zone: u16) u32 {
+    if (!residentMutationAllowed(.uv_layout)) return 0;
     if (mesh_edit.mode() != .face) return 0;
     if (zone != UV_ZONE_UNASSIGNED and zone >= mesh_edit.RetopoBandTuning.max_bands) return 0;
     const fc = uvZoneFaceCount();
@@ -9259,6 +10025,7 @@ pub fn uvZoneOfFace(face: u32) u16 {
 
 /// Drop one zone entirely (its faces go back to unassigned). Returns faces released.
 pub fn uvZoneDelete(zone: u16) u32 {
+    if (!residentMutationAllowed(.uv_layout)) return 0;
     if (zone == UV_ZONE_UNASSIGNED) return 0;
     const row = g_uv_zone orelse return 0;
     var released: u32 = 0;
@@ -9285,6 +10052,7 @@ pub fn uvZoneCounts(out: []u32) u32 {
 }
 
 pub fn uvZoneClearAll() bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     const row = g_uv_zone orelse return false;
     std.heap.c_allocator.free(row);
     g_uv_zone = null;
@@ -9434,11 +10202,13 @@ pub fn paintLayoutStale() bool {
 /// explicit setPaintBase may clear this state; loading an old raster/program is
 /// deliberately not an unlock path.
 pub fn invalidatePaintLayout() void {
+    if (!residentMutationAllowed(.uv_layout)) return;
     g_paint_layout_stale = true;
     g_paint_session = false;
 }
 
 pub fn setPaintSession(io: std.Io, environ: *const std.process.Environ.Map, on: bool) void {
+    if (on and !residentMutationAllowed(.paint_session)) return;
     // Host enforcement: a cart bug, script, or stale UI state cannot enter paint
     // against a topology revision whose atlas has not been explicitly rebuilt.
     if (on and g_paint_layout_stale) return;
@@ -9462,6 +10232,44 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
     if (g_paint_session) return -1; // paint owns the surface — no selection gestures (req_2662)
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    if (g_historical_preview.active) |*specimen| {
+        const px = vpLocalX(mx);
+        const py = vpLocalY(my);
+        var best_triangle: ?u32 = null;
+        var best_depth = std.math.inf(f32);
+        var triangle: u32 = 0;
+        while (triangle < specimen.document.verts.len / 24) : (triangle += 1) {
+            var projected: [3][3]f32 = undefined;
+            var valid = true;
+            for (0..3) |corner| {
+                const base = @as(usize, triangle) * 24 + corner * 8;
+                projected[corner] = model_paint.projectDepth(cam, g_paint_vp_w, g_paint_vp_h, .{
+                    specimen.document.verts[base + 0],
+                    specimen.document.verts[base + 1],
+                    specimen.document.verts[base + 2],
+                }) orelse {
+                    valid = false;
+                    break;
+                };
+            }
+            if (!valid) continue;
+            const a = projected[0];
+            const b = projected[1];
+            const c = projected[2];
+            const d0 = (px - b[0]) * (a[1] - b[1]) - (a[0] - b[0]) * (py - b[1]);
+            const d1 = (px - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (py - c[1]);
+            const d2 = (px - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (py - a[1]);
+            const inside = (d0 >= 0 and d1 >= 0 and d2 >= 0) or (d0 <= 0 and d1 <= 0 and d2 <= 0);
+            if (!inside) continue;
+            const depth = (a[2] + b[2] + c[2]) / 3.0;
+            if (depth < best_depth) {
+                best_depth = depth;
+                best_triangle = triangle;
+            }
+        }
+        const hit = best_triangle orelse return 0;
+        return @intCast(specimen.selectTriangle(hit, additive) catch return -1);
+    }
     return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my), additive);
 }
 
@@ -9799,9 +10607,11 @@ pub fn characterRigGizmoHit(mx: f32, my: f32) i32 {
     const pivot = characterRigGizmoPivot(bone_index);
     var best_distance = std.math.inf(f32);
     var best_code: i32 = -1;
+    const face_on = gizmoFaceOnPxPerUnit(cam, pivot);
     for (0..3) |axis_index| {
         const direction = characterRigParentAxis(bone_index, axis_index);
         const screen = axisScreenInfo(cam, pivot, direction) orelse continue;
+        if (!gizmoAxisGrabbable(screen, face_on)) continue; // no arm drawn → no grab
         const ax = screen.ax + g_paint_vp_x;
         const ay = screen.ay + g_paint_vp_y;
         const tx = ax + screen.dx * GIZMO_ARM_PX;
@@ -9971,9 +10781,11 @@ fn characterRigDrawGizmo(cam: model_paint.Camera, ox: f32, oy: f32) void {
     if (!g_character_rig.joint_editable) return;
     const selected = g_character_rig.selected_bone orelse return;
     const pivot = characterRigGizmoPivot(selected);
+    const face_on = gizmoFaceOnPxPerUnit(cam, pivot);
     for (0..3) |axis_index| {
         const direction = characterRigParentAxis(selected, axis_index);
         const screen = axisScreenInfo(cam, pivot, direction) orelse continue;
+        if (!gizmoAxisGrabbable(screen, face_on)) continue;
         const ax = screen.ax + ox;
         const ay = screen.ay + oy;
         const tx = ax + screen.dx * GIZMO_ARM_PX;
@@ -10375,11 +11187,7 @@ fn vnorm(a: [3]f32) [3]f32 {
     return .{ a[0] / l, a[1] / l, a[2] / l };
 }
 fn worldUnitsPerPixel(cam: model_paint.Camera, p: [3]f32) f32 {
-    const fwd = vnorm(vsub(cam.target, cam.eye));
-    const rel = vsub(p, cam.eye);
-    const z = @max(0.001, vdot(rel, fwd));
-    const span = 2.0 * z * @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
-    return if (g_paint_vp_h > 1) span / g_paint_vp_h else 0.01;
+    return gizmo_axis_map.worldUnitsPerPixel(cam, g_paint_vp_h, p);
 }
 /// Port of the studio's axisScreen (meshGizmo.tsx): a world direction at the pivot, in
 /// screen space — the anchor, the 2D unit direction, and how many screen px one world
@@ -10387,16 +11195,23 @@ fn worldUnitsPerPixel(cam: model_paint.Camera, p: [3]f32) f32 {
 /// this direction, so the gizmo is zoom-independent and foreshortening never bends it.
 /// Null when the pivot/probe projects behind the camera or the axis vanishes into the
 /// screen (the studio's `pxPerUnit <= 0` skip).
-const AxisScreen = struct { ax: f32, ay: f32, dx: f32, dy: f32, px_per_unit: f32 };
+const AxisScreen = gizmo_axis_map.AxisScreen;
 fn axisScreenInfo(cam: model_paint.Camera, pivot: [3]f32, u: [3]f32) ?AxisScreen {
-    const eps: f32 = 0.01;
-    const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return null;
-    const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, vadd(pivot, vmul(u, eps))) orelse return null;
-    const vx = b[0] - a[0];
-    const vy = b[1] - a[1];
-    const len = @sqrt(vx * vx + vy * vy);
-    if (len <= 1e-4) return null; // studio: lenPerEps must clear 1e-4
-    return .{ .ax = a[0], .ay = a[1], .dx = vx / len, .dy = vy / len, .px_per_unit = len / eps };
+    return gizmo_axis_map.axisScreen(cam, g_paint_vp_w, g_paint_vp_h, pivot, u);
+}
+/// The screen px one world unit spans at `p` with NO foreshortening — every axis'
+/// span is judged against this, so the gate and the drag rate scale with zoom and
+/// depth instead of against a fixed pixel count.
+fn gizmoFaceOnPxPerUnit(cam: model_paint.Camera, p: [3]f32) f32 {
+    return gizmo_axis_map.faceOnPxPerUnit(cam, g_paint_vp_h, p);
+}
+/// Whether this axis may draw an arm and take a grab. An axis pointing at the camera
+/// fails: its 48px arm would be drawn along a float-noise direction, on top of the
+/// arms that DO have a direction, and dragging it divides by a collapsed span
+/// (req_4160/4161 — a twitch threw the selection off the screen in a compass-snapped
+/// front view). Two honest arms beat three, one of which lies.
+fn gizmoAxisGrabbable(s: AxisScreen, face_on_px_per_unit: f32) bool {
+    return gizmo_axis_map.isGrabbable(s, face_on_px_per_unit);
 }
 /// A handle's screen position: GIZMO_ARM_PX along the axis' screen direction.
 fn gizmoArmEnd(s: AxisScreen, sign: f32) [2]f32 {
@@ -10541,10 +11356,13 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
         // rotate hub: the studio's small light dot at the anchor.
         overlayDot(pc[0] + ox, pc[1] + oy, GIZMO_HUB_RIM[0], GIZMO_HUB_RIM[1], GIZMO_HUB_RIM[2], 6);
     } else {
-        // Arms in the current capsule pass; MOVE tips get chevrons.
+        // Arms in the current capsule pass; MOVE tips get chevrons. An axis aimed at
+        // the camera draws nothing — see gizmoAxisGrabbable.
+        const face_on = gizmoFaceOnPxPerUnit(cam, pivot);
         var axis: i32 = 0;
         while (axis < 3) : (axis += 1) {
             const s = axisScreenInfo(cam, pivot, axisVec(axis)) orelse continue;
+            if (!gizmoAxisGrabbable(s, face_on)) continue;
             const c = gizmoAxisDrawColor(axis);
             const signs = [2]f32{ 1, -1 };
             const nsigns: usize = if (g_gizmo_tool == .scale) 2 else 1; // scale is double-ended
@@ -10563,6 +11381,7 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
             var sq_axis: i32 = 0;
             while (sq_axis < 3) : (sq_axis += 1) {
                 const s = axisScreenInfo(cam, pivot, axisVec(sq_axis)) orelse continue;
+                if (!gizmoAxisGrabbable(s, face_on)) continue;
                 const c = gizmoAxisDrawColor(sq_axis);
                 for ([2]f32{ 1, -1 }) |sign| {
                     const h = gizmoArmEnd(s, sign);
@@ -10627,9 +11446,11 @@ pub fn meshGizmoHit(mx: f32, my: f32) i32 {
         const r = GIZMO_CENTER_PX + 4;
         if (dxc * dxc + dyc * dyc <= r * r) return GIZMO_UNIFORM_CODE;
     }
+    const face_on = gizmoFaceOnPxPerUnit(cam, pivot);
     var axis: i32 = 0;
     while (axis < 3) : (axis += 1) {
         const s = axisScreenInfo(cam, pivot, axisVec(axis)) orelse continue;
+        if (!gizmoAxisGrabbable(s, face_on)) continue; // no arm drawn → no grab
         const signs = [2]f32{ 1, -1 };
         const nsigns: usize = if (g_gizmo_tool == .scale) 2 else 1;
         var k: usize = 0;
@@ -10686,9 +11507,11 @@ pub fn bdGizmoHit(mx: f32, my: f32) i32 {
     const lmy = vpLocalY(my);
     var best: i32 = -1;
     var best_d2: f32 = GIZMO_HIT_PX * GIZMO_HIT_PX;
+    const face_on = gizmoFaceOnPxPerUnit(cam, pos);
     var axis: i32 = 0;
     while (axis < 3) : (axis += 1) {
         const s = axisScreenInfo(cam, pos, axisVec(axis)) orelse continue;
+        if (!gizmoAxisGrabbable(s, face_on)) continue; // no arm drawn → no grab
         const h = gizmoArmEnd(s, 1);
         const tdx = lmx - h[0];
         const tdy = lmy - h[1];
@@ -10712,7 +11535,8 @@ pub fn bdGizmoDrag(dx: f32, dy: f32, shift: bool, free: bool) bool {
     if (g_bd_pos == null or g_bd_active < 0 or g_bd_active > 2) return false;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const s = axisScreenInfo(cam, g_bd_pos0, axisVec(g_bd_active)) orelse return false;
-    g_bd_raw += (dx * s.dx + dy * s.dy) / s.px_per_unit;
+    // Same bounded mapping as the mesh move gizmo (req_4160/4161).
+    g_bd_raw += (dx * s.dx + dy * s.dy) * gizmo_axis_map.worldPerPx(s, gizmoFaceOnPxPerUnit(cam, g_bd_pos0));
     const target = snapStep(g_bd_raw, GIZMO_STEP_M, GIZMO_STEP_FINE_M, shift, free);
     const d = target - g_bd_applied;
     if (@abs(d) < 1e-7) return false;
@@ -10730,9 +11554,11 @@ fn drawBdGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     const pos = g_bd_pos orelse return;
     if (g_paint_session) return;
     const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pos) orelse return;
+    const face_on = gizmoFaceOnPxPerUnit(cam, pos);
     var axis: i32 = 0;
     while (axis < 3) : (axis += 1) {
         const s = axisScreenInfo(cam, pos, axisVec(axis)) orelse continue;
+        if (!gizmoAxisGrabbable(s, face_on)) continue;
         const col = if (g_bd_active == axis) GIZMO_ACTIVE else axisColor(axis);
         const h = gizmoArmEnd(s, 1);
         overlayLine(s.ax + ox, s.ay + oy, h[0] + ox, h[1] + oy, col[0], col[1], col[2], GIZMO_SHAFT_W);
@@ -10897,7 +11723,13 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, 
     // (grow) direction is −axis on screen.
     const px = (dx * s.dx + dy * s.dy) * @as(f32, if (neg) -1 else 1);
     const av = axisVec(axis);
-    const move_wpp = 1.0 / s.px_per_unit;
+    // BOUNDED px→world: dividing by the raw span alone let an axis aimed at the camera
+    // turn one pixel into ~100 units (req_4160/4161). The floor is the same ratio the
+    // arm has to clear to be grabbable at all, so the steepest legal arm moves at most
+    // 1/min_axis_screen_fraction the face-on rate.
+    const face_on = gizmoFaceOnPxPerUnit(cam, pivot);
+    const move_px_per_unit = @max(s.px_per_unit, face_on * gizmo_axis_map.min_axis_screen_fraction);
+    const move_wpp = 1.0 / move_px_per_unit;
     switch (g_gizmo_tool) {
         .move => {
             g_gizmo_raw += px * move_wpp;
@@ -10906,7 +11738,7 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, 
             // unselected vertex's exact axis projection — flush, not stepped.
             g_gizmo_snap_marker = null;
             if (snap_vertex) {
-                if (vertexSnapAlongAxis(av, s.px_per_unit)) |lock| {
+                if (vertexSnapAlongAxis(av, move_px_per_unit)) |lock| {
                     target = lock.t;
                     g_gizmo_snap_marker = lock.vertex;
                 }
@@ -11762,6 +12594,40 @@ pub fn meshCompassSnap(code: i32) bool {
     return true;
 }
 
+fn drawHistoricalPreviewSelection(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const specimen = if (g_historical_preview.active) |*value| value else return;
+    for (specimen.selected_triangles, 0..) |selected, triangle| {
+        if (!selected) continue;
+        var points: [3][2]f32 = undefined;
+        var valid = true;
+        for (0..3) |corner| {
+            const base = triangle * 24 + corner * 8;
+            points[corner] = ovProject(cam, .{
+                specimen.document.verts[base + 0],
+                specimen.document.verts[base + 1],
+                specimen.document.verts[base + 2],
+            }, ox, oy) orelse {
+                valid = false;
+                break;
+            };
+        }
+        if (!valid) continue;
+        inline for (0..3) |edge| {
+            const next = (edge + 1) % 3;
+            overlayLine(
+                points[edge][0],
+                points[edge][1],
+                points[next][0],
+                points[next][1],
+                0.18,
+                0.86,
+                0.95,
+                3.0,
+            );
+        }
+    }
+}
+
 /// Draw the editor overlay — the modeling stage (tile panels + grid + axes), mode
 /// dressing (face wash/centroid dots, edge lines, vertex dots), loop-cut accents, the
 /// gizmo, and the marquee — as screen-space capsules/polys projected with the EXACT
@@ -11781,6 +12647,12 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // pane's origin would smear the stage/dots across it.
     if (@abs(ox - g_paint_vp_x) > 0.5 or @abs(oy - g_paint_vp_y) > 0.5) return;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    if (g_historical_preview.active != null) {
+        core.pushScissor(ox, oy, g_paint_vp_w, g_paint_vp_h);
+        drawHistoricalPreviewSelection(cam, ox, oy);
+        core.popScissor();
+        return;
+    }
     // Paint session (req_2662): the whole mode dressing goes quiet — the stage,
     // compass and marquee are view furniture and stay; wash/dots/edges/gizmo are
     // EDIT affordances and must never render over a paint surface.
@@ -11963,6 +12835,7 @@ pub fn meshEditSetScopeRanges(pairs: []const u32) void {
 /// built before the groups arrived. The binding must not write model_source directly:
 /// same-triangle-count group changes are invisible to mesh_edit's normal cache key.
 pub fn meshEditSetFaceGroups(groups: []const u32) void {
+    if (!residentMutationAllowed(.durable_channels)) return;
     clearIndexedEditMesh();
     model_source.setFaceGroups(groups);
     mesh_edit.faceGroupsChanged();
@@ -11981,6 +12854,7 @@ pub fn meshEditInferQuadFaceGroups() ?[]u32 {
 /// Like face groups, this is imported once into indexed topology and then follows
 /// face identity through cuts and splits.
 pub fn meshEditSetFaceMaterials(materials: []const u32) bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (materials.len != g_edit_count / 3) return false;
     clearIndexedEditMesh();
     model_source.setFaceMaterials(materials);
@@ -11990,6 +12864,7 @@ pub fn meshEditSetFaceMaterials(materials: []const u32) bool {
 /// Restore RJMD's semantic membership and name/provenance dictionary together.
 /// The topology cache must be rebuilt because each indexed face carries the ids.
 pub fn meshEditSetFaceSemantics(regions: []const u32, instances: []const u32, table_json: []const u8) bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (regions.len != g_edit_count / 3 or instances.len != regions.len) return false;
     if (!model_source.setSemanticState(regions, instances, table_json)) return false;
     clearIndexedEditMesh();
@@ -12011,6 +12886,7 @@ pub fn meshSemanticRestoreFromDocument(
     candidate_instances: ?[]const u32,
     candidate_table_json: ?[]const u8,
 ) MeshSemanticRestoreResult {
+    if (!residentMutationAllowed(.durable_channels)) return .{ .refuse = .historical_preview_active };
     // Hidden blocks have their own source-order row arrays. With none present,
     // model_source is the complete resident document and—unlike the save
     // snapshot's opaque/glass ordering—its face order is exactly the order the
@@ -12049,6 +12925,7 @@ pub fn meshSemanticRestoreFromDocument(
 /// commit in the same journal unit, so undo/redo can never pair ids with the
 /// wrong names. Returns changed render triangles (zero is a refusal/no-op).
 pub fn meshSemanticAssignSelection(region: u32, instance: u32, table_json: []const u8) u32 {
+    if (!residentMutationAllowed(.durable_channels)) return 0;
     if (region == model_source.NO_SEMANTIC_ID or !model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
     const face_count = g_edit_count / 3;
     if (face_count == 0) return 0;
@@ -12092,6 +12969,7 @@ pub fn meshEdgeSemanticAssignSelection(
     role_text: []const u8,
     object_id: []const u8,
 ) ?[]u8 {
+    if (!residentMutationAllowed(.durable_channels)) return null;
     if (!model_paint.hasTarget() or mesh_edit.mode() != .edge) return null;
     const edge_count = mesh_edit.selectedEdgeCountPub();
     if (edge_count == 0) return null;
@@ -12155,6 +13033,7 @@ pub fn meshEdgeSemanticSelect(region_id: u32, additive: bool) u32 {
 /// refused. A rename legitimately changes zero faces, so the caller must test for
 /// the negative rather than for zero.
 pub fn meshSemanticRegionEdit(region: u32, remove: bool, table_json: []const u8) i32 {
+    if (!residentMutationAllowed(.durable_channels)) return -1;
     if (region == model_source.NO_SEMANTIC_ID or !model_paint.hasTarget()) return -1;
     const face_count = g_edit_count / 3;
     if (face_count == 0) return -1;
@@ -12184,6 +13063,7 @@ pub fn meshSemanticRegionEdit(region: u32, remove: bool, table_json: []const u8)
 /// opening a legacy cube gives the seat known top/bottom/front/back/left/right
 /// without mislabeling an arbitrary imported mesh.
 pub fn meshSemanticBootstrapAxes(ids: [6]u32, table_json: []const u8) bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (model_source.faceSemanticRegions() != null or !model_paint.hasTarget()) return false;
     const verts = g_edit_verts orelse return false;
     const face_count: usize = @intCast(g_edit_count / 3);
@@ -12234,6 +13114,7 @@ pub fn meshSemanticNamePrimitive(
     ids: []const u32,
     table_json: []const u8,
 ) bool {
+    if (!residentMutationAllowed(.durable_channels)) return false;
     if (hi <= lo or ids.len != mesh_semantics.primitiveRoleCount(kind) or !model_paint.hasTarget()) return false;
     const verts = g_edit_verts orelse return false;
     const face_count: usize = @intCast(g_edit_count / 3);
@@ -12294,11 +13175,10 @@ fn invalidateMeshAudit() void {
 }
 
 fn meshAuditFacts(allocator: std.mem.Allocator, verts: []const f32, face_count: u32) mesh_audit.Facts {
-    // Pure vertex transforms patch positions in place WITHOUT bumping the
-    // generation, so generation+hash+faces alone kept serving pre-move counts —
-    // a probe moved through a solid reported its old intersections (req_3763
-    // P3-2). The verts digest makes any position change its own invalidation;
-    // one Wyhash pass over the resident soup is trivial next to the audit.
+    // The journal now advances generation for committed transforms, but live
+    // previews patch positions before commit. Keep the vertex digest so a probe
+    // during a preview never receives the prior intersection result (req_3763
+    // P3-2); one Wyhash pass is trivial next to the audit.
     const key = AuditKey{
         .hash = g_edit_key_hash,
         .generation = g_edit_generation,
@@ -12607,6 +13487,7 @@ pub fn meshSelectAuditFaces(kind: AuditSelectKind) ?MeshSelectorResult {
 /// paint pixels do not move; only indexed face metadata changes, and it journals with
 /// the model so Undo cannot desynchronise the Rig panel from the meshdoc.
 pub fn meshTextureSlotAssign(material: u32) u32 {
+    if (!residentMutationAllowed(.durable_channels)) return 0;
     if (!model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return 0;
@@ -12631,6 +13512,7 @@ pub fn meshTextureSlotAssign(material: u32) u32 {
 
 /// Removing a named role compacts later indices and clears faces that wore it.
 pub fn meshTextureSlotRemove(material: u32) u32 {
+    if (!residentMutationAllowed(.durable_channels)) return 0;
     if (!ensureIndexedEditMesh()) return 0;
     var snap = journalSnapshotCurrent("remove texture slot");
     var changed: u32 = 0;
@@ -12672,6 +13554,7 @@ pub fn meshTextureSlotSelect(material: u32) u32 {
 /// This is also where a PERSISTED doc's ranges arrive on load/resume — a doc saved
 /// while the req_3029 minting bug was live heals here instead of reopening corrupt.
 pub fn meshEditSetPartRanges(pairs: []const u32) void {
+    if (!residentMutationAllowed(.durable_channels)) return;
     clearIndexedEditMesh();
     // Tripwire (req_3049): a session lost its host part ranges and the next save
     // persisted a doc that reopens with every part merged. An empty push over a mesh
@@ -12717,6 +13600,7 @@ pub fn meshGroupFaceCount(lo: u32, hi: u32) u32 {
 /// each PART its own colour on load so a bare studio mesh reads as coloured parts, matching
 /// the outliner swatches. Returns the number of faces painted.
 pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
+    if (!residentMutationAllowed(.paint_raster)) return 0;
     if (g_paint_layout_stale) return 0;
     const fc = model_paint.faceCount();
     // Painting a selection-tinted face must land UNDER the tint (the outliner can recolor
@@ -12740,6 +13624,7 @@ pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
 /// the coordinate-free paint boundary used by automation: selection supplies the
 /// noun, RGB supplies the material fact, and no viewport raycast is involved.
 pub fn meshPaintSelection(io: std.Io, environ: *const std.process.Environ.Map, r: u8, g: u8, b: u8) u32 {
+    if (!residentMutationAllowed(.paint_raster)) return 0;
     if (g_paint_layout_stale or !model_paint.hasTarget() or mesh_edit.mode() != .face) return 0;
     const face_count = g_edit_count / 3;
     if (face_count == 0) return 0;
@@ -13087,6 +13972,7 @@ pub fn meshEditCounts() [4]u32 {
 /// camera. Returns the DISPLAYED face index painted, or -1 on a miss. The caller maps
 /// that face back to the source paint (so it survives quality changes) and marks dirty.
 pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
+    if (!residentMutationAllowed(.paint_raster)) return -1;
     if (!model_paint.hasTarget() or g_paint_layout_stale) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const face = mesh_edit.scopedFaceHit(model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)));
@@ -13118,9 +14004,11 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
 // The door renders a shader recipe to pixels (material_tex.bakePixels) and hands them
 // here; while set, every dab/fill SAMPLES the material instead of a flat colour.
 pub fn setPaintMaterial(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
+    if (!residentMutationAllowed(.paint_session)) return false;
     return model_paint.setMaterialInk(rgba, w, h, scale);
 }
 pub fn clearPaintMaterial() void {
+    if (!residentMutationAllowed(.paint_session)) return;
     model_paint.clearMaterialInk();
 }
 pub fn hasPaintMaterial() bool {
@@ -13143,6 +14031,7 @@ pub fn paintProgramBaseline() ?[]const u8 {
 /// the paint module can't do) so face+bary dabs land at the resolution they were made.
 /// False if there's no resident mesh or the blob is malformed.
 pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
+    if (!residentMutationAllowed(.paint_program)) return false;
     // A program stores face/barycentric addresses from one UV/topology revision.
     // It may restore a cold, unchanged model, but it must never silently bless a
     // structurally changed one. setPaintBase is the sole explicit unlock.
@@ -13161,6 +14050,7 @@ pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, bl
 /// Replay a program over a raster baseline that the package loader has already
 /// installed. Detail must match because rebuilding it here would erase that raster.
 pub fn paintProgramApplyOverBase(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
+    if (!residentMutationAllowed(.paint_program)) return false;
     if (g_paint_layout_stale or g_edit_verts == null or g_edit_count == 0) return false;
     const stored_detail = paint_program.programDetail(blob) orelse return false;
     if (@as(u32, stored_detail) != model_paint.detail()) return false;
@@ -13176,6 +14066,7 @@ pub fn paintProgramApplyOverBase(io: std.Io, environ: *const std.process.Environ
 
 /// Commit the open stroke unit (pointer-up). Returns true when a stroke was recorded.
 pub fn paintStrokeEnd(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (!residentMutationAllowed(.paint_program)) return false;
     if (g_paint_layout_stale) return false;
     const committed = paint_program.endStrokeUnit();
     if (!committed) return false;
@@ -13194,12 +14085,14 @@ pub fn paintStrokeEnd(io: std.Io, environ: *const std.process.Environ.Map) bool 
 /// Undo/redo ONE stroke-journal unit (a stroke or a structural layer op) by program
 /// replay. False when the journal side is empty.
 pub fn paintStrokeUndo(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (!residentMutationAllowed(.paint_program)) return false;
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.undoStroke(io, environ);
 }
 pub fn paintStrokeRedo(io: std.Io, environ: *const std.process.Environ.Map) bool {
+    if (!residentMutationAllowed(.paint_program)) return false;
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
@@ -13228,12 +14121,14 @@ pub fn paintActiveLayer() u32 {
     return paint_program.activeLayerId();
 }
 pub fn paintLayerAdd() u32 {
+    if (!residentMutationAllowed(.paint_layers)) return 0;
     if (g_paint_layout_stale) return 0;
     const id = paint_program.layerAdd();
     if (id != 0) journalFreeStack(&g_journal_redo);
     return id;
 }
 pub fn paintLayerDelete(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
+    if (!residentMutationAllowed(.paint_layers)) return false;
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
@@ -13242,6 +14137,7 @@ pub fn paintLayerDelete(io: std.Io, environ: *const std.process.Environ.Map, id:
     return changed;
 }
 pub fn paintLayerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u32, up: bool) bool {
+    if (!residentMutationAllowed(.paint_layers)) return false;
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
@@ -13250,22 +14146,26 @@ pub fn paintLayerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u
     return changed;
 }
 pub fn paintLayerSetVisible(io: std.Io, environ: *const std.process.Environ.Map, id: u32, on: bool) bool {
+    if (!residentMutationAllowed(.paint_layers)) return false;
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     return paint_program.layerSetVisible(io, environ, id, on);
 }
 pub fn paintLayerSetActive(id: u32) bool {
+    if (!residentMutationAllowed(.paint_layers)) return false;
     if (g_paint_layout_stale) return false;
     return paint_program.layerSetActive(id);
 }
 pub fn paintLayerRename(id: u32, name: []const u8) bool {
+    if (!residentMutationAllowed(.paint_layers)) return false;
     if (g_paint_layout_stale) return false;
     const changed = paint_program.layerRename(id, name);
     if (changed) journalFreeStack(&g_journal_redo);
     return changed;
 }
 pub fn paintLayerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
+    if (!residentMutationAllowed(.paint_layers)) return false;
     if (g_paint_layout_stale) return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
@@ -13277,6 +14177,7 @@ pub fn paintLayerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, 
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
 /// used when a quality change derives the new mesh's colours from the source paint.
 pub fn applyPaintColors(colors: []const u8) void {
+    if (!residentMutationAllowed(.paint_raster)) return;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     model_paint.applyColors(colors);
@@ -13289,6 +14190,7 @@ pub const DEFAULT_FACE = model_paint.DEFAULT_FACE;
 /// Paint a face by its index (no raycast) — programmatic fill / the headless paint
 /// proof. Returns false if there's no target or the index is out of range.
 pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     if (g_paint_layout_stale or face >= model_paint.faceCount()) return false;
     mesh_edit.suspendFaceTint(); // paint lands under any selection tint, never mixed with it
     defer mesh_edit.resumeFaceTint();
@@ -13299,6 +14201,7 @@ pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
 /// Set the atlas base type (0 = Texture Template, 1 = Solid Colour, 2 = Blank) + solid colour,
 /// then re-lay it on the current (unpainted) atlas — the Create Paint Atlas "Type" pick (req_2546).
 pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     if (!model_paint.hasTarget()) return false;
     const m: model_paint.BaseMode = switch (mode) {
         1 => .solid,
@@ -13349,12 +14252,14 @@ var g_locked_face: u32 = 0;
 /// Toggle the free-form face-safety mode: 0 = clip (paint the face under the dab), 1 = lock
 /// (mask the stroke to the face captured by paintStrokeBegin).
 pub fn paintModeSet(mode: i32) void {
+    if (!residentMutationAllowed(.paint_session)) return;
     g_paint_mode = if (mode == 1) 1 else 0;
 }
 
 /// LOCK-mode stroke begin: pick the face under the cursor and remember it, so every dab in
 /// this stroke masks to that one face. Returns the face index, or -1 on a miss / no target.
 pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
+    if (!residentMutationAllowed(.paint_program)) return -1;
     if (!model_paint.hasTarget() or g_paint_layout_stale) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return -1;
@@ -13420,6 +14325,7 @@ fn stampGroupMirrored(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: 
 /// (patch-texel units) and its blend. Reuses vpLocalX/Y so the embedded-editor viewport
 /// offset is honoured (req_2248) exactly like paintAt. Returns the painted face, or -1.
 pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32, spec: model_paint.BrushShape) i32 {
+    if (!residentMutationAllowed(.paint_raster)) return -1;
     if (!model_paint.hasTarget() or g_paint_layout_stale) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const lx = vpLocalX(mx);
@@ -13443,6 +14349,7 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
 /// triangulation is allowed, crossing into another authored face is refused.
 /// `points` are interleaved normalized viewport coordinates.
 pub fn paintPolygonAt(points: []const f32, r: u8, g: u8, b: u8, flow: f32, blend: u8) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     if (!model_paint.hasTarget() or g_paint_layout_stale) return false;
     if (points.len < 6 or points.len % 2 != 0 or points.len > paint_program.MAX_POLYGON_POINTS * 2) return false;
     const mapped = std.heap.c_allocator.alloc(f32, points.len) catch return false;
@@ -13485,6 +14392,7 @@ pub fn paintPolygonAt(points: []const f32, r: u8, g: u8, b: u8, flow: f32, blend
 /// re-uploads the whole mesh so the new mapping draws. Returns the ACTUAL density after
 /// the call (paint_islands halves an over-budget request), so the UI shows what took.
 pub fn setPaintDetail(px: i32) i32 {
+    if (!residentMutationAllowed(.uv_layout)) return -1;
     const verts = g_edit_verts orelse return -1;
     if (g_edit_count == 0) return -1;
     const want: u32 = if (px < 0) 1 else @intCast(px);
@@ -13504,6 +14412,7 @@ pub fn setPaintDetail(px: i32) i32 {
 /// this to turn the initial all-loose layout into real authored-face islands. Carries
 /// per-face base colours; sub-face strokes return via stroke-program replay.
 pub fn refreshPaintLayout() bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     const verts = g_edit_verts orelse return false;
     if (g_edit_count == 0 or !model_paint.hasTarget()) return false;
     // Structural topology installs already carry valid old-atlas UVs for display and
@@ -13527,6 +14436,7 @@ pub fn refreshPaintLayout() bool {
 /// whole model's islands fit a fit_texels² atlas and the density falls out of the
 /// model's own size. Returns the DERIVED density (texels/meter) so the UI can show it.
 pub fn setPaintFit(fit_texels: i32) i32 {
+    if (!residentMutationAllowed(.uv_layout)) return -1;
     const verts = g_edit_verts orelse return -1;
     if (g_edit_count == 0) return -1;
     const want: u32 = if (fit_texels < 64) 64 else @intCast(fit_texels);
@@ -13594,6 +14504,7 @@ pub fn paintFaceSelected(face: u32) bool {
 /// linear in islands + faces, rather than replaying one whole-model selection
 /// operation per island.
 pub fn meshEditSelectPaintIslands(island_indices: []const u32) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     if (model_paint.faceCount() == 0) return false;
     const mask = model_paint.buildIslandFaceSelectionMask(std.heap.c_allocator, island_indices) orelse return false;
     defer std.heap.c_allocator.free(mask);
@@ -13605,6 +14516,7 @@ pub fn meshEditSelectPaintIslands(island_indices: []const u32) bool {
 /// inverse of paintIslandSelected and keeps the viewport overlay, HUD count, and
 /// UV transform handles on one authoritative selection.
 pub fn meshEditSelectPaintIsland(island_index: u32, additive: bool) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     const face_count = model_paint.faceCount();
     if (face_count == 0) return false;
     const mask = std.heap.c_allocator.alloc(bool, face_count) catch return false;
@@ -13626,6 +14538,7 @@ pub fn meshEditSelectPaintIsland(island_index: u32, additive: bool) bool {
 /// raster as its new baseline at this boundary so a later replay cannot move old
 /// pixels behind the user's back.
 pub fn applyUvIslandRects(rects: []const u32) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     const verts = g_edit_verts orelse return false;
     const islands = model_paint.layoutIslands() orelse return false;
     if (rects.len != islands.len * 4) return false;
@@ -13646,6 +14559,7 @@ pub fn applyUvIslandRects(rects: []const u32) bool {
 /// rectangle transform, this preserves arbitrary triangle/polygon deformation:
 /// only sampling coordinates move over a byte-for-byte fixed atlas.
 pub fn applyUvCornerGeometry(corners: []const f32) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     const verts = g_edit_verts orelse return false;
     if (corners.len != @as(usize, model_paint.faceCount()) * 6) return false;
 
@@ -13662,6 +14576,7 @@ pub fn applyUvCornerGeometry(corners: []const f32) bool {
 /// only pointer-up or an explicit button/value commit reaches this boundary, so
 /// even a dense drag is exactly one undo unit.
 pub fn applyUvCornerGeometryJournaled(corners: []const f32, label: []const u8) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     if (mesh_journal_log.restoreDomainForLabel(label) != .uv) return false;
     const verts = g_edit_verts orelse return false;
     const atlas = model_paint.atlas() orelse return false;
@@ -13680,6 +14595,7 @@ pub fn applyUvCornerGeometryJournaled(corners: []const f32, label: []const u8) b
 /// corner table through the same one-step journal boundary as every direct UV edit.
 /// The atlas raster remains fixed; only the mesh's sampling coordinates change.
 pub fn restoreUvIslandShapesJournaled(island_indices: []const u32) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     if (g_edit_count == 0) return false;
     const corners = std.heap.c_allocator.alloc(f32, @as(usize, g_edit_count) * 2) catch return false;
     defer std.heap.c_allocator.free(corners);
@@ -13691,6 +14607,7 @@ pub fn restoreUvIslandShapesJournaled(island_indices: []const u32) bool {
 /// at the atlas's current texel density, keeping each island's centre. Same one-step
 /// journal boundary as every direct UV edit; the raster never moves.
 pub fn autoUvIslandSizesJournaled(island_indices: []const u32) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     if (g_edit_count == 0) return false;
     const corners = std.heap.c_allocator.alloc(f32, @as(usize, g_edit_count) * 2) catch return false;
     defer std.heap.c_allocator.free(corners);
@@ -13703,6 +14620,7 @@ pub fn autoUvIslandSizesJournaled(island_indices: []const u32) bool {
 /// selection's live UV footprint. Fails (refused, journal untouched) when a selected
 /// corner is behind the camera or there is no live paint viewport yet.
 pub fn projectUvFromViewJournaled(island_indices: []const u32) bool {
+    if (!residentMutationAllowed(.uv_layout)) return false;
     if (g_edit_count == 0) return false;
     if (g_paint_vp_w <= 0 or g_paint_vp_h <= 0) return false;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
@@ -13729,6 +14647,7 @@ fn opaqueImportCopy(rgba: []const u8) ?[]u8 {
 /// is an explicit bake boundary: the imported PNG becomes the new undo baseline
 /// and subsequent strokes continue on the existing layer table.
 pub fn replacePaintAtlas(rgba: []const u8) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     const opaque_rgba = opaqueImportCopy(rgba) orelse return false;
     defer std.heap.c_allocator.free(opaque_rgba);
     mesh_edit.suspendFaceTint();
@@ -13739,6 +14658,7 @@ pub fn replacePaintAtlas(rgba: []const u8) bool {
 }
 
 pub fn replacePaintAtlasJournaled(rgba: []const u8) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     const atlas = model_paint.atlas() orelse return false;
     if (std.mem.eql(u8, atlas.rgba, rgba)) return true;
     var snap = journalSnapshotForNewAction(mesh_journal_log.UV_TEXTURE_RELOAD_LABEL);
@@ -13761,6 +14681,7 @@ pub fn replacePaintAtlasJournaled(rgba: []const u8) bool {
 /// atlases/base.png through here, so legacy packages carrying transparent import
 /// padding heal on their next open + save.
 pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     const verts = g_edit_verts orelse return false;
     const opaque_rgba = opaqueImportCopy(rgba) orelse return false;
     defer std.heap.c_allocator.free(opaque_rgba);
@@ -13774,6 +14695,7 @@ pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
 }
 
 pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     if (model_paint.atlas()) |atlas| {
         if (atlas.w == width and atlas.h == height and std.mem.eql(u8, atlas.rgba, rgba)) return true;
     } else return false;
@@ -13797,6 +14719,7 @@ pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool
 /// Unlike a source-image import, alpha is retained: this may be a compiled
 /// editable image workspace with intentionally transparent gaps.
 pub fn resizePaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     const verts = g_edit_verts orelse return false;
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
@@ -13808,6 +14731,7 @@ pub fn resizePaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
 }
 
 pub fn resizePaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     if (model_paint.atlas()) |atlas| {
         if (atlas.w == width and atlas.h == height and std.mem.eql(u8, atlas.rgba, rgba)) return true;
     } else return false;
@@ -13837,6 +14761,7 @@ pub fn compilePaintAtlasWorkspace(
     shift_y: f32,
     preserve_program: bool,
 ) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     const verts = g_edit_verts orelse return false;
     const program = if (preserve_program) paint_program.serialize() else null;
     defer if (program) |blob| std.heap.c_allocator.free(blob);
@@ -13908,6 +14833,7 @@ pub fn paintedMeshVerts() ?[]const f32 {
 /// Load a saved painting: restore its detail (rewrites UVs + re-uploads the mesh) then blit the
 /// saved atlas over the texture. Returns false if the bytes don't match the restored dimensions.
 pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
+    if (!residentMutationAllowed(.paint_raster)) return false;
     // Saved atlas pixels describe the previous island layout. They cannot be the
     // implicit way out of a stale topology; the user must remake the atlas first.
     if (g_paint_layout_stale) return false;
@@ -15460,6 +16386,15 @@ pub fn getUvSamplingUniform(finite_atlas: bool) ?*wgpu.Buffer {
 }
 
 pub fn deinit() void {
+    g_historical_preview.deinit();
+    g_historical_preview_saved_orbit = null;
+    // Face analysis executes code owned by this replaceable Scene3D module.
+    // Join both workers before any module teardown can unmap that code.
+    g_face_table_worker.stopCaptured();
+    mesh_face_table_package.stopWorkerCaptured();
+    g_authorized_model_write_receipt = 0;
+    g_model_write_leases.reset();
+    g_model_adoption_receipts.reset();
     // Release every pool slot's resources.
     for (0..MAX_RT_POOL) |i| {
         const slot = &g_rt_pool[i];
@@ -17361,6 +18296,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
             break;
         }
     }
+    const historical_preview_active = scene_holds_target and g_historical_preview.active != null;
 
     // Capture the exact camera this frame so a paint raycast shoots the ray the user
     // sees (model_paint.pick). Only meaningful when this scene holds the paint target.
@@ -17520,6 +18456,11 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
         while (sci < scene_node.children.len and sh_nrec < MAX_SCENE_MESHES) : (sci += 1) {
             const c = &scene_node.children[sci];
             if (!c.scene3d_mesh) continue;
+            if (historical_preview_active) {
+                const preview_key = c.scene3d_geom_key orelse continue;
+                const preview_hash = hashKey(preview_key);
+                if (model_paint.isTarget(preview_hash) or (g_edit_key_hash != 0 and preview_hash == g_edit_key_hash)) continue;
+            }
             if (c.scene3d_ground_formula != null) continue;
             const key = c.scene3d_geom_key orelse continue;
             // Skip foliage / dynamic / heightfield / water — only solid casters.
@@ -17624,7 +18565,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                 }
                 // Skinned casters (SKIN-3499): the figure keeps its shadow on
                 // the palette path — group(1) here is the bone palette.
-                if (skin_nrec > 0 and g_skinned_shadow_pipeline != null and g_skinned_vbuf != null and g_skin_inst_buf != null) {
+                if (!historical_preview_active and skin_nrec > 0 and g_skinned_shadow_pipeline != null and g_skinned_vbuf != null and g_skin_inst_buf != null) {
                     sp.setPipeline(g_skinned_shadow_pipeline.?);
                     sp.setBindGroup(0, g_shadow_pass_bind_group.?, 0, null);
                     var ssi: usize = 0;
@@ -17759,6 +18700,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
 
     var dbg_inst_seen: u32 = 0; // req_0727: instanced (bucket) meshes seen vs collected
     var dbg_inst_collected: u32 = 0;
+    var preview_mesh_collected = false;
     var ci: u32 = 0;
     while (ci < scene_node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
         const child = &scene_node.children[ci];
@@ -17774,7 +18716,22 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
             const center = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
             if (math.v3distance(center, cam_pos) - estimateMeshRadius(child) > draw_radius) continue;
         }
-        const key = child.scene3d_geom_key orelse continue;
+        var key: []const u8 = child.scene3d_geom_key orelse continue;
+        var effective_vertices = child.scene3d_vertices;
+        var effective_vert_count = child.scene3d_vert_count;
+        if (historical_preview_active) {
+            const child_hash = hashKey(key);
+            const is_resident_target = model_paint.isTarget(child_hash) or
+                (g_edit_key_hash != 0 and child_hash == g_edit_key_hash);
+            if (is_resident_target) {
+                if (preview_mesh_collected) continue;
+                const specimen = if (g_historical_preview.active) |*value| value else continue;
+                key = specimen.dynamic_key;
+                effective_vertices = specimen.document.verts;
+                effective_vert_count = specimen.vertexCount();
+                preview_mesh_collected = true;
+            }
+        }
 
         var maybe_slot: ?GeoSlice = null;
         const shared_ground = child.scene3d_ground_formula != null and
@@ -17810,7 +18767,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
             if (maybe_slot == null) continue;
         } else if (std.mem.startsWith(u8, key, "~dyn~")) {
             // Live-edited geometry: reused per-slot, overwritten on version change.
-            maybe_slot = resolveDynamicGeom(queue, key, child.scene3d_vertices, child.scene3d_vert_count);
+            maybe_slot = resolveDynamicGeom(queue, key, effective_vertices, effective_vert_count);
             if (maybe_slot == null) continue;
         } else {
             maybe_slot = lookupGeometry(key);
@@ -18203,7 +19160,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     // after the opaque batches. group2 = the figure's palette pool slot; the
     // default 1×1 white texture keeps the fragment path identical to an
     // untextured mesh (bone tints ride the vertex color).
-    if (skin_nrec > 0 and g_skinned_pipeline != null and g_skinned_vbuf != null and g_skin_inst_buf != null) {
+    if (!historical_preview_active and skin_nrec > 0 and g_skinned_pipeline != null and g_skinned_vbuf != null and g_skin_inst_buf != null) {
         pass.setPipeline(g_skinned_pipeline.?);
         pass.setBindGroup(0, g_bind_group.?, 0, null);
         if (g_default_tex_bind_group) |dbg| pass.setBindGroup(1, dbg, 0, null);
@@ -18585,6 +19542,1673 @@ pub fn modelSessionActiveToken() u32 {
     return g_model_session_token;
 }
 
+const ModelWriteIdentityRequestV1 = struct {
+    version: u32,
+    actor: []const u8,
+    operationId: []const u8,
+    modelId: []const u8,
+    sessionToken: []const u8,
+    expectedGeneration: u64,
+};
+
+const ModelWriteLeaseReleaseRequestV1 = struct {
+    version: u32,
+    operation: enum { release, finalize_and_release } = .release,
+    receiptId: u64,
+    adoptionReceiptId: ?u64 = null,
+    expectedTargetSha256: ?[]const u8 = null,
+    publicationVerified: ?bool = null,
+};
+
+const ModelDocumentAdoptRequestV1 = struct {
+    version: u32,
+    actor: []const u8,
+    operationId: []const u8,
+    modelId: []const u8,
+    sessionToken: []const u8,
+    expectedGeneration: u64,
+    leaseReceiptId: u64,
+    expectedSha256: []const u8,
+    journalKind: enum { historical_restore, field_edit } = .historical_restore,
+};
+
+const ModelFieldCandidateRequestV1 = struct {
+    version: u32,
+    actor: []const u8,
+    operationId: []const u8,
+    modelId: []const u8,
+    sessionToken: []const u8,
+    expectedGeneration: u64,
+    leaseReceiptId: u64,
+    expectedResidentSha256: []const u8,
+    expectedObjectNamespaceHash: []const u8,
+    address: FaceAddressRequestV1,
+    field: mesh_face_field_candidate.Field,
+    value: u32,
+};
+
+const ModelDocumentRollbackRequestV1 = struct {
+    version: u32,
+    actor: []const u8,
+    operationId: []const u8,
+    modelId: []const u8,
+    sessionToken: []const u8,
+    leaseGeneration: u64,
+    expectedCurrentGeneration: u64,
+    leaseReceiptId: u64,
+    adoptionReceiptId: u64,
+};
+
+fn sha256Hex(bytes: []const u8) [64]u8 {
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    return std.fmt.bytesToHex(digest, .lower);
+}
+
+fn modelWriteIdentity(
+    actor: []const u8,
+    operation_id: []const u8,
+    model_id: []const u8,
+    session_token_text: []const u8,
+    generation: u64,
+) ?model_write_lease.Identity {
+    if (generation == 0 or generation > std.math.maxInt(u32)) return null;
+    const session_token = std.fmt.parseInt(u32, session_token_text, 10) catch return null;
+    if (session_token == 0) return null;
+    return .{
+        .actor = actor,
+        .operation_id = operation_id,
+        .model_id = model_id,
+        .session_token = session_token,
+        .generation = @intCast(generation),
+    };
+}
+
+fn modelWriteIdentityIsResident(identity: model_write_lease.Identity, require_generation: bool) bool {
+    return modelSessionResident() and
+        modelDocumentTokenForId(identity.model_id) == g_model_session_token and
+        identity.session_token == g_model_session_token and
+        (!require_generation or identity.generation == g_edit_generation);
+}
+
+fn leaseRefusedJsonAlloc(allocator: std.mem.Allocator) ![]u8 {
+    if (g_model_write_leases.owner()) |owner| return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = false,
+        .version = 1,
+        .code = "lease_refused",
+        .detail = "resident model already has an active writer",
+        .owner = .{
+            .actor = owner.actor,
+            .operationId = owner.operation_id,
+            .modelId = owner.model_id,
+            .sessionToken = owner.session_token,
+            .generation = owner.generation,
+        },
+    }, .{});
+    return faceRecoveryErrorJsonAlloc(allocator, "lease_refused", "resident model write lease was refused", false);
+}
+
+/// Acquire the one writer receipt before any restore allocation or journal edit.
+pub fn modelWriteLeaseAcquireJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(ModelWriteIdentityRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid model-write lease request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    const identity = modelWriteIdentity(
+        request.actor,
+        request.operationId,
+        request.modelId,
+        request.sessionToken,
+        request.expectedGeneration,
+    ) orelse return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid model-write lease identity", false);
+    if (request.version != 1)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid model-write lease version", false);
+    if (g_historical_preview.blocksResidentMutation())
+        return faceRecoveryErrorJsonAlloc(allocator, "lease_refused", "close the active historical preview before mutating the resident model", false);
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(identity.model_id) != g_model_session_token or identity.session_token != g_model_session_token)
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "write lease targets a different resident session", false);
+    if (identity.generation != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+    const receipt_id = g_model_write_leases.acquire(identity) catch |err| switch (err) {
+        error.LeaseRefused => return leaseRefusedJsonAlloc(allocator),
+        error.InvalidIdentity => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid model-write lease identity", false),
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    const response = std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .receiptId = receipt_id,
+        .modelId = request.modelId,
+        .sessionToken = request.sessionToken,
+        .generation = g_edit_generation,
+    }, .{}) catch |err| {
+        _ = g_model_write_leases.release(receipt_id) catch {};
+        return err;
+    };
+    return response;
+}
+
+/// Validate one guarded field candidate against the exact resident owner while
+/// its cold coordinator holds the model write lease. The response contains
+/// facts and hashes only; candidate bytes never cross JSON or JavaScript. The
+/// cold coordinator independently builds and owns the authoritative bytes from
+/// its exact `encodeCurrentAlloc` capture before adoption.
+pub fn modelFieldCandidateJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(ModelFieldCandidateRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid guarded field-candidate request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.leaseReceiptId == 0 or
+        request.expectedResidentSha256.len != 64 or request.expectedObjectNamespaceHash.len != 64 or
+        !std.mem.eql(u8, request.actor, "field-edit-coordinator"))
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid guarded field-candidate request", false);
+    }
+    if (g_historical_preview.blocksResidentMutation())
+        return faceRecoveryErrorJsonAlloc(allocator, "lease_refused", "close the active historical preview before editing resident fields", false);
+    const identity = modelWriteIdentity(
+        request.actor,
+        request.operationId,
+        request.modelId,
+        request.sessionToken,
+        request.expectedGeneration,
+    ) orelse return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid guarded field-candidate identity", false);
+    if (!modelWriteIdentityIsResident(identity, true))
+        return if (identity.session_token != g_model_session_token or modelDocumentTokenForId(identity.model_id) != g_model_session_token)
+            faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "field candidate targets a different resident session", false)
+        else
+            faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+    g_model_write_leases.validate(request.leaseReceiptId, identity) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "field candidate does not own the active write lease", false);
+    const address = faceAddressView(request.address) orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid guarded authored-face address", false);
+    if (address.stability != .stable)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "guarded field edit requires a stable authored-face address", false);
+
+    const resident_bytes = modelEncodeCurrentDocumentAlloc(allocator, request.modelId) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.WrongModel => return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "resident object namespace belongs to another model", false),
+        error.ObjectIdsUnpublished => return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "resident stable object IDs are not published", false),
+        else => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "resident document cannot be encoded exactly", false),
+    };
+    defer allocator.free(resident_bytes);
+    const resident_sha = sha256Hex(resident_bytes);
+    if (!std.mem.eql(u8, &resident_sha, request.expectedResidentSha256))
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident bytes changed after coordinator capture", true);
+    var document = meshdoc_format.decodeDocument(allocator, resident_bytes) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "resident document is not canonical RJMD", false);
+    defer document.deinit(allocator);
+    if (document.version != meshdoc_format.VERSION_LOGICAL_TOPOLOGY or document.range_object_ids == null)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "guarded field edit requires RJMD v5 stable object IDs", false);
+    const namespace = meshdoc_format.objectNamespaceDigest(request.modelId, document.range_object_ids.?, document.ranges);
+    const namespace_hex = std.fmt.bytesToHex(namespace, .lower);
+    if (!std.mem.eql(u8, &namespace_hex, request.expectedObjectNamespaceHash))
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "resident object namespace differs from the guarded face plane", false);
+
+    var candidate = mesh_face_field_candidate.buildAlloc(allocator, .{
+        .bytes = resident_bytes,
+        .address = address,
+        .field = request.field,
+        .value = request.value,
+    }) catch |err| return faceRecoveryErrorJsonAlloc(allocator, switch (err) {
+        error.StaleAddress => "stale_address",
+        error.UnstableAddress, error.AmbiguousAddress => "ambiguous_address",
+        error.OutOfMemory => return error.OutOfMemory,
+        else => "invalid_request",
+    }, @errorName(err), false);
+    defer candidate.deinit();
+    const candidate_sha = sha256Hex(candidate.bytes);
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .modelId = request.modelId,
+        .sessionToken = request.sessionToken,
+        .generation = g_edit_generation,
+        .residentSha256 = &resident_sha,
+        .candidateSha256 = &candidate_sha,
+        .objectNamespaceHash = &namespace_hex,
+        .field = candidate.facts.field,
+        .before = candidate.facts.before,
+        .after = candidate.facts.after,
+        .triangleCount = candidate.facts.triangle_count,
+    }, .{});
+}
+
+/// Release is idempotent for the exact receipt, but a plain finally-release may
+/// never silently finalize an unpublished adoption. The coordinator must use the
+/// explicit finalize operation only after package, manifest, and plane proof.
+pub const ModelDocumentFinalizeReceipt = model_adoption_finalize.Receipt;
+
+/// Allocation-free commit point for a document adoption.  Both receipt
+/// registries expose read-only status checks, so every fallible authorization
+/// check happens before either registry changes.  Once those checks pass the
+/// two mutations cannot allocate and exact retries resolve through the bounded
+/// tombstones retained by the registries.
+pub fn modelDocumentFinalize(
+    lease_receipt_id: u64,
+    adoption_receipt_id: u64,
+    target_sha256: model_adoption_receipt.HashHex,
+) !ModelDocumentFinalizeReceipt {
+    return model_adoption_finalize.commit(
+        &g_model_write_leases,
+        &g_model_adoption_receipts,
+        lease_receipt_id,
+        adoption_receipt_id,
+        target_sha256,
+    );
+}
+
+pub fn modelWriteLeaseReleaseJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(ModelWriteLeaseReleaseRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid model-write lease release", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.receiptId == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid model-write lease release", false);
+    switch (request.operation) {
+        .release => {
+            if (g_model_adoption_receipts.active) |adoption| {
+                if (adoption.lease_id == request.receiptId)
+                    return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "active adoption must be rolled back or explicitly finalized before lease release", false);
+            }
+            if (request.adoptionReceiptId != null or request.expectedTargetSha256 != null or request.publicationVerified != null)
+                return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "plain lease release cannot carry publication proof", false);
+
+            const release_status = g_model_write_leases.releaseStatus(request.receiptId) catch
+                return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "model-write lease receipt is not active", false);
+            const response = try std.json.Stringify.valueAlloc(allocator, .{
+                .ok = true,
+                .version = 1,
+                .released = release_status == .released,
+                .alreadyReleased = release_status == .already_released,
+                .alreadyFinalized = false,
+            }, .{});
+            errdefer allocator.free(response);
+            const released = g_model_write_leases.release(request.receiptId) catch
+                return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "model-write lease release was refused", false);
+            std.debug.assert(released == release_status);
+            return response;
+        },
+        .finalize_and_release => {
+            if (request.publicationVerified != true or request.adoptionReceiptId == null or
+                request.expectedTargetSha256 == null or request.expectedTargetSha256.?.len != 64)
+            {
+                return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "finalize requires exact adoption and publication proof", false);
+            }
+            var target_sha256: model_adoption_receipt.HashHex = undefined;
+            @memcpy(&target_sha256, request.expectedTargetSha256.?);
+            const adoption_status = g_model_adoption_receipts.finalizeStatus(
+                request.adoptionReceiptId.?,
+                request.receiptId,
+                target_sha256,
+            ) catch |err| switch (err) {
+                error.WrongTarget => return faceRecoveryErrorJsonAlloc(allocator, "hash_mismatch", "publication SHA differs from adopted target", false),
+                else => return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "adoption receipt is not active for finalization", false),
+            };
+            const release_status = g_model_write_leases.releaseStatus(request.receiptId) catch
+                return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "model-write lease receipt is not active", false);
+
+            // Reserve the exact response before either receipt changes state.
+            // If the caller loses this response, the bounded tombstones make an
+            // exact retry return the same successful state.
+            const response = try std.json.Stringify.valueAlloc(allocator, .{
+                .ok = true,
+                .version = 1,
+                .released = release_status == .released,
+                .alreadyReleased = release_status == .already_released,
+                .alreadyFinalized = adoption_status == .already_finalized,
+            }, .{});
+            errdefer allocator.free(response);
+            const finalized = modelDocumentFinalize(
+                request.receiptId,
+                request.adoptionReceiptId.?,
+                target_sha256,
+            ) catch unreachable;
+            std.debug.assert(finalized.finalized == (adoption_status == .finalized));
+            std.debug.assert(finalized.already_finalized == (adoption_status == .already_finalized));
+            std.debug.assert(finalized.released == (release_status == .released));
+            std.debug.assert(finalized.already_released == (release_status == .already_released));
+            return response;
+        },
+    }
+}
+
+fn rollbackAdoptedJournalAction(
+    adoption: model_adoption_receipt.Receipt,
+    target_snapshot: *JournalEntry,
+) bool {
+    if (g_journal_undo.items.len == 0) return false;
+    const top_index = g_journal_undo.items.len - 1;
+    if (g_journal_undo.items[top_index].action_id != adoption.action_id) return false;
+    var preimage = g_journal_undo.items[top_index];
+    g_journal_undo.items.len = top_index;
+    const restored = journalInstall(&preimage) and journalResidentDurableMatches(&preimage);
+    if (!restored) {
+        const target_restored = journalInstall(target_snapshot) and journalResidentDurableMatches(target_snapshot);
+        if (!target_restored)
+            std.log.err("[model-recovery] adoption rollback and target reinstatement both failed verification", .{});
+        g_journal_undo.appendAssumeCapacity(preimage);
+        return false;
+    }
+    const encoded = modelEncodeCurrentDocumentAlloc(jalloc, preimage.part_object_model_id orelse "") catch {
+        _ = journalInstall(target_snapshot);
+        g_journal_undo.appendAssumeCapacity(preimage);
+        return false;
+    };
+    defer jalloc.free(encoded);
+    const restored_sha = sha256Hex(encoded);
+    if (!std.mem.eql(u8, &restored_sha, &adoption.preimage_sha256)) {
+        _ = journalInstall(target_snapshot);
+        g_journal_undo.appendAssumeCapacity(preimage);
+        return false;
+    }
+    if (preimage.action_kind) |kind| enqueueMeshAction(
+        preimage.action_id,
+        kind,
+        .undone,
+        target_snapshot.count,
+        preimage.count,
+        partCountFromRanges(target_snapshot.part_ranges),
+        partCountFromRanges(preimage.part_ranges),
+    );
+    enqueueFollowJournalAction(
+        preimage.action_id,
+        if (preimage.action_kind) |kind| @intFromEnum(kind) else 255,
+        .undone,
+        preimage.label,
+        target_snapshot.count,
+        preimage.count,
+        partCountFromRanges(target_snapshot.part_ranges),
+        partCountFromRanges(preimage.part_ranges),
+    );
+    journalFreeEntry(&preimage);
+    journalFreeStack(&g_journal_redo);
+    armIntegrityRollCall("historical restore rollback");
+    return true;
+}
+
+/// Adopt caller-borrowed, capability-verified RJMD bytes as one exact journal
+/// action. Decode and every target allocation complete before resident mutation.
+pub fn modelDocumentAdoptBytesJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+    bytes: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(ModelDocumentAdoptRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid document-adopt request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.leaseReceiptId == 0 or request.expectedSha256.len != 64)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid document-adopt request", false);
+    const identity = modelWriteIdentity(
+        request.actor,
+        request.operationId,
+        request.modelId,
+        request.sessionToken,
+        request.expectedGeneration,
+    ) orelse return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid document-adopt identity", false);
+    if (!modelWriteIdentityIsResident(identity, true))
+        return if (identity.session_token != g_model_session_token or modelDocumentTokenForId(identity.model_id) != g_model_session_token)
+            faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "document adopt targets a different resident session", false)
+        else
+            faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+    g_model_write_leases.validate(request.leaseReceiptId, identity) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "document adopt does not own the active write lease", false);
+    const journal_label: []const u8 = switch (request.journalKind) {
+        .historical_restore => if (std.mem.eql(u8, request.actor, "recovery-coordinator"))
+            "historical restore"
+        else
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "historical restore adoption requires the recovery coordinator", false),
+        .field_edit => if (std.mem.eql(u8, request.actor, "field-edit-coordinator"))
+            "guarded field edit"
+        else
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "field-edit adoption requires the field-edit coordinator", false),
+    };
+    if (g_model_adoption_receipts.active != null)
+        return faceRecoveryErrorJsonAlloc(allocator, "lease_refused", "the active write lease already owns an adoption", false);
+
+    const target_sha = sha256Hex(bytes);
+    if (!std.mem.eql(u8, &target_sha, request.expectedSha256))
+        return faceRecoveryErrorJsonAlloc(allocator, "hash_mismatch", "candidate bytes differ from expected SHA-256", false);
+    var document = meshdoc_format.decodeDocument(allocator, bytes) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "candidate is not a readable current RJMD document", false);
+    defer document.deinit(allocator);
+    if (document.version != meshdoc_format.VERSION_LOGICAL_TOPOLOGY or document.range_object_ids == null)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "restore candidate must be RJMD v5 with stable object IDs", false);
+    var target = journalEntryFromDocument(&document, request.modelId, journal_label) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "restore candidate channels are incomplete", false),
+    };
+    defer journalFreeEntry(&target);
+
+    const preimage_bytes = modelEncodeCurrentDocumentAlloc(allocator, request.modelId) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.WrongModel => return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "resident object namespace belongs to another model", false),
+        error.ObjectIdsUnpublished => return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "resident stable object IDs are not published", false),
+        else => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "resident document cannot be encoded exactly", false),
+    };
+    defer allocator.free(preimage_bytes);
+    const preimage_sha = sha256Hex(preimage_bytes);
+
+    g_authorized_model_write_receipt = request.leaseReceiptId;
+    defer g_authorized_model_write_receipt = 0;
+    var preimage = journalSnapshotCurrent(journal_label) orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "could not capture exact resident preimage", false);
+    var preimage_live = true;
+    defer if (preimage_live) journalFreeEntry(&preimage);
+
+    if (!journalInstall(&target) or !journalResidentDurableMatches(&target)) {
+        const rolled_back = journalInstall(&preimage) and journalResidentDurableMatches(&preimage);
+        return faceRecoveryErrorJsonAlloc(
+            allocator,
+            "internal_error",
+            if (rolled_back) "candidate adoption was refused and resident preimage was restored" else "candidate adoption and resident rollback both failed",
+            false,
+        );
+    }
+    const resident_bytes = modelEncodeCurrentDocumentAlloc(allocator, request.modelId) catch {
+        _ = journalInstall(&preimage);
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "adopted resident could not be re-encoded", false);
+    };
+    defer allocator.free(resident_bytes);
+    const resident_sha = sha256Hex(resident_bytes);
+    if (!std.mem.eql(u8, &resident_sha, &target_sha)) {
+        const rolled_back = journalInstall(&preimage) and journalResidentDurableMatches(&preimage);
+        return faceRecoveryErrorJsonAlloc(
+            allocator,
+            "hash_mismatch",
+            if (rolled_back) "adopted resident bytes differ from candidate; preimage restored" else "adopted bytes differ and resident rollback failed",
+            false,
+        );
+    }
+
+    var preimage_optional: ?JournalEntry = preimage;
+    preimage_live = false;
+    journalCommit(&preimage_optional);
+    if (preimage_optional != null or g_last_committed_action_id == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "historical restore could not enter the native journal", false);
+    const adoption = g_model_adoption_receipts.issue(
+        request.leaseReceiptId,
+        g_last_committed_action_id,
+        g_model_session_token,
+        g_edit_generation,
+        preimage_sha,
+        target_sha,
+    ) catch {
+        var current_target = journalSnapshotCurrent(journal_label) orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "adoption receipt failed after journal commit", false);
+        defer journalFreeEntry(&current_target);
+        const synthetic = model_adoption_receipt.Receipt{
+            .id = 0,
+            .lease_id = request.leaseReceiptId,
+            .action_id = g_last_committed_action_id,
+            .session_token = g_model_session_token,
+            .generation_after = g_edit_generation,
+            .preimage_sha256 = preimage_sha,
+            .target_sha256 = target_sha,
+        };
+        _ = rollbackAdoptedJournalAction(synthetic, &current_target);
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "adoption receipt registry refused the journal action", false);
+    };
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .adoptionReceiptId = adoption.id,
+        .journalActionId = adoption.action_id,
+        .preimageSha256 = &preimage_sha,
+        .targetSha256 = &target_sha,
+        .residentSha256 = &resident_sha,
+        .generation = g_edit_generation,
+        .journalActionKind = @tagName(request.journalKind),
+    }, .{}) catch |err| {
+        // The caller cannot roll back an adoption whose receipt never crossed
+        // the boundary. Treat response allocation as part of the transaction.
+        const rolled_back = rollbackAdoptedJournalAction(adoption, &target);
+        if (rolled_back) {
+            _ = g_model_adoption_receipts.consumeRollback(adoption.id, request.leaseReceiptId) catch {};
+        } else {
+            std.log.err("[model-recovery] response allocation failed and adoption rollback could not verify", .{});
+        }
+        return err;
+    };
+}
+
+/// Roll back one adoption exactly once while its original write lease remains
+/// active. The target is captured first so a late preimage failure can restore
+/// the target plane before this function returns a refusal.
+pub fn modelDocumentRollbackJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(ModelDocumentRollbackRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid document-rollback request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.leaseReceiptId == 0 or request.adoptionReceiptId == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid document-rollback request", false);
+    const identity = modelWriteIdentity(
+        request.actor,
+        request.operationId,
+        request.modelId,
+        request.sessionToken,
+        request.leaseGeneration,
+    ) orelse return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid document-rollback identity", false);
+    if (!modelWriteIdentityIsResident(identity, false))
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "document rollback targets a different resident session", false);
+    g_model_write_leases.validate(request.leaseReceiptId, identity) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "document rollback does not own the active write lease", false);
+    const adoption = g_model_adoption_receipts.get(request.adoptionReceiptId, request.leaseReceiptId) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "authorization_failed", "adoption receipt is not active for this lease", false);
+    if (request.expectedCurrentGeneration != g_edit_generation or adoption.generation_after != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident generation changed after adoption", true);
+    const target_bytes = modelEncodeCurrentDocumentAlloc(allocator, request.modelId) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "current adopted resident cannot be encoded", false);
+    defer allocator.free(target_bytes);
+    const target_sha = sha256Hex(target_bytes);
+    if (!std.mem.eql(u8, &target_sha, &adoption.target_sha256))
+        return faceRecoveryErrorJsonAlloc(allocator, "hash_mismatch", "resident changed after adoption", false);
+
+    g_authorized_model_write_receipt = request.leaseReceiptId;
+    defer g_authorized_model_write_receipt = 0;
+    var target_snapshot = journalSnapshotCurrent("historical restore") orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "could not retain adopted target for rollback", false);
+    defer journalFreeEntry(&target_snapshot);
+    if (!rollbackAdoptedJournalAction(adoption, &target_snapshot))
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "exact adoption rollback could not be verified", false);
+    _ = g_model_adoption_receipts.consumeRollback(request.adoptionReceiptId, request.leaseReceiptId) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "rollback receipt could not be consumed", false);
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .rolledBack = true,
+        .adoptionReceiptId = request.adoptionReceiptId,
+        .residentSha256 = &adoption.preimage_sha256,
+        .generation = g_edit_generation,
+    }, .{});
+}
+
+const HistoricalPreviewDegradationWireV1 = mesh_face_table.RecoveryDegradationWireV1;
+
+const HistoricalPreviewOpenRequestV1 = struct {
+    version: u32,
+    operation: enum { open },
+    modelId: []const u8,
+    snapshotId: []const u8,
+    resolvedRevision: []const u8,
+    expectedSha256: []const u8,
+    identityQuality: mesh_face_table.IdentityQuality,
+    objectNamespaceHash: []const u8,
+    recoveryDegradations: []const HistoricalPreviewDegradationWireV1,
+};
+
+const HistoricalPreviewReleaseRequestV1 = struct {
+    version: u32,
+    operation: enum { release },
+    previewToken: []const u8,
+};
+
+fn historicalPreviewDegradationsAlloc(
+    allocator: std.mem.Allocator,
+    source: []const HistoricalPreviewDegradationWireV1,
+) ![]mesh_face_table.RecoveryDegradation {
+    const result = try allocator.alloc(mesh_face_table.RecoveryDegradation, source.len);
+    for (source, result) |row, *target| {
+        var actions: std.EnumSet(mesh_face_table.RecoveryDegradationAction) = .empty;
+        for (row.actions) |action| actions.insert(action);
+        var reasons: std.EnumSet(mesh_face_table.RecoveryDegradationReason) = .empty;
+        for (row.reasons) |reason| reasons.insert(reason);
+        if (row.actions.len == 0 or row.reasons.len == 0) return error.InvalidRecoveryProvenance;
+        target.* = .{
+            .channel = row.channel,
+            .actions = actions,
+            .reasons = reasons,
+            .affected_count = row.affectedCount,
+        };
+    }
+    return result;
+}
+
+pub fn historicalPreviewOpenJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+    bytes: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(HistoricalPreviewOpenRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid historical preview open request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.modelId.len == 0 or request.snapshotId.len == 0 or
+        request.resolvedRevision.len != 64 or request.expectedSha256.len != 64 or
+        request.objectNamespaceHash.len != 64 or
+        (request.identityQuality == .exact) != (request.recoveryDegradations.len == 0))
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid historical preview open request", false);
+    }
+    // The Lore capability proves the bytes, not which model is currently in
+    // this Scene3D owner. Refuse before decoding/parking anything when a stale
+    // Versions row from model A is invoked after the viewport moved to model B.
+    if (!historical_preview.targetsResident(
+        modelDocumentTokenForId(request.modelId),
+        g_model_session_token,
+        modelSessionResident(),
+    ))
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "historical preview does not target the resident Scene3D model", false);
+    if (g_gizmo_snap != null or g_paint_session or g_lc != null or g_bevel != null or g_quadify != null or
+        g_model_write_leases.owner() != null)
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "lease_refused", "finish the active resident edit before opening historical preview", false);
+    }
+    const degradations = historicalPreviewDegradationsAlloc(allocator, request.recoveryDegradations) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid historical preview recovery provenance", false);
+    defer allocator.free(degradations);
+    const token = g_historical_preview.open(.{
+        .model_id = request.modelId,
+        .snapshot_id = request.snapshotId,
+        .revision = request.resolvedRevision,
+        .sha256 = request.expectedSha256,
+        .bytes = bytes,
+        .identity_quality = request.identityQuality,
+        .recovery_degradations = degradations,
+        .max_vertices = MAX_DYN_VERTS,
+    }) catch |err| return faceRecoveryErrorJsonAlloc(allocator, switch (err) {
+        error.PreviewHashMismatch => "hash_mismatch",
+        error.PreviewAlreadyOpen => "invalid_request",
+        error.PreviewTooLarge => "invalid_request",
+        else => "internal_error",
+    }, @errorName(err), false);
+    defer allocator.free(token);
+    g_historical_preview_saved_orbit = g_orbit;
+    const specimen = &g_historical_preview.active.?;
+    orbitFrame(specimen.center, specimen.radius);
+    errdefer {
+        _ = g_historical_preview.release(token) catch {};
+        if (g_historical_preview_saved_orbit) |saved| g_orbit = saved;
+        g_historical_preview_saved_orbit = null;
+    }
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .previewToken = token,
+        .modelId = specimen.model_id,
+        .snapshotId = specimen.snapshot_id,
+        .resolvedRevision = specimen.revision,
+        .sha256 = &specimen.sha256,
+        .formatVersion = specimen.document.version,
+        .triangleCount = specimen.document.verts.len / 24,
+        .readOnly = true,
+    }, .{});
+}
+
+pub fn historicalPreviewReleaseJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) ![]u8 {
+    var parsed = std.json.parseFromSlice(HistoricalPreviewReleaseRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid historical preview release request", false);
+    defer parsed.deinit();
+    if (parsed.value.version != 1 or parsed.value.previewToken.len == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid historical preview release request", false);
+    const released = g_historical_preview.release(parsed.value.previewToken) catch |err|
+        return faceRecoveryErrorJsonAlloc(allocator, "released_capability", @errorName(err), false);
+    if (released.released) {
+        if (g_historical_preview_saved_orbit) |saved| g_orbit = saved;
+        g_historical_preview_saved_orbit = null;
+    }
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .released = released.released,
+        .alreadyReleased = released.already_released,
+    }, .{});
+}
+
+pub fn historicalPreviewActive() bool {
+    return g_historical_preview.active != null;
+}
+
+const FaceObjectPublicationRowV1 = struct {
+    rank: u32,
+    objectId: []const u8,
+};
+
+const FaceObjectPublicationV1 = struct {
+    version: u32,
+    modelId: []const u8,
+    sessionToken: []const u8,
+    expectedGeneration: u64,
+    ranges: []const FaceObjectPublicationRowV1,
+};
+
+const FaceSessionIdentityRequestV1 = struct {
+    version: u32,
+    modelId: []const u8,
+};
+
+const FacePlaneRequestV1 = struct {
+    source: []const u8,
+    sessionToken: ?[]const u8 = null,
+    expectedGeneration: ?u64 = null,
+    previewToken: ?[]const u8 = null,
+    expectedSha256: ?[]const u8 = null,
+};
+
+const FaceAddressRequestV1 = struct {
+    objectId: []const u8,
+    group: u32,
+    stability: []const u8,
+    artifactFaceOrdinal: ?u32 = null,
+};
+
+const FaceSelectTargetRequestV1 = struct {
+    kind: []const u8,
+    address: ?FaceAddressRequestV1 = null,
+    objectId: ?[]const u8 = null,
+    sourceGroup: ?u32 = null,
+};
+
+const FaceSelectRequestV1 = struct {
+    version: u32,
+    modelId: []const u8,
+    plane: FacePlaneRequestV1,
+    target: FaceSelectTargetRequestV1,
+    additive: bool,
+    frame: bool,
+};
+
+const FaceSeekRequestV1 = struct {
+    version: u32,
+    modelId: []const u8,
+    plane: FacePlaneRequestV1,
+    address: FaceAddressRequestV1,
+    sort: std.json.Value,
+    filters: std.json.Value,
+    limit: u32,
+};
+
+const FacePlaneKind = enum { resident, preview };
+
+fn facePlaneKind(plane: FacePlaneRequestV1) ?FacePlaneKind {
+    if (std.mem.eql(u8, plane.source, "resident")) {
+        if (plane.sessionToken == null or plane.sessionToken.?.len == 0 or
+            plane.expectedGeneration == null or plane.previewToken != null or plane.expectedSha256 != null) return null;
+        return .resident;
+    }
+    if (std.mem.eql(u8, plane.source, "preview")) {
+        if (plane.previewToken == null or plane.previewToken.?.len == 0 or
+            plane.expectedSha256 == null or plane.expectedSha256.?.len == 0 or
+            plane.sessionToken != null or plane.expectedGeneration != null) return null;
+        return .preview;
+    }
+    return null;
+}
+
+fn faceAddressView(address: FaceAddressRequestV1) ?mesh_face_table.AddressView {
+    if (address.objectId.len == 0) return null;
+    if (std.mem.eql(u8, address.stability, "stable")) {
+        if (address.artifactFaceOrdinal != null or address.group == indexed_edit_mesh.NO_GROUP) return null;
+        return .{
+            .object_id = address.objectId,
+            .group = address.group,
+            .stability = .stable,
+        };
+    }
+    if (std.mem.eql(u8, address.stability, "artifact_rank")) {
+        return .{
+            .object_id = address.objectId,
+            .group = address.group,
+            .stability = .artifact_rank,
+            .artifact_face_ordinal = address.artifactFaceOrdinal orelse return null,
+        };
+    }
+    return null;
+}
+
+pub fn modelDocumentTokenForId(model_id: []const u8) u32 {
+    var hash: u32 = 0x811c9dc5;
+    for (model_id) |byte| hash = (hash ^ byte) *% 0x01000193;
+    return (hash & 0x7fff_ffff) | @as(u32, @intFromBool((hash & 0x7fff_ffff) == 0));
+}
+
+fn faceSessionTokenMatches(text: []const u8) bool {
+    const token = std.fmt.parseInt(u32, text, 10) catch return false;
+    return token == g_model_session_token;
+}
+
+fn faceSessionTokenText(buffer: []u8) ?[]const u8 {
+    return std.fmt.bufPrint(buffer, "{d}", .{g_model_session_token}) catch null;
+}
+
+fn faceRecoveryErrorJsonAlloc(
+    allocator: std.mem.Allocator,
+    code: []const u8,
+    detail: []const u8,
+    include_generation: bool,
+) ![]u8 {
+    if (include_generation) return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = false,
+        .version = 1,
+        .code = code,
+        .detail = detail,
+        .currentGeneration = g_edit_generation,
+    }, .{});
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = false,
+        .version = 1,
+        .code = code,
+        .detail = detail,
+    }, .{});
+}
+
+fn objectNamespaceHash(model_id: []const u8, object_ids: []const []const u8, ranges: []const u32) [64]u8 {
+    return meshdoc_format.objectNamespaceHashHex(model_id, object_ids, ranges);
+}
+
+/// Exact resident identity used before every face inspection and recovery
+/// capture. The model id is verified against the active document token; a
+/// caller cannot claim whichever model happens to be visible.
+pub fn meshSessionIdentityJsonAlloc(allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(FaceSessionIdentityRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid mesh session identity request", false);
+    defer parsed.deinit();
+    if (parsed.value.version != 1 or parsed.value.modelId.len == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid mesh session identity request", false);
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(parsed.value.modelId) != g_model_session_token)
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "the requested model does not own the resident session", false);
+    var token_buffer: [16]u8 = undefined;
+    const token = faceSessionTokenText(&token_buffer) orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "could not encode resident session token", false);
+    const empty_ids = [_][]const u8{};
+    const namespace = objectNamespaceHash(parsed.value.modelId, &empty_ids, &.{});
+    return mesh_face_table.exactSessionIdentityJsonAlloc(
+        allocator,
+        parsed.value.modelId,
+        token,
+        g_edit_generation,
+        &namespace,
+    );
+}
+
+/// Publish stable object identity for the current range table. Any later range
+/// mutation clears this publication in model_source; callers must republish the
+/// new exact order before a durable face address can be returned.
+pub fn meshPublishObjectIdsJsonAlloc(allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+    if (!residentMutationAllowed(.durable_channels))
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "historical preview is read-only; object-id publication is blocked", false);
+    var parsed = std.json.parseFromSlice(FaceObjectPublicationV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid object-id publication request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.modelId.len == 0 or request.sessionToken.len == 0 or request.ranges.len == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid object-id publication request", false);
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(request.modelId) != g_model_session_token or !faceSessionTokenMatches(request.sessionToken))
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "object ids target a different resident session", false);
+    if (request.expectedGeneration != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+    const part_ranges = model_source.partRanges() orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "resident mesh has no exact part-range table", false);
+    if (part_ranges.len != request.ranges.len * 2)
+        return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "object-id count differs from the resident part-range count", false);
+    const object_ids = try allocator.alloc([]const u8, request.ranges.len);
+    defer allocator.free(object_ids);
+    for (request.ranges, 0..) |row, index| {
+        if (row.rank != index or row.objectId.len == 0)
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "object ids must be unique and range-ranked", false);
+        for (request.ranges[0..index]) |prior| if (std.mem.eql(u8, prior.objectId, row.objectId))
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "object ids must be unique and range-ranked", false);
+        object_ids[index] = row.objectId;
+    }
+    if (!model_source.setPartObjectIds(request.modelId, object_ids))
+        return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "native object-id publication was refused", false);
+    g_face_table_worker.invalidateIdentity();
+    const namespace = objectNamespaceHash(request.modelId, object_ids, part_ranges);
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .modelId = request.modelId,
+        .sessionToken = request.sessionToken,
+        .generation = g_edit_generation,
+        .objectCount = object_ids.len,
+        .identityQuality = "exact",
+        .objectNamespaceHash = &namespace,
+        .recoveryDegradations = mesh_face_table.EMPTY_RECOVERY_DEGRADATIONS_V1,
+    }, .{});
+}
+
+fn semanticRegionName(root: std.json.Value, region_id: u32) ?[]const u8 {
+    const object = switch (root) {
+        .object => |value| value,
+        else => return null,
+    };
+    const regions = switch (object.get("regions") orelse return null) {
+        .array => |value| value.items,
+        else => return null,
+    };
+    for (regions) |region| {
+        const row = switch (region) {
+            .object => |value| value,
+            else => continue,
+        };
+        const id: u32 = switch (row.get("id") orelse continue) {
+            .integer => |value| if (value >= 0 and value <= std.math.maxInt(u32)) @intCast(value) else continue,
+            else => continue,
+        };
+        if (id != region_id) continue;
+        return switch (row.get("name") orelse return null) {
+            .string => |value| if (value.len > 0) value else null,
+            else => null,
+        };
+    }
+    return null;
+}
+
+fn residentFaceAnalysisJobAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    session_token: []const u8,
+) !mesh_face_table_worker.PreparedJob {
+    if (!ensureIndexedEditMesh()) return error.NoResidentMesh;
+    const mesh = if (g_indexed_edit_mesh) |*resident| resident else return error.NoResidentMesh;
+    const published_model = model_source.partObjectModelId() orelse return error.ObjectIdsUnpublished;
+    if (!std.mem.eql(u8, published_model, model_id)) return error.WrongModel;
+    const ids_json = model_source.partObjectIdsJson() orelse return error.ObjectIdsUnpublished;
+    const ranges = model_source.partRanges() orelse return error.ObjectIdsUnpublished;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const temp = arena.allocator();
+    var parsed_ids = try std.json.parseFromSlice(std.json.Value, temp, ids_json, .{});
+    defer parsed_ids.deinit();
+    const id_values = switch (parsed_ids.value) {
+        .array => |value| value.items,
+        else => return error.ObjectIdsUnpublished,
+    };
+    if (id_values.len == 0 or id_values.len * 2 != ranges.len) return error.ObjectIdsUnpublished;
+    const object_ids = try temp.alloc([]const u8, id_values.len);
+    const bindings = try temp.alloc(mesh_face_table.ObjectBinding, id_values.len);
+    for (id_values, 0..) |value, index| {
+        const object_id = switch (value) {
+            .string => |text| if (text.len > 0) text else return error.ObjectIdsUnpublished,
+            else => return error.ObjectIdsUnpublished,
+        };
+        object_ids[index] = object_id;
+        bindings[index] = .{ .rank = @intCast(index), .object_id = object_id };
+    }
+
+    var parsed_semantics: ?std.json.Parsed(std.json.Value) = null;
+    defer if (parsed_semantics) |*value| value.deinit();
+    if (model_source.semanticTableJson()) |json| {
+        parsed_semantics = std.json.parseFromSlice(std.json.Value, temp, json, .{}) catch null;
+    }
+    var labels = std.ArrayListUnmanaged(mesh_face_table.DurableFaceLabelInput).empty;
+    defer labels.deinit(temp);
+    if (parsed_semantics) |parsed| for (mesh.faces.items) |*face| {
+        if (!face.alive) continue;
+        const name = semanticRegionName(parsed.value, face.semantic.region) orelse continue;
+        try labels.append(temp, .{
+            .face_id = face.id,
+            .face_name = name,
+            .semantic_region_name = name,
+        });
+    };
+
+    const render_classes = try temp.alloc(mesh_face_table.RenderClass, mesh.faces.items.len);
+    @memset(render_classes, .@"opaque");
+    for (mesh.faces.items) |*face| {
+        if (!face.alive or face.id >= render_classes.len) continue;
+        for (face.source_triangles.items) |triangle| {
+            const color = model_source.colorOf(triangle) orelse continue;
+            if (model_paint.isGlassAlpha(color[3])) {
+                render_classes[face.id] = .glass;
+                break;
+            }
+        }
+    }
+    const namespace = objectNamespaceHash(model_id, object_ids, ranges);
+    return mesh_face_table_worker.PreparedJob.captureIndexedAlloc(allocator, .{
+        .mesh = mesh,
+        .identity = .{
+            .source = .resident,
+            .model_id = model_id,
+            .session_token = session_token,
+            .generation = g_edit_generation,
+            .identity_quality = .exact,
+            .object_namespace_hash = &namespace,
+        },
+        .object_bindings = bindings,
+        .durable_labels = labels.items,
+        .render_class_by_face = render_classes,
+    });
+}
+
+fn residentFacePlaneHashAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    session_token: []const u8,
+) ![64]u8 {
+    const published_model = model_source.partObjectModelId() orelse return error.ObjectIdsUnpublished;
+    if (!std.mem.eql(u8, published_model, model_id)) return error.WrongModel;
+    const ids_json = model_source.partObjectIdsJson() orelse return error.ObjectIdsUnpublished;
+    const ranges = model_source.partRanges() orelse return error.ObjectIdsUnpublished;
+    var parsed_ids = try std.json.parseFromSlice(std.json.Value, allocator, ids_json, .{});
+    defer parsed_ids.deinit();
+    const values = switch (parsed_ids.value) {
+        .array => |value| value.items,
+        else => return error.ObjectIdsUnpublished,
+    };
+    if (values.len == 0 or values.len * 2 != ranges.len) return error.ObjectIdsUnpublished;
+    const object_ids = try allocator.alloc([]const u8, values.len);
+    defer allocator.free(object_ids);
+    for (values, 0..) |value, index| object_ids[index] = switch (value) {
+        .string => |text| if (text.len > 0) text else return error.ObjectIdsUnpublished,
+        else => return error.ObjectIdsUnpublished,
+    };
+    const namespace = objectNamespaceHash(model_id, object_ids, ranges);
+    return mesh_face_table_worker.planeIdentityHash(.{
+        .source = .resident,
+        .model_id = model_id,
+        .session_token = session_token,
+        .generation = g_edit_generation,
+        .identity_quality = .exact,
+        .object_namespace_hash = &namespace,
+    });
+}
+
+const ResidentAnalysisLookup = union(enum) {
+    snapshot: *const mesh_face_table.FaceAnalysisSnapshot,
+    response: []u8,
+};
+
+fn residentAnalysisErrorAlloc(
+    allocator: std.mem.Allocator,
+    err: anyerror,
+) ![]u8 {
+    return switch (err) {
+        error.ObjectIdsUnpublished => faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "stable resident object ids have not been published", false),
+        error.WrongModel => faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "published object ids belong to a different model", false),
+        error.NoResidentMesh => faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "resident mesh has no editable topology", false),
+        else => faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident face analysis capture failed", false),
+    };
+}
+
+fn residentFaceAnalysisLookup(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    session_token: []const u8,
+) !ResidentAnalysisLookup {
+    if (!g_face_table_worker.isStarted()) {
+        g_face_table_worker.start(io, allocator, 2) catch
+            return .{ .response = try faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident face-analysis worker could not start", false) };
+    }
+    const identity_hash = residentFacePlaneHashAlloc(allocator, model_id, session_token) catch |err|
+        return .{ .response = try residentAnalysisErrorAlloc(allocator, err) };
+    if (g_face_table_worker.cacheView(io, identity_hash)) |cached| switch (cached) {
+        .success => |snapshot| {
+            _ = g_face_table_worker.selectCached(io, identity_hash);
+            return .{ .snapshot = snapshot };
+        },
+        .diff => return .{ .response = try faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident face cache contains an invalid result kind", false) },
+        .failure => |failure| return .{ .response = try faceRecoveryErrorJsonAlloc(
+            allocator,
+            @tagName(mesh_face_table_worker.publicFailureCode(.resident, failure.code)),
+            failure.text(),
+            false,
+        ) },
+    };
+    if (g_face_table_worker.pendingReceipt(io, identity_hash)) |receipt|
+        return .{ .response = try mesh_face_table_worker.pendingJsonAlloc(allocator, receipt) };
+
+    var prepared = residentFaceAnalysisJobAlloc(allocator, model_id, session_token) catch |err|
+        return .{ .response = try residentAnalysisErrorAlloc(allocator, err) };
+    if (!std.mem.eql(u8, &prepared.identityHash(), &identity_hash)) {
+        prepared.deinit();
+        return .{ .response = try faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident capture identity changed during owner copy", false) };
+    }
+    return switch (g_face_table_worker.submitOwned(io, prepared)) {
+        .queued => |receipt| .{ .response = try mesh_face_table_worker.pendingJsonAlloc(allocator, receipt) },
+        .stopped => .{ .response = try faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident face-analysis worker stopped", false) },
+    };
+}
+
+fn faceRequestIsDiff(allocator: std.mem.Allocator, request_json: []const u8) bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, request_json, .{}) catch return false;
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return false,
+    };
+    const source = switch (root.get("source") orelse return false) {
+        .string => |value| value,
+        else => return false,
+    };
+    return std.mem.eql(u8, source, "diff");
+}
+
+fn diffQueryErrorJsonAlloc(
+    allocator: std.mem.Allocator,
+    err: mesh_face_diff.DiffError,
+) ![]u8 {
+    return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.InvalidQuery => faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-diff query", false),
+        error.AuditUnavailable => faceRecoveryErrorJsonAlloc(allocator, "audit_unavailable", "requested diff audit facts were not computed", false),
+        error.StaleCursor => faceRecoveryErrorJsonAlloc(allocator, "stale_cursor", "face-diff cursor belongs to another plane or query", false),
+        error.AddressNotInQuery => faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", "face address is not present in this diff query", false),
+        error.InvalidPlanes, error.InvalidReceipt => faceRecoveryErrorJsonAlloc(allocator, "internal_error", "native face-diff planes are inconsistent", false),
+    };
+}
+
+fn meshFaceDiffJsonAlloc(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) ![]u8 {
+    var parsed = mesh_face_diff.parseRequestAlloc(allocator, request_json) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-diff v1 request", false),
+    };
+    defer parsed.deinit();
+    const resident_query = parsed.resident.query;
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(resident_query.model_id) != g_model_session_token or
+        resident_query.session_token == null or !faceSessionTokenMatches(resident_query.session_token.?))
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "face-diff request targets a different resident session", false);
+    }
+    if (resident_query.expected_generation == null or resident_query.expected_generation.? != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+
+    var saved_query = resident_query;
+    saved_query.source = .saved;
+    saved_query.session_token = null;
+    saved_query.expected_generation = null;
+    saved_query.geometry_path = parsed.geometry_path;
+    saved_query.expected_sha256 = parsed.expected_saved_sha256;
+
+    if (!g_face_table_worker.isStarted()) g_face_table_worker.start(io, allocator, 2) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face-diff worker could not start", false);
+    const resident_hash = residentFacePlaneHashAlloc(
+        allocator,
+        resident_query.model_id,
+        resident_query.session_token.?,
+    ) catch |err| return residentAnalysisErrorAlloc(allocator, err);
+    const diff_hash = mesh_face_table_worker.diffPlaneIdentityHashAlloc(allocator, .{
+        .model_id = resident_query.model_id,
+        .session_token = resident_query.session_token.?,
+        .generation = resident_query.expected_generation.?,
+        .resident_plane_hash = resident_hash,
+        .artifact_sha256 = parsed.expected_saved_sha256,
+    }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-diff plane identity", false),
+    };
+    if (g_face_table_worker.cacheView(io, diff_hash)) |cached| switch (cached) {
+        .diff => |snapshot| {
+            _ = g_face_table_worker.selectCached(io, diff_hash);
+            return mesh_face_diff.queryPageJsonAlloc(
+                allocator,
+                snapshot,
+                mesh_face_diff.queryFromParsed(&parsed),
+            ) catch |err| diffQueryErrorJsonAlloc(allocator, err);
+        },
+        .success => return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face-diff cache contains an invalid result kind", false),
+        .failure => |failure| return faceRecoveryErrorJsonAlloc(
+            allocator,
+            @tagName(mesh_face_table_worker.publicFailureCode(.diff, failure.code)),
+            failure.text(),
+            false,
+        ),
+    };
+    if (g_face_table_worker.pendingReceipt(io, diff_hash)) |receipt|
+        return mesh_face_table_worker.pendingJsonAlloc(allocator, receipt);
+
+    var bytes = mesh_face_table_package.readSavedQueryFromCwdAlloc(
+        io,
+        allocator,
+        saved_query,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidRequest => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "saved diff geometry is outside the model-package lane", false),
+        error.WrongModel => return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "saved diff package belongs to a different model", false),
+        else => return faceRecoveryErrorJsonAlloc(allocator, "unreadable_saved_document", "saved diff geometry could not be read", false),
+    };
+    defer if (bytes.len > 0) allocator.free(bytes);
+    var resident_job = residentFaceAnalysisJobAlloc(
+        allocator,
+        resident_query.model_id,
+        resident_query.session_token.?,
+    ) catch |err| return residentAnalysisErrorAlloc(allocator, err);
+    var resident_job_owned = true;
+    defer if (resident_job_owned) resident_job.deinit();
+    var prepared = mesh_face_table_worker.PreparedJob.attachSavedDiffAlloc(
+        allocator,
+        &resident_job,
+        &bytes,
+        .{
+            .source = .saved,
+            .model_id = resident_query.model_id,
+            .expected_sha256 = parsed.expected_saved_sha256,
+        },
+        .{},
+        .{},
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face-diff worker input could not be captured", false),
+    };
+    resident_job_owned = false;
+    const prepared_hash = prepared.identityHash();
+    if (!std.mem.eql(u8, &prepared_hash, &diff_hash)) {
+        prepared.deinit();
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face-diff identity changed during owner capture", false);
+    }
+    return switch (g_face_table_worker.submitOwned(io, prepared)) {
+        .queued => |receipt| mesh_face_table_worker.pendingJsonAlloc(allocator, receipt),
+        .stopped => faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face-diff worker stopped", false),
+    };
+}
+
+pub fn meshFaceTableJsonAlloc(io: std.Io, allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+    if (faceRequestIsDiff(allocator, request_json))
+        return meshFaceDiffJsonAlloc(io, allocator, request_json);
+    var parsed = mesh_face_table.parseQueryAlloc(allocator, request_json) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-table v1 request", false);
+    defer parsed.deinit();
+    const query = parsed.query;
+    if (query.source == .saved)
+        return mesh_face_table_package.inspectSavedFromCwdAlloc(io, allocator, request_json);
+    if (query.source == .preview) {
+        const token = query.preview_token orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "preview face table requires previewToken", false);
+        const sha = query.expected_sha256 orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "preview face table requires expectedSha256", false);
+        const specimen = g_historical_preview.activeFor(token, query.model_id, sha) catch |err|
+            return faceRecoveryErrorJsonAlloc(allocator, switch (err) {
+                error.PreviewWrongModel => "wrong_model",
+                error.PreviewHashMismatch => "hash_mismatch",
+                else => "released_capability",
+            }, @errorName(err), false);
+        return specimen.analysis.requestJsonAlloc(allocator, request_json);
+    }
+    if (query.source != .resident)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "unknown face-table plane", false);
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(query.model_id) != g_model_session_token or
+        query.session_token == null or !faceSessionTokenMatches(query.session_token.?))
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "face-table request targets a different resident session", false);
+    }
+    if (query.expected_generation == null or query.expected_generation.? != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+    const lookup = try residentFaceAnalysisLookup(io, allocator, query.model_id, query.session_token.?);
+    const analysis = switch (lookup) {
+        .snapshot => |snapshot| snapshot,
+        .response => |response| return response,
+    };
+    return mesh_face_table.queryPageAlloc(allocator, analysis, query) catch |err| switch (err) {
+        error.InvalidRequest => faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-table query", false),
+        error.WrongModel => faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "face-table identity changed", false),
+        error.StaleGeneration => faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true),
+        error.AuditUnavailable => faceRecoveryErrorJsonAlloc(allocator, "audit_unavailable", "requested audit facts were not computed", false),
+        error.StaleCursor => faceRecoveryErrorJsonAlloc(allocator, "stale_cursor", "face-table cursor belongs to another plane or query", false),
+        error.AddressNotInQuery => faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", "face address is not present in this query", false),
+        else => |unhandled| return unhandled,
+    };
+}
+
+/// Main-thread completion drain. At most one compact event is returned per
+/// call; full analysis snapshots remain owned by the resident/cold workers.
+pub fn meshFaceAnalysisReadyJsonAlloc(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+) !?[]u8 {
+    if (g_face_table_worker.isStarted()) {
+        if (try g_face_table_worker.takeReadyEventJsonAlloc(io, allocator)) |event| return event;
+    }
+    return mesh_face_table_package.takeReadyEventJsonAlloc(io, allocator);
+}
+
+pub fn meshFaceAnalysisStop(io: std.Io) void {
+    g_face_table_worker.stop(io);
+    mesh_face_table_package.stopWorker(io);
+}
+
+fn faceSelectFaceReceiptJsonAlloc(
+    allocator: std.mem.Allocator,
+    request: FaceSelectRequestV1,
+    address: mesh_face_table.AddressView,
+    selected_triangles: u32,
+) ![]u8 {
+    if (address.artifact_face_ordinal) |ordinal| return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .plane = .{
+            .source = "resident",
+            .sessionToken = request.plane.sessionToken.?,
+            .generation = g_edit_generation,
+        },
+        .target = .{
+            .kind = "face",
+            .address = .{
+                .objectId = address.object_id,
+                .group = address.group,
+                .stability = "artifact_rank",
+                .artifactFaceOrdinal = ordinal,
+            },
+        },
+        .selectedTriangles = selected_triangles,
+    }, .{});
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .plane = .{
+            .source = "resident",
+            .sessionToken = request.plane.sessionToken.?,
+            .generation = g_edit_generation,
+        },
+        .target = .{
+            .kind = "face",
+            .address = .{
+                .objectId = address.object_id,
+                .group = address.group,
+                .stability = "stable",
+            },
+        },
+        .selectedTriangles = selected_triangles,
+    }, .{});
+}
+
+fn faceSelectBuildIssueReceiptJsonAlloc(
+    allocator: std.mem.Allocator,
+    request: FaceSelectRequestV1,
+    object_id: []const u8,
+    source_group: u32,
+    selected_triangles: u32,
+) ![]u8 {
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .plane = .{
+            .source = "resident",
+            .sessionToken = request.plane.sessionToken.?,
+            .generation = g_edit_generation,
+        },
+        .target = .{
+            .kind = "build_issue",
+            .objectId = object_id,
+            .sourceGroup = source_group,
+        },
+        .selectedTriangles = selected_triangles,
+    }, .{});
+}
+
+/// Resolve a durable/local authored-face address, or one stored build issue, to
+/// the resident triangle selection and optionally frame it. All identity and
+/// membership validation completes before the live selection changes.
+pub fn meshFaceSelectJsonAlloc(io: std.Io, allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(FaceSelectRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-select v1 request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.modelId.len == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-select v1 request", false);
+    const plane_kind = facePlaneKind(request.plane) orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-select plane", false);
+    if (plane_kind == .preview) {
+        if (!std.mem.eql(u8, request.target.kind, "face") or request.target.address == null or
+            request.target.objectId != null or request.target.sourceGroup != null)
+        {
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "preview selection requires one face address", false);
+        }
+        const address = faceAddressView(request.target.address.?) orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid preview face address", false);
+        const token = request.plane.previewToken.?;
+        const sha = request.plane.expectedSha256.?;
+        const specimen = g_historical_preview.activeFor(token, request.modelId, sha) catch |err|
+            return faceRecoveryErrorJsonAlloc(allocator, switch (err) {
+                error.PreviewWrongModel => "wrong_model",
+                error.PreviewHashMismatch => "hash_mismatch",
+                else => "released_capability",
+            }, @errorName(err), false);
+        const selected = specimen.selectAddress(address, request.additive) catch |err|
+            return faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", @errorName(err), false);
+        if (request.frame) orbitFrame(specimen.center, specimen.radius);
+        return std.json.Stringify.valueAlloc(allocator, .{
+            .ok = true,
+            .version = 1,
+            .plane = .{
+                .source = "preview",
+                .previewToken = token,
+                .sha256 = &specimen.sha256,
+            },
+            .target = request.target,
+            .selectedTriangles = selected,
+        }, .{});
+    }
+    if (g_historical_preview.blocksResidentMutation())
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "historical preview selection must target the preview plane", false);
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(request.modelId) != g_model_session_token or
+        !faceSessionTokenMatches(request.plane.sessionToken.?))
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "face selection targets a different resident session", false);
+    }
+    if (request.plane.expectedGeneration.? != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+    if (g_paint_session)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "face selection is unavailable during a paint stroke", false);
+
+    const face_target = std.mem.eql(u8, request.target.kind, "face");
+    const issue_target = std.mem.eql(u8, request.target.kind, "build_issue");
+    if (!face_target and !issue_target)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "unknown face selection target", false);
+    var address: ?mesh_face_table.AddressView = null;
+    if (face_target) {
+        if (request.target.objectId != null or request.target.sourceGroup != null)
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "face target fields do not match its kind", false);
+        address = faceAddressView(request.target.address orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "face target requires an address", false)) orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face address", false);
+    } else {
+        if (request.target.address != null or request.target.objectId == null or
+            request.target.objectId.?.len == 0 or request.target.sourceGroup == null)
+        {
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "build-issue target fields do not match its kind", false);
+        }
+    }
+
+    const lookup = try residentFaceAnalysisLookup(io, allocator, request.modelId, request.plane.sessionToken.?);
+    const analysis = switch (lookup) {
+        .snapshot => |snapshot| snapshot,
+        .response => |response| return response,
+    };
+
+    const triangle_count: usize = @intCast(g_edit_count / 3);
+    if (triangle_count == 0 or model_paint.faceCount() != triangle_count)
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident selection topology does not match face analysis", false);
+    const selection_mask = try allocator.alloc(bool, triangle_count);
+    defer allocator.free(selection_mask);
+    @memset(selection_mask, false);
+    var target_triangle_count: u32 = 0;
+
+    if (face_target) {
+        const row_index = analysis.findAddress(address.?) orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", "face address is not present in the resident analysis", false);
+        const row = &analysis.rows.items[row_index];
+        for (row.triangle_ids) |triangle| {
+            if (triangle >= selection_mask.len)
+                return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face address resolved outside resident selection topology", false);
+            if (!selection_mask[triangle]) {
+                selection_mask[triangle] = true;
+                target_triangle_count += 1;
+            }
+        }
+        if (target_triangle_count == 0 or target_triangle_count != row.triangle_ids.len)
+            return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "face address did not resolve exact triangle membership", false);
+    } else {
+        const object_id = request.target.objectId.?;
+        const source_group = request.target.sourceGroup.?;
+        var issue: ?*const mesh_face_table.FaceBuildIssue = null;
+        for (analysis.build_issues.items) |*candidate| {
+            if (candidate.source_group != source_group or !std.mem.eql(u8, candidate.object_id, object_id)) continue;
+            if (issue != null)
+                return faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", "build-issue target is ambiguous", false);
+            issue = candidate;
+        }
+        const resolved_issue = issue orelse
+            return faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", "build-issue target is not present in the resident analysis", false);
+        for (resolved_issue.source_triangles) |triangle| {
+            if (triangle >= selection_mask.len)
+                return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "build issue resolved outside resident selection topology", false);
+            if (!selection_mask[triangle]) {
+                selection_mask[triangle] = true;
+                target_triangle_count += 1;
+            }
+        }
+        if (target_triangle_count == 0 or target_triangle_count != resolved_issue.source_triangles.len)
+            return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "build issue did not resolve exact source-triangle membership", false);
+    }
+
+    if (request.additive) {
+        for (selection_mask, 0..) |*selected, triangle| {
+            selected.* = selected.* or mesh_edit.faceSelectedPub(@intCast(triangle));
+        }
+    }
+    var selected_triangles: u32 = 0;
+    for (selection_mask) |selected| selected_triangles += @intFromBool(selected);
+    if (mesh_edit.selectFacesByTriangleMask(selection_mask) == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "internal_error", "resident face selection could not be applied", false);
+    if (request.frame) _ = orbitFrameCurrent(true);
+
+    if (face_target) return faceSelectFaceReceiptJsonAlloc(allocator, request, address.?, selected_triangles);
+    return faceSelectBuildIssueReceiptJsonAlloc(
+        allocator,
+        request,
+        request.target.objectId.?,
+        request.target.sourceGroup.?,
+        selected_triangles,
+    );
+}
+
+/// Return the page cursor and row offset containing an authored face under the
+/// requested native sort/filter. `seekAddressAlloc` remains the sole owner of
+/// sort order and cursor construction.
+pub fn meshFaceSeekJsonAlloc(io: std.Io, allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(FaceSeekRequestV1, allocator, request_json, .{}) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-seek v1 request", false);
+    defer parsed.deinit();
+    const request = parsed.value;
+    if (request.version != 1 or request.modelId.len == 0)
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-seek v1 request", false);
+    const plane_kind = facePlaneKind(request.plane) orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-seek plane", false);
+    const address = faceAddressView(request.address) orelse
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face address", false);
+
+    if (plane_kind == .preview) {
+        const token = request.plane.previewToken.?;
+        const sha = request.plane.expectedSha256.?;
+        const specimen = g_historical_preview.activeFor(token, request.modelId, sha) catch |err|
+            return faceRecoveryErrorJsonAlloc(allocator, switch (err) {
+                error.PreviewWrongModel => "wrong_model",
+                error.PreviewHashMismatch => "hash_mismatch",
+                else => "released_capability",
+            }, @errorName(err), false);
+        const canonical_query_json = try std.json.Stringify.valueAlloc(allocator, .{
+            .version = request.version,
+            .modelId = request.modelId,
+            .source = "preview",
+            .previewToken = token,
+            .expectedSha256 = sha,
+            .sort = request.sort,
+            .filters = request.filters,
+            .limit = request.limit,
+        }, .{});
+        defer allocator.free(canonical_query_json);
+        var parsed_query = mesh_face_table.parseQueryAlloc(allocator, canonical_query_json) catch
+            return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid preview face-seek query", false);
+        defer parsed_query.deinit();
+        var receipt = mesh_face_table.seekAddressAlloc(
+            allocator,
+            &specimen.analysis.snapshot,
+            parsed_query.query,
+            address,
+        ) catch |err| return faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", @errorName(err), false);
+        defer receipt.deinit();
+        return std.json.Stringify.valueAlloc(allocator, .{
+            .ok = true,
+            .version = 1,
+            .cursor = @as(?[]const u8, receipt.cursor),
+            .rowOffset = receipt.row_offset,
+        }, .{});
+    }
+
+    const canonical_query_json = try std.json.Stringify.valueAlloc(allocator, .{
+        .version = request.version,
+        .modelId = request.modelId,
+        .source = "resident",
+        .sessionToken = request.plane.sessionToken.?,
+        .expectedGeneration = request.plane.expectedGeneration.?,
+        .sort = request.sort,
+        .filters = request.filters,
+        .limit = request.limit,
+    }, .{});
+    defer allocator.free(canonical_query_json);
+    var parsed_query = mesh_face_table.parseQueryAlloc(allocator, canonical_query_json) catch
+        return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-seek sort, filter, or limit", false);
+    defer parsed_query.deinit();
+    const query = parsed_query.query;
+
+    if (!modelSessionResident())
+        return faceRecoveryErrorJsonAlloc(allocator, "no_resident_session", "no resident model document", false);
+    if (modelDocumentTokenForId(query.model_id) != g_model_session_token or
+        query.session_token == null or !faceSessionTokenMatches(query.session_token.?))
+    {
+        return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "face seek targets a different resident session", false);
+    }
+    if (query.expected_generation == null or query.expected_generation.? != g_edit_generation)
+        return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true);
+
+    const lookup = try residentFaceAnalysisLookup(io, allocator, query.model_id, query.session_token.?);
+    const analysis = switch (lookup) {
+        .snapshot => |snapshot| snapshot,
+        .response => |response| return response,
+    };
+    var receipt = mesh_face_table.seekAddressAlloc(allocator, analysis, query, address) catch |err| switch (err) {
+        error.InvalidRequest => return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "invalid face-seek query", false),
+        error.WrongModel => return faceRecoveryErrorJsonAlloc(allocator, "wrong_model", "face-seek identity changed", false),
+        error.StaleGeneration => return faceRecoveryErrorJsonAlloc(allocator, "stale_generation", "resident mesh generation changed", true),
+        error.AuditUnavailable => return faceRecoveryErrorJsonAlloc(allocator, "audit_unavailable", "requested audit facts were not computed", false),
+        error.StaleCursor => return faceRecoveryErrorJsonAlloc(allocator, "stale_cursor", "face-seek cursor input is invalid", false),
+        error.AddressNotInQuery => return faceRecoveryErrorJsonAlloc(allocator, "address_not_in_query", "face address is excluded from this query", false),
+        else => |unhandled| return unhandled,
+    };
+    defer receipt.deinit();
+    return std.json.Stringify.valueAlloc(allocator, .{
+        .ok = true,
+        .version = 1,
+        .cursor = @as(?[]const u8, receipt.cursor),
+        .rowOffset = receipt.row_offset,
+    }, .{});
+}
+
 /// True when the ACTIVE session already holds a resident edit mesh — the cart's
 /// "was this document parked here before?" probe (req_3850 slice 2).
 pub fn modelSessionResident() bool {
@@ -18617,6 +21241,11 @@ fn modelSessionRecord(token: u32) ?*ModelSession {
 /// then loads the document into it through the normal load path.
 pub fn modelSessionSelect(token: u32) bool {
     if (token == g_model_session_token) return true;
+    if (g_historical_preview.blocksResidentMutation()) return false;
+    // A retained restore/field transaction owns this exact resident session.
+    // Parking it would turn that receipt into authority over another document.
+    if (g_model_write_leases.owner() != null) return false;
+    g_face_table_worker.invalidateIdentity();
     const current = modelSessionRecord(g_model_session_token) orelse return false;
     mesh_edit.sessionSave(&current.edit);
     model_source.sessionSave(&current.source);
