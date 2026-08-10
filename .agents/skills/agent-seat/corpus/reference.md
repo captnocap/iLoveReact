@@ -140,7 +140,8 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
 | `outermost:+x` / `outermost:-z` | Extremal face on the named axis. |
 | `above:y>1.4` / `below:y>1.4` | Faces above/below a threshold on an axis. |
 | `groups:12..18` | Authored face-group range. Index-based — never durable memory. |
-| `inside:box(minx,miny,minz,maxx,maxy,maxz)` | Faces fully inside an AABB. Six finite numbers. |
+| `inside:box(minx,miny,minz,maxx,maxy,maxz)` | Faces whose CENTROID is in an AABB. Six finite numbers. |
+| `mirror:x` / `mirror:z@0.002` | Replaces the current selection with its twins across the model-origin plane. **Default tolerance 0.0001 m.** |
 
 ### Selector gotchas, all real
 
@@ -154,10 +155,21 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
   and `kind:"face"` form refuse instead of silently selecting half an authored quad mesh.
 - **The comparator in `above:`/`below:` is decorative.** `above:y>1.4` and `above:y<1.4`
   compile identically; only the `above`/`below` prefix and the number are read.
-- **`inside:box` needs the face fully inside**, and coordinates are absolute. It is the
-  only way to isolate a sub-part of a multi-face region (e.g. the front quad of a
+- **`inside:box` tests the face CENTROID, not full containment** (`meshSelectQuery`, kind
+  `.box`) — this page claimed "fully inside" for a long time and it was never true, which
+  is why a returned bbox routinely reads WIDER than the box you asked for. Coordinates are
+  absolute. It isolates a sub-part of a multi-face region (e.g. the front quad of a
   `*.wall` ring), but it is brittle: a bound tuned to exclude a neighbouring quad breaks
   the moment either moves. Re-derive bounds from the live percept, never from memory.
+- **A box cannot isolate a region whose own AABB contains foreign faces.** Tightening drops
+  target faces before it drops the intruders. When the count comes back over, that is the
+  signal to reach for `mirror:` or a name — not to tune the numbers harder.
+- **`mirror:` reads the CURRENT selection, so it is always the second call**: select the
+  source, then mirror it. The reply adds `unmatchedSources` — how many source faces found
+  nothing at their reflection. **Non-zero means a partial mirror**, which otherwise looks
+  identical to a clean one; widen with `@<metres>` or accept that the model is asymmetric
+  there. Coincident twins (an inner skin behind an outer) both come along by design, so a
+  twin count above the source count is real, not a bug.
 - Geometric selectors return the real face count and bbox. Zero, or an unexpectedly broad
   result, is a reason to stop and inspect — not to proceed.
 - Every selector also compares matched faces with the active native scope. A partial match

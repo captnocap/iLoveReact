@@ -5,6 +5,7 @@
 //! Reads camera/light/mesh props from the 3D.View node's children.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
@@ -367,6 +368,7 @@ pub fn gpuMemoryStats() GpuMemoryStats {
     }
     if (g_paint_tex != null) stats.diffuse_texture_bytes += @as(u64, g_paint_tex_w) * g_paint_tex_h * 4;
     if (g_default_tex != null) stats.diffuse_texture_bytes += 4;
+    if (g_glass_aux_tex != null) stats.diffuse_texture_bytes += 4;
     return stats;
 }
 
@@ -403,10 +405,7 @@ pub fn hostStashBytes() u64 {
 /// COPIED into a host-owned buffer (the caller's parse result is freed right after).
 /// Returns false (loud) only when the stash is full. A re-drop of the same key
 /// overwrites; an already-resident key is a no-op success.
-pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
-    if (lookupGeometry(key) != null) return true; // already GPU-resident
-    const hash = hashKey(key);
-    const generation = geometryGeneration(hash);
+fn installHostMeshCopy(hash: u64, generation: u32, copy: []f32, count: u32) void {
     // The viewer shows ONE host mesh at a time, so a previously-stashed-but-not-yet-
     // drawn mesh (a superseded quality level mid-scrub) is obsolete. Evict every OTHER
     // entry as we stash the new current one — otherwise a fast slider drag fills the
@@ -422,9 +421,16 @@ pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
     }
     const s = slot orelse &g_host_stash[0]; // everything else is now free
     if (s.verts) |old| std.heap.c_allocator.free(old);
+    s.* = .{ .hash = hash, .verts = copy, .count = count, .generation = generation, .present = true };
+}
+
+pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
+    if (lookupGeometry(key) != null) return true; // already GPU-resident
+    const hash = hashKey(key);
+    const generation = geometryGeneration(hash);
     const copy = std.heap.c_allocator.alloc(f32, verts.len) catch return false;
     @memcpy(copy, verts);
-    s.* = .{ .hash = hash, .verts = copy, .count = count, .generation = generation, .present = true };
+    installHostMeshCopy(hash, generation, copy, count);
     return true;
 }
 
@@ -612,9 +618,14 @@ var g_edit_key_hash: u64 = 0;
 var g_edit_key: ?[]u8 = null;
 var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
 var g_edit_count: u32 = 0;
-/// Host-internal topology generation under `g_edit_key`. React declares the stable
-/// document handle once; topology replacement never leaks a renamed key again.
+/// Public resident-document revision under `g_edit_key`. Every authored-face fact
+/// change advances this so Recovery/diagnostic reads can reject stale receipts.
 var g_edit_generation: u32 = 0;
+/// Retained render allocation identity. Position-only mutations patch that allocation
+/// in place and MUST NOT advance this clock; topology replacement does. Keeping it
+/// separate from `g_edit_generation` prevents a diagnostic revision from making the
+/// shaded mesh disappear between two ordinary drags.
+var g_edit_geometry_generation: u32 = 0;
 /// Scene3D-owned resident analysis lane. Heavy facts/audit/diff never run in
 /// a V8 callback; this worker retains one resident generation snapshot.
 var g_face_table_worker: mesh_face_table_worker.Worker = .{};
@@ -716,7 +727,7 @@ fn cloneIndexedEditMeshOrImport(
             model_source.faceSemanticRegions(),
             model_source.faceSemanticInstances(),
         ) and
-            mesh.residentUvsMatch(verts, tri_count) and
+            mesh.residentRenderChannelsMatch(verts, tri_count) and
             mesh.residentLogicalTopologyMatches(
                 model_source.renderCornerLogicalIds(),
                 model_source.logicalVertexCount(),
@@ -964,16 +975,32 @@ fn clearActiveEditMesh() void {
     g_edit_key = null;
     g_edit_key_hash = 0;
     g_edit_generation = 0;
+    g_edit_geometry_generation = 0;
     invalidateMeshAudit();
 }
 
-inline fn bumpEditGeneration() void {
+inline fn bumpEditRevision() void {
     g_face_table_worker.invalidateIdentity();
-    g_edit_generation = stable_geometry_slot.nextGeneration(g_edit_generation);
+    const next = stable_geometry_slot.advanceRevision(.{
+        .revision = g_edit_generation,
+        .geometry = g_edit_geometry_generation,
+    });
+    g_edit_generation = next.revision;
+    g_edit_geometry_generation = next.geometry;
+}
+
+inline fn bumpEditGeometryGeneration() void {
+    g_face_table_worker.invalidateIdentity();
+    const next = stable_geometry_slot.advanceGeometry(.{
+        .revision = g_edit_generation,
+        .geometry = g_edit_geometry_generation,
+    });
+    g_edit_generation = next.revision;
+    g_edit_geometry_generation = next.geometry;
 }
 
 inline fn geometryGeneration(hash: u64) u32 {
-    return if (hash != 0 and hash == g_edit_key_hash) g_edit_generation else 0;
+    return if (hash != 0 and hash == g_edit_key_hash) g_edit_geometry_generation else 0;
 }
 
 fn normalOf(a: [3]f32, b: [3]f32, c: [3]f32) [3]f32 {
@@ -1040,7 +1067,7 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
 
     var patched = false;
     for (&g_host_stash) |*s| {
-        if (!s.present or s.hash != g_edit_key_hash or s.generation != g_edit_generation) continue;
+        if (!s.present or s.hash != g_edit_key_hash or s.generation != g_edit_geometry_generation) continue;
         if (s.verts) |stash_verts| {
             if (start_f32 + len_f32 <= stash_verts.len) {
                 @memcpy(stash_verts[start_f32 .. start_f32 + len_f32], verts[start_f32 .. start_f32 + len_f32]);
@@ -1052,7 +1079,7 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
     const buf = g_retained_vbuf;
     if (queue != null and buf != null) {
         for (g_geo_cache[0..g_geo_cache_len]) |*e| {
-            if (!e.present or e.hash != g_edit_key_hash or e.generation != g_edit_generation) continue;
+            if (!e.present or e.hash != g_edit_key_hash or e.generation != g_edit_geometry_generation) continue;
             if (first_vert + vert_count > e.count) continue;
             stageVertexRows(
                 queue.?,
@@ -1065,6 +1092,30 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
         }
     }
     return patched;
+}
+
+/// A CPU mutation is already authoritative by the time the incremental GPU patch
+/// runs. If no retained/stashed slot was patchable, retire any current GPU stamp
+/// and queue the complete current mesh for the next draw. Returning "not changed"
+/// after mutating CPU state makes drag accumulators replay the same cumulative
+/// delta on every motion event.
+fn queueActiveEditMeshUpload() bool {
+    const key = g_edit_key orelse return false;
+    const verts = g_edit_verts orelse return false;
+    if (g_edit_key_hash == 0 or g_edit_count == 0) return false;
+    // Secure the replacement before invalidating the visible retained entry. An
+    // allocation failure must leave the last successfully drawn geometry visible.
+    const copy = std.heap.c_allocator.alloc(f32, verts.len) catch return false;
+    @memcpy(copy, verts);
+    for (g_geo_cache[0..g_geo_cache_len]) |*entry| {
+        if (!entry.present or entry.hash != g_edit_key_hash or
+            entry.generation != g_edit_geometry_generation) continue;
+        // Active edit generations start at one; zero makes the next intern reuse
+        // this same retained region while refusing it as current in the meantime.
+        entry.generation = 0;
+    }
+    installHostMeshCopy(hashKey(key), g_edit_geometry_generation, copy, g_edit_count);
+    return true;
 }
 
 fn applyMeshMutation(m: mesh_edit.Mutation) bool {
@@ -1093,7 +1144,13 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
     if (model_paint.positions()) |pos| {
         _ = model_source.updateGeometryFromDisplayed(pos, m.first_face, m.last_face);
     }
-    return patchActiveEditMesh(m.first_face, m.last_face);
+    if (!patchActiveEditMesh(m.first_face, m.last_face) and !queueActiveEditMeshUpload()) {
+        // Geometry and journal truth have already changed. Keep the operation's
+        // success semantics honest so a held gizmo cannot compound its delta;
+        // the next full resident refresh remains able to recover presentation.
+        log.print("[mesh] live mutation committed but its render upload could not be queued\n", .{});
+    }
+    return true;
 }
 
 /// Adopt a freshly-parsed mesh (interleaved verts, 8 f32/vert) as the paint target.
@@ -1106,6 +1163,9 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     // target load must not let an equal face count make another model inherit
     // stale teaching colours; same-document replaces carry them explicitly.
     _ = clearRetopoBandPreview();
+    if (g_uv_zone) |rows| std.heap.c_allocator.free(rows);
+    g_uv_zone = null;
+    publishUvZoneMask();
     clearActiveEditMesh();
     paint_program.reset(); // a fresh model starts with an empty stroke program
     // Reset BEFORE the target swaps: reset restores any selection tint, and the saved
@@ -1122,6 +1182,7 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
             g_edit_key_hash = hashKey(key);
             g_edit_count = count;
             g_edit_generation = 1;
+            g_edit_geometry_generation = 1;
         }
     }
 }
@@ -1141,7 +1202,7 @@ fn setPaintTargetForGeneration(verts: []f32, count: u32) bool {
     clearActiveEditGeometry();
     g_edit_verts = copy;
     g_edit_count = count;
-    bumpEditGeneration();
+    bumpEditGeometryGeneration();
     return true;
 }
 
@@ -1165,6 +1226,48 @@ pub fn meshEditActiveCount() u32 {
 pub fn meshEditGeneration() u32 {
     return g_edit_generation;
 }
+
+/// Narrow, compile-time-only seam for the headless Scene3D interaction tests.
+/// The production viewport normally publishes these camera fields during draw;
+/// tests need the same projection without constructing a GPU surface.  Reads go
+/// through the real welded topology and retained host stash used by mutations.
+pub const test_support = if (builtin.is_test) struct {
+    pub fn setPaintCamera(eye: [3]f32, target: [3]f32, fov: f32, width: f32, height: f32) void {
+        g_paint_eye = eye;
+        g_paint_target = target;
+        g_paint_fov = fov;
+        g_paint_vp_w = width;
+        g_paint_vp_h = height;
+        g_paint_vp_x = 0;
+        g_paint_vp_y = 0;
+    }
+
+    pub fn vertexPosition(vertex: u32) ?[3]f32 {
+        if (!mesh_edit.ensureTopologyPub() or vertex >= mesh_edit.vertCount()) return null;
+        return mesh_edit.vertPosPub(vertex);
+    }
+
+    pub fn hostPresentationIsCurrent() bool {
+        if (g_edit_key_hash == 0 or g_edit_geometry_generation == 0) return false;
+        for (g_host_stash) |slot| {
+            if (slot.present and slot.hash == g_edit_key_hash and
+                slot.generation == g_edit_geometry_generation and slot.verts != null)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn ensureExplicitIndexedCache() bool {
+        if (!ensureIndexedEditMesh()) return false;
+        return if (g_indexed_edit_mesh) |*mesh| mesh.has_explicit_logical_topology else false;
+    }
+
+    pub fn exactIndexedSavePromotionRefusal() []const u8 {
+        return g_exact_indexed_save_promotion_refusal;
+    }
+} else struct {};
 
 /// Park the authoritative active edit copy for first draw. Paint-layout rebuilds
 /// and imported UV adoption mutate this copy after setPaintTarget, so stashing the
@@ -1376,8 +1479,8 @@ fn collectCurrentFaceColors() ?[]u8 {
 }
 
 /// Restore durable per-face colour metadata after a hide/show target rebuild without
-/// flattening the detailed paint raster. RGB stays source-side; only glass alpha is
-/// reasserted onto the live atlas.
+/// flattening the detailed paint raster. RGB stays source-side; glass alpha returns to
+/// the independent face-material table used to route the auxiliary glass atlas.
 fn restoreFaceColorMetadata(colors: []const u8) void {
     const face_count = g_edit_count / 3;
     if (colors.len != @as(usize, face_count) * 4) return;
@@ -1435,7 +1538,496 @@ fn applyExactSourceFaceColors(colors: []const u8, face_count: u32) bool {
     return true;
 }
 
-fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
+const LogicalTopologyReplacement = union(enum) {
+    /// The resident document has no explicit logical topology and this operation
+    /// does not mint one. Illegal when a current-v5 table is resident: silently
+    /// crossing that boundary was the req_4194 data-loss bug.
+    absent,
+    /// Corner order and logical connectivity are unchanged. Positions, normals,
+    /// and UVs may change, but every duplicate carrying one id must still validate.
+    preserve_same_order,
+    /// Structural mutation supplied the exact post-operation corner provenance.
+    exact: struct {
+        rows: []const u32,
+        vertex_count: u32,
+    },
+    /// Deleting the final triangle intentionally leaves no logical rows.
+    empty,
+};
+
+fn logicalReplacementExactOrAbsent(
+    rows: ?[]const u32,
+    count: u32,
+    logical_vertex_count: u32,
+) LogicalTopologyReplacement {
+    if (count == 0) return .empty;
+    if (rows) |exact_rows| return .{ .exact = .{
+        .rows = exact_rows,
+        .vertex_count = logical_vertex_count,
+    } };
+    return .absent;
+}
+
+/// Parallel provenance stream for soup-building structural operations. Existing
+/// corners are copied by source-corner address; new corners are minted explicitly
+/// by the operation's own topology recipe. It never discovers resident identity
+/// from positions.
+const LogicalRowsBuilder = struct {
+    rows: std.ArrayListUnmanaged(u32) = .empty,
+    source_rows: ?[]const u32,
+    source_vertex_count: u32,
+    next_id: u32,
+
+    fn init() ?LogicalRowsBuilder {
+        const source_rows = model_source.renderCornerLogicalIds();
+        if (source_rows) |rows| {
+            if (rows.len != g_edit_count or model_source.logicalVertexCount() == 0) return null;
+        } else if (model_source.logicalVertexCount() != 0) return null;
+        return .{
+            .source_rows = source_rows,
+            .source_vertex_count = model_source.logicalVertexCount(),
+            .next_id = model_source.logicalVertexCount(),
+        };
+    }
+
+    fn deinit(builder: *LogicalRowsBuilder) void {
+        builder.rows.deinit(std.heap.c_allocator);
+        builder.* = undefined;
+    }
+
+    fn enabled(builder: *const LogicalRowsBuilder) bool {
+        return builder.source_rows != null;
+    }
+
+    fn appendSourceFace(builder: *LogicalRowsBuilder, face: u32) bool {
+        const source = builder.source_rows orelse return true;
+        const base = @as(usize, face) * 3;
+        if (base + 3 > source.len) return false;
+        builder.rows.appendSlice(std.heap.c_allocator, source[base .. base + 3]) catch return false;
+        return true;
+    }
+
+    fn appendAllSource(builder: *LogicalRowsBuilder) bool {
+        const source = builder.source_rows orelse return true;
+        builder.rows.appendSlice(std.heap.c_allocator, source) catch return false;
+        return true;
+    }
+
+    fn sourceCorner(builder: *const LogicalRowsBuilder, face: u32, corner: usize) ?u32 {
+        const source = builder.source_rows orelse return 0;
+        const at = @as(usize, face) * 3 + corner;
+        return if (at < source.len) source[at] else null;
+    }
+
+    fn appendTriangle(builder: *LogicalRowsBuilder, ids: [3]u32) bool {
+        if (!builder.enabled()) return true;
+        builder.rows.appendSlice(std.heap.c_allocator, &ids) catch return false;
+        return true;
+    }
+
+    fn mint(builder: *LogicalRowsBuilder) ?u32 {
+        if (!builder.enabled()) return 0;
+        if (builder.next_id == std.math.maxInt(u32)) return null;
+        const id = builder.next_id;
+        builder.next_id += 1;
+        return id;
+    }
+
+    fn replacement(builder: *const LogicalRowsBuilder, count: u32) ?LogicalTopologyReplacement {
+        if (count == 0) return .empty;
+        if (!builder.enabled()) return .absent;
+        if (builder.rows.items.len != count or builder.next_id == 0) return null;
+        return .{ .exact = .{
+            .rows = builder.rows.items,
+            .vertex_count = builder.next_id,
+        } };
+    }
+};
+
+const LogicalCloneKey = struct { namespace: u64, source: u32 };
+const LogicalCloneMap = struct {
+    ids: std.AutoHashMapUnmanaged(LogicalCloneKey, u32) = .empty,
+
+    fn deinit(map: *LogicalCloneMap) void {
+        map.ids.deinit(std.heap.c_allocator);
+    }
+
+    fn getOrMint(map: *LogicalCloneMap, builder: *LogicalRowsBuilder, namespace: u64, source: u32) ?u32 {
+        if (!builder.enabled()) return 0;
+        const entry = map.ids.getOrPut(std.heap.c_allocator, .{ .namespace = namespace, .source = source }) catch return null;
+        if (!entry.found_existing) entry.value_ptr.* = builder.mint() orelse return null;
+        return entry.value_ptr.*;
+    }
+};
+
+fn appendTriLogical(
+    verts: *std.ArrayListUnmanaged(f32),
+    logical: *LogicalRowsBuilder,
+    a: [3]f32,
+    b: [3]f32,
+    c: [3]f32,
+    ids: [3]u32,
+) bool {
+    return appendTri(verts, a, b, c) and logical.appendTriangle(ids);
+}
+
+fn appendTriFacingLogical(
+    verts: *std.ArrayListUnmanaged(f32),
+    logical: *LogicalRowsBuilder,
+    a: [3]f32,
+    b: [3]f32,
+    c: [3]f32,
+    ids: [3]u32,
+    reference: [3]f32,
+) bool {
+    return if (vdot(normalOf(a, b, c), reference) >= 0)
+        appendTriLogical(verts, logical, a, b, c, ids)
+    else
+        appendTriLogical(verts, logical, a, c, b, .{ ids[0], ids[2], ids[1] });
+}
+
+fn appendQuadSplitLogical(
+    verts: *std.ArrayListUnmanaged(f32),
+    logical: *LogicalRowsBuilder,
+    a: [3]f32,
+    b: [3]f32,
+    c: [3]f32,
+    d: [3]f32,
+    ids: [4]u32,
+) bool {
+    const score_ac = @min(triArea2(a, b, c), triArea2(a, c, d));
+    const score_bd = @min(triArea2(a, b, d), triArea2(b, c, d));
+    if (score_bd > score_ac) {
+        return appendTriLogical(verts, logical, a, b, d, .{ ids[0], ids[1], ids[3] }) and
+            appendTriLogical(verts, logical, b, c, d, .{ ids[1], ids[2], ids[3] });
+    }
+    return appendTriLogical(verts, logical, a, b, c, .{ ids[0], ids[1], ids[2] }) and
+        appendTriLogical(verts, logical, a, c, d, .{ ids[0], ids[2], ids[3] });
+}
+
+fn appendQuadSplitFacingLogical(
+    verts: *std.ArrayListUnmanaged(f32),
+    logical: *LogicalRowsBuilder,
+    a: [3]f32,
+    b: [3]f32,
+    c: [3]f32,
+    d: [3]f32,
+    ids: [4]u32,
+    reference: [3]f32,
+) bool {
+    const area_normal = vadd(vcross(vsub(b, a), vsub(c, a)), vcross(vsub(c, a), vsub(d, a)));
+    return if (vdot(area_normal, reference) >= 0)
+        appendQuadSplitLogical(verts, logical, a, b, c, d, ids)
+    else
+        appendQuadSplitLogical(verts, logical, a, d, c, b, .{ ids[0], ids[3], ids[2], ids[1] });
+}
+
+/// Resolve one legacy live-edit vertex back to an authoritative v5 id only when
+/// every resident corner welded into that edit handle agrees on the same stable
+/// id. Coincident but intentionally split v5 vertices therefore refuse instead of
+/// being guessed together.
+fn stableLogicalIdForEditVertex(edit_vertex: u32) ?u32 {
+    const rows = model_source.renderCornerLogicalIds() orelse return null;
+    if (!mesh_edit.ensureTopologyPub() or rows.len != g_edit_count) return null;
+    var found: ?u32 = null;
+    var face: u32 = 0;
+    while (face < g_edit_count / 3) : (face += 1) {
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            if (mesh_edit.cornerVertPub(face, @intCast(corner)) != edit_vertex) continue;
+            const id = rows[@as(usize, face) * 3 + corner];
+            if (found) |prior| {
+                if (prior != id) return null;
+            } else found = id;
+        }
+    }
+    return found;
+}
+
+fn logicalIdForEditVertex(builder: *const LogicalRowsBuilder, edit_vertex: u32) ?u32 {
+    return if (builder.enabled()) stableLogicalIdForEditVertex(edit_vertex) else 0;
+}
+
+fn editVertexForStableLogicalId(stable_id: u32) ?u32 {
+    const rows = model_source.renderCornerLogicalIds() orelse return null;
+    if (!mesh_edit.ensureTopologyPub() or rows.len != g_edit_count) return null;
+    var found: ?u32 = null;
+    var face: u32 = 0;
+    while (face < g_edit_count / 3) : (face += 1) {
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            if (rows[@as(usize, face) * 3 + corner] != stable_id) continue;
+            const edit_vertex = mesh_edit.cornerVertPub(face, @intCast(corner));
+            if (found) |prior| {
+                if (prior != edit_vertex) return null;
+            } else found = edit_vertex;
+        }
+    }
+    return found;
+}
+
+const EdgeLogicalPromotion = enum {
+    none,
+    /// An exact v5 indexed cache restored the visible resident table that an older
+    /// replacement path had dropped. Hidden blocks, if any, were untouched.
+    restored_exact_visible,
+    /// A genuinely anonymous v1-v4 prop gained one full-model stable namespace.
+    minted_legacy_full,
+};
+
+fn rollbackEdgeLogicalPromotion(promotion: EdgeLogicalPromotion) void {
+    switch (promotion) {
+        .none => {},
+        .restored_exact_visible => model_source.clearLogicalTopology(),
+        .minted_legacy_full => {
+            model_source.clearLogicalTopology();
+            for (g_hidden_groups.items) |*hidden| {
+                if (hidden.logical_ids) |rows| std.heap.c_allocator.free(rows);
+                hidden.logical_ids = null;
+                hidden.logical_vertex_count = 0;
+            }
+        },
+    }
+}
+
+/// Give the first named edge on an anonymous prop a full resident logical namespace
+/// before its path is recorded. Visible faces come first, so their ids are exactly the
+/// live legacy edit ids; hidden blocks append into the same namespace. Later opaque /
+/// glass sorting moves these rows with their corners instead of renumbering the path.
+fn mintLegacyLogicalTopologyForEdgeAuthoring() bool {
+    if (model_source.renderCornerLogicalIds() != null or model_source.logicalVertexCount() != 0) return false;
+    const source = model_source.verts() orelse return false;
+    const source_count = model_source.count();
+    if (source_count == 0 or source_count % 3 != 0 or g_edit_count != source_count or
+        source.len != @as(usize, source_count) * 8)
+    {
+        return false;
+    }
+    for (g_hidden_groups.items) |hidden| {
+        if (hidden.logical_ids != null or hidden.logical_vertex_count != 0 or
+            hidden.source_verts.len == 0 or hidden.source_verts.len % 24 != 0)
+        {
+            return false;
+        }
+    }
+
+    var total_floats = source.len;
+    for (g_hidden_groups.items) |hidden| {
+        total_floats = std.math.add(usize, total_floats, hidden.source_verts.len) catch return false;
+    }
+    const all_verts = std.heap.c_allocator.alloc(f32, total_floats) catch return false;
+    defer std.heap.c_allocator.free(all_verts);
+    const all_parts = std.heap.c_allocator.alloc(u32, total_floats / 24) catch return false;
+    defer std.heap.c_allocator.free(all_parts);
+
+    var float_at: usize = 0;
+    var face_at: usize = 0;
+    @memcpy(all_verts[0..source.len], source);
+    float_at += source.len;
+    const visible_groups = model_source.faceGroups();
+    for (0..source_count / 3) |face| {
+        const group = if (visible_groups) |groups|
+            if (face < groups.len) groups[face] else model_source.NO_FACE_GROUP
+        else
+            model_source.NO_FACE_GROUP;
+        all_parts[face_at] = model_source.partIndexOf(group);
+        face_at += 1;
+    }
+    for (g_hidden_groups.items) |hidden| {
+        @memcpy(all_verts[float_at .. float_at + hidden.source_verts.len], hidden.source_verts);
+        float_at += hidden.source_verts.len;
+        const hidden_faces = hidden.source_verts.len / 24;
+        if (hidden.groups.len != hidden_faces) return false;
+        for (hidden.groups) |group| {
+            all_parts[face_at] = model_source.partIndexOf(group);
+            face_at += 1;
+        }
+    }
+    if (float_at != all_verts.len or face_at != all_parts.len) return false;
+
+    var topology = mesh_edit.legacyLogicalTopologyAlloc(
+        std.heap.c_allocator,
+        all_verts,
+        all_parts,
+    ) catch return false;
+    defer topology.deinit();
+    const logical_vertex_count: u32 = @intCast(topology.vertex_positions.len / 3);
+    if (logical_vertex_count == 0 or topology.corner_vertices.len != total_floats / 8) return false;
+
+    const hidden_rows = std.heap.c_allocator.alloc([]u32, g_hidden_groups.items.len) catch return false;
+    defer std.heap.c_allocator.free(hidden_rows);
+    var initialized: usize = 0;
+    var installed = false;
+    defer if (!installed) for (hidden_rows[0..initialized]) |rows| std.heap.c_allocator.free(rows);
+    var corner_at: usize = source_count;
+    for (g_hidden_groups.items, 0..) |hidden, index| {
+        const corner_count = hidden.source_verts.len / 8;
+        hidden_rows[index] = std.heap.c_allocator.dupe(
+            u32,
+            topology.corner_vertices[corner_at .. corner_at + corner_count],
+        ) catch return false;
+        initialized += 1;
+        corner_at += corner_count;
+    }
+    if (corner_at != topology.corner_vertices.len or
+        !model_source.setLogicalTopology(topology.corner_vertices[0..source_count], logical_vertex_count))
+    {
+        return false;
+    }
+    for (g_hidden_groups.items, 0..) |*hidden, index| {
+        hidden.logical_ids = hidden_rows[index];
+        hidden.logical_vertex_count = logical_vertex_count;
+    }
+    installed = true;
+    clearIndexedEditMesh();
+    return true;
+}
+
+/// Recover an exact existing v5 namespace when one survives in the indexed cache;
+/// otherwise mint one only for a genuinely anonymous legacy prop. Falling back from
+/// an explicit-but-stale cache to a position weld would silently replace identity.
+fn prepareLogicalTopologyForEdgeAuthoring() ?EdgeLogicalPromotion {
+    if (model_source.renderCornerLogicalIds() != null and model_source.logicalVertexCount() > 0) return .none;
+    if (g_indexed_edit_mesh) |*indexed| {
+        if (indexed.has_explicit_logical_topology) {
+            return if (promoteLogicalTopologyFromExactIndexedCacheForSave())
+                .restored_exact_visible
+            else
+                null;
+        }
+    }
+    return if (mintLegacyLogicalTopologyForEdgeAuthoring()) .minted_legacy_full else null;
+}
+
+/// Validate the candidate table against the exact full save ordering, including
+/// hidden blocks and opaque/glass partitioning. This runs before the semantic row is
+/// committed, so the authoring door can never report success for a path Save rejects.
+fn edgeSemanticTableResolvesInCurrentDocument(allocator: std.mem.Allocator, table_json: []const u8) bool {
+    var snapshot = composeDocumentSnapshot(allocator, false) orelse return false;
+    defer snapshot.deinit(allocator);
+    const logical_rows = snapshot.render_corner_logical_ids orelse return false;
+    const dense_to_stable = snapshot.dense_to_stable_logical_ids orelse return false;
+    const remapped = model_source.semanticTableForLogicalSnapshotAlloc(
+        allocator,
+        table_json,
+        dense_to_stable,
+    ) catch return false;
+    defer allocator.free(remapped);
+    return model_source.semanticEdgePathsResolveInTopology(
+        allocator,
+        remapped,
+        logical_rows,
+        snapshot.logical_vertex_count,
+        snapshot.groups,
+    ) catch false;
+}
+
+fn mirroredLogicalId(
+    builder: *LogicalRowsBuilder,
+    fresh_twins: *LogicalCloneMap,
+    source_id: u32,
+    subset: u8,
+) ?u32 {
+    if (!builder.enabled()) return 0;
+    if (source_id < builder.source_vertex_count) {
+        const edit_vertex = editVertexForStableLogicalId(source_id) orelse return null;
+        const twin = mesh_edit.mirrorImageOfVertPub(edit_vertex, subset) orelse return null;
+        return stableLogicalIdForEditVertex(twin);
+    }
+    return fresh_twins.getOrMint(builder, @as(u64, subset) + 1, source_id);
+}
+
+/// Mint topology for a genuinely new, independent soup (Add Part). Position
+/// matching is confined to that import boundary; no resident stable id is ever
+/// reconstructed or compared by position. The resulting local ids are offset into
+/// the live document's stable namespace.
+fn appendFreshIndependentSoupLogical(
+    builder: *LogicalRowsBuilder,
+    verts: []const f32,
+    count: u32,
+    groups: ?[]const u32,
+) bool {
+    if (!builder.enabled()) return true;
+    if (count == 0 or count % 3 != 0) return false;
+    const face_count = count / 3;
+    const parts = std.heap.c_allocator.alloc(u32, face_count) catch return false;
+    defer std.heap.c_allocator.free(parts);
+    @memset(parts, 0);
+    var imported = indexed_edit_mesh.Mesh.fromSoup(
+        std.heap.c_allocator,
+        verts,
+        face_count,
+        groups,
+        parts,
+    ) catch return false;
+    defer imported.deinit();
+    if (imported.render_triangles.items.len != face_count) return false;
+    const base = builder.next_id;
+    const fresh_count: u32 = @intCast(imported.vertices.items.len);
+    if (fresh_count == 0 or base > std.math.maxInt(u32) - fresh_count) return false;
+    for (flattenedLogicalRows(imported.render_triangles.items)) |local_id| {
+        builder.rows.append(std.heap.c_allocator, base + local_id) catch return false;
+    }
+    builder.next_id += fresh_count;
+    return true;
+}
+
+fn logicalReplacementPreflight(new_verts: []const f32, count: u32, replacement: LogicalTopologyReplacement) bool {
+    const need = @as(usize, count) * 8;
+    if (new_verts.len < need) return false;
+    return switch (replacement) {
+        .absent => model_source.renderCornerLogicalIds() == null,
+        .empty => count == 0,
+        .preserve_same_order => if (model_source.renderCornerLogicalIds()) |rows|
+            rows.len == count and count > 0 and meshdoc_format.logicalRowsValid(
+                std.heap.c_allocator,
+                new_verts[0..need],
+                rows,
+                model_source.logicalVertexCount(),
+                false,
+            )
+        else
+            false,
+        .exact => |exact| exact.rows.len == count and count > 0 and meshdoc_format.logicalRowsValid(
+            std.heap.c_allocator,
+            new_verts[0..need],
+            exact.rows,
+            exact.vertex_count,
+            false,
+        ),
+    };
+}
+
+fn replaceSourceGeometryWithLogical(
+    key: []const u8,
+    new_verts: []const f32,
+    count: u32,
+    replacement: LogicalTopologyReplacement,
+) bool {
+    const need = @as(usize, count) * 8;
+    return switch (replacement) {
+        .absent, .empty => blk: {
+            model_source.retain(key, new_verts[0..need], count);
+            break :blk model_source.count() == count and model_source.renderCornerLogicalIds() == null;
+        },
+        .preserve_same_order => model_source.retainWithLogicalTopology(
+            key,
+            new_verts[0..need],
+            count,
+            model_source.renderCornerLogicalIds() orelse return false,
+            model_source.logicalVertexCount(),
+        ),
+        .exact => |exact| model_source.retainWithLogicalTopology(
+            key,
+            new_verts[0..need],
+            count,
+            exact.rows,
+            exact.vertex_count,
+        ),
+    };
+}
+
+fn replaceActiveEditMesh(new_verts: []f32, count: u32, logical: LogicalTopologyReplacement) bool {
     if (!residentMutationAllowed(.geometry_journal)) return false;
     const need = @as(usize, count) * 8;
     // count == 0 is a LEGITIMATE state (req_2806: deleting the last part empties the
@@ -1443,6 +2035,7 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     // clears the paint target below 3 verts, the empty soup stashes under a fresh
     // key, and the viewer draws nothing.
     if (count != 0 and (count < 3 or new_verts.len < need)) return false;
+    if (!logicalReplacementPreflight(new_verts, count, logical)) return false;
     const old_colors = collectCurrentFaceColors();
     defer if (old_colors) |c| std.heap.c_allocator.free(c);
     const old_materials: ?[]u32 = if (model_source.faceMaterials()) |rows|
@@ -1482,7 +2075,7 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     // it instead of nuking the layer list on every eye toggle / topo op (req_2672).
     paint_program.snapshotLayersForCarry();
     if (!setPaintTargetForGeneration(new_verts, count)) return false;
-    model_source.retain(key, new_verts[0..need], count);
+    if (!replaceSourceGeometryWithLogical(key, new_verts[0..need], count, logical)) return false;
     // A structural edit at reduced quality commits that displayed topology as the
     // authoritative source immediately; future saves no longer need projection mode.
     g_save_displayed_projection = false;
@@ -1518,12 +2111,14 @@ fn replaceActiveEditMeshPreservingAtlas(
     count: u32,
     groups: ?[]const u32,
     colors: []const u8,
+    logical: LogicalTopologyReplacement,
 ) bool {
     if (!residentMutationAllowed(.geometry_journal)) return false;
     const need = @as(usize, count) * 8;
     if (count < 3 or count % 3 != 0 or new_verts.len < need) return false;
     if (colors.len != @as(usize, count / 3) * 4 or model_paint.atlas() == null) return false;
     if (groups) |rows| if (rows.len < @as(usize, count / 3)) return false;
+    if (!logicalReplacementPreflight(new_verts, count, logical)) return false;
 
     const old_ranges: ?[]u32 = if (model_source.partRanges()) |ranges|
         (std.heap.c_allocator.dupe(u32, ranges) catch null)
@@ -1555,11 +2150,11 @@ fn replaceActiveEditMeshPreservingAtlas(
     clearActiveEditGeometry();
     g_edit_verts = edit_copy;
     g_edit_count = count;
-    bumpEditGeneration();
+    bumpEditGeometryGeneration();
     edit_copy_adopted = true;
     if (!stashHostMesh(key, new_verts[0..need], count)) return false;
 
-    model_source.retain(key, new_verts[0..need], count);
+    if (!replaceSourceGeometryWithLogical(key, new_verts[0..need], count, logical)) return false;
     g_save_displayed_projection = false;
     if (groups) |rows| model_source.setFaceGroups(rows);
     if (old_ranges) |ranges| model_source.setPartRanges(ranges);
@@ -1641,8 +2236,16 @@ fn faceEntityContains(e: FaceExtrudeEntity, f: u32) bool {
     return if (e.grouped) model_source.faceGroupOf(f) == e.group else f == e.face;
 }
 
-fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeEntity, out: *std.ArrayListUnmanaged([3]f32)) bool {
-    const Dir = struct { from_key: u64, to_key: u64, ukey: u128, from: [3]f32 };
+const FaceExtrudeBoundaryPoint = struct { position: [3]f32, logical_id: u32 };
+
+fn chainExtrudeBoundary(
+    verts: []const f32,
+    tri_count: u32,
+    entity: FaceExtrudeEntity,
+    logical: *const LogicalRowsBuilder,
+    out: *std.ArrayListUnmanaged(FaceExtrudeBoundaryPoint),
+) bool {
+    const Dir = struct { from_key: u64, to_key: u64, ukey: u128, from: [3]f32, logical_id: u32 };
     var undirected = std.AutoHashMapUnmanaged(u128, u32){};
     defer undirected.deinit(std.heap.c_allocator);
     var dirs: std.ArrayListUnmanaged(Dir) = .empty;
@@ -1666,11 +2269,12 @@ fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeE
             const gop = undirected.getOrPut(std.heap.c_allocator, ukey) catch return false;
             if (!gop.found_existing) gop.value_ptr.* = 0;
             gop.value_ptr.* += 1;
-            dirs.append(std.heap.c_allocator, .{ .from_key = ka, .to_key = kb, .ukey = ukey, .from = a }) catch return false;
+            const logical_id = logical.sourceCorner(f, k) orelse return false;
+            dirs.append(std.heap.c_allocator, .{ .from_key = ka, .to_key = kb, .ukey = ukey, .from = a, .logical_id = logical_id }) catch return false;
         }
     }
 
-    const Next = struct { to_key: u64, from: [3]f32 };
+    const Next = struct { to_key: u64, from: [3]f32, logical_id: u32 };
     var adj = std.AutoHashMapUnmanaged(u64, Next){};
     defer adj.deinit(std.heap.c_allocator);
     var boundary_n: u32 = 0;
@@ -1681,7 +2285,7 @@ fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeE
         boundary_n += 1;
         const gop = adj.getOrPut(std.heap.c_allocator, de.from_key) catch return false;
         if (gop.found_existing) return false;
-        gop.value_ptr.* = .{ .to_key = de.to_key, .from = de.from };
+        gop.value_ptr.* = .{ .to_key = de.to_key, .from = de.from, .logical_id = de.logical_id };
         if (!have_start) {
             start_key = de.from_key;
             have_start = true;
@@ -1693,7 +2297,7 @@ fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeE
     var count: u32 = 0;
     while (count < boundary_n) {
         const e = adj.get(cur) orelse return false;
-        out.append(std.heap.c_allocator, e.from) catch return false;
+        out.append(std.heap.c_allocator, .{ .position = e.from, .logical_id = e.logical_id }) catch return false;
         count += 1;
         cur = e.to_key;
         if (cur == start_key) break;
@@ -1701,23 +2305,24 @@ fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeE
     return cur == start_key and count == boundary_n;
 }
 
-fn faceLoopNormal(loop: []const [3]f32) [3]f32 {
+fn faceLoopNormal(loop: []const FaceExtrudeBoundaryPoint) [3]f32 {
     var n: [3]f32 = .{ 0, 0, 0 };
-    for (loop, 0..) |cur, i| {
-        const nxt = loop[(i + 1) % loop.len];
+    for (loop, 0..) |item, i| {
+        const cur = item.position;
+        const nxt = loop[(i + 1) % loop.len].position;
         n[0] += (cur[1] - nxt[1]) * (cur[2] + nxt[2]);
         n[1] += (cur[2] - nxt[2]) * (cur[0] + nxt[0]);
         n[2] += (cur[0] - nxt[0]) * (cur[1] + nxt[1]);
     }
     const l = @sqrt(vdot(n, n));
     if (l > 1e-8) return .{ n[0] / l, n[1] / l, n[2] / l };
-    if (loop.len >= 3) return normalOf(loop[0], loop[1], loop[2]);
+    if (loop.len >= 3) return normalOf(loop[0].position, loop[1].position, loop[2].position);
     return .{ 0, 1, 0 };
 }
 
-fn faceLoopCentroid(loop: []const [3]f32) [3]f32 {
+fn faceLoopCentroid(loop: []const FaceExtrudeBoundaryPoint) [3]f32 {
     var c: [3]f32 = .{ 0, 0, 0 };
-    for (loop) |p| c = vadd(c, p);
+    for (loop) |point| c = vadd(c, point.position);
     const inv = if (loop.len > 0) 1.0 / @as(f32, @floatFromInt(loop.len)) else 1.0;
     return vmul(c, inv);
 }
@@ -1989,9 +2594,14 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
     const part_count = hostPartCount();
 
-    var loop: std.ArrayListUnmanaged([3]f32) = .empty;
+    var logical = LogicalRowsBuilder.init() orelse return false;
+    defer logical.deinit();
+    var cap_logical = LogicalCloneMap{};
+    defer cap_logical.deinit();
+
+    var loop: std.ArrayListUnmanaged(FaceExtrudeBoundaryPoint) = .empty;
     defer loop.deinit(std.heap.c_allocator);
-    if (!chainExtrudeBoundary(cur_verts, tri_count, ent, &loop) or loop.items.len < 3) return false;
+    if (!chainExtrudeBoundary(cur_verts, tri_count, ent, &logical, &loop) or loop.items.len < 3) return false;
     const n = faceLoopNormal(loop.items);
     const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
     const off = vmul(n, dist);
@@ -2000,7 +2610,8 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
     var cap_scale: f32 = 1.0;
     if (!straight) {
         var max_radius: f32 = 0;
-        for (loop.items) |point| {
+        for (loop.items) |item| {
+            const point = item.position;
             const relative = vsub(point, center);
             const tangent = vsub(relative, vmul(n, vdot(relative, n)));
             max_radius = @max(max_radius, @sqrt(vdot(tangent, tangent)));
@@ -2029,6 +2640,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
         const base = @as(usize, f) * 24;
         if (base + 24 > cur_verts.len) return false;
         if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
+        if (!logical.appendSourceFace(f)) return false;
         if (has_groups) {
             const g = old_groups.?[f];
             groups.append(std.heap.c_allocator, g) catch return false;
@@ -2047,10 +2659,13 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
 
     var i: usize = 1;
     while (i + 1 < loop.items.len) : (i += 1) {
-        const a = if (straight) vadd(loop.items[0], off) else mesh_edit.faceExtrudePointPub(loop.items[0], center, n, dist, cap_scale);
-        const b = if (straight) vadd(loop.items[i], off) else mesh_edit.faceExtrudePointPub(loop.items[i], center, n, dist, cap_scale);
-        const c = if (straight) vadd(loop.items[i + 1], off) else mesh_edit.faceExtrudePointPub(loop.items[i + 1], center, n, dist, cap_scale);
-        if (!appendTri(&out, a, b, c)) return false;
+        const a = if (straight) vadd(loop.items[0].position, off) else mesh_edit.faceExtrudePointPub(loop.items[0].position, center, n, dist, cap_scale);
+        const b = if (straight) vadd(loop.items[i].position, off) else mesh_edit.faceExtrudePointPub(loop.items[i].position, center, n, dist, cap_scale);
+        const c = if (straight) vadd(loop.items[i + 1].position, off) else mesh_edit.faceExtrudePointPub(loop.items[i + 1].position, center, n, dist, cap_scale);
+        const a_id = cap_logical.getOrMint(&logical, 0, loop.items[0].logical_id) orelse return false;
+        const b_id = cap_logical.getOrMint(&logical, 0, loop.items[i].logical_id) orelse return false;
+        const c_id = cap_logical.getOrMint(&logical, 0, loop.items[i + 1].logical_id) orelse return false;
+        if (!appendTriLogical(&out, &logical, a, b, c, .{ a_id, b_id, c_id })) return false;
         if (has_groups) {
             groups.append(std.heap.c_allocator, cap_group) catch return false;
             if (part_count > 0) face_part.append(std.heap.c_allocator, ent.part) catch return false;
@@ -2063,10 +2678,14 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
 
     i = 0;
     while (i < loop.items.len) : (i += 1) {
-        const a = loop.items[i];
-        const b = loop.items[(i + 1) % loop.items.len];
+        const a = loop.items[i].position;
+        const b = loop.items[(i + 1) % loop.items.len].position;
         const a2 = if (straight) vadd(a, off) else mesh_edit.faceExtrudePointPub(a, center, n, dist, cap_scale);
         const b2 = if (straight) vadd(b, off) else mesh_edit.faceExtrudePointPub(b, center, n, dist, cap_scale);
+        const a_id = loop.items[i].logical_id;
+        const b_id = loop.items[(i + 1) % loop.items.len].logical_id;
+        const a2_id = cap_logical.getOrMint(&logical, 0, a_id) orelse return false;
+        const b2_id = cap_logical.getOrMint(&logical, 0, b_id) orelse return false;
         const qc = vmul(vadd(vadd(a, b), vadd(a2, b2)), 0.25);
         const wn = normalOf(a, b, b2);
         const side_group = if (has_groups) blk: {
@@ -2075,9 +2694,9 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
             break :blk g;
         } else model_source.NO_FACE_GROUP;
         const ok = if (vdot(wn, vsub(qc, center)) < 0)
-            appendQuadSplit(&out, a2, b2, b, a)
+            appendQuadSplitLogical(&out, &logical, a2, b2, b, a, .{ a2_id, b2_id, b_id, a_id })
         else
-            appendQuadSplit(&out, a, b, b2, a2);
+            appendQuadSplitLogical(&out, &logical, a, b, b2, a2, .{ a_id, b_id, b2_id, a2_id });
         if (!ok) return false;
         if (has_groups) {
             groups.append(std.heap.c_allocator, side_group) catch return false;
@@ -2100,9 +2719,10 @@ pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
 
     const new_count: u32 = @intCast(out.items.len / 8);
     if (new_count == g_edit_count) return false;
+    const logical_replacement = logical.replacement(new_count) orelse return false;
     var snap = journalSnapshotCurrent("extrude face");
     mesh_edit.clearSelection();
-    if (!replaceActiveEditMesh(out.items, new_count)) {
+    if (!replaceActiveEditMesh(out.items, new_count, logical_replacement)) {
         journalDiscard(&snap);
         return false;
     }
@@ -2308,6 +2928,11 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
     defer if (old_groups) |g| alloc.free(g);
     const part_count = hostPartCount();
 
+    var logical = LogicalRowsBuilder.init() orelse return false;
+    defer logical.deinit();
+    var cap_logical = LogicalCloneMap{};
+    defer cap_logical.deinit();
+
     var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(alloc);
     var groups: std.ArrayListUnmanaged(u32) = .empty;
@@ -2330,6 +2955,7 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
         const base = @as(usize, f) * 24;
         if (base + 24 > cur_verts.len) return false;
         if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
+        if (!logical.appendSourceFace(f)) return false;
         if (mesh_grouped) {
             const g = old_groups.?[f];
             groups.append(alloc, g) catch return false;
@@ -2368,6 +2994,16 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
             row[slot * 8 + 2] = cap_point[2];
         }
         if (!appendFloats(&out, &row)) return false;
+        if (logical.enabled()) {
+            const namespace = @as(u64, uf.find(parent, f)) + 1;
+            var cap_ids: [3]u32 = undefined;
+            var logical_corner: usize = 0;
+            while (logical_corner < 3) : (logical_corner += 1) {
+                const source_id = logical.sourceCorner(f, logical_corner) orelse return false;
+                cap_ids[logical_corner] = cap_logical.getOrMint(&logical, namespace, source_id) orelse return false;
+            }
+            if (!logical.appendTriangle(cap_ids)) return false;
+        }
         if (mesh_grouped) {
             const g = old_groups.?[f];
             groups.append(alloc, g) catch return false;
@@ -2399,7 +3035,12 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
             const b = keys.pos(cur_verts, f, (slot + 1) % 3);
             const a2 = if (straight) vadd(a, patch.off) else mesh_edit.faceExtrudePointPub(a, patch.center, patch.normal, dist, patch.scale);
             const b2 = if (straight) vadd(b, patch.off) else mesh_edit.faceExtrudePointPub(b, patch.center, patch.normal, dist, patch.scale);
-            if (!appendQuadSplit(&out, a, b, b2, a2)) return false;
+            const a_id = logical.sourceCorner(f, slot) orelse return false;
+            const b_id = logical.sourceCorner(f, (slot + 1) % 3) orelse return false;
+            const namespace = @as(u64, uf.find(parent, f)) + 1;
+            const a2_id = cap_logical.getOrMint(&logical, namespace, a_id) orelse return false;
+            const b2_id = cap_logical.getOrMint(&logical, namespace, b_id) orelse return false;
+            if (!appendQuadSplitLogical(&out, &logical, a, b, b2, a2, .{ a_id, b_id, b2_id, a2_id })) return false;
             if (mesh_grouped) {
                 groups.append(alloc, next_group) catch return false;
                 groups.append(alloc, next_group) catch return false;
@@ -2425,9 +3066,10 @@ fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, 
 
     const new_count: u32 = @intCast(out.items.len / 8);
     if (new_count == g_edit_count) return false;
+    const logical_replacement = logical.replacement(new_count) orelse return false;
     var snap = journalSnapshotCurrent("extrude face");
     mesh_edit.clearSelection();
-    if (!replaceActiveEditMesh(out.items, new_count)) {
+    if (!replaceActiveEditMesh(out.items, new_count, logical_replacement)) {
         journalDiscard(&snap);
         return false;
     }
@@ -2550,15 +3192,27 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32, angle_degrees_raw: f32) bool {
     const c = outer[0];
     const d = outer[1];
 
+    var logical = LogicalRowsBuilder.init() orelse return false;
+    defer logical.deinit();
+    if (!logical.appendAllSource()) return false;
+    var mirror_logical = LogicalCloneMap{};
+    defer mirror_logical.deinit();
+    const endpoint_ids = [2]u32{
+        logicalIdForEditVertex(&logical, endpoints[0]) orelse return false,
+        logicalIdForEditVertex(&logical, endpoints[1]) orelse return false,
+    };
+
     var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
         verts.deinit(std.heap.c_allocator);
         return false;
     }
     const appended_start = verts.items.len;
+    const appended_logical_start = logical.rows.items.len;
     var focus_a = c;
     var focus_b = d;
     var anchored = false;
+    var source_outer_ids = [2]?u32{ null, null }; // c, d for the unanchored mirror recipe
     // A retained vertex selection changes the same deep operation into the mixed
     // edge+vertex form: reuse that resident vertex as one outer corner and mint
     // only the opposite open corner. Selecting one of the source edge's own
@@ -2575,20 +3229,44 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32, angle_degrees_raw: f32) bool {
         );
         focus_a = plan.outer[plan.shared_index];
         focus_b = plan.outer[plan.open_index];
+        const target_id = logicalIdForEditVertex(&logical, target) orelse return false;
+        var outer_ids: [2]u32 = undefined;
+        outer_ids[plan.shared_index] = target_id;
+        outer_ids[plan.open_index] = logical.mint() orelse return false;
         if (plan.triangle) {
             const open = plan.outer[plan.open_index];
-            break :blk appendTriFacing(&verts, frame.a, frame.b, open, frame.face_normal);
+            break :blk appendTriFacingLogical(
+                &verts,
+                &logical,
+                frame.a,
+                frame.b,
+                open,
+                .{ endpoint_ids[0], endpoint_ids[1], outer_ids[plan.open_index] },
+                frame.face_normal,
+            );
         }
-        break :blk appendQuadSplitFacing(&verts, frame.a, frame.b, plan.outer[1], plan.outer[0], frame.face_normal);
+        break :blk appendQuadSplitFacingLogical(
+            &verts,
+            &logical,
+            frame.a,
+            frame.b,
+            plan.outer[1],
+            plan.outer[0],
+            .{ endpoint_ids[0], endpoint_ids[1], outer_ids[1], outer_ids[0] },
+            frame.face_normal,
+        );
     } else blk: {
         // Edge ids are position-sorted, not wound. Keep the new coplanar face on
         // the same visible side as its authored neighbour instead of randomly
         // back-culling. Preserve the established zero-angle byte path.
+        const c_id = logical.mint() orelse return false;
+        const d_id = logical.mint() orelse return false;
+        source_outer_ids = .{ c_id, d_id };
         const forward = vdot(normalOf(frame.a, frame.b, d), frame.face_normal) >= 0;
         break :blk if (forward)
-            appendQuadSplit(&verts, frame.a, frame.b, d, c)
+            appendQuadSplitLogical(&verts, &logical, frame.a, frame.b, d, c, .{ endpoint_ids[0], endpoint_ids[1], d_id, c_id })
         else
-            appendQuadSplit(&verts, frame.b, frame.a, c, d);
+            appendQuadSplitLogical(&verts, &logical, frame.b, frame.a, c, d, .{ endpoint_ids[1], endpoint_ids[0], c_id, d_id });
     };
     if (!appended) {
         verts.deinit(std.heap.c_allocator);
@@ -2627,7 +3305,15 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32, angle_degrees_raw: f32) bool {
                         const base = appended_start + row * 24 + corner * 8;
                         corners[corner] = mirrorReflectPoint(.{ verts.items[base], verts.items[base + 1], verts.items[base + 2] }, subset);
                     }
-                    if (!appendTri(&verts, corners[0], corners[2], corners[1])) {
+                    const mirrored_ids: [3]u32 = if (logical.enabled()) blk: {
+                        const source_ids = logical.rows.items[appended_logical_start + row * 3 ..][0..3];
+                        break :blk .{
+                            mirroredLogicalId(&logical, &mirror_logical, source_ids[0], subset) orelse return false,
+                            mirroredLogicalId(&logical, &mirror_logical, source_ids[2], subset) orelse return false,
+                            mirroredLogicalId(&logical, &mirror_logical, source_ids[1], subset) orelse return false,
+                        };
+                    } else .{ 0, 0, 0 };
+                    if (!appendTriLogical(&verts, &logical, corners[0], corners[2], corners[1], mirrored_ids)) {
                         verts.deinit(std.heap.c_allocator);
                         return false;
                     }
@@ -2638,12 +3324,16 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32, angle_degrees_raw: f32) bool {
                 const rb = mirrorReflectPoint(frame.b, subset);
                 const rc = mirrorReflectPoint(c, subset);
                 const rd = mirrorReflectPoint(d, subset);
+                const ra_id = mirroredLogicalId(&logical, &mirror_logical, endpoint_ids[0], subset) orelse return false;
+                const rb_id = mirroredLogicalId(&logical, &mirror_logical, endpoint_ids[1], subset) orelse return false;
+                const rc_id = mirroredLogicalId(&logical, &mirror_logical, source_outer_ids[0] orelse return false, subset) orelse return false;
+                const rd_id = mirroredLogicalId(&logical, &mirror_logical, source_outer_ids[1] orelse return false, subset) orelse return false;
                 // A reflection flips handedness — swap the pairs relative to the source call.
                 const forward = vdot(normalOf(frame.a, frame.b, d), frame.face_normal) >= 0;
                 const twin_appended = if (forward)
-                    appendQuadSplit(&verts, rb, ra, rc, rd)
+                    appendQuadSplitLogical(&verts, &logical, rb, ra, rc, rd, .{ rb_id, ra_id, rc_id, rd_id })
                 else
-                    appendQuadSplit(&verts, ra, rb, rd, rc);
+                    appendQuadSplitLogical(&verts, &logical, ra, rb, rd, rc, .{ ra_id, rb_id, rd_id, rc_id });
                 if (!twin_appended) {
                     verts.deinit(std.heap.c_allocator);
                     return false;
@@ -2672,8 +3362,9 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32, angle_degrees_raw: f32) bool {
     @memset(semantics.regions[old_faces..], source_semantic.region);
     @memset(semantics.instances[old_faces..], source_semantic.instance);
     if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
+    const logical_replacement = logical.replacement(g_edit_count + new_faces * 3) orelse return false;
     var snap = journalSnapshotCurrent("extrude edge");
-    if (!replaceActiveEditMesh(owned, g_edit_count + new_faces * 3)) {
+    if (!replaceActiveEditMesh(owned, g_edit_count + new_faces * 3, logical_replacement)) {
         journalDiscard(&snap);
         return false;
     }
@@ -2768,11 +3459,18 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const edges = selected[0..@as(usize, @intCast(selected_count))];
     const agreed_normal = mesh_edit.selectedEdgesReferenceNormalPub();
 
+    var logical = LogicalRowsBuilder.init() orelse return false;
+    defer logical.deinit();
+    if (!logical.appendAllSource()) return false;
+    var mirror_logical = LogicalCloneMap{};
+    defer mirror_logical.deinit();
+
     var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
         verts.deinit(std.heap.c_allocator);
         return false;
     }
+    const appended_logical_start = logical.rows.items.len;
 
     var ok = false;
     if (selected_count == 2) {
@@ -2801,15 +3499,35 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 .{ edges[0][0], c_id },
                 .{ edges[0][1], d_id },
             ) orelse mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], candidate);
-            if (winding) |reference| ok = appendQuadSplitFacing(&verts, a, b, d, c, reference);
+            if (winding) |reference| ok = appendQuadSplitFacingLogical(
+                &verts,
+                &logical,
+                a,
+                b,
+                d,
+                c,
+                .{
+                    logicalIdForEditVertex(&logical, edges[0][0]) orelse return false,
+                    logicalIdForEditVertex(&logical, edges[0][1]) orelse return false,
+                    logicalIdForEditVertex(&logical, d_id) orelse return false,
+                    logicalIdForEditVertex(&logical, c_id) orelse return false,
+                },
+                reference,
+            );
         } else if (agreed_normal) |reference_normal| {
             var order: [3]u32 = undefined;
             if (mesh_edit.triangleFromAdjacentEdges(edges[0], edges[1], &order)) {
-                ok = appendTriFacing(
+                ok = appendTriFacingLogical(
                     &verts,
+                    &logical,
                     mesh_edit.vertPosPub(order[0]),
                     mesh_edit.vertPosPub(order[1]),
                     mesh_edit.vertPosPub(order[2]),
+                    .{
+                        logicalIdForEditVertex(&logical, order[0]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[1]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[2]) orelse return false,
+                    },
                     reference_normal,
                 );
             }
@@ -2821,9 +3539,35 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             const p1 = mesh_edit.vertPosPub(order[1]);
             const p2 = mesh_edit.vertPosPub(order[2]);
             ok = if (n == 3)
-                appendTriFacing(&verts, p0, p1, p2, reference_normal)
+                appendTriFacingLogical(
+                    &verts,
+                    &logical,
+                    p0,
+                    p1,
+                    p2,
+                    .{
+                        logicalIdForEditVertex(&logical, order[0]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[1]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[2]) orelse return false,
+                    },
+                    reference_normal,
+                )
             else
-                appendQuadSplitFacing(&verts, p0, p1, p2, mesh_edit.vertPosPub(order[3]), reference_normal);
+                appendQuadSplitFacingLogical(
+                    &verts,
+                    &logical,
+                    p0,
+                    p1,
+                    p2,
+                    mesh_edit.vertPosPub(order[3]),
+                    .{
+                        logicalIdForEditVertex(&logical, order[0]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[1]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[2]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[3]) orelse return false,
+                    },
+                    reference_normal,
+                );
         }
     }
     if (!ok) {
@@ -2873,7 +3617,15 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                             corners[k][axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - corners[k][axis];
                     }
                 }
-                if (!appendTri(&verts, corners[0], corners[2], corners[1])) {
+                const mirrored_ids: [3]u32 = if (logical.enabled()) blk: {
+                    const source_ids = logical.rows.items[appended_logical_start + row * 3 ..][0..3];
+                    break :blk .{
+                        mirroredLogicalId(&logical, &mirror_logical, source_ids[0], subset) orelse return false,
+                        mirroredLogicalId(&logical, &mirror_logical, source_ids[2], subset) orelse return false,
+                        mirroredLogicalId(&logical, &mirror_logical, source_ids[1], subset) orelse return false,
+                    };
+                } else .{ 0, 0, 0 };
+                if (!appendTriLogical(&verts, &logical, corners[0], corners[2], corners[1], mirrored_ids)) {
                     verts.deinit(std.heap.c_allocator);
                     return false;
                 }
@@ -2911,8 +3663,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const had_uv_zone = g_uv_zone != null;
     var uv_zone_carry = prepareZoneAppend(&g_uv_zone, @intCast(old_faces), @intCast(added / 3), UV_ZONE_UNASSIGNED);
     defer if (uv_zone_carry) |labels| std.heap.c_allocator.free(labels);
+    const logical_replacement = logical.replacement(g_edit_count + added) orelse return false;
     var snap = journalSnapshotCurrent("create face");
-    const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
+    const replaced = replaceActiveEditMesh(owned, g_edit_count + added, logical_replacement);
     if (replaced) {
         if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part, source_tris)) {
             if (snap) |*before| _ = journalInstall(before);
@@ -3166,7 +3919,7 @@ pub fn meshTopoLoopCut() bool {
 
     var snap = journalSnapshotCurrent("loop cut");
     const install_groups: ?[]const u32 = if (groups_arg != null) cut.groups else null;
-    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut.materials, cut.semantic_regions, cut.semantic_instances, cut_colors);
+    const ok = lcInstallLowered(cut.positions, cut.uvs, cut.tri_count, install_groups, cut.materials, cut.semantic_regions, cut.semantic_instances, cut_colors, flattenedLogicalRows(cut.triangle_vertices), @intCast(indexed.vertices.items.len));
     if (ok) {
         if (base_part) |bp| {
             _ = bp;
@@ -3232,7 +3985,7 @@ pub fn meshTopoConnectVertices() bool {
 
     var snap = journalSnapshotCurrent("connect vertices");
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors, flattenedLogicalRows(lowered.triangle_vertices), @intCast(indexed.vertices.items.len));
     if (!ok) {
         journalDiscard(&snap);
         return false;
@@ -3346,7 +4099,7 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
 
     var snap = journalSnapshotCurrent("symmetrize");
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors, flattenedLogicalRows(lowered.triangle_vertices), @intCast(indexed.vertices.items.len));
     if (ok) {
         if (parts != null) renormalizePartRanges(lowered.parts, part_count);
         adoptIndexedEditMesh(&indexed, &lowered);
@@ -3470,13 +4223,17 @@ fn lcInstallLowered(
     semantic_regions: []const u32,
     semantic_instances: []const u32,
     colors: []const u8,
+    logical_rows: []const u32,
+    logical_vertex_count: u32,
 ) bool {
     if (pos.len != @as(usize, tri_count) * 9 or
         uvs.len != @as(usize, tri_count) * 6 or
         colors.len != @as(usize, tri_count) * 4 or
         materials.len != tri_count or
         semantic_regions.len != tri_count or
-        semantic_instances.len != tri_count) return false;
+        semantic_instances.len != tri_count or
+        logical_rows.len != @as(usize, tri_count) * 3 or
+        logical_vertex_count == 0) return false;
     var out: std.ArrayListUnmanaged(f32) = .empty;
     var t: u32 = 0;
     while (t < tri_count) : (t += 1) {
@@ -3505,9 +4262,15 @@ fn lcInstallLowered(
     // preview layout afresh. Only real authored pixels license the preservation path.
     const preserve_authored_atlas = model_paint.hasAuthoredAtlas();
     const installed = if (preserve_authored_atlas)
-        replaceActiveEditMeshPreservingAtlas(owned, tri_count * 3, groups, colors)
+        replaceActiveEditMeshPreservingAtlas(owned, tri_count * 3, groups, colors, .{ .exact = .{
+            .rows = logical_rows,
+            .vertex_count = logical_vertex_count,
+        } })
     else
-        replaceActiveEditMesh(owned, tri_count * 3);
+        replaceActiveEditMesh(owned, tri_count * 3, .{ .exact = .{
+            .rows = logical_rows,
+            .vertex_count = logical_vertex_count,
+        } });
     if (!installed) return false;
     if (!preserve_authored_atlas) {
         // There are no authored pixels whose coordinates can be stale yet.
@@ -3730,7 +4493,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         s.last_face_part = std.heap.c_allocator.dupe(u32, lowered.parts) catch return false;
     }
     const install_groups: ?[]const u32 = if (s.base_groups != null) lowered.groups else null;
-    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors)) return false;
+    if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors, flattenedLogicalRows(lowered.triangle_vertices), @intCast(preview.vertices.items.len))) return false;
     if (s.last_mesh) |*mesh| mesh.deinit();
     s.last_mesh = preview;
     preview = .{ .allocator = std.heap.c_allocator };
@@ -3794,7 +4557,7 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
         if (s.base_mesh.lower()) |lowered_value| {
             var lowered = lowered_value;
             defer lowered.deinit();
-            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, s.base_colors);
+            ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, groups_arg, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, s.base_colors, flattenedLogicalRows(lowered.triangle_vertices), @intCast(s.base_mesh.vertices.items.len));
         } else |_| {
             ok = false;
         }
@@ -4264,6 +5027,8 @@ pub fn meshBevelPreview(width_raw: f32, target_sides: u32) bool {
         lowered.semantic_regions,
         lowered.semantic_instances,
         colors,
+        flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(preview.vertices.items.len),
     )) return false;
     if (session.kind == .face_polygon) {
         mesh_edit.setMode(.face);
@@ -4330,6 +5095,8 @@ pub fn meshBevelEnd(commit: bool) bool {
                 lowered.semantic_regions,
                 lowered.semantic_instances,
                 session.base_colors,
+                flattenedLogicalRows(lowered.triangle_vertices),
+                @intCast(session.base_mesh.vertices.items.len),
             );
         } else |_| {
             ok = false;
@@ -4876,20 +5643,18 @@ fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, la
         model_paint.atlas() != null and
         groups.items.len == kept / 3 and
         colors.items.len == @as(usize, kept / 3) * 4;
+    const logical_replacement = logicalReplacementExactOrAbsent(
+        if (current_logical_ids != null and kept > 0) logical_ids.items else null,
+        kept,
+        logical_vertex_count,
+    );
     if (paint_stable and !preserve_indexed_atlas) beginPaintStableReplace();
     const ok = if (preserve_indexed_atlas)
-        replaceActiveEditMeshPreservingAtlas(owned, kept, groups.items, colors.items)
+        replaceActiveEditMeshPreservingAtlas(owned, kept, groups.items, colors.items, logical_replacement)
     else
-        replaceActiveEditMesh(owned, kept);
+        replaceActiveEditMesh(owned, kept, logical_replacement);
     if (!ok and paint_stable and !preserve_indexed_atlas) cancelPaintStableReplace();
     if (ok) {
-        if (current_logical_ids != null and kept > 0 and
-            !model_source.setLogicalTopology(logical_ids.items, logical_vertex_count))
-        {
-            if (snap) |*before| _ = journalInstall(before);
-            journalDiscard(&snap);
-            return false;
-        }
         if (kept > 0) {
             model_source.setFaceMaterials(materials.items);
         } else {
@@ -5268,6 +6033,10 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     const need = @as(usize, new_count) * 8;
     if (new_count < 3 or new_verts.len < need) return fail;
 
+    var logical = LogicalRowsBuilder.init() orelse return fail;
+    defer logical.deinit();
+    if (!logical.appendAllSource()) return fail;
+
     const cur_groups = captureFaceGroups() orelse return fail;
     defer std.heap.c_allocator.free(cur_groups);
     const cur_materials = std.heap.c_allocator.alloc(u32, cur_count / 3) catch return fail;
@@ -5302,6 +6071,12 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
         var i: u32 = 0;
         while (i < new_faces) : (i += 1) groups.appendAssumeCapacity((if (i < new_groups.len) new_groups[i] else 0) + offset);
     }
+    if (cur_count > 0 and !appendFreshIndependentSoupLogical(
+        &logical,
+        new_verts[0..need],
+        new_count,
+        groups.items[cur_faces..],
+    )) return fail;
     const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
         out.deinit(std.heap.c_allocator);
         return fail;
@@ -5361,12 +6136,14 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
 
     // Appending onto an emptied document is the one fresh paint domain: there is no
     // atlas to preserve, so install normally and derive its first layout.
+    const installed_count = cur_count + new_count;
+    const logical_replacement = logical.replacement(installed_count) orelse return fail;
     const ok = if (cur_count > 0 and has_atlas)
-        replaceActiveEditMeshPreservingAtlas(owned, cur_count + new_count, groups.items, exact_colors.?)
+        replaceActiveEditMeshPreservingAtlas(owned, installed_count, groups.items, exact_colors.?, logical_replacement)
     else if (cur_count > 0)
-        replaceActiveEditMesh(owned, cur_count + new_count)
+        replaceActiveEditMesh(owned, installed_count, logical_replacement)
     else
-        replaceActiveEditMesh(owned, new_count);
+        replaceActiveEditMesh(owned, new_count, logical_replacement);
     if (ok) {
         if (cur_count > 0 and !has_atlas) {
             if (exact_colors) |colors| _ = applyExactFaceColors(colors, (cur_count + new_count) / 3);
@@ -5438,6 +6215,79 @@ fn freeHiddenGroup(group: HiddenGroup) void {
 fn clearHiddenGroups() void {
     for (g_hidden_groups.items) |group| freeHiddenGroup(group);
     g_hidden_groups.clearRetainingCapacity();
+}
+
+/// Repair only the specific resident-channel loss that the former structural
+/// replacement boundary could create: current geometry remained intact while
+/// `model_source.retain()` cleared its RJMD-v5 logical-corner table. The indexed
+/// cache is admissible only when it was itself hydrated from explicit topology and
+/// still matches every current position, normal, UV, authored-face metadata, part,
+/// material, and semantic row. Named edge paths are resolved against those exact
+/// stable ids before publication. No position weld or id reconstruction occurs.
+var g_exact_indexed_save_promotion_refusal: []const u8 = "";
+
+fn refuseExactIndexedCacheForSave(reason: []const u8) bool {
+    g_exact_indexed_save_promotion_refusal = reason;
+    if (!builtin.is_test) {
+        log.print("[meshdoc] exact indexed topology cache cannot restore resident v5 ids: {s}\n", .{reason});
+    }
+    return false;
+}
+
+fn promoteLogicalTopologyFromExactIndexedCacheForSave() bool {
+    g_exact_indexed_save_promotion_refusal = "";
+    if (model_source.renderCornerLogicalIds() != null) return true;
+    const source = model_source.verts() orelse return refuseExactIndexedCacheForSave("no durable source geometry");
+    const source_count = model_source.count();
+    if (source_count == 0 or source_count % 3 != 0 or g_edit_count != source_count)
+        return refuseExactIndexedCacheForSave("displayed/source shape mismatch");
+    const source_len = @as(usize, source_count) * 8;
+    if (source.len < source_len) return refuseExactIndexedCacheForSave("truncated durable source geometry");
+    const indexed = if (g_indexed_edit_mesh) |*mesh| mesh else return refuseExactIndexedCacheForSave("no indexed cache");
+    if (!indexed.has_explicit_logical_topology)
+        return refuseExactIndexedCacheForSave("indexed cache was imported from anonymous soup");
+
+    const face_count = source_count / 3;
+    const face_parts = capturePartOfFaces();
+    defer if (face_parts) |parts| std.heap.c_allocator.free(parts);
+    if (!indexed.residentMetadataMatchesWithSemantics(
+        face_count,
+        model_source.faceGroups(),
+        face_parts,
+        model_source.faceMaterials(),
+        model_source.faceSemanticRegions(),
+        model_source.faceSemanticInstances(),
+    )) return refuseExactIndexedCacheForSave("cached face metadata is stale");
+    if (!indexed.residentPositionsMatch(source[0..source_len], face_count))
+        return refuseExactIndexedCacheForSave("cached positions are stale");
+    if (!indexed.residentRenderChannelsMatch(source[0..source_len], face_count))
+        return refuseExactIndexedCacheForSave("cached normals or UVs are stale");
+
+    const logical_rows = flattenedLogicalRows(indexed.render_triangles.items);
+    const logical_vertex_count: u32 = @intCast(indexed.vertices.items.len);
+    if (!meshdoc_format.logicalRowsValid(
+        std.heap.c_allocator,
+        source[0..source_len],
+        logical_rows,
+        logical_vertex_count,
+        false,
+    )) return refuseExactIndexedCacheForSave("cached ids do not validate against current positions");
+    if (model_source.semanticTableJson()) |semantic_json| {
+        const paths_resolve = model_source.semanticEdgePathsResolveInTopology(
+            std.heap.c_allocator,
+            semantic_json,
+            logical_rows,
+            logical_vertex_count,
+            model_source.faceGroups(),
+        ) catch return refuseExactIndexedCacheForSave("semantic edge table is invalid");
+        if (!paths_resolve) return refuseExactIndexedCacheForSave("named semantic edges do not resolve");
+    }
+    if (!model_source.setLogicalTopology(logical_rows, logical_vertex_count))
+        return refuseExactIndexedCacheForSave("logical topology allocation failed");
+    if (!builtin.is_test) {
+        log.print("[meshdoc] restored exact resident RJMD-v5 logical ids from the matching indexed cache before save\n", .{});
+    }
+    return true;
 }
 
 fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_source.MeshDocSnapshot {
@@ -5512,7 +6362,55 @@ fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_s
 /// Complete durable source document. Visibility is presentation state: hidden
 /// triangles remain part of RJMD even though they are absent from the live draw mesh.
 pub fn modelDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+    if (model_source.renderCornerLogicalIds() == null) {
+        if (g_indexed_edit_mesh) |*indexed| {
+            if (indexed.has_explicit_logical_topology) {
+                _ = promoteLogicalTopologyFromExactIndexedCacheForSave();
+            }
+        }
+    }
     return composeDocumentSnapshot(allocator, false);
+}
+
+const ModelRecoverySnapshotResult = struct {
+    document: model_source.MeshDocSnapshot,
+    semantic_table_affected_count: u64 = 0,
+    composition_report: meshdoc_format.RecoveryCompositionReport = .{},
+};
+
+fn fullSemanticTableLossCount(allocator: std.mem.Allocator, json: []const u8) u64 {
+    const count = mesh_edge_semantics.recoveryContentCount(allocator, json) catch return 1;
+    return @max(count, 1);
+}
+
+const RecoveredSemanticTable = struct {
+    json: ?[]u8,
+    affected_count: u64,
+};
+
+fn recoverSemanticTableForSnapshotAlloc(
+    allocator: std.mem.Allocator,
+    json: []const u8,
+    dense_to_stable_logical_ids: ?[]const u32,
+) RecoveredSemanticTable {
+    if (dense_to_stable_logical_ids) |dense_to_stable| {
+        if (model_source.semanticTableForLogicalSnapshotAlloc(allocator, json, dense_to_stable)) |remapped| {
+            return .{ .json = remapped, .affected_count = 0 };
+        } else |_| {}
+    }
+    const recovered = mesh_edge_semantics.recoveryTableWithReportAlloc(
+        allocator,
+        json,
+        true,
+        false,
+    ) catch return .{
+        .json = null,
+        .affected_count = fullSemanticTableLossCount(allocator, json),
+    };
+    return .{
+        .json = recovered.json,
+        .affected_count = recovered.removed_content_count,
+    };
 }
 
 /// Recovery-only resident snapshot for the Lore panic lane. The strict model
@@ -5521,8 +6419,8 @@ pub fn modelDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDoc
 /// complete live and hidden triangle from native memory into an owned snapshot;
 /// the Lore encoder can then persist a current-v5 geometry envelope instead of
 /// inheriting Save's refusal.
-pub fn modelRecoverySnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
-    if (composeDocumentSnapshot(allocator, false)) |snapshot| return snapshot;
+fn modelRecoverySnapshotWithReceipt(allocator: std.mem.Allocator) ?ModelRecoverySnapshotResult {
+    if (composeDocumentSnapshot(allocator, false)) |snapshot| return .{ .document = snapshot };
 
     const visible = visible_block: {
         if (model_source.verts()) |rows| {
@@ -5566,17 +6464,32 @@ pub fn modelRecoverySnapshot(allocator: std.mem.Allocator) ?model_source.MeshDoc
         block_count += 1;
     }
     if (block_count == 0) return null;
-    var snapshot = model_source.composeMeshDocRecoverySnapshot(allocator, blocks[0..block_count]) catch return null;
+    const composition = model_source.composeMeshDocRecoverySnapshotWithReport(allocator, blocks[0..block_count]) catch return null;
+    var snapshot = composition.snapshot;
+    var semantic_table_affected_count: u64 = 0;
     if (snapshot.semantic_regions != null) {
         if (model_source.semanticTableJson()) |json| {
-            snapshot.semantic_table_json = if (snapshot.dense_to_stable_logical_ids) |dense_to_stable|
-                model_source.semanticTableForLogicalSnapshotAlloc(allocator, json, dense_to_stable) catch
-                    mesh_edge_semantics.recoveryTableAlloc(allocator, json, true, false) catch null
-            else
-                mesh_edge_semantics.recoveryTableAlloc(allocator, json, true, false) catch null;
+            const recovered = recoverSemanticTableForSnapshotAlloc(
+                allocator,
+                json,
+                snapshot.dense_to_stable_logical_ids,
+            );
+            snapshot.semantic_table_json = recovered.json;
+            semantic_table_affected_count = recovered.affected_count;
         }
+    } else if (model_source.semanticTableJson()) |json| {
+        semantic_table_affected_count = fullSemanticTableLossCount(allocator, json);
     }
-    return snapshot;
+    return .{
+        .document = snapshot,
+        .semantic_table_affected_count = semantic_table_affected_count,
+        .composition_report = composition.report,
+    };
+}
+
+pub fn modelRecoverySnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+    const recovered = modelRecoverySnapshotWithReceipt(allocator) orelse return null;
+    return recovered.document;
 }
 
 pub const CurrentDocumentEncodeError = std.mem.Allocator.Error || error{
@@ -5623,6 +6536,43 @@ fn recoveryCaptureAppend(
     artifact.identity_quality = 1;
 }
 
+fn recoveryActionBits(delta: meshdoc_format.RecoveryChannelDelta) u32 {
+    return @as(u32, @intFromBool(delta.synthesized)) << 0 |
+        @as(u32, @intFromBool(delta.repaired)) << 1 |
+        @as(u32, @intFromBool(delta.defaulted)) << 2 |
+        @as(u32, @intFromBool(delta.dropped)) << 3;
+}
+
+fn recoveryCaptureAppendComposition(
+    artifact: *RecoveryCaptureArtifact,
+    report: meshdoc_format.RecoveryCompositionReport,
+) void {
+    if (report.face_groups.affected_count > 0) recoveryCaptureAppend(artifact, .{
+        .channel = .face_groups,
+        .action_bits = recoveryActionBits(report.face_groups),
+        .reason_bits = 1 << 2,
+        .affected_count = report.face_groups.affected_count,
+    });
+    if (report.materials.affected_count > 0) recoveryCaptureAppend(artifact, .{
+        .channel = .materials,
+        .action_bits = recoveryActionBits(report.materials),
+        .reason_bits = 1 << 3,
+        .affected_count = report.materials.affected_count,
+    });
+    if (report.semantic_membership.affected_count > 0) recoveryCaptureAppend(artifact, .{
+        .channel = .semantic_membership,
+        .action_bits = recoveryActionBits(report.semantic_membership),
+        .reason_bits = 1 << 4,
+        .affected_count = report.semantic_membership.affected_count,
+    });
+    if (report.logical_topology.affected_count > 0) recoveryCaptureAppend(artifact, .{
+        .channel = .logical_topology,
+        .action_bits = recoveryActionBits(report.logical_topology),
+        .reason_bits = 1 << 6,
+        .affected_count = report.logical_topology.affected_count,
+    });
+}
+
 /// Owner-thread panic encoding for the ABI capture lane. It never reads package
 /// disk and never adopts the result. Invalid range/group identity is repaired
 /// only in the owned snapshot copy and reported through typed provenance.
@@ -5630,8 +6580,9 @@ pub fn captureRecoveryArtifactAlloc(
     allocator: std.mem.Allocator,
     model_id: []const u8,
 ) !RecoveryCaptureArtifact {
-    var document = modelRecoverySnapshot(allocator) orelse return error.NoResidentDocument;
-    defer document.deinit(allocator);
+    var recovered = modelRecoverySnapshotWithReceipt(allocator) orelse return error.NoResidentDocument;
+    defer recovered.document.deinit(allocator);
+    const document = &recovered.document;
     const triangle_count = document.verts.len / 24;
     if (triangle_count == 0) return error.NoResidentDocument;
 
@@ -5640,6 +6591,19 @@ pub fn captureRecoveryArtifactAlloc(
     const range_repaired = !meshdoc_format.rangesValid(ranges, @intCast(ranges.len / 2)) or
         !meshdoc_format.rangesOwnEveryFace(ranges, document.groups, @intCast(ranges.len / 2));
     if (range_repaired) {
+        var changed_groups: u64 = 0;
+        if (document.groups) |prior| {
+            for (prior) |group| changed_groups += @intFromBool(group != 0);
+        } else {
+            changed_groups = @intCast(triangle_count);
+        }
+        if (changed_groups > 0) {
+            recovered.composition_report.face_groups.affected_count = @max(
+                recovered.composition_report.face_groups.affected_count,
+                changed_groups,
+            );
+            recovered.composition_report.face_groups.defaulted = true;
+        }
         const fallback_groups = try allocator.alloc(u32, triangle_count);
         @memset(fallback_groups, 0);
         if (document.groups) |prior| allocator.free(prior);
@@ -5688,7 +6652,7 @@ pub fn captureRecoveryArtifactAlloc(
 
     const bytes = try meshdoc_format.encodeCurrentSnapshotWithRangeObjectIdsAlloc(
         allocator,
-        &document,
+        document,
         ranges,
         object_ids.items,
     );
@@ -5706,6 +6670,7 @@ pub fn captureRecoveryArtifactAlloc(
     };
     std.crypto.hash.sha2.Sha256.hash(bytes, &artifact.sha256, .{});
     artifact.object_namespace_hash = meshdoc_format.objectNamespaceDigest(model_id, object_ids.items, ranges);
+    recoveryCaptureAppendComposition(&artifact, recovered.composition_report);
     if (range_repaired) recoveryCaptureAppend(&artifact, .{
         .channel = .range_membership,
         .action_bits = 1 << 1,
@@ -5717,6 +6682,12 @@ pub fn captureRecoveryArtifactAlloc(
         .action_bits = 1 << 0,
         .reason_bits = 1 << 0,
         .affected_count = @intCast(ranges.len / 2),
+    });
+    if (recovered.semantic_table_affected_count > 0) recoveryCaptureAppend(&artifact, .{
+        .channel = .semantic_table,
+        .action_bits = 1 << 3,
+        .reason_bits = 1 << 5,
+        .affected_count = recovered.semantic_table_affected_count,
     });
     return artifact;
 }
@@ -5931,7 +6902,15 @@ fn hideGroup(lo: u32, hi: u32) bool {
     };
     defer std.heap.c_allocator.free(owned);
     const kept: u32 = @intCast(owned.len / 8);
-    const ok = replaceActiveEditMesh(owned, kept);
+    const ok = replaceActiveEditMesh(
+        owned,
+        kept,
+        logicalReplacementExactOrAbsent(
+            if (cur_logical_ids != null and kept > 0) keep_logical.items else null,
+            kept,
+            logical_vertex_count,
+        ),
+    );
     if (ok) {
         model_source.setFaceGroups(keep_g.items);
         model_source.setFaceMaterials(keep_m.items);
@@ -5940,12 +6919,6 @@ fn hideGroup(lo: u32, hi: u32) bool {
             return false;
         }
         _ = model_source.replaceGeometrySameTriangleCount(keep_source.items, kept);
-        if (cur_logical_ids != null and kept > 0) {
-            if (!model_source.setLogicalTopology(keep_logical.items, logical_vertex_count)) {
-                freeHiddenGroup(hidden);
-                return false;
-            }
-        }
         _ = refreshPaintLayout();
         restoreFaceColorMetadata(keep_c.items);
         g_hidden_groups.appendAssumeCapacity(hidden);
@@ -6026,14 +6999,20 @@ fn showGroup(lo: u32, hi: u32) bool {
     };
     defer std.heap.c_allocator.free(owned);
     const new_count = cur_count + @as(u32, @intCast(entry.verts.len / 8));
-    const ok = replaceActiveEditMesh(owned, new_count);
+    const ok = replaceActiveEditMesh(
+        owned,
+        new_count,
+        logicalReplacementExactOrAbsent(
+            if (has_logical_topology) logical_ids.items else null,
+            new_count,
+            logical_vertex_count,
+        ),
+    );
     if (ok) {
         model_source.setFaceGroups(groups.items);
         model_source.setFaceMaterials(materials.items);
         if (!model_source.setFaceSemantics(semantic_regions.items, semantic_instances.items)) return false;
         _ = model_source.replaceGeometrySameTriangleCount(source_out.items, new_count);
-        if (has_logical_topology and new_count > 0 and
-            !model_source.setLogicalTopology(logical_ids.items, logical_vertex_count)) return false;
         _ = refreshPaintLayout();
         restoreFaceColorMetadata(colors.items);
         freeHiddenGroup(entry);
@@ -6139,6 +7118,9 @@ const JournalEntry = struct {
     // decoration. Every chronological model snapshot carries its exact live
     // membership and frozen before-image so topology undo cannot erase it.
     retopo_guide: ?mesh_edit.OwnedRetopoGuide,
+    // UV mask zones are the same one-row-per-face identity channel. Glass is a
+    // face reorder, so its undo/redo must restore the exact reordered mask too.
+    uv_zones: ?[]u16,
     paint_layout_stale: bool,
     paint_layout_revision: u64,
     note: ?[]u8,
@@ -6491,6 +7473,7 @@ fn journalEntryBytes(e: *const JournalEntry) usize {
         n += guide.source_positions.len * @sizeOf(f32);
         n += guide.source_bands.len * @sizeOf(u16);
     }
+    if (e.uv_zones) |rows| n += rows.len * @sizeOf(u16);
     if (e.note) |note| n += note.len;
     n += e.selection.vertex_ids.len * @sizeOf(u32);
     n += e.selection.edge_pairs.len * @sizeOf(mesh_edit.Edge);
@@ -6523,6 +7506,7 @@ fn journalFreeEntry(e: *JournalEntry) void {
     if (e.atlas) |atlas| jalloc.free(atlas.rgba);
     if (e.paint_state) |paint_state| paint_program.journalStateFree(paint_state);
     if (e.retopo_guide) |*guide| guide.deinit(jalloc);
+    if (e.uv_zones) |rows| jalloc.free(rows);
     if (e.note) |n| jalloc.free(n);
     e.selection.deinit();
 }
@@ -6588,11 +7572,9 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
         .atlas = null,
         .paint_state = null,
         .retopo_guide = null,
+        .uv_zones = null,
         .paint_layout_stale = g_paint_layout_stale,
-        // Lore carries RJMD geometry, not the current paint atlas/program. Force
-        // the restore down the stale-layout rebuild path even when counts happen
-        // to match; arbitrary historical topology never inherits atlas validity.
-        .paint_layout_revision = model_paint.layoutRevision() +% 1,
+        .paint_layout_revision = model_paint.layoutRevision(),
         .note = null,
         .selection = .{},
         .label = label,
@@ -6704,6 +7686,10 @@ fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?Jo
             return null;
         };
     }
+    if (g_uv_zone) |rows| entry.uv_zones = jalloc.dupe(u16, rows) catch {
+        journalFreeEntry(&entry);
+        return null;
+    };
     entry.colors = collectCurrentFaceColors() orelse {
         journalFreeEntry(&entry);
         release_lease = false;
@@ -6955,7 +7941,7 @@ fn journalCommit(snap: *?JournalEntry) void {
         e.action_kind,
         e.generation,
         g_edit_generation,
-    )) bumpEditGeneration();
+    )) bumpEditRevision();
     enqueueFollowJournalAction(
         e.action_id,
         follow_kind,
@@ -7276,6 +8262,14 @@ fn journalInstallRetopoGuide(e: *const JournalEntry) bool {
     return true;
 }
 
+fn journalInstallUvZones(e: *const JournalEntry) bool {
+    const replacement: ?[]u16 = if (e.uv_zones) |rows| jalloc.dupe(u16, rows) catch return false else null;
+    if (g_uv_zone) |rows| jalloc.free(rows);
+    g_uv_zone = replacement;
+    publishUvZoneMask();
+    return true;
+}
+
 /// Prove every channel that can be checked without touching resident state.
 /// Install is intentionally allocation-light after this boundary; any remaining
 /// late allocation refusal is handled by the caller's exact preimage rollback.
@@ -7294,6 +8288,7 @@ fn journalMeshPreflight(e: *const JournalEntry) bool {
         }
     }
     if (e.colors == null or e.colors.?.len != face_count * 4) return false;
+    if (e.uv_zones) |rows| if (rows.len != face_count) return false;
     if (e.logical_ids) |rows| {
         if (rows.len != e.count or e.logical_vertex_count == 0 or
             !meshdoc_format.logicalRowsValid(jalloc, e.source_verts, rows, e.logical_vertex_count, false)) return false;
@@ -7413,6 +8408,8 @@ fn journalResidentDurableMatches(e: *const JournalEntry) bool {
     if (!optionalBytesEqual(model_source.partObjectModelId(), e.part_object_model_id)) return false;
     if (!optionalBytesEqual(model_source.colors(), e.colors)) return false;
     if (!optionalBytesEqual(g_journal_note, e.note)) return false;
+    if ((g_uv_zone == null) != (e.uv_zones == null)) return false;
+    if (g_uv_zone) |rows| if (!std.mem.eql(u16, rows, e.uv_zones.?)) return false;
     if (g_hidden_groups.items.len != e.hidden.len) return false;
     for (g_hidden_groups.items, e.hidden) |live, saved| {
         if (live.lo != saved.lo or live.hi != saved.hi or
@@ -7474,8 +8471,12 @@ fn journalEntryFromDocument(
         .atlas = null,
         .paint_state = null,
         .retopo_guide = null,
+        .uv_zones = null,
         .paint_layout_stale = true,
-        .paint_layout_revision = model_paint.layoutRevision(),
+        // Lore carries RJMD geometry, not the current paint atlas/program. Force
+        // the restore down the stale-layout rebuild path even when counts happen
+        // to match; arbitrary historical topology never inherits atlas validity.
+        .paint_layout_revision = model_paint.layoutRevision() +% 1,
         .note = null,
         .selection = .{ .mode = .none },
         .label = label,
@@ -7527,17 +8528,16 @@ fn journalInstall(e: *const JournalEntry) bool {
     if (!journalMeshPreflight(e)) return false;
     const vcopy = jalloc.dupe(f32, e.verts) catch return false;
     defer jalloc.free(vcopy);
-    const invalidates_layout = if (mesh_journal_log.actionKindForLabel(e.label)) |kind|
-        mesh_journal_log.actionInvalidatesPaintLayout(kind)
-    else
-        false;
+    const action_kind = e.action_kind orelse mesh_journal_log.actionKindForLabel(e.label);
+    const invalidates_layout = if (action_kind) |kind| mesh_journal_log.actionInvalidatesPaintLayout(kind) else false;
     // Indexed structural installs keep the atlas raster alive and journal snapshots
     // retain their exact interleaved UVs. Reuse that raster only while it is still the
     // SAME coordinate space the snapshot recorded. Hide/show performs a group-keyed
     // repack; installing older UVs over that later raster makes opaque faces sample
     // transparent shelf padding (req_3364).
     const same_atlas_coordinates = e.paint_layout_revision == model_paint.layoutRevision();
-    const preserve_indexed_atlas = invalidates_layout and
+    const exact_face_reorder = if (action_kind) |kind| kind == .glass_faces else false;
+    const preserve_indexed_atlas = (invalidates_layout or exact_face_reorder) and
         same_atlas_coordinates and
         e.count >= 3 and
         model_paint.atlas() != null and
@@ -7553,10 +8553,15 @@ fn journalInstall(e: *const JournalEntry) bool {
         beginPaintStableReplace()
     else if (carry_repacked_atlas)
         beginPaintRasterCarry();
+    const journal_logical = logicalReplacementExactOrAbsent(
+        e.logical_ids,
+        e.count,
+        e.logical_vertex_count,
+    );
     const installed = if (preserve_indexed_atlas)
-        replaceActiveEditMeshPreservingAtlas(vcopy, e.count, e.groups, e.colors.?)
+        replaceActiveEditMeshPreservingAtlas(vcopy, e.count, e.groups, e.colors.?, journal_logical)
     else
-        replaceActiveEditMesh(vcopy, e.count);
+        replaceActiveEditMesh(vcopy, e.count, journal_logical);
     if (!installed) {
         if (paint_stable)
             cancelPaintStableReplace()
@@ -7592,9 +8597,7 @@ fn journalInstall(e: *const JournalEntry) bool {
             if (!model_source.setSemanticState(regions, instances, json)) return false;
         } else if (!model_source.setFaceSemantics(regions, instances)) return false;
     } else model_source.clearFaceSemantics();
-    if (e.logical_ids) |rows| {
-        if (rows.len != e.count or !model_source.setLogicalTopology(rows, e.logical_vertex_count)) return false;
-    } else model_source.clearLogicalTopology();
+    // Logical rows were installed atomically with the geometry replacement above.
     // Tripwire (req_3049): restoring a snapshot that carries NO ranges over a mesh
     // that has them silently un-parts the model — the save then persists a doc that
     // reopens merged. Name it when it happens.
@@ -7614,6 +8617,13 @@ fn journalInstall(e: *const JournalEntry) bool {
             const n = @min(src.len, c.len);
             if (n > 0) @memcpy(src[0..n], c[0..n]);
         }
+        if (preserve_indexed_atlas and exact_face_reorder) {
+            var face: u32 = 0;
+            while (face < e.count / 3) : (face += 1) {
+                model_paint.paintFaceAlpha(face, c[@as(usize, face) * 4 + 3]);
+            }
+            paint_program.invalidateFaceKeys();
+        }
     }
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = if (e.note) |n| (jalloc.dupe(u8, n) catch null) else null;
@@ -7623,6 +8633,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     if (e.count > 0 and !preserve_indexed_atlas) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
     g_paint_layout_stale = e.paint_layout_stale;
     if (!journalInstallRetopoGuide(e)) return false;
+    if (!journalInstallUvZones(e)) return false;
     return restoreJournalSelection(&e.selection);
 }
 
@@ -7970,6 +8981,12 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     var fresh_ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer fresh_ranges.deinit(alloc);
 
+    var logical = LogicalRowsBuilder.init() orelse return fail;
+    defer logical.deinit();
+    if (!logical.appendAllSource()) return fail;
+    var cloned_logical = LogicalCloneMap{};
+    defer cloned_logical.deinit();
+
     if (!appendFloats(&verts, cur_verts[0 .. @as(usize, g_edit_count) * 8])) return fail;
     groups.appendSlice(jalloc, cur_groups) catch return fail;
     colors.appendSlice(jalloc, cur_colors) catch return fail;
@@ -8012,7 +9029,18 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
                     else
                         path_array.mapPoint(template, params, bay, p);
                 }
-                if (!appendTri(&verts, mapped[0], mapped[1], mapped[2])) return fail;
+                const namespace = 1 + @as(u64, bay) * @as(u64, source_ranges.len / 2) + @as(u64, source_index);
+                const source_ids = [3]u32{
+                    logical.sourceCorner(f, 0) orelse return fail,
+                    logical.sourceCorner(f, 1) orelse return fail,
+                    logical.sourceCorner(f, 2) orelse return fail,
+                };
+                const mapped_ids = [3]u32{
+                    cloned_logical.getOrMint(&logical, namespace, source_ids[0]) orelse return fail,
+                    cloned_logical.getOrMint(&logical, namespace, source_ids[1]) orelse return fail,
+                    cloned_logical.getOrMint(&logical, namespace, source_ids[2]) orelse return fail,
+                };
+                if (!appendTriLogical(&verts, &logical, mapped[0], mapped[1], mapped[2], mapped_ids)) return fail;
                 const group_entry = local_groups.getOrPut(jalloc, source_group) catch return fail;
                 if (!group_entry.found_existing) {
                     group_entry.value_ptr.* = next_local;
@@ -8043,8 +9071,12 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     if (fresh_ranges.items.len != expected_fresh_pairs) return fail;
     const result_ranges = fresh_ranges.toOwnedSlice(alloc) catch return fail;
     const installed_count: u32 = @intCast(verts.items.len / 8);
+    const logical_replacement = logical.replacement(installed_count) orelse {
+        alloc.free(result_ranges);
+        return fail;
+    };
     var snap = journalSnapshotCurrent("path array");
-    if (!replaceActiveEditMesh(verts.items, installed_count)) {
+    if (!replaceActiveEditMesh(verts.items, installed_count, logical_replacement)) {
         journalDiscard(&snap);
         alloc.free(result_ranges);
         return fail;
@@ -8287,20 +9319,17 @@ pub fn meshFlipSelectionWinding() bool {
     mesh_edit.clearSelection();
     mesh_edit.resumeFaceTint();
 
-    if (!replaceActiveEditMesh(flipped_verts, g_edit_count)) {
+    if (!replaceActiveEditMesh(
+        flipped_verts,
+        g_edit_count,
+        logicalReplacementExactOrAbsent(flipped_logical_ids, g_edit_count, logical_vertex_count),
+    )) {
         model_paint.dropAtlasCarry();
         _ = mesh_edit.selectFacesByTriangleMask(mask);
         journalDiscard(&snap);
         return false;
     }
     if (groups) |g| model_source.setFaceGroups(g);
-    if (flipped_logical_ids) |rows| {
-        if (!model_source.setLogicalTopology(rows, logical_vertex_count)) {
-            if (snap) |*before| _ = journalInstall(before);
-            journalDiscard(&snap);
-            return false;
-        }
-    }
     _ = refreshPaintLayout();
     model_paint.dropAtlasCarry(); // refresh consumes it; this also clears a failed rebuild's stash
     _ = mesh_edit.selectFacesByTriangleMask(mask);
@@ -8348,7 +9377,7 @@ fn commitIndexedFaceGrouping(
     const live_parts: ?[]const u32 = if (parts) |rows| rows else null;
     const committed = guard.matchesGroupOnly(merged_groups) and
         indexed.residentMetadataMatches(tri_count, merged_groups, live_parts, model_source.faceMaterials()) and
-        indexed.residentUvsMatch(verts, tri_count);
+        indexed.residentRenderChannelsMatch(verts, tri_count);
     if (!committed) {
         const old_groups = guard.groups orelse {
             journalDiscard(&snap);
@@ -8493,6 +9522,8 @@ pub fn meshMergeSelectedFaces() bool {
         lowered.semantic_regions,
         lowered.semantic_instances,
         dissolve_colors,
+        flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(indexed.vertices.items.len),
     );
     if (!installed) {
         journalDiscard(&snap);
@@ -8793,6 +9824,8 @@ pub fn meshMirrorMatchQuads(axis_mask_raw: u32) MirrorQuadStats {
         lowered.semantic_regions,
         lowered.semantic_instances,
         dissolve_colors,
+        flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(indexed.vertices.items.len),
     );
     if (!installed) {
         journalDiscard(&snap);
@@ -8848,7 +9881,7 @@ pub fn meshMirrorReplaceSelection(axis_mask_raw: u32) indexed_edit_mesh.Mesh.Mir
     if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return empty;
     var snap = journalSnapshotCurrent("mirror copy selection");
     const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
-    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors);
+    const ok = lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors, flattenedLogicalRows(lowered.triangle_vertices), @intCast(indexed.vertices.items.len));
     if (!ok) {
         journalDiscard(&snap);
         return empty;
@@ -8938,7 +9971,7 @@ fn quadifyInstallPreview(session: *const QuadifySession, preview: *indexed_edit_
         for (parts) |part| if (part != indexed_edit_mesh.NO_PART) return false;
     }
     if (!std.mem.eql(u32, session.base_materials, materials) or
-        !preview.residentUvsMatch(verts, tri_count))
+        !preview.residentRenderChannelsMatch(verts, tri_count))
     {
         return false;
     }
@@ -9080,7 +10113,7 @@ pub fn meshQuadifyEnd(commit: bool) QuadifyEndInfo {
                 groups,
                 session.base_parts,
                 session.base_materials,
-            ) and indexed.residentUvsMatch(verts, tri_count);
+            ) and indexed.residentRenderChannelsMatch(verts, tri_count);
         if (valid) {
             changed = session.last_stats.quads;
             journalCommit(&session.snap);
@@ -9113,9 +10146,9 @@ pub fn meshTrianglesToQuads() u32 {
     return if (ended.ok) ended.changed else 0;
 }
 
-/// Toggle the selected faces (face mode) as GLASS: their atlas texels get a translucent
-/// alpha and the mesh re-partitions so every glass face sits in one trailing run the
-/// draw routes through the transparent pipeline (per-face glass on ONE resident mesh).
+/// Toggle the selected faces (face mode) as GLASS: face metadata changes and the mesh
+/// re-partitions so every glass face sits in one trailing run drawn through the
+/// transparent pipeline with the independent auxiliary glass atlas.
 /// Toggling faces that are already glass makes them opaque again.
 pub fn meshSetSelectionGlass() bool {
     if (!residentMutationAllowed(.durable_channels)) return false;
@@ -9156,6 +10189,7 @@ pub fn meshSetSelectionGlass() bool {
         colors[@as(usize, f) * 4 + 3] = if (make_glass) model_paint.GLASS_ALPHA else 255;
     }
     if (!partitionGlassFaces(colors)) {
+        if (snap) |*before| _ = journalInstall(before);
         journalDiscard(&snap);
         return false;
     }
@@ -9170,9 +10204,9 @@ pub fn meshSetSelectionGlass() bool {
 /// ALPHA ONLY, NO REBUILD (req_3412): the document guarantees the glass faces
 /// are already the trailing run, and running partitionGlassFaces' wholesale
 /// mesh replacement at mount blanked the entire viewport (the Lavalampsad
-/// repro). paintFaceAlpha is the sanctioned restore-time writer — it re-asserts
-/// the retained per-face opacity + texels and editGlassFirstVert derives the
-/// transparent split live from those alphas. The source colour table mirrors
+/// repro). paintFaceAlpha is the sanctioned restore-time metadata writer — it
+/// re-asserts retained per-face opacity without touching the opaque atlas, and
+/// editGlassFirstVert derives the transparent split live from those alphas. The source colour table mirrors
 /// the run so the next save re-serializes the boundary. A LOAD, not an edit:
 /// nothing journals.
 pub fn meshRestoreGlass(glass_first_vertex: u32) bool {
@@ -9203,6 +10237,9 @@ fn partitionGlassFaces(colors: []const u8) bool {
     const cur_verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
     if (colors.len < @as(usize, tri_count) * 4) return false;
+    const source_verts = model_source.verts() orelse return false;
+    const vertex_words = @as(usize, g_edit_count) * 8;
+    if (model_source.count() != g_edit_count or source_verts.len < vertex_words or cur_verts.len < vertex_words) return false;
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     const cur_groups: ?[]u32 = if (has_groups) captureFaceGroups() else null;
     defer if (cur_groups) |g| jalloc.free(g);
@@ -9212,6 +10249,10 @@ fn partitionGlassFaces(colors: []const u8) bool {
 
     var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(jalloc);
+    var out_source: std.ArrayListUnmanaged(f32) = .empty;
+    defer out_source.deinit(jalloc);
+    var order: std.ArrayListUnmanaged(u32) = .empty;
+    defer order.deinit(jalloc);
     var new_groups: std.ArrayListUnmanaged(u32) = .empty;
     defer new_groups.deinit(jalloc);
     var new_colors: std.ArrayListUnmanaged(u8) = .empty;
@@ -9230,35 +10271,94 @@ fn partitionGlassFaces(colors: []const u8) bool {
         while (f < tri_count) : (f += 1) {
             const is_opaque = !model_paint.isGlassAlpha(colors[@as(usize, f) * 4 + 3]);
             if (is_opaque != want_opaque) continue;
-            const base = @as(usize, f) * 24;
-            if (base + 24 > cur_verts.len) break;
-            if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
-            if (cur_groups) |g| new_groups.append(jalloc, g[f]) catch return false;
-            new_colors.appendSlice(jalloc, colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return false;
-            new_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return false;
-            const semantic = model_source.faceSemanticOf(f);
-            new_semantic_regions.append(jalloc, semantic.region) catch return false;
-            new_semantic_instances.append(jalloc, semantic.instance) catch return false;
-            if (cur_logical_ids) |rows| {
-                const logical_base = @as(usize, f) * 3;
-                new_logical_ids.appendSlice(jalloc, rows[logical_base .. logical_base + 3]) catch return false;
-            }
+            order.append(jalloc, f) catch return false;
         }
     }
+    if (order.items.len != tri_count) return false;
+
+    for (order.items) |f| {
+        const base = @as(usize, f) * 24;
+        if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
+        if (!appendFloats(&out_source, source_verts[base .. base + 24])) return false;
+        if (cur_groups) |g| new_groups.append(jalloc, g[f]) catch return false;
+        new_colors.appendSlice(jalloc, colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return false;
+        new_materials.append(jalloc, model_source.faceMaterialOf(f)) catch return false;
+        const semantic = model_source.faceSemanticOf(f);
+        new_semantic_regions.append(jalloc, semantic.region) catch return false;
+        new_semantic_instances.append(jalloc, semantic.instance) catch return false;
+        if (cur_logical_ids) |rows| {
+            const logical_base = @as(usize, f) * 3;
+            new_logical_ids.appendSlice(jalloc, rows[logical_base .. logical_base + 3]) catch return false;
+        }
+    }
+
+    const permute_u16 = struct {
+        fn run(rows: []const u16, face_order: []const u32) ?[]u16 {
+            if (rows.len != face_order.len) return null;
+            const reordered = jalloc.alloc(u16, rows.len) catch return null;
+            for (face_order, 0..) |old_face, new_face| reordered[new_face] = rows[old_face];
+            return reordered;
+        }
+    }.run;
+    var new_manual_bands: ?[]u16 = if (g_retopo_manual_bands) |rows| permute_u16(rows, order.items) else null;
+    defer if (new_manual_bands) |rows| jalloc.free(rows);
+    if (g_retopo_manual_bands != null and new_manual_bands == null) return false;
+    var new_planned_bands: ?[]u16 = if (g_retopo_band_plan) |*plan| permute_u16(plan.faces, order.items) else null;
+    defer if (new_planned_bands) |rows| jalloc.free(rows);
+    if (g_retopo_band_plan != null and new_planned_bands == null) return false;
+    var new_uv_zones: ?[]u16 = if (g_uv_zone) |rows| permute_u16(rows, order.items) else null;
+    defer if (new_uv_zones) |rows| jalloc.free(rows);
+    if (g_uv_zone != null and new_uv_zones == null) return false;
+
     const count: u32 = @intCast(out.items.len / 8);
     if (count != g_edit_count) return false;
-    if (!replaceActiveEditMesh(out.items, count)) return false;
-    if (cur_groups != null) model_source.setFaceGroups(new_groups.items);
-    if (cur_logical_ids != null and
-        !model_source.setLogicalTopology(new_logical_ids.items, logical_vertex_count)) return false;
+    const was_layout_stale = g_paint_layout_stale;
+    if (!replaceActiveEditMeshPreservingAtlas(
+        out.items,
+        count,
+        if (cur_groups != null) new_groups.items else null,
+        new_colors.items,
+        logicalReplacementExactOrAbsent(
+            if (cur_logical_ids != null) new_logical_ids.items else null,
+            count,
+            logical_vertex_count,
+        ),
+    )) return false;
+    if (cur_logical_ids != null) {
+        if (!model_source.replaceGeometryAndLogicalTopologySameTriangleCount(
+            out_source.items,
+            count,
+            new_logical_ids.items,
+            logical_vertex_count,
+        )) return false;
+    } else if (!model_source.replaceGeometrySameTriangleCount(out_source.items, count)) return false;
     model_source.setFaceMaterials(new_materials.items);
     if (!model_source.setFaceSemantics(new_semantic_regions.items, new_semantic_instances.items)) return false;
-    model_paint.applyColors(new_colors.items);
-    if (model_source.colors()) |src| {
-        const n = @min(src.len, new_colors.items.len);
-        if (n > 0) @memcpy(src[0..n], new_colors.items[0..n]);
+
+    var face: u32 = 0;
+    while (face < tri_count) : (face += 1) {
+        model_paint.paintFaceAlpha(face, new_colors.items[@as(usize, face) * 4 + 3]);
     }
-    _ = refreshPaintLayout();
+    if (new_manual_bands) |rows| {
+        if (g_retopo_manual_bands) |old| jalloc.free(old);
+        g_retopo_manual_bands = rows;
+        new_manual_bands = null;
+    }
+    if (new_planned_bands) |rows| {
+        if (g_retopo_band_plan) |*plan| {
+            jalloc.free(plan.faces);
+            plan.faces = rows;
+            new_planned_bands = null;
+        }
+    }
+    if (new_uv_zones) |rows| {
+        if (g_uv_zone) |old| jalloc.free(old);
+        g_uv_zone = rows;
+        new_uv_zones = null;
+        publishUvZoneMask();
+    }
+    paint_program.invalidateFaceKeys();
+    g_paint_layout_stale = was_layout_stale;
     return true;
 }
 
@@ -9271,8 +10371,7 @@ fn ensureGlassTrailing() void {
     var needs = false;
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
-        const c = model_paint.faceColor(f) orelse continue;
-        const is_glass = model_paint.isGlassAlpha(c[3]);
+        const is_glass = model_paint.faceIsGlass(f);
         if (is_glass and first_glass == null) first_glass = f;
         if (!is_glass and first_glass != null) needs = true;
     }
@@ -9288,8 +10387,7 @@ fn editGlassFirstVert() u32 {
     const fc = model_paint.faceCount();
     var k = fc;
     while (k > 0) : (k -= 1) {
-        const c = model_paint.faceColor(k - 1) orelse break;
-        if (!model_paint.isGlassAlpha(c[3])) break;
+        if (!model_paint.faceIsGlass(k - 1)) break;
     }
     return k * 3;
 }
@@ -9390,6 +10488,11 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(jalloc);
     if (!appendCurrentDisplayed(&out)) return false;
+    var logical = LogicalRowsBuilder.init() orelse return false;
+    defer logical.deinit();
+    if (!logical.appendAllSource()) return false;
+    var inner_logical = LogicalCloneMap{};
+    defer inner_logical.deinit();
     var add_groups: std.ArrayListUnmanaged(u32) = .empty;
     defer add_groups.deinit(jalloc);
     var add_colors: std.ArrayListUnmanaged(u8) = .empty;
@@ -9419,7 +10522,12 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
             const off = offsets.get(mesh_edit.cornerVertPub(f, @intCast(k)));
             p[k] = .{ p[k][0] + off[0], p[k][1] + off[1], p[k][2] + off[2] };
         }
-        if (!appendTri(&out, p[0], p[2], p[1])) return false;
+        const inner_ids = [3]u32{
+            inner_logical.getOrMint(&logical, 1, logical.sourceCorner(f, 0) orelse return false) orelse return false,
+            inner_logical.getOrMint(&logical, 1, logical.sourceCorner(f, 2) orelse return false) orelse return false,
+            inner_logical.getOrMint(&logical, 1, logical.sourceCorner(f, 1) orelse return false) orelse return false,
+        };
+        if (!appendTriLogical(&out, &logical, p[0], p[2], p[1], inner_ids)) return false;
         if (has_groups) {
             const gop = inner_groups.getOrPut(jalloc, model_source.faceGroupOf(f)) catch return false;
             if (!gop.found_existing) {
@@ -9449,7 +10557,11 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         const ai: [3]f32 = .{ a[0] + oa[0], a[1] + oa[1], a[2] + oa[2] };
         const bi: [3]f32 = .{ b[0] + ob[0], b[1] + ob[1], b[2] + ob[2] };
         // Edge a→b runs in the face's winding, so (a, ai, bi, b) faces outward.
-        if (!appendQuadSplit(&out, a, ai, bi, b)) return false;
+        const a_id = logical.sourceCorner(fa, use.corner) orelse return false;
+        const b_id = logical.sourceCorner(fa, (use.corner + 1) % 3) orelse return false;
+        const ai_id = inner_logical.getOrMint(&logical, 1, a_id) orelse return false;
+        const bi_id = inner_logical.getOrMint(&logical, 1, b_id) orelse return false;
+        if (!appendQuadSplitLogical(&out, &logical, a, ai, bi, b, .{ a_id, ai_id, bi_id, b_id })) return false;
         if (has_groups) {
             const wall_group = next_group;
             next_group += 1;
@@ -9499,7 +10611,11 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     }
     @memcpy(semantics.regions[first_new_face..], add_semantic_regions.items);
     @memcpy(semantics.instances[first_new_face..], add_semantic_instances.items);
-    if (!replaceActiveEditMesh(out.items, new_count)) {
+    const logical_replacement = logical.replacement(new_count) orelse {
+        journalDiscard(&snap);
+        return false;
+    };
+    if (!replaceActiveEditMesh(out.items, new_count, logical_replacement)) {
         journalDiscard(&snap);
         return false;
     }
@@ -12977,24 +14093,49 @@ pub fn meshEdgeSemanticAssignSelection(
     defer allocator.free(selected);
     if (mesh_edit.selectedEdgesPub(selected) != edge_count) return null;
     const part = mesh_edit.selectedEdgesCommonPartPub() orelse return null;
+    const role = mesh_edge_semantics.Role.parse(role_text) orelse return null;
+    var snap = journalSnapshotCurrent("name edge region");
+    if (snap == null) return null;
+    const promotion = prepareLogicalTopologyForEdgeAuthoring() orelse {
+        journalDiscard(&snap);
+        return null;
+    };
+    var committed = false;
+    defer if (!committed) {
+        journalDiscard(&snap);
+        rollbackEdgeLogicalPromotion(promotion);
+    };
     const path_edges = allocator.alloc(mesh_edge_semantics.Edge, edge_count) catch return null;
     defer allocator.free(path_edges);
-    for (selected, 0..) |edge, index| path_edges[index] = .{ .a = edge[0], .b = edge[1], .part = part };
-    var path = mesh_edge_semantics.canonicalPathAlloc(allocator, path_edges) catch return null;
+    for (selected, 0..) |edge, index| {
+        const a = stableLogicalIdForEditVertex(edge[0]) orelse {
+            journalDiscard(&snap);
+            return null;
+        };
+        const b = stableLogicalIdForEditVertex(edge[1]) orelse {
+            journalDiscard(&snap);
+            return null;
+        };
+        path_edges[index] = .{ .a = a, .b = b, .part = part };
+    }
+    var path = mesh_edge_semantics.canonicalPathAlloc(allocator, path_edges) catch {
+        journalDiscard(&snap);
+        return null;
+    };
     defer path.deinit();
-    const role = mesh_edge_semantics.Role.parse(role_text) orelse return null;
     const table_json = model_source.semanticTableJson() orelse EMPTY_SEMANTIC_TABLE_JSON;
-    var assigned = mesh_edge_semantics.appendRegionAlloc(allocator, table_json, name, role, object_id, path) catch return null;
+    var assigned = mesh_edge_semantics.appendRegionAlloc(allocator, table_json, name, role, object_id, path) catch {
+        journalDiscard(&snap);
+        return null;
+    };
     defer assigned.deinit();
-    var rows = captureFaceSemantics(g_edit_count / 3) orelse return null;
-    defer rows.deinit();
-    var snap = journalSnapshotCurrent("name edge region");
-    if (!model_source.setSemanticState(rows.regions, rows.instances, assigned.json)) {
+    if (!edgeSemanticTableResolvesInCurrentDocument(allocator, assigned.json)) {
         journalDiscard(&snap);
         return null;
     }
-    journalCommit(&snap);
-    return std.json.Stringify.valueAlloc(allocator, .{
+    var rows = captureFaceSemantics(g_edit_count / 3) orelse return null;
+    defer rows.deinit();
+    const receipt = std.json.Stringify.valueAlloc(allocator, .{
         .ok = true,
         .id = assigned.id,
         .name = name,
@@ -13003,7 +14144,15 @@ pub fn meshEdgeSemanticAssignSelection(
         .edges = edge_count,
         .vertices = path.vertices.len,
         .closed = path.closed,
-    }, .{}) catch null;
+    }, .{}) catch return null;
+    if (!model_source.setSemanticState(rows.regions, rows.instances, assigned.json)) {
+        allocator.free(receipt);
+        journalDiscard(&snap);
+        return null;
+    }
+    journalCommit(&snap);
+    committed = true;
+    return receipt;
 }
 
 /// Restore one durable edge region to the current edge selection by logical endpoint
@@ -13015,8 +14164,18 @@ pub fn meshEdgeSemanticSelect(region_id: u32, additive: bool) u32 {
     const edge_count = region.vertices.len - 1 + @as(usize, if (region.closed) 1 else 0);
     const pairs = jalloc.alloc(mesh_edit.Edge, edge_count) catch return 0;
     defer jalloc.free(pairs);
-    for (0..region.vertices.len - 1) |index| pairs[index] = .{ region.vertices[index], region.vertices[index + 1] };
-    if (region.closed) pairs[pairs.len - 1] = .{ region.vertices[region.vertices.len - 1], region.vertices[0] };
+    const edit_vertices = jalloc.alloc(u32, region.vertices.len) catch return 0;
+    defer jalloc.free(edit_vertices);
+    for (region.vertices, 0..) |stable_id, index| {
+        const edit_vertex = editVertexForStableLogicalId(stable_id) orelse return 0;
+        // A position-weld edit handle may cover two deliberately split v5 ids. In
+        // that case the viewport cannot select one honestly, so refuse instead of
+        // highlighting a different durable edge.
+        if (stableLogicalIdForEditVertex(edit_vertex) != stable_id) return 0;
+        edit_vertices[index] = edit_vertex;
+    }
+    for (0..edit_vertices.len - 1) |index| pairs[index] = .{ edit_vertices[index], edit_vertices[index + 1] };
+    if (region.closed) pairs[pairs.len - 1] = .{ edit_vertices[edit_vertices.len - 1], edit_vertices[0] };
     return mesh_edit.selectEdgesByEndpointPairsPub(pairs, additive);
 }
 
@@ -13304,7 +14463,7 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
     return out.toOwnedSlice(allocator) catch null;
 }
 
-pub const MeshSelectorKind = enum { all, region, region_facing, part, facing, above, below, extremal, box };
+pub const MeshSelectorKind = enum { all, region, region_facing, part, facing, above, below, extremal, box, mirror };
 pub const MeshSelectorQuery = struct {
     kind: MeshSelectorKind,
     region: u32 = model_source.NO_SEMANTIC_ID,
@@ -13320,7 +14479,10 @@ pub const MeshSelectorQuery = struct {
     max: [3]f32 = .{ 0, 0, 0 },
     additive: bool = false,
 };
-pub const MeshSelectorResult = struct { faces: u32, actionable_faces: u32, bbox: [6]f32 };
+/// `unmatched_sources` only means anything for the `mirror` kind: how many faces of the
+/// SOURCE selection found nothing standing at their reflection. A mirror that silently
+/// pairs 20 of 24 faces reads exactly like a clean one until this number is looked at.
+pub const MeshSelectorResult = struct { faces: u32, actionable_faces: u32, bbox: [6]f32, unmatched_sources: u32 = 0 };
 
 fn selectorHasRegion(query: MeshSelectorQuery, region: u32) bool {
     if (query.regions.len == 0) return region == query.region;
@@ -13331,6 +14493,12 @@ fn selectorHasRegion(query: MeshSelectorQuery, region: u32) bool {
 fn triangleCentroidAxis(verts: []const f32, face: usize, axis: usize) f32 {
     const base = face * 24;
     return (verts[base + axis] + verts[base + 8 + axis] + verts[base + 16 + axis]) / 3;
+}
+
+fn centroidsCoincide(centroid: [3]f32, other: []const f32, tolerance: f32) bool {
+    return @abs(centroid[0] - other[0]) <= tolerance and
+        @abs(centroid[1] - other[1]) <= tolerance and
+        @abs(centroid[2] - other[2]) <= tolerance;
 }
 
 /// Resolve a geometric/semantic selector against the live topology at use time.
@@ -13350,6 +14518,34 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
         extremum = if (query.sign >= 0) @max(extremum, value) else @min(extremum, value);
     };
     const facing_cos = @cos(std.math.degreesToRadians(std.math.clamp(query.tolerance_degrees, 0, 180)));
+    // Mirror twins: reflect the CURRENT selection across the model-origin plane and take
+    // whatever stands there. The pairing is positional — the same way mirror-quads and
+    // mirror-replace already find twins — so an unnamed counterpart needs no name of its
+    // own to be reached. Snapshot the sources before the loop, because the loop's own
+    // clearSelection() is what the twins are about to be written into.
+    const tolerance = @max(query.epsilon, 0);
+    var mirror_sources: []f32 = &.{};
+    var mirror_hit: []bool = &.{};
+    defer if (mirror_sources.len > 0) jalloc.free(mirror_sources);
+    defer if (mirror_hit.len > 0) jalloc.free(mirror_hit);
+    if (query.kind == .mirror) {
+        var sources: usize = 0;
+        for (0..face_count) |face| {
+            if (mesh_edit.faceSelectedPub(@intCast(face))) sources += 1;
+        }
+        if (sources == 0) return .{ .faces = 0, .actionable_faces = 0, .bbox = .{ 0, 0, 0, 0, 0, 0 } };
+        mirror_sources = jalloc.alloc(f32, sources * 3) catch return null;
+        mirror_hit = jalloc.alloc(bool, sources) catch return null;
+        @memset(mirror_hit, false);
+        var next: usize = 0;
+        for (0..face_count) |face| {
+            if (!mesh_edit.faceSelectedPub(@intCast(face))) continue;
+            const slot = mirror_sources[next * 3 ..][0..3];
+            for (0..3) |component| slot[component] = triangleCentroidAxis(verts, face, component);
+            slot[axis] = -slot[axis];
+            next += 1;
+        }
+    }
     var matched: u32 = 0;
     var actionable: u32 = 0;
     var bbox: [6]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
@@ -13389,6 +14585,21 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
                 const normal = normalOf(a, b, c);
                 break :blk normal[axis] * (if (query.sign >= 0) @as(f32, 1) else -1) >= facing_cos;
             },
+            // Every reflected source is scanned rather than stopping at the first hit, so
+            // coincident faces (an inner skin behind an outer one) both come along and the
+            // count says so, instead of half a surface arriving silently.
+            .mirror => blk: {
+                var twin = false;
+                var source: usize = 0;
+                while (source < mirror_hit.len) : (source += 1) {
+                    const reflected = mirror_sources[source * 3 ..][0..3];
+                    if (@abs(centroid[axis] - reflected[axis]) > tolerance) continue;
+                    if (!centroidsCoincide(centroid, reflected, tolerance)) continue;
+                    mirror_hit[source] = true;
+                    twin = true;
+                }
+                break :blk twin;
+            },
         };
         if (!include) continue;
         mask[face] = true;
@@ -13409,7 +14620,11 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
         first = false;
     }
     if (matched == 0) bbox = .{ 0, 0, 0, 0, 0, 0 };
-    return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox };
+    var unmatched: u32 = 0;
+    for (mirror_hit) |paired| {
+        if (!paired) unmatched += 1;
+    }
+    return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox, .unmatched_sources = unmatched };
 }
 
 /// Which audited fact to select. `both` is the union — one press to see every
@@ -14843,9 +16058,9 @@ pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
     defer mesh_edit.resumeFaceTint();
     _ = setPaintDetail(detail_px);
     if (!model_paint.setAtlas(rgba)) return false;
-    // The saved painting knows nothing about the mesh's glass — its alpha is whatever
-    // was live at save time. Re-assert the per-face glass state from the source colour
-    // table (the durable truth meshdoc exports), colour untouched (req_2928).
+    // The saved painting is only the opaque colour sheet. Re-assert the per-face glass
+    // state from the source colour table into the independent material channel;
+    // paintFaceAlpha cannot alter the imported pixels.
     if (model_source.colors()) |src| {
         const fc = model_paint.faceCount();
         var f: u32 = 0;
@@ -15398,6 +16613,12 @@ var g_sky_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 var g_default_tex: ?*wgpu.Texture = null;
 var g_default_tex_view: ?*wgpu.TextureView = null;
 var g_default_tex_bind_group: ?*wgpu.BindGroup = null;
+// Glass never samples the resident model's paint sheet. A dedicated 1×1 auxiliary
+// atlas supplies its material colour and opacity for every UV, including corrupt,
+// overlapping, or out-of-bounds coordinates.
+var g_glass_aux_tex: ?*wgpu.Texture = null;
+var g_glass_aux_tex_view: ?*wgpu.TextureView = null;
+var g_glass_aux_tex_bind_group: ?*wgpu.BindGroup = null;
 // Nearest-filter sampler for the diffuse texture path. Block-face pixels
 // stay crisp; switch to linear later if smoother sampling is wanted.
 var g_diffuse_sampler: ?*wgpu.Sampler = null;
@@ -15885,6 +17106,52 @@ pub fn init(environ: *const std.process.Environ.Map) void {
             .layout = g_tex_bind_group_layout.?,
             .entry_count = def_entries.len,
             .entries = &def_entries,
+        });
+    }
+
+    // Independent glass atlas. It deliberately uses unbounded sampling: every UV
+    // resolves to this one texel, so glass can never fall back into, overlap, or
+    // transfer opacity through the opaque model atlas.
+    g_glass_aux_tex = device.createTexture(&.{
+        .label = wgpu.StringView.fromSlice("r3d_glass_aux"),
+        .size = .{ .width = 1, .height = 1, .depth_or_array_layers = 1 },
+        .mip_level_count = 1,
+        .sample_count = 1,
+        .dimension = .@"2d",
+        .format = .rgba8_unorm,
+        .usage = wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_dst,
+    });
+    if (g_glass_aux_tex) |glass_tex| {
+        const queue = core.getQueue();
+        if (queue) |q| {
+            q.writeTexture(
+                &.{ .texture = glass_tex, .mip_level = 0, .origin = .{}, .aspect = .all },
+                @ptrCast(&model_paint.GLASS_AUX_TEXEL),
+                model_paint.GLASS_AUX_TEXEL.len,
+                &.{ .offset = 0, .bytes_per_row = 4, .rows_per_image = 1 },
+                &.{ .width = 1, .height = 1, .depth_or_array_layers = 1 },
+            );
+        }
+        g_glass_aux_tex_view = glass_tex.createView(&.{
+            .format = .rgba8_unorm,
+            .dimension = .@"2d",
+            .base_mip_level = 0,
+            .mip_level_count = 1,
+            .base_array_layer = 0,
+            .array_layer_count = 1,
+            .aspect = .all,
+        });
+    }
+    if (g_glass_aux_tex_view != null and g_diffuse_sampler != null and g_uv_unbounded_uniform != null) {
+        const glass_entries = [_]wgpu.BindGroupEntry{
+            .{ .binding = 0, .texture_view = g_glass_aux_tex_view.? },
+            .{ .binding = 1, .sampler = g_diffuse_sampler.? },
+            .{ .binding = 2, .buffer = g_uv_unbounded_uniform.?, .offset = 0, .size = 4 * @sizeOf(f32) },
+        };
+        g_glass_aux_tex_bind_group = device.createBindGroup(&.{
+            .layout = g_tex_bind_group_layout.?,
+            .entry_count = glass_entries.len,
+            .entries = &glass_entries,
         });
     }
 
@@ -16411,6 +17678,9 @@ pub fn deinit() void {
     if (g_default_tex_bind_group) |bg| bg.release();
     if (g_default_tex_view) |v| v.release();
     if (g_default_tex) |t| t.destroy();
+    if (g_glass_aux_tex_bind_group) |bg| bg.release();
+    if (g_glass_aux_tex_view) |v| v.release();
+    if (g_glass_aux_tex) |t| t.destroy();
     if (g_diffuse_sampler) |s| s.release();
     if (g_uv_unbounded_uniform) |b| b.release();
     if (g_uv_finite_uniform) |b| b.release();
@@ -18829,8 +20099,8 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
 
         // Per-face GLASS on the resident edit mesh: glass faces live in ONE trailing
         // run (partitionGlassFaces keeps that invariant), so the opaque pass draws the
-        // prefix and the trailing run rides the transparent pass (depth-write off,
-        // far→near) — per-face translucency on a single resident model.
+        // prefix and the trailing run rides the transparent pass against its dedicated
+        // auxiliary texture. It never samples the model paint atlas.
         if (child.scene3d_instance_count == 0 and model_paint.isTarget(hashKey(key))) {
             const gv = editGlassFirstVert();
             const slot0 = maybe_slot.?;
@@ -18839,7 +20109,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                     const gc = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
                     tidx[tcount] = ci;
                     tslot[tcount] = .{ .offset = slot0.offset + @as(u64, gv) * @sizeOf(Vertex), .count = slot0.count - gv };
-                    ttex[tcount] = tex_bg;
+                    ttex[tcount] = g_glass_aux_tex_bind_group orelse g_default_tex_bind_group;
                     tdist[tcount] = math.v3distance(gc, cam_pos);
                     tcount += 1;
                     collected_logical += 1;
@@ -19469,6 +20739,7 @@ const DocState = struct {
     g_edit_verts: @TypeOf(g_edit_verts) = null,
     g_edit_count: @TypeOf(g_edit_count) = 0,
     g_edit_generation: @TypeOf(g_edit_generation) = 0,
+    g_edit_geometry_generation: @TypeOf(g_edit_geometry_generation) = 0,
     g_save_displayed_projection: @TypeOf(g_save_displayed_projection) = false,
     g_indexed_edit_mesh: @TypeOf(g_indexed_edit_mesh) = null,
     g_guard_before: @TypeOf(g_guard_before) = null,
@@ -19500,6 +20771,7 @@ const DocState = struct {
     g_integrity_label_len: @TypeOf(g_integrity_label_len) = 0,
     g_retopo_band_plan: @TypeOf(g_retopo_band_plan) = null,
     g_retopo_manual_bands: @TypeOf(g_retopo_manual_bands) = null,
+    g_uv_zone: @TypeOf(g_uv_zone) = null,
     g_retopo_source_ghost: @TypeOf(g_retopo_source_ghost) = null,
     g_retopo_pending_band: @TypeOf(g_retopo_pending_band) = mesh_edit.RETOPO_BAND_UNASSIGNED,
     g_retopo_pending_band_generation: @TypeOf(g_retopo_pending_band_generation) = 0,
@@ -19508,6 +20780,11 @@ const DocState = struct {
     g_audit_facts: @TypeOf(g_audit_facts) = .{},
     g_audit_key: @TypeOf(g_audit_key) = null,
 };
+
+comptime {
+    if (!@hasField(DocState, "g_edit_geometry_generation"))
+        @compileError("DocState must park the retained geometry generation with its resident model");
+}
 
 fn docStateSave(s: *DocState) void {
     inline for (@typeInfo(DocState).@"struct".fields) |f|
@@ -20472,9 +21749,11 @@ pub fn meshPublishObjectIdsJsonAlloc(allocator: std.mem.Allocator, request_json:
             return faceRecoveryErrorJsonAlloc(allocator, "invalid_request", "object ids must be unique and range-ranked", false);
         object_ids[index] = row.objectId;
     }
-    if (!model_source.setPartObjectIds(request.modelId, object_ids))
-        return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "native object-id publication was refused", false);
-    g_face_table_worker.invalidateIdentity();
+    switch (model_source.publishPartObjectIds(request.modelId, object_ids)) {
+        .rejected => return faceRecoveryErrorJsonAlloc(allocator, "object_ids_unpublished", "native object-id publication was refused", false),
+        .unchanged => {},
+        .changed => g_face_table_worker.invalidateIdentity(),
+    }
     const namespace = objectNamespaceHash(request.modelId, object_ids, part_ranges);
     return std.json.Stringify.valueAlloc(allocator, .{
         .ok = true,
@@ -21264,5 +22543,6 @@ pub fn modelSessionSelect(token: u32) bool {
         docStateReset();
     }
     g_model_session_token = token;
+    publishUvZoneMask();
     return true;
 }

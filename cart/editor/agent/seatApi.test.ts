@@ -412,6 +412,17 @@ test('geometric selectors compile to native query arguments', () => {
   assert(query?.kind === 'facing' && query.axis === 1 && query.sign === 1 && query.tolerance_degrees === 30, 'facing selector changed meaning');
 });
 
+test('mirror selectors carry the axis and an explicit match tolerance', () => {
+  const query = compileSeatSelector('mirror:x', percept);
+  assert(query?.kind === 'mirror' && query.axis === 0 && query.epsilon === 0.0001, 'mirror selector changed meaning');
+  const widened = compileSeatSelector('mirror:z@0.002', percept);
+  assert(widened?.kind === 'mirror' && widened.axis === 2 && widened.epsilon === 0.002, 'mirror tolerance override was dropped');
+  // A bare axis is the facing namespace, not the mirror one; keeping them distinct is why
+  // mirror carries its own prefix rather than reusing facing's sign.
+  assert(compileSeatSelector('mirror:+x', percept) === null, 'mirror accepted a signed axis it cannot honour');
+  assert(compileSeatSelector('mirror:w', percept) === null, 'mirror accepted a non-axis');
+});
+
 test('compound region and facing selectors include the named descendant family', () => {
   const nested: SeatPercept = {
     ...percept,

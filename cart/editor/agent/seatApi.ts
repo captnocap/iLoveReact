@@ -126,7 +126,9 @@ export type SeatPercept = {
   activePartId: string | null;
   parts: SeatPart[];
 };
-export type SelectorReceipt = { ok: boolean; faces?: number; actionableFaces?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
+/** `unmatchedSources` belongs to `mirror:` alone — how many faces of the source selection
+ * had nothing standing at their reflection. A partial mirror otherwise reads as a clean one. */
+export type SelectorReceipt = { ok: boolean; faces?: number; actionableFaces?: number; unmatchedSources?: number; bbox?: [number, number, number, number, number, number]; reason?: string };
 export type TopologyReceipt = { ok: number; key?: string; count?: number; generation?: number; [key: string]: unknown };
 /** mirror-quads receipt counters — present even on ok:0 so a zero explains itself. */
 export type MirrorQuadStats = { ok?: number; changed?: number; quads?: number; symmetric?: number; pairs?: number; refused?: number };
@@ -618,6 +620,12 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
   }
   const facing = /^facing:([+-])([xyz])(?:@(\d+(?:\.\d+)?))?$/.exec(text);
   if (facing) return { kind: 'facing', axis: axisIndex(facing[2]!)!, sign: facing[1] === '+' ? 1 : -1, tolerance_degrees: Number(facing[3] ?? 15) };
+  // The counterpart of a named surface is reachable without being named first: select the
+  // source, then mirror it. Twins are paired positionally across the model-origin plane,
+  // so this is the read-only sibling of mirror-quads/mirror-replace rather than a second
+  // notion of symmetry. The optional @<metres> widens the match for an imperfect import.
+  const mirror = /^mirror:([xyz])(?:@(\d+(?:\.\d+)?))?$/.exec(text);
+  if (mirror) return { kind: 'mirror', axis: axisIndex(mirror[1]!)!, epsilon: Number(mirror[2] ?? 0.0001) };
   if (text === 'top' || text === 'extremal:top') return { kind: 'extremal', axis: 1, sign: 1 };
   if (text === 'bottom' || text === 'extremal:bottom') return { kind: 'extremal', axis: 1, sign: -1 };
   const extremal = /^outermost:([+-])([xyz])$/.exec(text);

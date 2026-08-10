@@ -26,6 +26,7 @@ const scene3d = if (build_options.dev_native_modules and !build_options.dev_scen
     struct {}
 else
     @import("gpu/3d.zig");
+const scene3d_runtime = @import("dev_modules/scene3d_runtime.zig");
 const mesh_edit = @import("gpu/mesh_edit.zig");
 const indexed_edit_mesh = @import("gpu/indexed_edit_mesh.zig");
 const mesh_journal_log = @import("gpu/mesh_journal_log.zig");
@@ -1101,11 +1102,11 @@ fn hostMeshSelectQuery(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     defer parsed.deinit();
     const result = scene3d.meshSelectQuery(parsed.value) orelse
         return setReturnString(info, "{\"ok\":false,\"reason\":\"no live mesh\"}");
-    var buf: [320]u8 = undefined;
+    var buf: [384]u8 = undefined;
     const reply = std.fmt.bufPrint(
         &buf,
-        "{{\"ok\":true,\"faces\":{d},\"actionableFaces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
-        .{ result.faces, result.actionable_faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
+        "{{\"ok\":true,\"faces\":{d},\"actionableFaces\":{d},\"unmatchedSources\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+        .{ result.faces, result.actionable_faces, result.unmatched_sources, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
     ) catch return setReturnString(info, "{\"ok\":false,\"reason\":\"encode failed\"}");
     setReturnString(info, reply);
 }
@@ -1928,6 +1929,94 @@ fn hostMeshSessionResident(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, if (scene3d.modelSessionResident()) @as(i32, 1) else @as(i32, 0));
 }
 
+fn finishMeshRecoveryJsonDoor(info: v8.FunctionCallbackInfo, response: []const u8) bool {
+    const allocator = std.heap.c_allocator;
+    setReturnString(info, response);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, response, .{}) catch return false;
+    defer parsed.deinit();
+    const response_object = switch (parsed.value) {
+        .object => |object| object,
+        else => return false,
+    };
+    return switch (response_object.get("ok") orelse return false) {
+        .bool => |ok| ok,
+        else => false,
+    };
+}
+
+fn callMeshRecoveryJsonDoor(info: v8.FunctionCallbackInfo, operation: anytype) bool {
+    const allocator = std.heap.c_allocator;
+    const request = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "{\"ok\":false,\"version\":1,\"code\":\"invalid_request\",\"detail\":\"missing request JSON\"}");
+        return false;
+    };
+    defer allocator.free(request);
+    const response = operation(allocator, request) catch |err| {
+        var buffer: [256]u8 = undefined;
+        const json = std.fmt.bufPrint(&buffer, "{{\"ok\":false,\"version\":1,\"code\":\"internal_error\",\"detail\":\"{s}\"}}", .{@errorName(err)}) catch
+            "{\"ok\":false,\"version\":1,\"code\":\"internal_error\",\"detail\":\"face recovery door failed\"}";
+        setReturnString(info, json);
+        return false;
+    };
+    defer allocator.free(response);
+    return finishMeshRecoveryJsonDoor(info, response);
+}
+
+fn callMeshRecoveryJsonDoorIo(info: v8.FunctionCallbackInfo, io: std.Io, operation: anytype) bool {
+    const allocator = std.heap.c_allocator;
+    const request = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "{\"ok\":false,\"version\":1,\"code\":\"invalid_request\",\"detail\":\"missing request JSON\"}");
+        return false;
+    };
+    defer allocator.free(request);
+    const response = operation(io, allocator, request) catch |err| {
+        var buffer: [256]u8 = undefined;
+        const json = std.fmt.bufPrint(&buffer, "{{\"ok\":false,\"version\":1,\"code\":\"internal_error\",\"detail\":\"{s}\"}}", .{@errorName(err)}) catch
+            "{\"ok\":false,\"version\":1,\"code\":\"internal_error\",\"detail\":\"face recovery door failed\"}";
+        setReturnString(info, json);
+        return false;
+    };
+    defer allocator.free(response);
+    return finishMeshRecoveryJsonDoor(info, response);
+}
+
+fn hostMeshSessionIdentity(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = callMeshRecoveryJsonDoor(info, scene3d.meshSessionIdentityJsonAlloc);
+}
+
+fn hostMeshPublishObjectIds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = callMeshRecoveryJsonDoor(info, scene3d.meshPublishObjectIdsJsonAlloc);
+}
+
+fn hostMeshFaceTable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = callMeshRecoveryJsonDoorIo(
+        info,
+        v8_runtime.hostContext(info.getIsolate()).io,
+        scene3d.meshFaceTableJsonAlloc,
+    );
+}
+
+fn hostMeshFaceSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (callMeshRecoveryJsonDoorIo(
+        info,
+        v8_runtime.hostContext(info.getIsolate()).io,
+        scene3d.meshFaceSelectJsonAlloc,
+    )) state.markDirty();
+}
+
+fn hostMeshFaceSeek(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = callMeshRecoveryJsonDoorIo(
+        info,
+        v8_runtime.hostContext(info.getIsolate()).io,
+        scene3d.meshFaceSeekJsonAlloc,
+    );
+}
+
 /// __mesh_action_drain() → Uint32 ArrayBuffer. One fixed row per accepted
 /// journal commit/control: id, document, kind, phase, source, before/after
 /// vertex counts, before/after part counts, and prior queue overflow.
@@ -2171,8 +2260,7 @@ fn hostMeshUvZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     var counts: [128]u32 = undefined;
     const assigned = scene3d.uvZoneCounts(counts[0..]);
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(buf[0..]);
-    const out = stream.writer();
+    var out = std.Io.Writer.fixed(&buf);
     out.print("{{\"ok\":1,\"changed\":{d},\"assigned\":{d},\"zones\":[", .{ changed, assigned }) catch {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -2188,7 +2276,7 @@ fn hostMeshUvZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    setReturnString(info, stream.getWritten());
+    setReturnString(info, out.buffered());
 }
 
 fn hostMeshTopoMergeFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -4674,6 +4762,12 @@ fn emitExecResult(host: *HostContext, rid: []const u8, stdout: []const u8, code:
 /// tickDrain() name that INGREDIENTS in v8_app.zig expects.
 pub fn tickDrain(host: *HostContext) void {
     g_exec_executor.drain(host, emitExecResult);
+    if (scene3d_runtime.meshFaceAnalysisReadyJsonAlloc(host.io, std.heap.c_allocator) catch null) |payload| {
+        defer std.heap.c_allocator.free(payload);
+        const payload_z = std.heap.c_allocator.dupeZ(u8, payload) catch return;
+        defer std.heap.c_allocator.free(payload_z);
+        v8_runtime.callGlobal2Str(host, "__ffiEmit", "mesh-analysis-ready", payload_z);
+    }
 }
 
 // The pending-flush queue + drain + reload-clear moved to
@@ -5086,6 +5180,11 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_action_document", hostMeshActionDocument);
         v8_runtime.registerHostFn("__mesh_session_select", hostMeshSessionSelect);
         v8_runtime.registerHostFn("__mesh_session_resident", hostMeshSessionResident);
+        v8_runtime.registerHostFn("__mesh_session_identity", hostMeshSessionIdentity);
+        v8_runtime.registerHostFn("__mesh_publish_object_ids", hostMeshPublishObjectIds);
+        v8_runtime.registerHostFn("__mesh_face_table", hostMeshFaceTable);
+        v8_runtime.registerHostFn("__mesh_face_select", hostMeshFaceSelect);
+        v8_runtime.registerHostFn("__mesh_face_seek", hostMeshFaceSeek);
         v8_runtime.registerHostFn("__mesh_action_drain", hostMeshActionDrain);
         v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
         v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);
@@ -5096,7 +5195,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_topo_detach", hostMeshTopoDetach);
         v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
         v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
-    v8_runtime.registerHostFn("__mesh_uv_zone", hostMeshUvZone);
+        v8_runtime.registerHostFn("__mesh_uv_zone", hostMeshUvZone);
         v8_runtime.registerHostFn("__mesh_uv_zone", hostMeshUvZone);
         v8_runtime.registerHostFn("__mesh_topo_tris_to_quads", hostMeshTopoTrisToQuads);
         v8_runtime.registerHostFn("__mesh_topo_mirror_quads", hostMeshTopoMirrorQuads);
@@ -5340,6 +5439,11 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_action_document", hostMeshActionDocument);
     v8_runtime.registerHostFn("__mesh_session_select", hostMeshSessionSelect);
     v8_runtime.registerHostFn("__mesh_session_resident", hostMeshSessionResident);
+    v8_runtime.registerHostFn("__mesh_session_identity", hostMeshSessionIdentity);
+    v8_runtime.registerHostFn("__mesh_publish_object_ids", hostMeshPublishObjectIds);
+    v8_runtime.registerHostFn("__mesh_face_table", hostMeshFaceTable);
+    v8_runtime.registerHostFn("__mesh_face_select", hostMeshFaceSelect);
+    v8_runtime.registerHostFn("__mesh_face_seek", hostMeshFaceSeek);
     v8_runtime.registerHostFn("__mesh_action_drain", hostMeshActionDrain);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
     v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);
