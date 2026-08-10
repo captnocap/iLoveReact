@@ -249,7 +249,7 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge, worldViewSlotForKey } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
-import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocRangeGeometry, meshDocUnreadableDiagnostic } from '../data/meshDoc';
+import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocUnreadableDiagnostic } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import { hydrateModelDocumentPartsAfterMount, modelDocumentMetadataByRange } from '../model/modelDocumentColdMount';
 import { parseModelHistory } from '../model/uvHistory';
@@ -285,6 +285,7 @@ import {
 } from '../model/outlinerCommand';
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh, type LightRig } from '../model/editMesh';
+import { modelPartImportPayload } from '../model/modelPartImport';
 import { normalizeModelLights } from '../model/modelLights';
 import { createTextureSlotFromSelection, normalizeModelTextureSlots } from '../model/modelTextureSlotAuthoring';
 import { connectedPieceIds, pieceSelectionVolume, rotatePieceSelection, type PieceSelectionIntent } from '../world/selection';
@@ -6805,27 +6806,32 @@ export default function AppFrame() {
     let tint = existing.length;
     const nextColor = () => PART_TINTS[tint++ % PART_TINTS.length]!;
     const added: ModelPart[] = [];
+    let journalParts = existing.slice();
     const doc = packageMeshDoc(pkg);
     const meta = packageMeshDocParts(pkg) ?? [];
     if (doc && doc.vertices.length >= 24) {
       for (let index = 0; index < doc.ranges.length; index += 1) {
-        const geo = meshDocRangeGeometry(doc, index);
-        if (geo.positions.length === 0) continue;
+        const imported = modelPartImportPayload(doc, index);
+        if (!imported) continue;
         const row = meta[index];
         const color = row?.color ?? nextColor();
         const expectedPartCount = existing.length + added.length;
         if (source === 'headless') console.error(`[partops] import append ${pkg.id} range ${index} expects ${expectedPartCount} resident part(s)`);
-        const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color, expectedPartCount));
+        const r = withNativeMeshActionSource(source, () => api.appendPart(imported.positions, imported.faceGroups, color, expectedPartCount));
         if (!r) continue;
-        added.push({
+        const placed: ModelPart = {
           id: `part:imp:${state.seq}:${added.length}`,
           name: doc.ranges.length === 1 ? pkg.name : `${pkg.name} · ${row?.name ?? `part ${index + 1}`}`,
           kind: row?.kind as PrimitiveKind | undefined,
+          mesh: imported.mesh,
           visible: true,
           color,
           lo: r.lo,
           hi: r.hi,
-        });
+        };
+        added.push(placed);
+        journalParts = [...journalParts, placed];
+        writeHostPartJournalNote(mid, journalParts);
       }
     } else if (pkg.primitive) {
       const built = primitiveMeshData(pkg.primitive);
@@ -6833,11 +6839,19 @@ export default function AppFrame() {
       const r = built.positions.length > 0
         ? withNativeMeshActionSource(source, () => api.appendPart(built.positions, built.faceGroups, color, existing.length + added.length))
         : null;
-      if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive), visible: true, color, lo: r.lo, hi: r.hi });
+      if (r) {
+        const placed: ModelPart = { id: `part:imp:${state.seq}:0`, name: pkg.name, kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive), visible: true, color, lo: r.lo, hi: r.hi };
+        added.push(placed);
+        writeHostPartJournalNote(mid, [...journalParts, placed]);
+      }
     } else if (pkg.viewerPath && isViewerFile(pkg.viewerPath)) {
       const color = nextColor();
       const r = withNativeMeshActionSource(source, () => api.appendModelFile(pkg.viewerPath, color, existing.length + added.length));
-      if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
+      if (r) {
+        const placed: ModelPart = { id: `part:imp:${state.seq}:0`, name: pkg.name, sourcePath: pkg.viewerPath, visible: true, color, lo: r.lo, hi: r.hi };
+        added.push(placed);
+        writeHostPartJournalNote(mid, [...journalParts, placed]);
+      }
     }
     if (added.length === 0) {
       setState((prev) => ({ ...prev, status: `could not import ${pkg.name} — its package has no usable mesh document or .glb/.obj` }));
@@ -7245,6 +7259,41 @@ export default function AppFrame() {
           modelDirty: modelId ? Boolean(live.modelDirty[modelId]) : null,
           paintLayoutStale: (globalThis as any).__model_paint_layout_stale?.() === 1,
           modelFocusShape: (globalThis as any).__modelFocusBridge?.shape ?? null,
+        });
+      }
+      // Part-ownership truth (req_4189). The shell's Outliner rows and the host's
+      // native range table can diverge silently: every range-scoped op keeps working
+      // off the shell's numbers while the host already believes most faces are
+      // unowned, and the divergence only becomes visible when some later op
+      // renormalizes and bakes the host's view in — collapsing every row at once.
+      // The context menu shows a human this state; an agent had no door onto it at
+      // all, which is why the fault reads as "the editor spontaneously broke".
+      // Report BOTH tables in one reply: either alone cannot show a disagreement.
+      if (action === 'part-ownership') {
+        const raw = (globalThis as any).__mesh_history_log?.();
+        if (typeof raw !== 'string' || raw.length === 0) return fail('no resident mesh journal — open a model first');
+        let log: any;
+        try { log = JSON.parse(raw); } catch { return fail('the host journal log was not valid JSON'); }
+        const current = log?.current ?? null;
+        if (!current) return fail('the host journal log carried no current state');
+        const hostRanges: { lo: number; hi: number }[] = (current.parts ?? [])
+          .map((part: any) => ({ lo: Number(part.lo), hi: Number(part.hi) }));
+        const shellRows = parts.map((part) => ({ id: part.id, name: part.name, lo: part.lo ?? null, hi: part.hi ?? null }));
+        const agrees = shellRows.length === hostRanges.length
+          && shellRows.every((row, index) => row.lo === hostRanges[index]?.lo && row.hi === hostRanges[index]?.hi);
+        return ok({
+          agrees,
+          modelId,
+          residentSessionModelId: activeSessionModelIdRef.current,
+          authoredGroups: current.authoredGroups ?? null,
+          triangles: current.triangles ?? null,
+          unownedFaces: current.unownedFaces ?? null,
+          multiplyOwnedFaces: current.multiplyOwnedFaces ?? null,
+          ownershipValid: current.ownershipValid ?? null,
+          rangesValid: current.rangesValid ?? null,
+          hostParts: current.parts ?? [],
+          shellRows,
+          editScopeRanges: log?.scope?.ranges ?? null,
         });
       }
       if (action === 'lore') {
@@ -8680,8 +8729,24 @@ export default function AppFrame() {
     } else if (meshDoc) {
       withRanges = parts;
     } else {
-      const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
-      withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
+      // A seed doc's ranges come from recomposing its part SEEDS — correct on a COLD
+      // mount, where the viewer really does rebuild the mesh from those seeds, and
+      // fiction the moment the session is live and edited (req_4189). Extrude, cut and
+      // every other face-minting verb grow a part far past its seed: a 19-extrude frame
+      // seeded by one cube recomposes to 6 groups. This effect re-runs on every activate
+      // AND on every remount — a cart hot reload is a remount — so it would silently
+      // overwrite every row with its seed span while the host's table stayed correct.
+      // The rows then push that fiction into __mesh_edit_scope_ranges and the model
+      // becomes unworkable, with nothing in the mesh journal for undo to put back.
+      // The host is authoritative whenever THIS model owns the resident session, so
+      // prefer its live table and keep the seed recompose for the cold case only.
+      const hostRanges = activeSessionModelIdRef.current === mid ? readHostPartRanges() : null;
+      if (hostRanges && hostRanges.length === parts.length) {
+        withRanges = stampRowsByRank(parts, hostRanges);
+      } else {
+        const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
+        withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
+      }
     }
     if (recoverCollapsedParts && meshDoc) {
       // A hot reload may resume the already-resident one-range host session instead

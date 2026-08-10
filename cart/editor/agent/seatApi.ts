@@ -2254,6 +2254,11 @@ const SEAT_READ_ACTIONS = new Set([
   'look', 'semantic-status', 'rig-status', 'face-table', 'elements', 'boundary-continuation', 'uv-state',
   'topo-refusal',
   'recipe-list', 'shot', 'claims', 'lore',
+  // The host's part-ownership truth is a pure read of the journal log's `current`
+  // view. It is the ONLY way an agent can see the shell's Outliner rows disagree
+  // with the native range table (req_4189), so a supervisor must be able to run it
+  // against a claimed model without taking the claim away from its holder.
+  'part-ownership',
   // Saved-package reads touch neither the resident mesh nor the live selection, so
   // a supervisor can inspect a claimed model's disk state without taking the claim.
   // `measure`/`stats` are deliberately NOT here: their richer selector targets set
@@ -2690,6 +2695,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         return seat.reply('recipe', result.ok, result, result.reason);
       }
       case 'editor-status':
+      case 'part-ownership':
       case 'rig-status':
       case 'face-table':
       case 'face-select':
@@ -2718,3 +2724,5 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
     return seat.reply(request.action, false, undefined, error instanceof Error ? error.message : String(error));
   }
 }
+
+// req_4189 probe
