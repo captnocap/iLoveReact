@@ -138,7 +138,7 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
 | `extremal:top` / `extremal:bottom` | Explicit extremal face on ±y. Preferred in new scripts. |
 | `outermost:+x` / `outermost:-z` | Extremal face on the named axis. |
 | `above:y>1.4` / `below:y>1.4` | Faces above/below a threshold on an axis. |
-| `faces:12..18` | Face-group range. Index-based — never durable memory. |
+| `groups:12..18` | Authored face-group range. Index-based — never durable memory. |
 | `inside:box(minx,miny,minz,maxx,maxy,maxz)` | Faces fully inside an AABB. Six finite numbers. |
 
 ### Selector gotchas, all real
@@ -147,7 +147,10 @@ From `compileSeatSelector`. Anything not matching these returns `unknown selecto
   is the primitive's saved semantic region. Bare non-keyword names remain a compatibility
   convenience, but new scripts should always spell durable names as `region:<name>`.
 - `part:` belongs to Outliner identity (`part-select`). It is deliberately not a face-range
-  selector. Use `faces:<lo>..<hi>` only as an ephemeral bridge from a just-returned receipt.
+  selector. Use `groups:<lo>..<hi>` only as an ephemeral bridge from a just-returned receipt.
+- Render-triangle ids are a different index space. Select a returned list with
+  `select-elements {"kind":"triangle","indices":[...]}`; the ambiguous `faces:` selector
+  and `kind:"face"` form refuse instead of silently selecting half an authored quad mesh.
 - **The comparator in `above:`/`below:` is decorative.** `above:y>1.4` and `above:y<1.4`
   compile identically; only the `above`/`below` prefix and the number are read.
 - **`inside:box` needs the face fully inside**, and coordinates are absolute. It is the
@@ -299,3 +302,61 @@ silently returns wrong numbers for half your models. When the reader refuses, it
 code and the reason — `[invalid-edge-logical-id] edge region "test" refers outside the
 saved logical-vertex table` is a real answer; a hand parser would have returned plausible
 garbage instead.
+
+---
+
+## Reading the named surfaces and the holes
+
+```bash
+tools/seat regions [filter] [--all]   # the semantic table JOINED to its geometry
+tools/seat stats boundary             # watertight? how many HOLES, and where
+```
+
+`look` returns semantics (`table.regions`: id, name, role, parent) and geometry
+(`regions`: id, faces, instances, bbox) as two arrays keyed by id. **Do not join them
+yourself** — `regions` does it, adds `size`, hides empty names unless you pass `--all`,
+and filters by substring. It is a pure percept read, so it works on a model another lane
+has claimed.
+
+`stats boundary` answers "is this watertight, and if not where are the holes" in one call:
+`boundaryEdges`, `openVertices`, and **`loops`** — the number of separate rims, which is
+the number an agent can act on where an edge count is not. It also lists
+`coincidentOpenVertices`: boundary rims sitting in the same place, i.e. seams nobody
+closed, which is exactly what `weld-pairs` fixes.
+
+## Refusals name their cause
+
+`extrude` used to reject with "(selection, name, or naming debt)" — three causes in one
+string, so the agent had to go digging. It now names which of four it was: a non-finite
+distance, naming debt (with the budget and both ways out), a semantic-name clash (with the
+instance), or the host refusing the selection (with what a region extrude will not accept).
+If you hit a refusal that does not tell you what to fix, that is a bug worth reporting.
+
+---
+
+## NAMED GAP: lathe / surface of revolution
+
+Agents building wheels, rims, tyres and steering wheels write a ~500-line Python
+orchestrator to do this (`build_rim.py`, req_4187). The technique is sound and uses only
+existing verbs — which is exactly why it should be ONE verb rather than a script each
+agent rewrites differently:
+
+```
+new cylinder → delete both caps → cut direction:1 cuts:N   # a tube of N loops
+for each profile point k (radius, y):
+    select-loop <seed edge of loop k> --apply
+    scale-uniform (radius / baseRadius)
+    move [0, y - loopY, 0]
+flip                                                        # seed normals face inward
+```
+
+The missing piece is not the maths — it is loop-seed discovery (which edge belongs to loop
+k) plus the composition. The proposed verb:
+
+```bash
+tools/seat lathe '{"profile":[[r,y],...],"sides":24,"bands":{"0":"hub","5":"grip"}}'
+```
+
+NOT BUILT YET. Until it exists, drive the existing verbs and **say in your report that you
+had to orchestrate it externally** — that report is what turns this gap into the verb.
+Naming each band as you shape it is still required either way.

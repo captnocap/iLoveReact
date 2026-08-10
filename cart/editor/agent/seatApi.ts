@@ -10,12 +10,14 @@ import {
   type MeshSemanticRegion as SemanticRegion,
   type MeshSemanticTable as SemanticTable,
 } from '../model/meshSemantics';
-import { claimActiveModel, claimAdmits, claimModel, dismissClaim, listClaims } from './claims';
+import { claimActiveModel, claimAdmits, claimHolder, claimModel, dismissClaim, listClaims } from './claims';
 import {
   CONTACT_EPSILON,
   axisIndexOf,
+  boundaryLoopCount,
   boxFacts,
   boxOfPoints,
+  boxSize,
   findAnomalies,
   isBox,
   measureContact,
@@ -622,8 +624,8 @@ export function compileSeatSelector(selector: string, percept: SeatPercept): Rec
   if (extremal) return { kind: 'extremal', axis: axisIndex(extremal[2]!)!, sign: extremal[1] === '+' ? 1 : -1 };
   const plane = /^(above|below):([xyz])([<>])(-?\d+(?:\.\d+)?)$/.exec(text);
   if (plane) return { kind: plane[1], axis: axisIndex(plane[2]!)!, threshold: Number(plane[4]) };
-  const faces = /^faces:(\d+)\.\.(\d+)$/.exec(text);
-  if (faces) return { kind: 'part', lo: Number(faces[1]), hi: Number(faces[2]) };
+  const groups = /^groups:(\d+)\.\.(\d+)$/.exec(text);
+  if (groups) return { kind: 'part', lo: Number(groups[1]), hi: Number(groups[2]) };
   const box = /^inside:box\(([^)]+)\)$/.exec(text);
   if (box) {
     const values = box[1]!.split(',').map(Number);
@@ -765,7 +767,8 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     }
     const query = compileSeatSelector(selector, percept);
     if (!query) {
-      if (/^part:\d+\.\.\d+$/.test(selector.trim())) return { ok: false, reason: 'face ranges use faces:<lo>..<hi>; part: is reserved for Outliner part ids' };
+      if (/^faces:\d+\.\.\d+$/.test(selector.trim())) return { ok: false, reason: 'faces: was ambiguous and is refused; authored face-group ranges use groups:<lo>..<hi>, while triangle ids use select-elements kind:"triangle"' };
+      if (/^part:\d+\.\.\d+$/.test(selector.trim())) return { ok: false, reason: 'authored face-group ranges use groups:<lo>..<hi>; part: is reserved for Outliner part ids' };
       if (selector.trim().startsWith('part:')) return { ok: false, reason: 'Outliner parts are selected with part-select, not the face selector' };
       return { ok: false, reason: `unknown selector "${selector}"` };
     }
@@ -1100,7 +1103,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (changed) notifySelectionChanged();
     return changed;
   };
-  const selectElements = (kind: 'face' | 'edge' | 'vertex', values: unknown): number => {
+  const selectElements = (kind: 'triangle' | 'edge' | 'vertex', values: unknown): number => {
     const indices = Array.isArray(values)
       ? [...new Set(values.map(Number).filter((index) => Number.isInteger(index) && index >= 0))]
       : [];
@@ -1189,14 +1192,24 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const declared = declareRegion(percept.table, name, role, op, adapter.take?.());
     return Number(automation(() => host.__mesh_semantic_assign?.(declared.region.id, instance, JSON.stringify(declared.table))) ?? 0);
   };
-  const extrude = (distance: number, name: string, instance = 0): TopologyReceipt | null => {
+  /** Extrude had FOUR distinct failure paths collapsing into one "(selection, name, or
+   *  naming debt)" message, which sent agents digging to find out which (req_4187). Each
+   *  now says which, and what to do about it — a refusal that does not name the fix is a
+   *  refusal an agent routes around. */
+  const HOST_EXTRUDE_REFUSAL = 'the host refused the extrude — a MULTI-face selection region-extrudes as one shell, so wire faces, non-manifold selection edges, and closed selections are refused. Check the selection with `measure bbox selection`';
+  const extrude = (distance: number, name: string, instance = 0): { ok: true; result: TopologyReceipt } | { ok: false; reason: string } => {
     const before = look();
-    if (!before) return null;
+    if (!before) return { ok: false, reason: 'no live mesh' };
+    if (!Number.isFinite(distance) || distance === 0) {
+      return { ok: false, reason: 'extrude needs a finite nonzero distance in METERS (1 unit = 1 meter)' };
+    }
     if (!name || name === '_') {
-      if (before.unnamed > debtBudget) return null;
+      if (before.unnamed > debtBudget) {
+        return { ok: false, reason: `naming debt: ${before.unnamed} unnamed triangles is over the ${debtBudget}-face budget, so an UNNAMED extrude is refused. Pass a name to this extrude, or name what is already there first` };
+      }
       const result = readTopology(automation(() => host.__mesh_topo_extrude_face?.(distance)));
       adapter.adoptTopology?.(result);
-      return result;
+      return result ? { ok: true, result } : { ok: false, reason: HOST_EXTRUDE_REFUSAL };
     }
     let table = before.table;
     const parent = regionByName(table, name)?.id;
@@ -1204,10 +1217,12 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     table = cap.table;
     const wall = declareRegion(table, `${name}.wall`, 'wall', 'extrude', adapter.take?.(), parent);
     table = wall.table;
-    if (host.__mesh_semantic_extrude_intent?.(cap.region.id, wall.region.id, instance, JSON.stringify(table)) !== 1) return null;
+    if (host.__mesh_semantic_extrude_intent?.(cap.region.id, wall.region.id, instance, JSON.stringify(table)) !== 1) {
+      return { ok: false, reason: `the host refused to reserve the semantic names "${name}.cap" and "${name}.wall" for instance ${instance} — a different instance may already own them, or the selection is empty` };
+    }
     const result = readTopology(automation(() => host.__mesh_topo_extrude_face?.(distance)));
     adapter.adoptTopology?.(result);
-    return result;
+    return result ? { ok: true, result } : { ok: false, reason: HOST_EXTRUDE_REFUSAL };
   };
   const recordTransform = (changed: boolean): boolean => {
     if (changed) adapter.documentMutated?.();
@@ -1331,10 +1346,13 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
         !factors.every((factor) => Number.isFinite(factor) && factor > 0) || !finiteVec3(offset)) {
       return { ok: false, stage: 'validate', reason: 'inset arguments are malformed or non-finite' };
     }
-    const result = extrude(distance, name);
-    if (!result) {
-      return { ok: false, stage: 'extrude', reason: 'hairline extrude rejected; select exactly one authored face before inset' };
+    const extruded = extrude(distance, name);
+    if (!extruded.ok) {
+      // Carry the extrude's own reason instead of flattening it back to one line —
+      // inset's rejected stage is only useful if it says WHY that stage rejected.
+      return { ok: false, stage: 'extrude', reason: `hairline extrude rejected; select exactly one authored face before inset — ${extruded.reason}` };
     }
+    const result = extruded.result;
     let transforms = 0;
     const rollback = (stage: 'scale-0' | 'scale-1' | 'offset', reason: string): InsetReceipt => {
       for (let step = 0; step < transforms + 1; step += 1) topology(() => host.__mesh_undo?.());
@@ -1531,7 +1549,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     const before = look();
     const range = adapter.addPrimitive(spec);
     if (!range) return null;
-    select(`faces:${range.lo}..${range.hi}`);
+    select(`groups:${range.lo}..${range.hi}`);
     let table = before?.table ?? { version: 1 as const, regions: [] };
     const root = declareRegion(table, name, 'part', `add ${spec.kind}`, adapter.take?.());
     table = root.table;
@@ -1618,7 +1636,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   // seat output is unversioned: when the meaning of a number changes, the private
   // formula keeps returning a confident wrong answer. These verbs read the SAME
   // resident data the viewport draws.
-  const TARGET_SYNTAX = 'targets are any selector (region:<name>, facing:+y, outermost:-x, faces:lo..hi, inside:box(...)), plus "selection" and "model"';
+  const TARGET_SYNTAX = 'targets are any selector (region:<name>, facing:+y, outermost:-x, groups:lo..hi, inside:box(...)), plus "selection" and "model"';
   type ResolvedTarget = { selector: string; bbox: SeatBox; faces: number; selectionSet: boolean };
   /** A target's extent. `region:` names and the whole model answer from the resident
    *  percept and leave the live selection ALONE; the richer selector algebra has to
@@ -1759,6 +1777,46 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (!move(delta)) return { ok: false, reason: `set-position computed delta ${delta[axis]} but the move was rejected — check the active part scope` };
     return { ok: true, result: { axis: String(args.axis).toLowerCase(), anchor, from: current, to: value, delta, bbox: box } };
   };
+  /** The region table as ONE joined row set (req_4187). `look` returns semantics
+   *  (`table.regions`: id, name, role, parent) and geometry (`regions`: id, faces,
+   *  instances, bbox) as two separate arrays keyed by id, so every agent that wanted
+   *  "what are the named surfaces and how big are they" joined them by hand in python.
+   *  The join belongs here, once, where both halves are already in scope. */
+  const regionTable = (args: Record<string, unknown>): SeatShellReceipt => {
+    const percept = look();
+    if (!percept) return { ok: false, reason: 'no live mesh' };
+    const geometry = new Map(percept.regions.map((region) => [region.id, region] as const));
+    const filter = String(args.filter ?? '').trim().toLowerCase();
+    const rows = percept.table.regions
+      .map((region) => {
+        const shape = geometry.get(region.id);
+        return {
+          id: region.id,
+          name: region.name,
+          role: region.role ?? null,
+          parent: region.parent ?? null,
+          createdBy: region.createdBy?.op ?? null,
+          faces: shape?.faces ?? 0,
+          instances: shape?.instances ?? 0,
+          bbox: shape?.bbox ?? null,
+          ...(shape && shape.faces > 0 ? { size: boxSize(shape.bbox) } : {}),
+        };
+      })
+      // An EMPTY region is a name with no geometry under it — worth seeing, never worth
+      // hiding, because it is usually the residue of an edit that moved faces elsewhere.
+      .filter((row) => (args.all === true || row.faces > 0))
+      .filter((row) => !filter || row.name.toLowerCase().includes(filter));
+    const named = rows.reduce((sum, row) => sum + row.faces, 0);
+    return { ok: true, result: {
+      model: percept.model,
+      regions: rows,
+      shown: rows.length,
+      total: percept.table.regions.length,
+      namedTriangles: named,
+      unnamed: percept.unnamed,
+      placeholders: percept.placeholders,
+    } };
+  };
   const measure = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
     const tolerance = Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : CONTACT_EPSILON;
     if (operation === 'bbox') {
@@ -1803,6 +1861,40 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       if (!topology) return { ok: false, reason: 'topology descriptors unavailable' };
       return { ok: true, result: measureSymmetry(topology.vertices, axis, tolerance) };
     }
+    if (operation === 'boundary') {
+      // "Is this watertight, and if not where are the holes" — asked by hand-parsing a
+      // dumped `elements` file for edges with faces<2, then grouping the open vertices
+      // by position to find seams that should weld (req_4187).
+      const topology = elements();
+      if (!topology) return { ok: false, reason: 'topology descriptors unavailable' };
+      const open = topology.edges.filter((edge) => edge.open || edge.faces < 2);
+      const openVertices = new Set<number>();
+      for (const edge of open) for (const vertex of edge.vertices) openVertices.add(vertex);
+      const positions = new Map(topology.vertices.map((vertex) => [vertex.id, vertex.at] as const));
+      // Coincident open vertices are the weld candidates: two boundary rims sitting in
+      // the same place is a seam nobody closed, which is exactly what `weld-pairs` fixes.
+      const byPosition = new Map<string, number[]>();
+      const quantize = (value: number) => Math.round(value / Math.max(tolerance, Number.EPSILON));
+      for (const vertex of openVertices) {
+        const at = positions.get(vertex);
+        if (!at) continue;
+        const key = `${quantize(at[0])}|${quantize(at[1])}|${quantize(at[2])}`;
+        byPosition.set(key, [...(byPosition.get(key) ?? []), vertex]);
+      }
+      const coincident = [...byPosition.values()].filter((ids) => ids.length > 1)
+        .map((ids) => ({ vertices: ids, at: positions.get(ids[0]!)! }));
+      return { ok: true, result: {
+        watertight: open.length === 0,
+        boundaryEdges: open.length,
+        openVertices: openVertices.size,
+        loops: boundaryLoopCount(open),
+        coincidentOpenVertices: coincident.slice(0, 24),
+        coincidentGroups: coincident.length,
+        edges: open.slice(0, 48).map((edge) => ({ id: edge.id, vertices: edge.vertices, faces: edge.faces })),
+        totalEdges: topology.edges.length,
+        tolerance,
+      } };
+    }
     if (operation === 'anomalies') {
       const percept = look();
       const topology = elements();
@@ -1824,7 +1916,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
             : { measured: false, reason: 'mesh is over the audit budget — intersecting/unreachable are UNKNOWN, not zero' },
       } };
     }
-    return { ok: false, reason: `unknown stats operation "${operation}" — edges, symmetry, or anomalies` };
+    return { ok: false, reason: `unknown stats operation "${operation}" — edges, boundary, symmetry, or anomalies` };
   };
   /** Seat one target's facing plane onto another's. `dryRun` returns the delta the
    *  agent used to compute by hand; the plain form applies it as one undo step, so
@@ -1870,7 +1962,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   /** Facts a check can read. `shell` is true only for the lanes that pay for a disk or
    *  diagnostics read; the ambient per-reply counter never does. */
-  const oracleFacts = (percept: SeatPercept | null, shell: boolean): OracleFacts => {
+  const oracleFacts = (percept: SeatPercept | null, shell: boolean, claimToken?: string): OracleFacts => {
     const diagnostics = shell ? (host.__modelSemanticDiagnostics ?? null) : null;
     const savedDiff = shell && percept?.model
       ? adapter.shellAction?.('package', { operation: 'diff', model: percept.model })
@@ -1901,7 +1993,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
         intersectingFaces: percept.intersectingFaces,
         unreachableFaces: percept.unreachableFaces,
       } : null,
-      claimed: percept?.model ? claimActiveModel() === percept.model : null,
+      claimed: percept?.model ? seatModelClaimedByToken(percept.model, claimToken) : null,
       packageInSync: saved ? saved.inSync === true : null,
       packageDirty: saved ? saved.dirty === true : null,
       semanticHealthy: diagnostics ? (diagnostics as Record<string, unknown>).status === 'healthy' : null,
@@ -1967,7 +2059,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const readOracleDoc: OracleDocReader = (name) => adapter.readSkillDoc?.(name) ?? null;
   const oracleDocFor = (phase: string): string =>
     readOracleDoc(phase) ?? `(no corpus slice for "${phase}" — the phase runs on its checklist alone; that gap is worth reporting)`;
-  const oracle = (operation: string, args: Record<string, unknown>): SeatShellReceipt => {
+  const oracle = (operation: string, args: Record<string, unknown>, claimToken?: string): SeatShellReceipt => {
     if (operation === 'plans') {
       return { ok: true, result: { plans: ORACLE_PLANS.map(({ id, summary, phases }) => ({ id, summary, phases })) } };
     }
@@ -1989,7 +2081,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       const corpus = adapter.corpus?.readCorpus();
       session.classId = isClassCorpus(corpus) ? classifyByCorpus(task, corpus)?.classId ?? null : null;
       storeOracle(session);
-      const view = viewSession(session, oracleFacts(look(), true));
+      const view = viewSession(session, oracleFacts(look(), true, claimToken));
       logTrajectory('start', view, []);
       return { ok: true, result: { ...view, matched: session.matchedSignal, doc: oracleDocFor(view.phase!) } };
     }
@@ -2041,13 +2133,13 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       return { ok: true, result: { stopped: ending } };
     }
     if (operation === 'status') {
-      const view = viewSession(oracleSession, oracleFacts(look(), true));
+      const view = viewSession(oracleSession, oracleFacts(look(), true, claimToken));
       return { ok: true, result: { ...view, ...(args.doc === true ? { doc: view.phase ? oracleDocFor(view.phase) : null } : {}) } };
     }
     if (operation === 'attest') {
       const id = String(args.id ?? '').trim();
       const note = String(args.note ?? '').trim();
-      const known = viewSession(oracleSession, oracleFacts(look(), false)).checks.find((check) => check.id === id);
+      const known = viewSession(oracleSession, oracleFacts(look(), false, claimToken)).checks.find((check) => check.id === id);
       if (!known) return { ok: false, reason: `"${id}" is not an exit criterion of the current phase` };
       if (known.verified === 'host') {
         return { ok: false, reason: `"${id}" is HOST-measured — attesting cannot pass it. ${known.detail}` };
@@ -2055,10 +2147,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       if (!note) return { ok: false, reason: `attesting "${id}" requires saying how you verified it` };
       oracleSession.attest[id] = note;
       storeOracle(oracleSession);
-      return { ok: true, result: viewSession(oracleSession, oracleFacts(look(), true)) };
+      return { ok: true, result: viewSession(oracleSession, oracleFacts(look(), true, claimToken)) };
     }
     if (operation === 'advance') {
-      const outcome = advanceSession(oracleSession, oracleFacts(look(), true));
+      const outcome = advanceSession(oracleSession, oracleFacts(look(), true, claimToken));
       if (outcome.ok) {
         storeOracle(oracleSession);
         logTrajectory('advance', outcome.view, outcome.view.checks.map((check) => check.id));
@@ -2091,7 +2183,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, uvZone, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
-    measure, stats, align, oracle, walk, setPosition,
+    measure, stats, align, oracle, walk, setPosition, regionTable,
   };
 }
 
@@ -2109,12 +2201,15 @@ export type SeatRequest = {
 export type SeatBootstrapAdapter = { newPrimitive: (spec: SeatPrimitiveSpec) => boolean };
 
 export const seatRequestTarget = (request: SeatRequest, activeModel: string | null): string | null =>
-  request.model ?? activeModel ?? null;
+  request.action === 'new' ? null : request.model ?? activeModel ?? null;
+
+export const seatModelClaimedByToken = (model: string | null, token: string | undefined): boolean =>
+  claimHolder(model) !== null && claimAdmits(model, token).ok;
 
 const BACKGROUND_VISIBLE_VIEWPORT_ACTIONS = new Set(['viewport', 'reference', 'paint-tool', 'path', 'thumbnail']);
 const BACKGROUND_FOCUS_BRIDGE_ACTIONS = new Set([
   'uv-state', 'uv-select', 'uv-layout', 'uv-prestack', 'uv-stitch', 'uv-two-sheet',
-  'uv-geometry', 'uv-history', 'uv-atlas', 'uv-layer', 'paint-variant', 'semantic-status',
+  'uv-geometry', 'uv-history', 'uv-atlas', 'uv-layer', 'paint-variant', 'semantic-status', 'face-table', 'face-select',
 ]);
 const BACKGROUND_EDITOR_COMMAND_ACTIONS = new Set(['command', 'model-export', 'model-starter', 'model-import']);
 const BACKGROUND_PART_GEOMETRY_ACTIONS = new Set([
@@ -2156,7 +2251,7 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 // actions (viewport, retopo-bands, follow, uv-prestack diagnostics, ...).
 
 const SEAT_READ_ACTIONS = new Set([
-  'look', 'semantic-status', 'rig-status', 'elements', 'boundary-continuation', 'uv-state',
+  'look', 'semantic-status', 'rig-status', 'face-table', 'elements', 'boundary-continuation', 'uv-state',
   'topo-refusal',
   'recipe-list', 'shot', 'claims', 'lore',
   // Saved-package reads touch neither the resident mesh nor the live selection, so
@@ -2164,6 +2259,9 @@ const SEAT_READ_ACTIONS = new Set([
   // `measure`/`stats` are deliberately NOT here: their richer selector targets set
   // the live selection, and clobbering a claimed agent's selection is a crossed wire.
   'package',
+  // `regions` joins two arrays of the percept and touches nothing else, so a supervisor
+  // can read a claimed model's named surfaces without taking the claim.
+  'regions',
   // The oracle routes docs and reads its own workflow cursor. It never touches the
   // resident mesh or the live selection, so a lane can consult it before it claims.
   'oracle',
@@ -2178,6 +2276,9 @@ const seatRequestReads = (request: SeatRequest): boolean => {
 };
 
 const seatAdmission = (request: SeatRequest): { ok: boolean; reason?: string } => {
+  // `new` creates a fresh document; an unrelated claim on the currently visible
+  // model has no authority over that targetless shell operation.
+  if (request.action === 'new') return { ok: true };
   if (seatRequestReads(request)) return { ok: true };
   const target = request.model ?? claimActiveModel();
   return claimAdmits(target, request.token);
@@ -2324,6 +2425,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const result = seat.walk(request.action.slice('select-'.length), args);
         return seat.reply(request.action, result.ok, result.result, result.reason);
       }
+      case 'regions': {
+        const result = seat.regionTable(args);
+        return seat.reply('regions', result.ok, result.result, result.reason);
+      }
       case 'set-position': {
         const result = seat.setPosition(args);
         return seat.reply('set-position', result.ok, result.result, result.reason);
@@ -2333,7 +2438,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         return seat.reply('for-each', result.ok, result.result, result.reason);
       }
       case 'oracle': {
-        const result = seat.oracle(String(args.operation ?? 'status'), args);
+        const result = seat.oracle(String(args.operation ?? 'status'), args, request.token);
         return seat.reply('oracle', result.ok, result.result, result.reason);
       }
       case 'retopo-bands': {
@@ -2377,7 +2482,8 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'select-elements': {
         const kind = String(args.kind ?? 'face');
-        if (kind !== 'face' && kind !== 'edge' && kind !== 'vertex') return seat.reply('select-elements', false, undefined, 'kind must be face, edge, or vertex');
+        if (kind === 'face') return seat.reply('select-elements', false, undefined, 'kind:"face" is ambiguous and refused — indices here are render triangles, so use kind:"triangle"; authored face-group ranges use groups:<lo>..<hi>');
+        if (kind !== 'triangle' && kind !== 'edge' && kind !== 'vertex') return seat.reply('select-elements', false, undefined, 'kind must be triangle, edge, or vertex');
         const changed = seat.selectElements(kind, args.indices);
         return seat.reply('select-elements', changed > 0, { changed }, changed > 0 ? undefined : 'no valid in-scope element indices were selected');
       }
@@ -2413,8 +2519,8 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         return seat.reply('name', changed > 0, { changed }, changed > 0 ? undefined : 'no selected faces or invalid name');
       }
       case 'extrude': {
-        const result = seat.extrude(Number(args.distance ?? 0), String(args.name ?? ''), Number(args.instance ?? 0));
-        return seat.reply('extrude', !!result, result ?? undefined, result ? undefined : 'extrude rejected (selection, name, or naming debt)');
+        const outcome = seat.extrude(Number(args.distance ?? 0), String(args.name ?? ''), Number(args.instance ?? 0));
+        return seat.reply('extrude', outcome.ok, outcome.ok ? outcome.result : undefined, outcome.ok ? undefined : outcome.reason);
       }
       case 'extrude-edge': {
         const result = seat.extrudeEdge(Number(args.distance ?? 0));
@@ -2585,6 +2691,8 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'editor-status':
       case 'rig-status':
+      case 'face-table':
+      case 'face-select':
       case 'lore':
       case 'command':
       // The saved package is disk state, so only the shell can read it — but the

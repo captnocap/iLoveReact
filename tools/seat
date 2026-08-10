@@ -4,6 +4,7 @@
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const { parseFaceTableArgs, faceTablePendingReceipt } = require('./seat_args');
 
 const args = process.argv.slice(2);
 const briefIndex = args.indexOf('--brief');
@@ -29,7 +30,17 @@ if (args.indexOf('--wait') >= 0 || args.indexOf('--fields') >= 0) {
 const action = args.shift() || 'look';
 const numberList = (values) => values.map((value) => Number(value));
 let request;
-if (['look', 'semantic-status', 'rig-status', 'elements', 'undo', 'redo', 'connect', 'delete', 'merge-faces', 'weld', 'flip', 'glass', 'save', 'tris-to-quads', 'collect-uv-orientation'].includes(action)) request = { action };
+if (action === 'face-table') {
+  try {
+    const parsed = parseFaceTableArgs(args);
+    request = { action, args: parsed.request };
+    waitSeconds = parsed.waitMs / 1000;
+  } catch (error) {
+    console.error(`seat: ${error.message}`);
+    process.exit(2);
+  }
+}
+else if (['look', 'semantic-status', 'rig-status', 'elements', 'undo', 'redo', 'connect', 'delete', 'merge-faces', 'weld', 'flip', 'glass', 'save', 'tris-to-quads', 'collect-uv-orientation'].includes(action)) request = { action };
 else if (action === 'follow') {
   const operation = args.shift() || 'read';
   if (operation === 'inspect') {
@@ -144,6 +155,14 @@ else if (['select-path', 'select-loop', 'select-ring', 'select-grow', 'select-si
   else if (action === 'select-similar') request = { action, args: { face: Number(args[0]), ...(args[1] ? { by: args[1] } : {}), ...(args[2] ? { tolerance: Number(args[2]) } : {}), ...extra } };
   else request = { action, args: { edge: Number(args[0]), ...extra } };
 }
+// regions [filter] [--all] — the semantic table JOINED to its geometry: name, role,
+// parent, faces, bbox, size. One read instead of joining two arrays from `look`.
+else if (action === 'regions') {
+  const allIndex = args.indexOf('--all');
+  const all = allIndex >= 0;
+  if (all) args.splice(allIndex, 1);
+  request = { action, args: { ...(args.length ? { filter: args.join(' ') } : {}), ...(all ? { all: true } : {}) } };
+}
 // set-position <axis> <value> — absolute placement. Agents think in target coordinates
 // ("tabletop at 0.75 m"); without this every one becomes read-bbox, subtract, move.
 else if (action === 'set-position') request = { action, args: { axis: args[0], value: Number(args[1]), ...(args[2] ? { anchor: args[2] } : {}) } };
@@ -236,7 +255,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|ranges|diff> [model]|package triangles <lo> [n]|<a,b,c>|package compare <model>|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
+  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|face-table [--source resident|saved|preview|diff] [--sort column[:asc|desc]] [--filter kind] [--limit n]|new <kind> [size height sides]|elements|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|ranges|diff> [model]|package triangles <lo> [n]|<a,b,c>|package compare <model>|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|boundary|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|regions [filter] [--all]|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 
@@ -272,6 +291,7 @@ const notReadyYet = (reply) => {
   // is how a caller learns that waiting is the right move.
   const state = reply.result && typeof reply.result === 'object' ? reply.result.state : null;
   if (state === 'starting' || state === 'dialog-blocked') return true;
+  if (faceTablePendingReceipt(reply)) return true;
   if (reply.ok) return false;
   return typeof reply.reason === 'string' && /no live model|not ready|still starting|shell bridge is unavailable/i.test(reply.reason);
 };
@@ -346,7 +366,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     // Everything below this line is a "not yet": the socket is not up, or the shell
     // answered that it is still starting or blocked behind a dialog.
     if (Date.now() >= deadline) break;
-    await sleep(RETRY_DELAY_MS);
+    const retry = last?.kind === 'reply' ? faceTablePendingReceipt(last.reply) : null;
+    await sleep(retry?.retryAfterMs ?? RETRY_DELAY_MS);
   }
   if (last?.kind === 'reply') emit(last);
   console.error(`seat: ${last?.message ?? 'no reply'}${waitSeconds > 0 ? ` (waited ${waitSeconds}s)` : ''}`);

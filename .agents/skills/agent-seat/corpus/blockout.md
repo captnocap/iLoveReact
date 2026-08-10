@@ -19,7 +19,7 @@ tools/seat action texture-slot '{"operation":"create","purpose":"screen","label"
 
 | Action | Operations / arguments |
 |---|---|
-| `select-elements` | `kind:"face"|"edge"|"vertex"`, `indices`; replaces the mode selection in one call. |
+| `select-elements` | `kind:"triangle"|"edge"|"vertex"`, `indices`; replaces the mode selection in one call. Triangle ids and authored `groups:<lo>..<hi>` ranges are deliberately separate. |
 | `part-select` | `ids`, optional `primary`; changes the native edit scope too. |
 | `part-rename`, `part-visibility`, `part-delete`, `part-duplicate` | `id`; rename adds `name`, visibility adds `visible`, duplicate adds optional `axis:"x"|"y"|"z"`. |
 | `part-merge` | `ids` with at least two rows. Merges authoring scope while preserving each face's semantic region; it does not weld vertices or remove hidden faces. |
@@ -178,3 +178,61 @@ tools/seat oracle exemplar car <model-id> --by <who> --reject "doors welded shut
 An unguarded corpus converges on average agent output — which is the disease these gates
 exist to cure. Rejections with reasons are the most valuable rows in the store: each one is
 a check that does not exist yet.
+
+---
+
+## Reading the named surfaces and the holes
+
+```bash
+tools/seat regions [filter] [--all]   # the semantic table JOINED to its geometry
+tools/seat stats boundary             # watertight? how many HOLES, and where
+```
+
+`look` returns semantics (`table.regions`: id, name, role, parent) and geometry
+(`regions`: id, faces, instances, bbox) as two arrays keyed by id. **Do not join them
+yourself** — `regions` does it, adds `size`, hides empty names unless you pass `--all`,
+and filters by substring. It is a pure percept read, so it works on a model another lane
+has claimed.
+
+`stats boundary` answers "is this watertight, and if not where are the holes" in one call:
+`boundaryEdges`, `openVertices`, and **`loops`** — the number of separate rims, which is
+the number an agent can act on where an edge count is not. It also lists
+`coincidentOpenVertices`: boundary rims sitting in the same place, i.e. seams nobody
+closed, which is exactly what `weld-pairs` fixes.
+
+## Refusals name their cause
+
+`extrude` used to reject with "(selection, name, or naming debt)" — three causes in one
+string, so the agent had to go digging. It now names which of four it was: a non-finite
+distance, naming debt (with the budget and both ways out), a semantic-name clash (with the
+instance), or the host refusing the selection (with what a region extrude will not accept).
+If you hit a refusal that does not tell you what to fix, that is a bug worth reporting.
+
+---
+
+## NAMED GAP: lathe / surface of revolution
+
+Agents building wheels, rims, tyres and steering wheels write a ~500-line Python
+orchestrator to do this (`build_rim.py`, req_4187). The technique is sound and uses only
+existing verbs — which is exactly why it should be ONE verb rather than a script each
+agent rewrites differently:
+
+```
+new cylinder → delete both caps → cut direction:1 cuts:N   # a tube of N loops
+for each profile point k (radius, y):
+    select-loop <seed edge of loop k> --apply
+    scale-uniform (radius / baseRadius)
+    move [0, y - loopY, 0]
+flip                                                        # seed normals face inward
+```
+
+The missing piece is not the maths — it is loop-seed discovery (which edge belongs to loop
+k) plus the composition. The proposed verb:
+
+```bash
+tools/seat lathe '{"profile":[[r,y],...],"sides":24,"bands":{"0":"hub","5":"grip"}}'
+```
+
+NOT BUILT YET. Until it exists, drive the existing verbs and **say in your report that you
+had to orchestrate it externally** — that report is what turns this gap into the verb.
+Naming each band as you shape it is still required either way.

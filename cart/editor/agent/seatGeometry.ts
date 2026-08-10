@@ -439,3 +439,34 @@ export function triangleEdgeLengths(
   }
   return lengths;
 }
+
+/** How many separate closed rims a set of boundary edges forms. One hole is one loop;
+ *  a tube open at both ends is two. Counting them is what turns "37 boundary edges" —
+ *  a number an agent cannot act on — into "two holes", which it can. */
+export function boundaryLoopCount(
+  edges: readonly { vertices: [number, number] }[],
+): number {
+  const adjacency = new Map<number, number[]>();
+  for (const edge of edges) {
+    for (const [from, to] of [edge.vertices, [edge.vertices[1], edge.vertices[0]] as const]) {
+      adjacency.set(from, [...(adjacency.get(from) ?? []), to]);
+    }
+  }
+  const seen = new Set<number>();
+  let loops = 0;
+  for (const start of adjacency.keys()) {
+    if (seen.has(start)) continue;
+    loops += 1;
+    const stack = [start];
+    seen.add(start);
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const next of adjacency.get(current) ?? []) {
+        if (seen.has(next)) continue;
+        seen.add(next);
+        stack.push(next);
+      }
+    }
+  }
+  return loops;
+}

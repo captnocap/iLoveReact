@@ -1,8 +1,8 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { runSeatForEach, backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
-import { resetClaimsForTest, setClaimActiveModel } from './claims';
+import { runSeatForEach, backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, seatModelClaimedByToken, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { claimModel, resetClaimsForTest, setClaimActiveModel } from './claims';
 import type { CharacterRigSeatStatus } from './characterRigSeat';
 
 let passed = 0, failed = 0;
@@ -87,9 +87,10 @@ test('geometric keywords cannot be shadowed by saved region names', () => {
   assert(namedTop?.kind === 'region' && namedTop.region === 2, 'explicit region namespace did not reach the saved name');
 });
 
-test('face ranges have their own namespace and part remains reserved for Outliner ids', () => {
-  const faces = compileSeatSelector('faces:12..18', percept);
-  assert(faces?.kind === 'part' && faces.lo === 12 && faces.hi === 18, 'face range did not compile');
+test('authored face-group ranges have an explicit namespace and triangle ids stay separate', () => {
+  const groups = compileSeatSelector('groups:12..18', percept);
+  assert(groups?.kind === 'part' && groups.lo === 12 && groups.hi === 18, 'authored face-group range did not compile');
+  assert(compileSeatSelector('faces:12..18', percept) === null, 'the ambiguous faces namespace still compiled');
   assert(compileSeatSelector('part:12..18', percept) === null, 'legacy part range remained ambiguous');
 });
 
@@ -560,6 +561,9 @@ test('element inspection makes ephemeral edge and vertex indices discoverable', 
   assert(faceArgs[0] === 7 && faceArgs[1] === 1, 'face selection arguments drifted');
   assert(executeSeatRequest(seat, { action: 'select-elements', args: { kind: 'vertex', indices: [2, 3] } }).ok, 'multi-element selection failed');
   assert(vertexArgs[0] === 3 && vertexArgs[1] === 1, 'multi-element selection did not add subsequent indices');
+  const ambiguousFaces = executeSeatRequest(seat, { action: 'select-elements', args: { kind: 'face', indices: [0, 1] } });
+  assert(!ambiguousFaces.ok && ambiguousFaces.reason?.includes('render triangles') === true, 'ambiguous face indices did not refuse with the two index spaces named');
+  assert(executeSeatRequest(seat, { action: 'select-elements', args: { kind: 'triangle', indices: [0, 1] } }).ok, 'explicit triangle selection failed');
   const paired = executeSeatRequest(seat, { action: 'select-edge-pairs', args: { pairs: [[3, 2]] } });
   assert(paired.ok && edgeArgs[0] === 4 && edgeArgs[1] === 0, 'boundary edge pair did not resolve inside the live topology');
   const pointed = executeSeatRequest(seat, { action: 'select-edge-points', args: { pairs: [[[-0.0000001, 1, 0], [1, 1, 0]]] } });
@@ -748,6 +752,43 @@ test('shell-owned modeling tools delegate through one bounded authority', () => 
   assert((reply.result as any).accepted === 'viewport', 'shell receipt was not preserved');
   const lore = executeSeatRequest(seat, { action: 'lore', args: { operation: 'history' } });
   assert(lore.ok && calls.length === 2 && calls[1]!.action === 'lore', 'Lore recovery API did not use the bounded shell authority');
+  const faceTableArgs = { source: 'resident', sort: { column: 'area', direction: 'asc' }, filters: [{ kind: 'malformed' }], limit: 20 };
+  const faces = executeSeatRequest(seat, { action: 'face-table', args: faceTableArgs });
+  assert(faces.ok && calls.length === 3 && calls[2]!.action === 'face-table', 'face table did not use the bounded shell authority');
+  assert(calls[2]!.args === faceTableArgs, 'face table rewrote its strict query before shell identity resolution');
+  const faceSelectArgs = {
+    plane: { source: 'resident', sessionToken: '42', expectedGeneration: 7 },
+    target: { kind: 'face', address: { objectId: 'body', group: 12, stability: 'stable' } },
+    additive: false,
+    frame: true,
+  };
+  const selectedFace = executeSeatRequest(seat, { action: 'face-select', args: faceSelectArgs });
+  assert(selectedFace.ok && calls.length === 4 && calls[3]!.action === 'face-select', 'face selection did not use the bounded shell authority');
+  assert(calls[3]!.args === faceSelectArgs, 'face selection rewrote its strict identity before the native boundary');
+});
+
+test('face table is a read and cannot inspect a background ModelView', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('model:visible');
+  const request = { action: 'face-table', model: 'model:visible', args: { source: 'resident' } };
+  assert(backgroundSeatRefusal(request.action, request.args) !== null,
+    'background face table escaped the one-live-ModelView boundary');
+});
+
+test('face selection is selection-only: background-refused and still claim-gated', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('model:visible');
+  assert(backgroundSeatRefusal('face-select', {}) !== null,
+    'background face selection escaped the one-live-ModelView boundary');
+  const claimed = claimModel('model:visible', 'secret', 'human');
+  assert(claimed.ok, 'fixture claim was refused');
+  const reply = executeSeatRequestAtShell(createAgentSeat({ shellAction: () => ({ ok: true }) }), {
+    action: 'face-select',
+    model: 'model:visible',
+    args: {},
+  }, { newPrimitive: () => true });
+  assert(!reply.ok && /(claimed|locked)/i.test(reply.reason ?? ''), `face selection was incorrectly classified as a claim-free read: ${reply.reason ?? 'no reason'}`);
+  resetClaimsForTest();
 });
 
 test('bevel is one captured native session and cancels a rejected preview', () => {
@@ -1029,6 +1070,43 @@ test('seat request target prefers the request model and otherwise uses the activ
   assert(seatRequestTarget({ action: 'look', model: 'm-b' }, 'm-a') === 'm-b', 'explicit request model lost to the active model');
   assert(seatRequestTarget({ action: 'look' }, 'm-a') === 'm-a', 'active model was not used as the request target');
   assert(seatRequestTarget({ action: 'look' }, null) === null, 'a missing model target was invented');
+  assert(seatRequestTarget({ action: 'new', model: 'm-b' }, 'm-a') === null, 'targetless new inherited a model claim target');
+});
+
+test('new is targetless and an unrelated active-model claim cannot block document creation', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('m-visible');
+  assert(claimModel('m-visible', 'visible-secret', 'visible-lane').ok, 'fixture claim failed');
+  let created = false;
+  const reply = executeSeatRequestAtShell(null, { action: 'new', model: 'm-visible' }, {
+    newPrimitive: () => { created = true; return true; },
+  });
+  assert(reply.ok && created, `visible model claim blocked targetless new: ${reply.reason ?? 'no reason'}`);
+  resetClaimsForTest();
+});
+
+test('oracle claim truth follows the target model and the requesting lane token', () => {
+  resetClaimsForTest();
+  setClaimActiveModel('m-visible');
+  assert(claimModel('m-visible', 'visible-secret', 'visible-lane').ok, 'visible fixture claim failed');
+  assert(claimModel('m-background', 'background-secret', 'background-lane').ok, 'background fixture claim failed');
+  assert(seatModelClaimedByToken('m-background', 'background-secret'), 'background target claim was read through the active visible model');
+  assert(!seatModelClaimedByToken('m-background', 'visible-secret'), 'visible lane token passed the background target claim');
+  assert(!seatModelClaimedByToken('m-background', undefined), 'a tokenless oracle reported another lane claim as its own');
+  const backgroundSeat = createAgentSeat({
+    partPercept: () => ({ model: 'm-background', activePartId: null, parts: [] }),
+  });
+  const started = executeSeatRequest(backgroundSeat, {
+    action: 'oracle', token: 'background-secret', args: { operation: 'start', task: 'model a cube' },
+  });
+  const claimedCheck = (started.result as any)?.checks?.find((check: any) => check.id === 'model-claimed');
+  assert(started.ok && claimedCheck?.pass === true, 'oracle start did not thread the target lane token into model-claimed');
+  const wrongLane = executeSeatRequest(backgroundSeat, {
+    action: 'oracle', token: 'visible-secret', args: { operation: 'status' },
+  });
+  const wrongCheck = (wrongLane.result as any)?.checks?.find((check: any) => check.id === 'model-claimed');
+  assert(wrongLane.ok && wrongCheck?.pass === false, 'oracle model-claimed still followed the active visible lane');
+  resetClaimsForTest();
 });
 
 test('background seat policy names every refused limitation family', () => {
@@ -1385,6 +1463,106 @@ test('for-each refuses to nest and names the parts it could not reach', () => {
     assert(!nested.ok && /cannot nest/.test(nested.reason ?? ''), 'for-each nested');
     const missing = runSeatForEach(seat, { selector: 'rivet', do: { action: 'flip', args: {} } });
     assert(!missing.ok && /no visible Outliner part/.test(missing.reason ?? ''), `reason was ${missing.reason}`);
+  });
+});
+
+
+// ── the reads agents were doing in python (req_4187) ───────────────────────────
+
+test('extrude names WHICH of its four causes rejected it', () => {
+  withMeasureHost(() => {
+    const host = globalThis as any;
+    const saved = host.__mesh_topo_extrude_face;
+    const seat = createAgentSeat({ namingDebtBudget: 0 });
+    // 1. a bad distance is not a selection problem, and must not read as one
+    const zero = executeSeatRequest(seat, { action: 'extrude', args: { distance: 0, name: 'leg' } });
+    assert(!zero.ok && /finite nonzero distance in METERS/.test(zero.reason ?? ''), `distance: ${zero.reason}`);
+    // 2. naming debt names the budget and both ways out
+    const cleanState = host.__mesh_semantic_state;
+    host.__mesh_semantic_state = () => JSON.stringify({ ...measurePercept, unnamed: 5 });
+    const debt = executeSeatRequest(createAgentSeat({ namingDebtBudget: 0 }), { action: 'extrude', args: { distance: 0.1, name: '' } });
+    host.__mesh_semantic_state = cleanState;
+    assert(!debt.ok && /naming debt/.test(debt.reason ?? '') && /Pass a name/.test(debt.reason ?? ''), `debt: ${debt.reason}`);
+    // 3. a host refusal explains what a region extrude will not accept
+    host.__mesh_semantic_extrude_intent = () => 1;
+    host.__mesh_topo_extrude_face = () => null;
+    const refused = executeSeatRequest(seat, { action: 'extrude', args: { distance: 0.1, name: 'leg' } });
+    assert(!refused.ok && /wire faces, non-manifold/.test(refused.reason ?? ''), `host: ${refused.reason}`);
+    // 4. a semantic-name clash is its own answer, not "selection, name, or naming debt"
+    host.__mesh_semantic_extrude_intent = () => 0;
+    const clash = executeSeatRequest(seat, { action: 'extrude', args: { distance: 0.1, name: 'leg', instance: 2 } });
+    assert(!clash.ok && /reserve the semantic names "leg.cap"/.test(clash.reason ?? ''), `clash: ${clash.reason}`);
+    assert(/instance 2/.test(clash.reason ?? ''), 'the clash did not name the instance');
+    host.__mesh_topo_extrude_face = saved;
+  });
+});
+
+test('regions joins the semantic table to its geometry in one row set', () => {
+  withMeasureHost((calls) => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'regions', args: {} });
+    const result = reply.result as any;
+    assert(reply.ok, `regions failed: ${reply.reason}`);
+    const leg = result.regions.find((row: any) => row.name === 'leg');
+    // name+role come from table.regions; faces+bbox from regions — the join agents
+    // were doing by hand in python.
+    assert(leg && leg.faces === 6 && Array.isArray(leg.bbox), `leg row was ${JSON.stringify(leg)}`);
+    assert(Array.isArray(leg.size) && Math.abs(leg.size[1] - 0.46) < 1e-6, `size was ${leg?.size}`);
+    assert(result.namedTriangles === 24, `namedTriangles was ${result.namedTriangles}`);
+    assert(calls.selectQueries === 0, 'a region read ran a host selector query');
+  });
+});
+
+test('regions hides empty names by default and filters by substring', () => {
+  withMeasureHost(() => {
+    const seat = createAgentSeat();
+    const all = executeSeatRequest(seat, { action: 'regions', args: { all: true } }).result as any;
+    const shown = executeSeatRequest(seat, { action: 'regions', args: {} }).result as any;
+    assert(all.shown >= shown.shown, 'all:true showed fewer rows than the default');
+    const filtered = executeSeatRequest(seat, { action: 'regions', args: { filter: 'leg' } }).result as any;
+    assert(filtered.regions.every((row: any) => row.name.includes('leg')), 'the filter leaked non-matching rows');
+    assert(filtered.regions.length > 0, 'the filter matched nothing it should have');
+  });
+});
+
+test('stats boundary answers watertight, and counts HOLES not just edges', () => {
+  withMeasureHost(() => {
+    const reply = executeSeatRequest(createAgentSeat(), { action: 'stats', args: { operation: 'boundary' } });
+    const result = reply.result as any;
+    assert(reply.ok, `stats boundary failed: ${reply.reason}`);
+    // The fixture has one open edge, so it is not watertight and that edge is one loop.
+    assert(result.watertight === false, 'an open mesh reported watertight');
+    assert(result.boundaryEdges === 1 && result.openVertices === 2, `${result.boundaryEdges} edges / ${result.openVertices} verts`);
+    assert(result.loops === 1, `expected 1 loop, got ${result.loops}`);
+  });
+});
+
+test('a closed mesh reports watertight with zero loops', () => {
+  withMeasureHost(() => {
+    (globalThis as any).__mesh_edit_elements = () => JSON.stringify({
+      vertices: [{ id: 0, at: [0, 0, 0] }, { id: 1, at: [1, 0, 0] }],
+      edges: [{ id: 0, vertices: [0, 1], faces: 2, open: false }],
+    });
+    const result = executeSeatRequest(createAgentSeat(), { action: 'stats', args: { operation: 'boundary' } }).result as any;
+    assert(result.watertight === true && result.loops === 0, `watertight=${result.watertight} loops=${result.loops}`);
+  });
+});
+
+test('coincident open vertices surface as weld candidates', () => {
+  withMeasureHost(() => {
+    // Two boundary rims sitting in the same place: a seam nobody closed.
+    (globalThis as any).__mesh_edit_elements = () => JSON.stringify({
+      vertices: [
+        { id: 0, at: [0, 0, 0] }, { id: 1, at: [1, 0, 0] },
+        { id: 2, at: [0, 0, 0] }, { id: 3, at: [1, 0, 0] },
+      ],
+      edges: [
+        { id: 0, vertices: [0, 1], faces: 1, open: true },
+        { id: 1, vertices: [2, 3], faces: 1, open: true },
+      ],
+    });
+    const result = executeSeatRequest(createAgentSeat(), { action: 'stats', args: { operation: 'boundary' } }).result as any;
+    assert(result.coincidentGroups === 2, `expected 2 coincident groups, got ${result.coincidentGroups}`);
+    assert(result.loops === 2, `two disjoint rims are two loops, got ${result.loops}`);
   });
 });
 
