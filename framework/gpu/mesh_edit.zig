@@ -819,6 +819,26 @@ var g_xray: bool = false;
 var g_camera_visible_vert: ?[]bool = null;
 var g_camera_visible_edge: ?[]bool = null;
 
+/// Every input refreshCameraVisibility reads. Equal keys ⇒ the masks and the occlusion
+/// grid it would build are byte-identical to the ones already standing, so the build is
+/// skipped. Selection is deliberately absent: the masks answer "can the camera see it",
+/// never "is it chosen". Adding an input to the refresh means adding it HERE, or the
+/// overlay silently keeps drawing a stale answer.
+const CameraVisibilityKey = struct {
+    geometry_rev: u64,
+    face_count: u32,
+    vert_count: u32,
+    edge_count: u32,
+    scope: u64,
+    xray: bool,
+    eye: [3]f32,
+    target: [3]f32,
+    fov_deg: f32,
+    vp_w: f32,
+    vp_h: f32,
+};
+var g_vis_key: ?CameraVisibilityKey = null;
+
 // ── Overlay occlusion depth buffer (Surface mode, req_3856/3859/3867) ──────────
 // A small CPU depth buffer rebuilt by refreshCameraVisibility: every front-facing
 // triangle of the resident mesh (scope-independent — anything rendered occludes,
@@ -1055,6 +1075,30 @@ fn faceCameraFacing(cam: model_paint.Camera, face: u32) bool {
 /// off-screen (or hidden) still draws where you can actually see it (req_3859).
 pub fn refreshCameraVisibility(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bool {
     if (!ensureTopology()) return false;
+    // The masks and the occlusion grid are a pure function of this key, and the whole
+    // build is screen-AREA work: rasterizing every front face plus walking every edge's
+    // on-screen span. Zoomed in on a dense mesh that is milliseconds a frame, and the
+    // overlay asked for it 240 times a second at a parked camera (req_4198). Recompute
+    // only when an input actually moved.
+    const key = CameraVisibilityKey{
+        .geometry_rev = model_paint.geometryRevision(),
+        .face_count = model_paint.faceCount(),
+        .vert_count = g_vert_count,
+        .edge_count = g_edge_count,
+        .scope = scopeSignature(),
+        .xray = g_xray,
+        .eye = cam.eye,
+        .target = cam.target,
+        .fov_deg = cam.fov_deg,
+        .vp_w = vp_w,
+        .vp_h = vp_h,
+    };
+    if (g_vis_key) |built| {
+        if (std.meta.eql(built, key) and
+            g_camera_visible_vert != null and g_camera_visible_vert.?.len == g_vert_count and
+            g_camera_visible_edge != null and g_camera_visible_edge.?.len == g_edge_count) return true;
+    }
+    g_vis_key = null; // a failed build must not be mistaken for a cached one
     if (g_camera_visible_vert == null or g_camera_visible_vert.?.len != g_vert_count) {
         if (g_camera_visible_vert) |mask| alloc.free(mask);
         g_camera_visible_vert = alloc.alloc(bool, g_vert_count) catch return false;
@@ -1071,6 +1115,7 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bo
         @memset(visible_vertices, true);
         @memset(visible_edges, true);
         g_occ_ready = false; // X-Ray: nothing is hidden — face dots consult this too
+        g_vis_key = key;
         return true;
     }
 
@@ -1123,6 +1168,7 @@ pub fn refreshCameraVisibility(cam: model_paint.Camera, vp_w: f32, vp_h: f32) bo
         visible_edges[edge] = visible_vertices[a] or visible_vertices[b] or
             !g_occ_ready or edgeSpanVisible(cam, vp_w, vp_h, vertPos(a), vertPos(b));
     }
+    g_vis_key = key;
     return true;
 }
 
@@ -1590,6 +1636,12 @@ pub fn followPatchJson(allocator: std.mem.Allocator, requested_faces: ?[]const u
 /// unit regressions consume the same boundary contract.
 pub const SolidifyTuning = struct {
     pub const default_thickness_m: f32 = 0.125;
+    /// A crease whose incident planes are nearly antiparallel has an unbounded exact
+    /// miter: the offset goes as thickness / sin(dihedral/2). Cap the displacement at
+    /// this multiple of the requested thickness so a knife edge thickens instead of
+    /// spiking. A closed cube corner needs sqrt(3) ~= 1.7321, so 2.0 leaves every
+    /// well-conditioned corner exact and only bites on the degenerate ones.
+    pub const miter_limit: f32 = 2.0;
     /// Damped least-squares keeps one-plane and two-plane boundary vertices stable
     /// while converging to the exact three-plane intersection at closed corners.
     pub const plane_solver_regularization: f64 = 1.0e-9;
@@ -1672,6 +1724,12 @@ const SolidifyPlaneSystem = struct {
         const x2 = y2 / l22;
         const x1 = (y1 - l21 * x2) / l11;
         const x0 = (y0 - l10 * x1 - l20 * x2) / l00;
+        const length = @sqrt(x0 * x0 + x1 * x1 + x2 * x2);
+        const limit = @as(f64, SolidifyTuning.miter_limit) * @as(f64, thickness);
+        if (length > limit and length > 0) {
+            const scale = limit / length;
+            return .{ @floatCast(x0 * scale), @floatCast(x1 * scale), @floatCast(x2 * scale) };
+        }
         return .{ @floatCast(x0), @floatCast(x1), @floatCast(x2) };
     }
 };
@@ -2014,6 +2072,26 @@ fn loopRunsEdgeForward(loop: [4]u32, edge: Edge) ?bool {
     return null;
 }
 
+/// The candidate quad's own surface normal, signed by whether its written order is
+/// the one to keep. Degenerate loops have no usable normal and reject.
+fn candidateLoopNormal(candidate: [4]u32, keep: bool) ?[3]f32 {
+    const a = vertPosPub(candidate[0]);
+    const b = vertPosPub(candidate[1]);
+    const c = vertPosPub(candidate[2]);
+    const d = vertPosPub(candidate[3]);
+    const area_normal = vecAdd(
+        vecCross(vecSub(b, a), vecSub(c, a)),
+        vecCross(vecSub(c, a), vecSub(d, a)),
+    );
+    const normal = vecNorm(area_normal);
+    if (vecDot(normal, normal) < 0.5) return null;
+    return if (keep) normal else vecMul(normal, -1);
+}
+
+fn sameUndirectedEdge(a: Edge, b: Edge) bool {
+    return (a[0] == b[0] and a[1] == b[1]) or (a[0] == b[1] and a[1] == b[0]);
+}
+
 /// Final Create Face winding authority for a valid two-edge boundary bridge when
 /// neither opposite neighbor-normal pair agrees. Surface normals can legitimately
 /// conflict around a corner transition; boundary circulation cannot. The candidate
@@ -2034,18 +2112,42 @@ pub fn bridgeBoundaryReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u3
             keep_candidate = keep;
         }
     }
+    return candidateLoopNormal(candidate, keep_candidate orelse return null);
+}
 
-    const a = vertPosPub(candidate[0]);
-    const b = vertPosPub(candidate[1]);
-    const c = vertPosPub(candidate[2]);
-    const d = vertPosPub(candidate[3]);
-    const area_normal = vecAdd(
-        vecCross(vecSub(b, a), vecSub(c, a)),
-        vecCross(vecSub(c, a), vecSub(d, a)),
-    );
-    const normal = vecNorm(area_normal);
-    if (vecDot(normal, normal) < 0.5) return null;
-    return if (keep_candidate orelse return null) normal else vecMul(normal, -1);
+/// Winding taken from a side the new face ALREADY SHARES with the mesh (req_4204).
+/// Two selected boundary edges joined by a third edge are not an ambiguous bridge:
+/// that edge is a side of the quad, it already carries a face, and the new face must
+/// traverse it opposite to that face. Nothing about the selected pair can overrule a
+/// side that is physically there — a disagreement between the two selected edges only
+/// means one of THEM is inside-out, and refusing the fill leaves the hole instead of
+/// closing it against the surface it actually touches.
+///
+/// This exists because `bridgeCrossReferenceNormalPub` demands BOTH of the quad's
+/// other sides AND agreeing normals across them, so it goes silent on the ordinary
+/// case of exactly one connecting edge. Here every non-selected side that exists as a
+/// manifold boundary votes; absent, interior, and non-manifold sides abstain rather
+/// than reject, and the surviving votes must agree.
+pub fn bridgeConnectingSideReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u32) ?[3]f32 {
+    if (!ensureTopology()) return null;
+    inline for (.{ sel0, sel1 }) |edge| {
+        _ = edgeExtrusionFramePub(edgeIndexBetween(edge[0], edge[1]) orelse return null) orelse return null;
+    }
+    var keep_candidate: ?bool = null;
+    var side: usize = 0;
+    while (side < candidate.len) : (side += 1) {
+        const edge: Edge = .{ candidate[side], candidate[(side + 1) % candidate.len] };
+        if (sameUndirectedEdge(edge, sel0) or sameUndirectedEdge(edge, sel1)) continue;
+        const adjacent_forward = boundaryFaceRunsEdgeForward(edge) orelse continue;
+        const candidate_forward = loopRunsEdgeForward(candidate, edge) orelse continue;
+        const keep = adjacent_forward != candidate_forward;
+        if (keep_candidate) |agreed| {
+            if (agreed != keep) return null;
+        } else {
+            keep_candidate = keep;
+        }
+    }
+    return candidateLoopNormal(candidate, keep_candidate orelse return null);
 }
 
 pub const ExtrudeTuning = struct {
@@ -2533,6 +2635,7 @@ pub fn reset() void {
     g_occ_bw = 0;
     g_occ_bh = 0;
     g_occ_ready = false;
+    g_vis_key = null; // the masks this key described were just freed
     if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
@@ -2750,13 +2853,21 @@ pub fn scopedFaceHit(face: i32) i32 {
 /// Build the per-vert / per-edge scope masks for the active scope (lazy; keyed on
 /// facecount+ranges). A vert is in scope if any in-scope face touches it; an edge if both
 /// endpoints are. No-op when the scope is inactive or the topology isn't welded yet.
-fn ensureScopeMasks() void {
-    if (!g_scope_active or g_verts == null) return;
+/// Identity of the active scope: facecount plus the ordered range list. Two calls
+/// returning the same value promise `faceInScope` answers identically for every face.
+fn scopeSignature() u64 {
+    if (!g_scope_active) return 0;
     var sig: u64 = @as(u64, model_paint.faceCount()) << 32;
     for (g_scope_ranges[0..g_scope_count]) |r| {
         sig ^= (@as(u64, r[0]) << 12) ^ @as(u64, r[1]);
         sig = sig *% 0x9e3779b97f4a7c15 +% 1; // order-sensitive mix so [a,b],[c,d] ≠ [c,d],[a,b]
     }
+    return sig;
+}
+
+fn ensureScopeMasks() void {
+    if (!g_scope_active or g_verts == null) return;
+    const sig = scopeSignature();
     if (g_scope_built == sig and g_scope_vert != null) return;
     if (g_scope_vert) |m| alloc.free(m);
     if (g_scope_edge) |m| alloc.free(m);
@@ -3025,14 +3136,20 @@ pub fn selectAll() i32 {
 /// deletes — exactly what's selected, nothing more: face mode drops selected faces; vertex
 /// mode drops any face touching a selected vertex; edge mode drops any face using a selected
 /// edge. Returns the count to delete. `out.len` must be >= facecount.
+/// Build the selected-face mask into `out`. The caller's buffer length is the MESH's
+/// authority on how many faces exist; `model_paint.faceCount()` is the paint layout's
+/// opinion and the two disagree constantly, because a stale atlas is the NORMAL state of
+/// a model being edited (req_4125). Two bugs lived in that gap: `out.len < fc` refused
+/// outright, killing the caller with no reason; and callers who allocate by triangle
+/// count got a buffer memset only over `fc`, leaving uninitialised garbage past it that
+/// read as phantom selected faces. Clamp to the buffer and clear all of it.
 pub fn buildDeleteMask(out: []bool) u32 {
-    const fc = model_paint.faceCount();
-    if (out.len < fc) return 0;
-    @memset(out[0..fc], false);
+    const fc = @min(@as(usize, model_paint.faceCount()), out.len);
+    @memset(out, false);
     switch (g_mode) {
         .face => {
             const sel = g_sel_face orelse return 0;
-            var f: u32 = 0;
+            var f: usize = 0;
             while (f < fc) : (f += 1) {
                 if (f < sel.len and sel[f]) out[f] = true;
             }
@@ -3041,9 +3158,9 @@ pub fn buildDeleteMask(out: []bool) u32 {
             if (!ensureTopology()) return 0;
             const sel = g_sel_vert orelse return 0;
             const corners = g_corner_vert orelse return 0;
-            var f: u32 = 0;
+            var f: usize = 0;
             while (f < fc) : (f += 1) {
-                var k: u32 = 0;
+                var k: usize = 0;
                 while (k < 3) : (k += 1) {
                     const v = corners[f * 3 + k];
                     if (v < sel.len and sel[v]) {
@@ -3064,7 +3181,7 @@ pub fn buildDeleteMask(out: []bool) u32 {
             while (e < g_edge_count) : (e += 1) {
                 if (e < sel.len and sel[e]) eset.put(alloc, edgeKey(edges[e * 2], edges[e * 2 + 1]), {}) catch {};
             }
-            var f: u32 = 0;
+            var f: usize = 0;
             while (f < fc) : (f += 1) {
                 const a = corners[f * 3 + 0];
                 const b = corners[f * 3 + 1];
@@ -3075,7 +3192,7 @@ pub fn buildDeleteMask(out: []bool) u32 {
         .none => {},
     }
     var count: u32 = 0;
-    var i: u32 = 0;
+    var i: usize = 0;
     while (i < fc) : (i += 1) {
         if (out[i]) count += 1;
     }
@@ -3190,6 +3307,162 @@ fn weldKey(p: [3]f32) [3]i32 {
 /// With no part ranges set, every face is NO_PART and this degrades to position-only.
 const WeldKey = struct { pos: [3]i32, part: u32 };
 
+pub const LegacyLogicalTopology = struct {
+    allocator: std.mem.Allocator,
+    corner_vertices: []u32,
+    vertex_positions: []f32,
+    vertex_parts: []u32,
+
+    pub fn deinit(topology: *LegacyLogicalTopology) void {
+        if (topology.corner_vertices.len > 0) topology.allocator.free(topology.corner_vertices);
+        if (topology.vertex_positions.len > 0) topology.allocator.free(topology.vertex_positions);
+        if (topology.vertex_parts.len > 0) topology.allocator.free(topology.vertex_parts);
+        topology.* = undefined;
+    }
+};
+
+/// The one legacy position-weld implementation. Live v4 edge selection and the
+/// v4->v5 persistence boundary both call this, so migration cannot mint a
+/// different numeric vertex identity from the one named-edge authoring used.
+fn buildLegacyLogicalTopologyAlloc(
+    allocator: std.mem.Allocator,
+    positions: []const f32,
+    face_count: usize,
+    floats_per_corner: usize,
+    face_parts: []const u32,
+) !LegacyLogicalTopology {
+    if (face_count == 0 or floats_per_corner < 3 or face_parts.len != face_count or
+        positions.len < face_count * 3 * floats_per_corner)
+    {
+        return error.InvalidLegacyLogicalTopology;
+    }
+    var weld = std.AutoHashMapUnmanaged(WeldKey, u32).empty;
+    defer weld.deinit(allocator);
+    var vertex_positions = std.ArrayListUnmanaged(f32).empty;
+    defer vertex_positions.deinit(allocator);
+    var vertex_parts = std.ArrayListUnmanaged(u32).empty;
+    defer vertex_parts.deinit(allocator);
+    const corner_vertices = try allocator.alloc(u32, face_count * 3);
+    errdefer allocator.free(corner_vertices);
+
+    for (0..face_count) |face| {
+        for (0..3) |corner| {
+            const base = (face * 3 + corner) * floats_per_corner;
+            const point = [3]f32{ positions[base], positions[base + 1], positions[base + 2] };
+            const key = WeldKey{ .pos = weldKey(point), .part = face_parts[face] };
+            const entry = try weld.getOrPut(allocator, key);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = @intCast(vertex_positions.items.len / 3);
+                try vertex_positions.appendSlice(allocator, &point);
+                try vertex_parts.append(allocator, face_parts[face]);
+            }
+            corner_vertices[face * 3 + corner] = entry.value_ptr.*;
+        }
+    }
+    const owned_positions = try vertex_positions.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_positions);
+    const owned_parts = try vertex_parts.toOwnedSlice(allocator);
+    return .{
+        .allocator = allocator,
+        .corner_vertices = corner_vertices,
+        .vertex_positions = owned_positions,
+        .vertex_parts = owned_parts,
+    };
+}
+
+/// Explicit legacy-to-v5 mint boundary for a complete resident model assembled by
+/// Scene3D. The caller supplies one owner per face and receives corner ids in that
+/// exact face order. This is the same builder used by the live edit topology, so a
+/// selected legacy edit edge can be promoted without inventing a second identity.
+pub fn legacyLogicalTopologyAlloc(
+    allocator: std.mem.Allocator,
+    interleaved: []const f32,
+    face_parts: []const u32,
+) !LegacyLogicalTopology {
+    if (interleaved.len == 0 or interleaved.len % 24 != 0) return error.InvalidLegacyLogicalTopology;
+    return buildLegacyLogicalTopologyAlloc(allocator, interleaved, interleaved.len / 24, 8, face_parts);
+}
+
+pub const LegacyEdgeTopologyPromotion = struct {
+    allocator: std.mem.Allocator,
+    render_corner_logical_ids: []u32,
+    dense_to_stable_logical_ids: []u32,
+    logical_vertex_count: u32,
+
+    pub fn deinit(promotion: *LegacyEdgeTopologyPromotion) void {
+        if (promotion.render_corner_logical_ids.len > 0) promotion.allocator.free(promotion.render_corner_logical_ids);
+        if (promotion.dense_to_stable_logical_ids.len > 0) promotion.allocator.free(promotion.dense_to_stable_logical_ids);
+        promotion.* = undefined;
+    }
+
+    pub fn applyBorrowed(promotion: *const LegacyEdgeTopologyPromotion, snapshot: *model_source.MeshDocSnapshot) void {
+        snapshot.render_corner_logical_ids = promotion.render_corner_logical_ids;
+        snapshot.logical_vertex_count = promotion.logical_vertex_count;
+        snapshot.dense_to_stable_logical_ids = promotion.dense_to_stable_logical_ids;
+    }
+
+    pub fn moveInto(promotion: *LegacyEdgeTopologyPromotion, snapshot: *model_source.MeshDocSnapshot) void {
+        promotion.applyBorrowed(snapshot);
+        promotion.render_corner_logical_ids = &.{};
+        promotion.dense_to_stable_logical_ids = &.{};
+    }
+};
+
+/// Promote only the legacy documents that actually carry durable named-edge
+/// paths. Plain v1-v4 props remain non-logical. The reconstructed rows must make
+/// every saved path selectable before they may enter a strict current-v5 file.
+pub fn legacyEdgeTopologyPromotionAlloc(
+    allocator: std.mem.Allocator,
+    interleaved: []const f32,
+    groups: ?[]const u32,
+    ranges: []const u32,
+    semantic_table_json: ?[]const u8,
+) !?LegacyEdgeTopologyPromotion {
+    const semantic_json = semantic_table_json orelse return null;
+    if (try model_source.semanticEdgeRegionCount(allocator, semantic_json) == 0) return null;
+    if (interleaved.len == 0 or interleaved.len % 24 != 0) return error.InvalidLegacyLogicalTopology;
+    const face_count = interleaved.len / 24;
+    const face_groups = groups orelse return error.InvalidLegacyLogicalTopology;
+    if (face_groups.len != face_count or ranges.len == 0 or ranges.len % 2 != 0 or
+        !partRangesValid(ranges, @intCast(ranges.len / 2)))
+    {
+        return error.InvalidLegacyLogicalTopology;
+    }
+    const face_parts = try allocator.alloc(u32, face_count);
+    defer allocator.free(face_parts);
+    for (face_groups, 0..) |group, face| {
+        var owner: ?u32 = null;
+        for (0..ranges.len / 2) |range_index| {
+            if (group >= ranges[range_index * 2] and group < ranges[range_index * 2 + 1]) {
+                owner = @intCast(range_index);
+                break;
+            }
+        }
+        face_parts[face] = owner orelse return error.InvalidLegacyLogicalTopology;
+    }
+    var topology = try buildLegacyLogicalTopologyAlloc(allocator, interleaved, face_count, 8, face_parts);
+    defer topology.deinit();
+    const logical_vertex_count: u32 = @intCast(topology.vertex_positions.len / 3);
+    if (!try model_source.semanticEdgePathsResolveInTopology(
+        allocator,
+        semantic_json,
+        topology.corner_vertices,
+        logical_vertex_count,
+        face_groups,
+    )) return error.InvalidLegacyEdgePath;
+    const logical_rows = topology.corner_vertices;
+    topology.corner_vertices = &.{};
+    errdefer allocator.free(logical_rows);
+    const dense_to_stable = try allocator.alloc(u32, logical_vertex_count);
+    for (dense_to_stable, 0..) |*stable, dense| stable.* = @intCast(dense);
+    return .{
+        .allocator = allocator,
+        .render_corner_logical_ids = logical_rows,
+        .dense_to_stable_logical_ids = dense_to_stable,
+        .logical_vertex_count = logical_vertex_count,
+    };
+}
+
 /// Build (or rebuild) the welded topology from model_paint's CPU triangle positions.
 /// Returns false if there's no resident mesh. Idempotent for a given facecount.
 fn ensureTopology() bool {
@@ -3208,31 +3481,16 @@ fn ensureTopology() bool {
     const pos = model_paint.positions() orelse return false;
     if (pos.len < @as(usize, fc) * 9) return false;
 
-    var weld = std.AutoHashMapUnmanaged(WeldKey, u32).empty;
-    defer weld.deinit(alloc);
-    var verts = std.ArrayListUnmanaged(f32).empty;
-    var vert_parts = std.ArrayListUnmanaged(u32).empty;
-    var corner_vert = alloc.alloc(u32, @as(usize, fc) * 3) catch return false;
+    const face_count: usize = @intCast(fc);
+    const face_parts = alloc.alloc(u32, face_count) catch return false;
+    defer alloc.free(face_parts);
+    for (face_parts, 0..) |*part, face| part.* = model_source.partIndexOf(model_source.faceGroupOf(@intCast(face)));
+    var topology = buildLegacyLogicalTopologyAlloc(alloc, pos, face_count, 3, face_parts) catch return false;
+    var topology_adopted = false;
+    defer if (!topology_adopted) topology.deinit();
+    const corner_vert = topology.corner_vertices;
 
     var f: u32 = 0;
-    while (f < fc) : (f += 1) {
-        const part = model_source.partIndexOf(model_source.faceGroupOf(f));
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const base = f * 9 + k * 3;
-            const p: [3]f32 = .{ pos[base + 0], pos[base + 1], pos[base + 2] };
-            const key = WeldKey{ .pos = weldKey(p), .part = part };
-            const gop = weld.getOrPut(alloc, key) catch return false;
-            if (!gop.found_existing) {
-                gop.value_ptr.* = @intCast(verts.items.len / 3);
-                verts.append(alloc, p[0]) catch return false;
-                verts.append(alloc, p[1]) catch return false;
-                verts.append(alloc, p[2]) catch return false;
-                vert_parts.append(alloc, part) catch return false;
-            }
-            corner_vert[f * 3 + k] = gop.value_ptr.*;
-        }
-    }
 
     // Unique undirected edges from the three corners of every face. emap maps an edge
     // key → its index in `edges`, so the boundary pass below can find an edge from a
@@ -3250,10 +3508,12 @@ fn ensureTopology() bool {
         addEdge(&emap, &edges, c, a);
     }
 
-    g_verts = verts.toOwnedSlice(alloc) catch return false;
-    g_vert_part = vert_parts.toOwnedSlice(alloc) catch return false;
+    const owned_edges = edges.toOwnedSlice(alloc) catch return false;
+    g_verts = topology.vertex_positions;
+    g_vert_part = topology.vertex_parts;
     g_corner_vert = corner_vert;
-    g_edges = edges.toOwnedSlice(alloc) catch return false;
+    g_edges = owned_edges;
+    topology_adopted = true;
     g_vert_count = @intCast(g_verts.?.len / 3);
     g_edge_count = @intCast(g_edges.?.len / 2);
     g_built_for = fc;
@@ -5685,6 +5945,7 @@ pub const Session = struct {
     g_occ_bh: @TypeOf(g_occ_bh) = 0,
     g_occ_ready: @TypeOf(g_occ_ready) = false,
     g_occ_cam: @TypeOf(g_occ_cam) = .{ .eye = .{ 0, 0, 0 }, .target = .{ 0, 0, 1 }, .fov_deg = 50 },
+    g_vis_key: @TypeOf(g_vis_key) = null,
 };
 
 pub fn sessionSave(s: *Session) void {
@@ -5696,6 +5957,7 @@ pub fn sessionLoad(s: *const Session) void {
     inline for (@typeInfo(Session).@"struct".fields) |f|
         @field(@This(), f.name) = @field(s, f.name);
     g_occ_ready = false; // occlusion grid is camera-derived; rebuild for the restored mesh
+    g_vis_key = null; // …so the cache must not claim the grid it describes is standing
 }
 
 pub fn sessionReset() void {

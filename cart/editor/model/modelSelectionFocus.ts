@@ -314,6 +314,6 @@ export function describeCreateFaceReadiness(snapshot: ModelSelectionSnapshot): C
   if (bare.length > 0) {
     blocking.push(`${bare.map((edge) => `edge ${edge.id}`).join(' and ')} carries no face at all — a wire edge has no surface to take a winding from`);
   }
-  hostDecides.push('whether a winding survives: the two edges\' neighbour normals, else the quad\'s other two sides if they already exist as edges, else boundary circulation');
+  hostDecides.push('whether a winding survives: the two edges\' neighbour normals, else the quad\'s other two sides if BOTH already exist as edges, else boundary circulation across the selected pair, else any one side the quad already shares with the mesh');
   return { shape: 'bridge', blocking, hostDecides };
 }

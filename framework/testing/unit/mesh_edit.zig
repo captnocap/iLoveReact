@@ -6,6 +6,45 @@ const testing = std.testing;
 const mesh_edit = @import("mesh_edit");
 const indexed_edit_mesh = @import("indexed_edit_mesh");
 
+test "indexed mesh checked teardown preserves valid owned storage" {
+    var mesh = indexed_edit_mesh.Mesh{ .allocator = testing.allocator };
+    try mesh.vertices.append(testing.allocator, .{ .position = .{ 1, 2, 3 } });
+    try testing.expect(mesh.deinitRefusal() == null);
+    try testing.expect(mesh.deinitChecked(0x1234));
+}
+
+test "indexed mesh checked teardown refuses the observed low faces pointer" {
+    const bad_address = std.heap.page_size_min / 2;
+    const bad_faces: [*]indexed_edit_mesh.Face = @ptrFromInt(bad_address);
+    var mesh = indexed_edit_mesh.Mesh{ .allocator = testing.allocator };
+    mesh.faces = .{ .items = bad_faces[0..1], .capacity = 1 };
+
+    const refusal = mesh.deinitRefusal().?;
+    try testing.expectEqual(indexed_edit_mesh.MeshStorageField.faces, refusal.field);
+    try testing.expectEqual(bad_address, refusal.address);
+    try testing.expectEqual(@as(usize, 1), refusal.len);
+    try testing.expectEqual(@as(usize, 1), refusal.capacity);
+    try testing.expect(!mesh.deinitChecked(0x5678));
+}
+
+test "indexed mesh checked teardown validates nested face storage before freeing" {
+    const bad_address = std.heap.page_size_min / 2;
+    const bad_vertices: [*]u32 = @ptrFromInt(bad_address);
+    var mesh = indexed_edit_mesh.Mesh{ .allocator = testing.allocator };
+    try mesh.faces.append(testing.allocator, .{ .id = 0, .group = 0, .part = 0 });
+    mesh.faces.items[0].vertices = .{ .items = bad_vertices[0..1], .capacity = 1 };
+
+    const refusal = mesh.deinitRefusal().?;
+    try testing.expectEqual(indexed_edit_mesh.MeshStorageField.face_vertices, refusal.field);
+    try testing.expectEqual(@as(?usize, 0), refusal.owner_index);
+    try testing.expect(!mesh.deinitChecked(0x9abc));
+
+    // The refusal deliberately leaves ownership untouched for diagnosis.  Once
+    // the damaged header is restored, the legitimate allocations still release.
+    mesh.faces.items[0].vertices = .empty;
+    try testing.expect(mesh.deinitChecked(0xdef0));
+}
+
 test "manual retopology tint preserves the user's exact face mask" {
     var labels = [_]u16{mesh_edit.RETOPO_BAND_UNASSIGNED} ** 6;
     const first = [_]bool{ false, true, true, false, true, false };
@@ -132,6 +171,36 @@ test "meshdoc range table must exactly match the declared Outliner count" {
     try testing.expect(!mesh_edit.partRangesValid(empty[0..], 1));
 }
 
+test "detach repartitions durable logical vertices at the new part boundary" {
+    // Two triangles share logical vertices 1 and 2 while they belong to one part.
+    // Detach moves the second triangle into a different part. Those two addresses
+    // must split even though their positions remain coincident; otherwise moving
+    // the detached part mutates the indexed guard's copy of the body seam and a
+    // rigid translation is falsely reported as a concave edit.
+    const logical = [_]u32{ 0, 1, 2, 2, 1, 3 };
+    const joined_parts = [_]u32{ 0, 0 };
+    var joined = try indexed_edit_mesh.partitionLogicalCornersByPart(
+        testing.allocator,
+        logical[0..],
+        joined_parts[0..],
+        4,
+    );
+    defer joined.deinit(testing.allocator);
+    try testing.expectEqual(@as(u32, 4), joined.vertex_count);
+    try testing.expectEqualSlices(u32, logical[0..], joined.rows);
+
+    const detached_parts = [_]u32{ 0, 1 };
+    var detached = try indexed_edit_mesh.partitionLogicalCornersByPart(
+        testing.allocator,
+        logical[0..],
+        detached_parts[0..],
+        4,
+    );
+    defer detached.deinit(testing.allocator);
+    try testing.expectEqual(@as(u32, 6), detached.vertex_count);
+    try testing.expectEqualSlices(u32, &.{ 0, 1, 2, 3, 4, 5 }, detached.rows);
+}
+
 test "meshdoc snapshot keeps hidden part faces and rejects metadata-only ranges" {
     var visible = [_]f32{0} ** 24;
     var hidden = [_]f32{0} ** 24;
@@ -160,6 +229,57 @@ test "meshdoc snapshot keeps hidden part faces and rejects metadata-only ranges"
     try testing.expect(!mesh_edit.meshDocRangesOwnEveryFace(ranges[0..], visible_groups[0..], 2));
 }
 
+test "meshdoc v5 snapshot compacts native ids once across hidden and glass reorder" {
+    var glass = [_]f32{0} ** 24;
+    var solid = [_]f32{0} ** 24;
+    // Stable ids 90 and 100 appear in both blocks with the same positions. Normal/UV
+    // rows intentionally differ because those are render-corner attributes.
+    glass[0] = 0;
+    glass[1] = 0;
+    glass[8] = 1;
+    glass[9] = 0;
+    glass[16] = 0;
+    glass[17] = 1;
+    glass[3] = 1;
+    glass[6] = 0.25;
+    solid[0] = 1;
+    solid[1] = 0;
+    solid[8] = 0;
+    solid[9] = 0;
+    solid[16] = 1;
+    solid[17] = 1;
+    solid[3] = 9;
+    solid[6] = 0.75;
+    const glass_ids = [_]u32{ 90, 100, 110 };
+    const opaque_ids = [_]u32{ 100, 90, 120 };
+    const glass_color = [_]u8{ 20, 30, 40, 80 };
+    const opaque_color = [_]u8{ 20, 30, 40, 255 };
+    var snapshot = try mesh_edit.composeMeshDocSnapshot(testing.allocator, &.{
+        .{ .verts = glass[0..], .render_corner_logical_ids = glass_ids[0..], .colors = glass_color[0..] },
+        .{ .verts = solid[0..], .render_corner_logical_ids = opaque_ids[0..], .colors = opaque_color[0..] },
+    });
+    defer snapshot.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 3), snapshot.glass_first_vertex);
+    try testing.expectEqual(@as(u32, 4), snapshot.logical_vertex_count);
+    try testing.expectEqualSlices(u32, &.{ 90, 100, 110, 120 }, snapshot.dense_to_stable_logical_ids.?);
+    try testing.expectEqualSlices(u32, &.{ 1, 0, 3, 0, 1, 2 }, snapshot.render_corner_logical_ids.?);
+}
+
+test "meshdoc v5 snapshot rejects one logical id at separated positions" {
+    var first = [_]f32{0} ** 24;
+    var second = [_]f32{0} ** 24;
+    first[8] = 1;
+    first[17] = 1;
+    second[0] = 0.01;
+    second[8] = 1;
+    second[17] = 1;
+    try testing.expectError(error.InvalidLogicalTopology, mesh_edit.composeMeshDocSnapshot(testing.allocator, &.{
+        .{ .verts = first[0..], .render_corner_logical_ids = &.{ 0, 1, 2 } },
+        .{ .verts = second[0..], .render_corner_logical_ids = &.{ 0, 1, 2 } },
+    }));
+}
+
 test "quality save snapshot uses the reduced resident topology" {
     // The retained baseline may contain many more faces so the slider can be
     // adjusted again, but Save passes only the chosen resident projection into the
@@ -183,6 +303,53 @@ test "quality save snapshot uses the reduced resident topology" {
     try testing.expectEqualSlices(u32, mapped_group[0..], snapshot.groups.?);
     try testing.expectEqualSlices(u32, mapped_material[0..], snapshot.materials.?);
     try testing.expect(mesh_edit.meshDocRangesOwnEveryFace(&.{ 7, 8 }, snapshot.groups, 1));
+}
+
+test "RJMD v5 indexed hydration trusts logical ids instead of position welding" {
+    var soup = [_]f32{0} ** (6 * 8);
+    const positions = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, -1, 0 },
+    };
+    for (positions, 0..) |position, corner| {
+        const at = corner * 8;
+        soup[at] = position[0];
+        soup[at + 1] = position[1];
+        soup[at + 2] = position[2];
+    }
+    const logical_ids = [_]u32{ 0, 1, 2, 3, 4, 5 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithLogicalSemantics(
+        testing.allocator,
+        soup[0..],
+        2,
+        null,
+        null,
+        null,
+        null,
+        null,
+        logical_ids[0..],
+        6,
+    );
+    defer indexed.deinit();
+    try testing.expectEqual(@as(usize, 6), indexed.vertices.items.len);
+    try testing.expectEqualSlices(u32, &.{ 0, 1, 2 }, indexed.render_triangles.items[0][0..]);
+    try testing.expectEqualSlices(u32, &.{ 3, 4, 5 }, indexed.render_triangles.items[1][0..]);
+    try testing.expect(indexed.residentLogicalTopologyMatches(logical_ids[0..], 6));
+    try testing.expect(!indexed.residentLogicalTopologyMatches(null, 0));
+
+    soup[3 * 8] = 0.01;
+    try testing.expectError(error.InvalidLogicalTopology, indexed_edit_mesh.Mesh.fromSoupWithLogicalSemantics(
+        testing.allocator,
+        soup[0..],
+        2,
+        null,
+        null,
+        null,
+        null,
+        null,
+        &.{ 0, 1, 2, 0, 4, 5 },
+        6,
+    ));
 }
 
 test "paint face hits cannot cross the active outliner scope" {
@@ -444,6 +611,51 @@ fn windingQuad(out: []f32, first_triangle: usize, corners: [4][3]f32, normal: [3
             out[row + 7] = 0.5;
         }
     }
+}
+
+test "mirrored basic cut keeps the clicked-face seed and splits both authored twins" {
+    var soup = [_]f32{0} ** (4 * 3 * 8);
+    windingQuad(soup[0..], 0, .{
+        .{ -2, 0, -1 }, .{ 0, 0, -1 }, .{ 0, 0, 1 }, .{ -2, 0, 1 },
+    }, .{ 0, -1, 0 });
+    windingQuad(soup[0..], 2, .{
+        .{ 2, 0, 1 }, .{ 0, 0, 1 }, .{ 0, 0, -1 }, .{ 2, 0, -1 },
+    }, .{ 0, -1, 0 });
+    const groups = [_]u32{ 10, 10, 20, 20 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(
+        testing.allocator,
+        soup[0..],
+        4,
+        groups[0..],
+        null,
+    );
+    defer indexed.deinit();
+
+    // The user clicked the later (+X) authored face. Capture its seed before live
+    // mirror broadens the operation mask to include the earlier (-X) twin.
+    var operation_mask = [_]bool{ false, false, true, true };
+    const seed = indexed.seedInfo(operation_mask[0..]).?;
+    try testing.expectEqual(@as(u32, 20), seed.keep_group);
+    try testing.expectApproxEqAbs(@as(f32, 1), seed.center[0], 0.00001);
+    operation_mask[0] = true;
+    operation_mask[1] = true;
+
+    try testing.expect(try indexed.cutSelected(operation_mask[0..], seed.directions[0], 1, 0.5));
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    // Each mirrored quad goes from two render triangles to four. A one-sided cut
+    // would produce six total; eight proves both authored twins joined this edit.
+    try testing.expectEqual(@as(u32, 8), lowered.tri_count);
+    var source_station = false;
+    var twin_station = false;
+    var row: usize = 0;
+    while (row + 2 < lowered.positions.len) : (row += 3) {
+        const x = lowered.positions[row];
+        if (@abs(x - 1) < 0.00001) source_station = true;
+        if (@abs(x + 1) < 0.00001) twin_station = true;
+    }
+    try testing.expect(source_station);
+    try testing.expect(twin_station);
 }
 
 /// The unit cube [0,1]³ as 12 outward-CCW triangles — winding a culled renderer accepts
@@ -845,6 +1057,93 @@ test "bridge winding follows the oriented boundary when every neighbor-normal pa
     try testing.expect(reference[2] < -0.999);
 }
 
+test "a side the quad already shares decides the bridge the selected pair cannot" {
+    // req_4204. Two open edges joined by a THIRD edge are not an ambiguous bridge:
+    // that edge is a side of the quad, it already carries a face, and the new face
+    // must run it the other way. Here the two selected edges are wound against each
+    // other, so both the neighbour-normal and boundary-circulation authorities go
+    // silent, and only ONE of the quad's other two sides exists — which is exactly
+    // the case the cross-reference rescue cannot serve, since it demands both.
+    //
+    //   v3 ─── v2      selected: (v0,v1) and (v2,v3)
+    //   │  fill  │     absent:   (v1,v2)
+    //   v0 ─── v1      present:  (v3,v0), carrying one face
+    var soup = [_]f32{
+        // face 0 — carries (v0,v1), running v0 → v1
+        0,   0,    0, 0, 0, -1, 0, 0,
+        1,   0,    0, 0, 0, -1, 0, 0,
+        0.5, -1,   0, 0, 0, -1, 0, 0,
+
+        // face 1 — carries (v2,v3), running v3 → v2: wound AGAINST face 0
+        0,   1,    0, 0, 0, 1,  0, 0,
+        1,   1,    0, 0, 0, 1,  0, 0,
+        0.5, 2,    0, 0, 0, 1,  0, 0,
+
+        // face 2 — the connecting side, carrying (v3,v0) and running v3 → v0
+        0,   1,    0, 0, 0, -1, 0, 0,
+        0,   0,    0, 0, 0, -1, 0, 0,
+        -1,  0.5,  0, 0, 0, -1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(4204, soup[0..], 9, &.{ 0, 1, 2 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var v0: ?u32 = null;
+    var v1: ?u32 = null;
+    var v2: ?u32 = null;
+    var v3: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[0] == 0 and at[1] == 0) v0 = vertex;
+        if (at[0] == 1 and at[1] == 0) v1 = vertex;
+        if (at[0] == 1 and at[1] == 1) v2 = vertex;
+        if (at[0] == 0 and at[1] == 1) v3 = vertex;
+    }
+    const selected_0: mesh_edit.Edge = .{ v0.?, v1.? };
+    const selected_1: mesh_edit.Edge = .{ v2.?, v3.? };
+    const candidate = [4]u32{ v0.?, v1.?, v2.?, v3.? };
+
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        const ends = mesh_edit.edgeEndpointsPub(edge);
+        inline for (.{ selected_0, selected_1 }) |wanted| {
+            if ((ends[0] == wanted[0] and ends[1] == wanted[1]) or
+                (ends[0] == wanted[1] and ends[1] == wanted[0]))
+            {
+                try testing.expect(mesh_edit.selectEdgeByIndex(edge, true));
+            }
+        }
+    }
+
+    // Every authority that only ever looks at the SELECTED pair goes silent.
+    try testing.expect(mesh_edit.selectedEdgesReferenceNormalPub() == null);
+    try testing.expect(mesh_edit.bridgeBoundaryReferenceNormalPub(selected_0, selected_1, candidate) == null);
+    // …and the cross-reference rescue cannot fire, because (v1,v2) does not exist.
+    try testing.expect(mesh_edit.bridgeCrossReferenceNormalPub(
+        selected_0,
+        selected_1,
+        .{ v1.?, v2.? },
+        .{ v3.?, v0.? },
+    ) == null);
+
+    // The one side that IS there answers outright: face 2 runs v3 → v0, so the quad
+    // must run v0 → v3, which is the reverse of the order written above.
+    const reference = mesh_edit.bridgeConnectingSideReferenceNormalPub(selected_0, selected_1, candidate).?;
+    try testing.expectApproxEqAbs(@as(f32, 0), reference[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), reference[1], 0.0001);
+    try testing.expect(reference[2] < -0.999);
+
+    // Abstaining is not agreeing: a loop whose other two sides are BOTH absent leaves
+    // nothing to consult, and that still refuses rather than guessing a facing.
+    try testing.expect(mesh_edit.bridgeConnectingSideReferenceNormalPub(
+        selected_0,
+        selected_1,
+        .{ v0.?, v1.?, v3.?, v2.? },
+    ) == null);
+}
+
 test "twin-edge probe requires matching face incidence between source and twin" {
     // A mirrored op must mean the same thing on both sides: a bridge built from an
     // open source edge must not land on a twin edge that already carries two faces
@@ -968,6 +1267,37 @@ test "exact uniform scale accepts a negative factor to mirror through its pivot"
 
     try testing.expect(!mesh_edit.scaleSelectionUniform(pivot, 0).changed);
     try testing.expect(!mesh_edit.scaleSelectionUniform(pivot, -51).changed);
+}
+
+test "align loop flattens a skewed vertex ring on its least-varying axis" {
+    const corners = [4][3]f32{
+        .{ -0.12, -1, -1 },
+        .{ 0.08, 1, -1 },
+        .{ 0.04, 1, 1 },
+        .{ -0.10, -1, 1 },
+    };
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    for ([2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }, 0..) |triangle, face| {
+        for (triangle, 0..) |corner, slot| {
+            const at = (face * 3 + slot) * 8;
+            @memcpy(soup[at .. at + 3], corners[corner][0..]);
+        }
+    }
+    mesh_edit.test_support.loadGroupedSoup(4017, soup[0..], 6, &.{ 7, 7 });
+    defer mesh_edit.test_support.clear();
+    for (0..corners.len) |vertex| try testing.expect(mesh_edit.selectVertexByIndex(@intCast(vertex), vertex != 0));
+
+    const alignment = mesh_edit.alignSelectedLoop() orelse return error.ExpectedLoopAlignment;
+    try testing.expectEqual(@as(u8, 0), alignment.axis);
+    try testing.expectApproxEqAbs(@as(f32, -0.025), alignment.coordinate, 0.00001);
+    for (0..corners.len) |vertex| {
+        const position = mesh_edit.vertPosPub(@intCast(vertex));
+        try testing.expectApproxEqAbs(alignment.coordinate, position[0], 0.00001);
+        try testing.expectApproxEqAbs(corners[vertex][1], position[1], 0.00001);
+        try testing.expectApproxEqAbs(corners[vertex][2], position[2], 0.00001);
+    }
+    try testing.expectEqual(@as(u32, 4), mesh_edit.selCount());
+    try testing.expect(mesh_edit.alignSelectedLoop() == null); // already flat: no phantom undo
 }
 
 test "exact numeric scaling preserves sub-centimetre factors instead of drag clamping" {
@@ -1241,6 +1571,38 @@ test "tris to quads recovers every selected cell instead of pairing across grid 
         live_quads += 1;
     }
     try testing.expectEqual(@as(u32, 2), live_quads);
+}
+
+test "position mutation adopts recomputed normals without invalidating indexed topology" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 0, 1,
+    };
+    const groups = [_]u32{0};
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(
+        testing.allocator,
+        soup[0..],
+        1,
+        groups[0..],
+        null,
+    );
+    defer indexed.deinit();
+    try testing.expect(indexed.residentRenderChannelsMatch(soup[0..], 1));
+
+    // Moving one corner changes the triangle's derived flat normal, while its UV
+    // rows remain the exact same authored render channel.
+    soup[2] = 0.5;
+    const inv_sqrt_125: f32 = 1.0 / @sqrt(@as(f32, 1.25));
+    const changed_normal = [3]f32{ 0.5 * inv_sqrt_125, 0.5 * inv_sqrt_125, inv_sqrt_125 };
+    for (0..3) |corner| {
+        const base = corner * 8;
+        @memcpy(soup[base + 3 .. base + 6], changed_normal[0..]);
+    }
+    try testing.expect(indexed.residentUvsMatch(soup[0..], 1));
+    try testing.expect(!indexed.residentRenderChannelsMatch(soup[0..], 1));
+    try testing.expect(indexed.updatePositionsFromInterleaved(soup[0..], 1));
+    try testing.expect(indexed.residentRenderChannelsMatch(soup[0..], 1));
 }
 
 test "tris to quads maximizes the total across an ambiguous four-triangle chain" {
@@ -1610,12 +1972,12 @@ test "merge faces turns conflicting semantic names into explicit debt" {
     for (lowered.semantic_instances) |instance| try testing.expectEqual(indexed_edit_mesh.NO_SEMANTIC_ID, instance);
 }
 
-test "merge faces rejects a connected bent surface without changing its topology" {
+test "interactive merge accepts a connected bent surface without retessellating it" {
     // Both authored quads point generally the same way and share one full edge, but
-    // the second rises out of the first quad's plane. The old 0.5 normal-dot gate
-    // accepted this 27-degree bend and lowered its six-corner perimeter as one fan,
-    // changing physical diagonals even though the displayed triangle count happened
-    // to stay constant (the bookshelf corruption from req_3374).
+    // the second rises out of the first quad's plane. Explicit Merge Faces is user
+    // intent and may author this warped six-corner face. Its existing four source
+    // triangles remain the physical surface, so accepting the grouping operation
+    // must not silently fan or change a diagonal.
     const flat = [4][3]f32{
         .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 },
     };
@@ -1640,12 +2002,17 @@ test "merge faces rejects a connected bent surface without changing its topology
     const selected = [_]bool{true} ** 4;
     var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 4, groups[0..], parts[0..]);
     defer indexed.deinit();
+    var before_triangles: [4][3]u32 = undefined;
+    @memcpy(before_triangles[0..], indexed.render_triangles.items[0..4]);
 
-    try testing.expect((try indexed.mergeSelected(selected[0..])) == null);
+    const merged = (try indexed.mergeSelected(selected[0..])) orelse return error.ExpectedBentMerge;
+    try testing.expect(!merged.retessellated);
+    try testing.expectEqual(@as(usize, 6), indexed.faces.items[merged.face_id].vertices.items.len);
     var lowered = try indexed.lower();
     defer lowered.deinit();
     try testing.expectEqual(@as(u32, 4), lowered.tri_count);
-    try testing.expectEqualSlices(u32, groups[0..], lowered.groups);
+    try testing.expectEqualSlices([3]u32, before_triangles[0..], lowered.triangle_vertices);
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 0, 0 }, lowered.groups);
     try testing.expectEqualSlices(u32, parts[0..], lowered.parts);
 }
 
@@ -1826,6 +2193,78 @@ test "edge extrusion extends a grouped quad outward in its plane" {
     try testing.expectApproxEqAbs(@as(f32, -0.25), outer[1][0], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 0), outer[0][2], 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 0), outer[1][2], 1e-6);
+}
+
+test "exact edge extrusion angle tilts the strip without changing its distance" {
+    const frame = mesh_edit.EdgeExtrusionFrame{
+        .a = .{ 0, 0, 0 },
+        .b = .{ 0, 1, 0 },
+        .outward = .{ 1, 0, 0 },
+        .face_normal = .{ 0, 0, 1 },
+        .source_face = 0,
+    };
+    const radians = mesh_edit.extrusionAngleRadiansPub(45) orelse return error.TestUnexpectedResult;
+    const outer = frame.outerAtAngleRadians(2, radians);
+    const component = @sqrt(@as(f32, 2));
+    try testing.expectApproxEqAbs(component, outer[0][0], 1e-6);
+    try testing.expectApproxEqAbs(component, outer[0][2], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 2), @sqrt(outer[0][0] * outer[0][0] + outer[0][2] * outer[0][2]), 1e-6);
+    try testing.expectEqual(@as(f32, 1), outer[1][1]);
+}
+
+test "edge plus vertex extrusion reuses one corner and leaves one open" {
+    const frame = mesh_edit.EdgeExtrusionFrame{
+        .a = .{ 0, 0, 0 },
+        .b = .{ 0, 1, 0 },
+        .outward = .{ 1, 0, 0 },
+        .face_normal = .{ 0, 0, 1 },
+        .source_face = 0,
+    };
+    const incident = mesh_edit.anchoredEdgeExtrusionPub(frame, .{ 4, 7 }, 4, frame.a, 2, 0);
+    try testing.expect(incident.triangle);
+    try testing.expectEqual(@as(u1, 0), incident.shared_index);
+    try testing.expectEqualSlices(f32, &.{ 0, 0, 0 }, &incident.outer[0]);
+    try testing.expectEqualSlices(f32, &.{ 2, 1, 0 }, &incident.outer[1]);
+
+    const target: [3]f32 = .{ 2.1, 1.1, 0 };
+    const separate = mesh_edit.anchoredEdgeExtrusionPub(frame, .{ 4, 7 }, 12, target, 2, 0);
+    try testing.expect(!separate.triangle);
+    try testing.expectEqual(@as(u1, 1), separate.shared_index);
+    try testing.expectEqualSlices(f32, &target, &separate.outer[1]);
+    try testing.expectEqualSlices(f32, &.{ 2, 0, 0 }, &separate.outer[0]);
+}
+
+test "shift selecting a target vertex retains the source edge across modes" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(4046, soup[0..], 3, &.{5});
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.focusEdgeByEndpoints(.{ 0, 0, 0 }, .{ 1, 0, 0 }));
+    const source_edge = mesh_edit.selectedEdgeIndexPub() orelse return error.TestUnexpectedResult;
+    mesh_edit.setMode(.vertex);
+    try testing.expect(mesh_edit.selectVertexByIndex(0, true));
+    try testing.expectEqual(source_edge, mesh_edit.selectedEdgeIndexPub().?);
+    try testing.expectEqual(@as(u32, 0), mesh_edit.selectedVertexIndexPub().?);
+}
+
+test "face extrusion draft widens and narrows around the cap center" {
+    const positive = mesh_edit.extrusionAngleRadiansPub(45) orelse return error.TestUnexpectedResult;
+    const widen = mesh_edit.faceExtrudeScalePub(2, 1, positive) orelse return error.TestUnexpectedResult;
+    try testing.expectApproxEqAbs(@as(f32, 1.5), widen, 1e-6);
+    const widened = mesh_edit.faceExtrudePointPub(.{ 2, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 1 }, 1, widen);
+    try testing.expectApproxEqAbs(@as(f32, 3), widened[0], 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 1), widened[2], 1e-6);
+
+    const negative = mesh_edit.extrusionAngleRadiansPub(-45) orelse return error.TestUnexpectedResult;
+    const narrow = mesh_edit.faceExtrudeScalePub(2, 1, negative) orelse return error.TestUnexpectedResult;
+    try testing.expectApproxEqAbs(@as(f32, 0.5), narrow, 1e-6);
+    try testing.expect(mesh_edit.faceExtrudeScalePub(0.5, 1, negative) == null);
+    try testing.expect(mesh_edit.extrusionAngleRadiansPub(90) == null);
 }
 
 test "part range rebase keeps an unchanged scope push from clearing edge focus" {
@@ -2158,6 +2597,36 @@ test "solidify keeps a triangulated planar panel parallel at exact thickness" {
         try testing.expectApproxEqAbs(@as(f32, 0), actual[1], 0.00001);
         try testing.expectApproxEqAbs(@as(f32, -0.2), actual[2], 0.00001);
     }
+}
+
+test "solidify clamps the miter spike at a knife-edge crease" {
+    const triangles = [2]mesh_edit.SolidifyTriangle{
+        .{
+            .face = 0,
+            .group = 10,
+            .corners = .{ 0, 1, 2 },
+            .positions = .{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 } },
+        },
+        .{
+            .face = 1,
+            .group = 20,
+            .corners = .{ 0, 1, 3 },
+            .positions = .{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, -0.9848078, -0.17364818 } },
+        },
+    };
+    const thickness: f32 = 0.005;
+    var offsets = try mesh_edit.solidifyOffsets(testing.allocator, triangles[0..], thickness);
+    defer offsets.deinit();
+
+    const offset = offsets.get(0);
+    const magnitude = @sqrt(offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2]);
+    const limit = mesh_edit.SolidifyTuning.miter_limit * thickness;
+    try testing.expect(magnitude <= limit + 1.0e-6);
+    try testing.expect(magnitude > thickness);
+}
+
+test "solidify leaves a well-conditioned cube corner below the miter limit" {
+    try testing.expect(mesh_edit.SolidifyTuning.miter_limit > @sqrt(3.0));
 }
 
 test "pen edge wire triangles weld into naked selectable boundary edges" {
@@ -2540,6 +3009,163 @@ test "selected open boundary loop chamfers to its chosen target side count" {
         }
     }
     try testing.expect(neutral_triangles > 0);
+}
+
+test "boundary chamfer accepts the loop-cut opening captured by Follow" {
+    // req_3979: these are the exact four authored quads surrounding the face the
+    // user deleted after four accepted Loop Cut transactions. The opening is a
+    // slightly sloped 0.2 m x 0.21 m quad, not the planar square fixture above.
+    const v180 = [3]f32{ 0.35714287, 1.724881, -0.100000024 };
+    const v181 = [3]f32{ 0.35714287, 1.724881, 0.099999994 };
+    const v184 = [3]f32{ 0.36192286, 1.724881, -0.100000024 };
+    const v185 = [3]f32{ 0.36192286, 1.724881, 0.099999994 };
+    const v188 = [3]f32{ 0.546875, 1.6248809, -0.100000024 };
+    const v190 = [3]f32{ 0.546875, 1.6248809, 0.099999994 };
+    const quads = [4][4][3]f32{
+        .{ v180, v181, v185, v184 },
+        .{ v184, v188, .{ 0.5, 1.6248809, -0.3 }, .{ 0.36192286, 1.724881, -0.3 } },
+        .{ .{ 0.5, 1.5248808, -0.100000024 }, v188, v190, .{ 0.5, 1.5248808, 0.099999994 } },
+        .{ .{ 0.5, 1.6248809, 0.3 }, v190, v185, .{ 0.36192286, 1.724881, 0.3 } },
+    };
+    var soup = [_]f32{0} ** (8 * 3 * 8);
+    var triangle: usize = 0;
+    for (quads) |quad| {
+        for ([2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }) |split| {
+            for (split, 0..) |quad_corner, output_corner| {
+                const base = (triangle * 3 + output_corner) * 8;
+                @memcpy(soup[base .. base + 3], quad[quad_corner][0..]);
+            }
+            triangle += 1;
+        }
+    }
+    const groups = [_]u32{ 180, 180, 190, 190, 184, 184, 212, 212 };
+    const parts = [_]u32{7} ** 8;
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 8, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    const selected_edges = [4][2][3]f32{
+        .{ v185, v190 },
+        .{ v188, v190 },
+        .{ v184, v188 },
+        .{ v184, v185 },
+    };
+    var loop: [selected_edges.len]u32 = undefined;
+    const selection = indexed.resolveBoundaryChamfer(selected_edges[0..], 7, loop[0..]) orelse
+        return error.ExpectedFollowOpening;
+    try testing.expectEqual(@as(u32, 4), selection.sides_before);
+    try testing.expect(selection.max_width >= indexed_edit_mesh.BoundaryChamferTuning.minimum_width_m);
+    try testing.expect(try indexed.chamferBoundary(
+        loop[0..],
+        indexed_edit_mesh.BoundaryChamferTuning.minimum_width_m,
+        8,
+    ));
+
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try testing.expectEqual(@as(u32, 20), lowered.tri_count);
+    try testing.expectEqual(@as(u32, 20), try countOpenEdges(&indexed)); // 12 outer edges + 8 chamfered opening edges.
+    for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+}
+
+test "one selected quad becomes a welded eight-sided extrusion center without n-gon transition faces" {
+    const corners = [4][3]f32{
+        .{ -1, -1, 0 },
+        .{ 1, -1, 0 },
+        .{ 1, 1, 0 },
+        .{ -1, 1, 0 },
+    };
+    const corner_uvs = [4][2]f32{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } };
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    for ([2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }, 0..) |triangle, face| {
+        for (triangle, 0..) |corner, slot| {
+            const at = (face * 3 + slot) * 8;
+            @memcpy(soup[at .. at + 3], corners[corner][0..]);
+            soup[at + 6] = corner_uvs[corner][0];
+            soup[at + 7] = corner_uvs[corner][1];
+        }
+    }
+    const groups = [_]u32{ 9, 9 };
+    const parts = [_]u32{ 3, 3 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 2, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    const selected = [_]bool{ true, true };
+    const selection = indexed.resolveFacePolygon(selected[0..]) orelse return error.ExpectedFacePolygonSelection;
+    try testing.expectEqual(@as(u32, 4), selection.sides_before);
+    try testing.expectEqual(@as(u32, 8), selection.default_target_sides);
+    try testing.expect(selection.max_width > indexed_edit_mesh.FacePolygonTuning.minimum_width_m);
+
+    const center_id = (try indexed.polygonizeFace(selection.face_id, 0.25, 8)) orelse
+        return error.ExpectedFacePolygon;
+    try testing.expect(!indexed.faces.items[selection.face_id].alive);
+    const center = &indexed.faces.items[center_id];
+    try testing.expect(center.alive);
+    try testing.expectEqual(@as(usize, 8), center.vertices.items.len);
+    try testing.expectEqual(@as(u32, 9), center.group);
+    try testing.expectEqual(@as(u32, 3), center.part);
+
+    var triangles: u32 = 0;
+    var quads: u32 = 0;
+    var transition_faces: u32 = 0;
+    for (indexed.faces.items) |face| {
+        if (!face.alive or face.id == center_id) continue;
+        transition_faces += 1;
+        if (face.vertices.items.len == 3) triangles += 1 else if (face.vertices.items.len == 4) quads += 1 else return error.UnexpectedTransitionNgon;
+    }
+    try testing.expectEqual(@as(u32, 8), transition_faces);
+    try testing.expectEqual(@as(u32, 4), triangles);
+    try testing.expectEqual(@as(u32, 4), quads);
+    try testing.expectEqual(@as(u32, 4), try countOpenEdges(&indexed));
+
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    try testing.expectEqual(@as(u32, 18), lowered.tri_count);
+    for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+}
+
+test "face polygon keeps its first edge aligned while the side count changes" {
+    const corners = [4][3]f32{
+        .{ -1, -1, 0 },
+        .{ 1, -1, 0 },
+        .{ 1, 1, 0 },
+        .{ -1, 1, 0 },
+    };
+    const triangles = [2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } };
+    for ([_]usize{ 5, 17 }) |target_sides| {
+        var soup = [_]f32{0} ** (2 * 3 * 8);
+        for (triangles, 0..) |triangle, face| {
+            for (triangle, 0..) |corner, slot| {
+                const at = (face * 3 + slot) * 8;
+                @memcpy(soup[at .. at + 3], corners[corner][0..]);
+            }
+        }
+        const groups = [_]u32{ 9, 9 };
+        const parts = [_]u32{ 3, 3 };
+        var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 2, groups[0..], parts[0..]);
+        defer indexed.deinit();
+
+        const selection = indexed.resolveFacePolygon(&.{ true, true }) orelse
+            return error.ExpectedFacePolygonSelection;
+        const source = &indexed.faces.items[selection.face_id];
+        const source_a = indexed.vertices.items[source.vertices.items[0]].position;
+        const source_b = indexed.vertices.items[source.vertices.items[1]].position;
+        const center_id = (try indexed.polygonizeFace(selection.face_id, 0.25, target_sides)) orelse
+            return error.ExpectedFacePolygon;
+        const center = &indexed.faces.items[center_id];
+        const center_a = indexed.vertices.items[center.vertices.items[0]].position;
+        const center_b = indexed.vertices.items[center.vertices.items[1]].position;
+        const source_edge = [3]f32{ source_b[0] - source_a[0], source_b[1] - source_a[1], source_b[2] - source_a[2] };
+        const center_edge = [3]f32{ center_b[0] - center_a[0], center_b[1] - center_a[1], center_b[2] - center_a[2] };
+        const cross = [3]f32{
+            source_edge[1] * center_edge[2] - source_edge[2] * center_edge[1],
+            source_edge[2] * center_edge[0] - source_edge[0] * center_edge[2],
+            source_edge[0] * center_edge[1] - source_edge[1] * center_edge[0],
+        };
+        try testing.expectApproxEqAbs(@as(f32, 0), cross[0], 0.00001);
+        try testing.expectApproxEqAbs(@as(f32, 0), cross[1], 0.00001);
+        try testing.expectApproxEqAbs(@as(f32, 0), cross[2], 0.00001);
+        try testing.expect(source_edge[0] * center_edge[0] + source_edge[1] * center_edge[1] + source_edge[2] * center_edge[2] > 0);
+    }
 }
 
 test "boundary chamfer supports non-doubling and multi-segment targets" {

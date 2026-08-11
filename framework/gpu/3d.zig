@@ -3498,7 +3498,11 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 edges[1],
                 .{ edges[0][0], c_id },
                 .{ edges[0][1], d_id },
-            ) orelse mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], candidate);
+            ) orelse mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], candidate) orelse
+                // A side the quad already shares with the mesh outranks a disagreement
+                // between the two selected edges: it is a real surface the new face
+                // touches, so it decides the fill outright (req_4204).
+                mesh_edit.bridgeConnectingSideReferenceNormalPub(edges[0], edges[1], candidate);
             if (winding) |reference| ok = appendQuadSplitFacingLogical(
                 &verts,
                 &logical,
