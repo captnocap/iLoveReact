@@ -2573,7 +2573,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       }
       case 'create-face': {
         const result = seat.createFace(String(args.name ?? ''), Number(args.instance ?? 0));
-        return seat.reply('create-face', !!result, result ?? undefined, result ? undefined : 'select two bridge edges or a closed 3/4-edge loop and provide a name');
+        return seat.reply('create-face', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select two bridge edges or a closed 3/4-edge loop and provide a name'));
       }
       case 'bevel': {
         const targetSides = args.targetSides == null ? undefined : Number(args.targetSides);

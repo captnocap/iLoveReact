@@ -3449,26 +3449,52 @@ fn closedEdgeLoopOrder(edges: []const mesh_edit.Edge, out: *[4]u32) ?u32 {
     return unique_count;
 }
 
+/// Name a Create Face refusal and refuse (req_4205). `meshTopoCreateFaceFromEdges`
+/// answered one bool across two dozen exits, so "Create Face did nothing" was the whole
+/// diagnosis available to the person holding the mouse — and the only way to narrow it
+/// was to press the key again, which mutates on the runs where it works. This is the
+/// req_4114 contract ("every early exit names itself") finally applied to this verb;
+/// `tools/seat action topo-refusal` already reads the slot.
+fn refuseCreateFace(why: []const u8) bool {
+    topoRefuse(why);
+    return false;
+}
+
+const MISSING_LOGICAL_ROW =
+    "a corner of the fill has no logical row id — the resident mesh's row table does not cover the selected vertices, so the model needs a reload before topology ops will land";
+const MIRROR_ROW_REFUSAL =
+    "the mirrored twin fill has no logical row id on the far side — disarm Mirror Edit to land the source side alone";
+
 pub fn meshTopoCreateFaceFromEdges() bool {
-    if (!model_paint.hasTarget()) return false;
+    g_topo_refusal = "";
+    if (!model_paint.hasTarget()) return refuseCreateFace("no model is mounted for editing");
     const follow_before = mesh_edit.followSelectedEdgesJson(std.heap.c_allocator, 2);
     defer if (follow_before) |json| std.heap.c_allocator.free(json);
     var selected: [16]mesh_edit.Edge = undefined;
     const selected_count = mesh_edit.selectedEdgesPub(selected[0..]);
-    if (selected_count < 2 or selected_count > selected.len) return false;
+    if (selected_count < 2 or selected_count > selected.len) {
+        g_topo_refusal = std.fmt.bufPrint(
+            &g_topo_refusal_buf,
+            "Create Face reads {d} in-scope selected edge(s); it needs 2 to bridge, 3 or 4 to fill a closed loop, and never more than {d}. A plain click REPLACES the selection — the second pick must be additive. An edge selected outside the active part scope is not counted.",
+            .{ selected_count, selected.len },
+        ) catch "Create Face needs 2 to 16 in-scope selected edges";
+        return false;
+    }
     const edges = selected[0..@as(usize, @intCast(selected_count))];
     const agreed_normal = mesh_edit.selectedEdgesReferenceNormalPub();
 
-    var logical = LogicalRowsBuilder.init() orelse return false;
+    var logical = LogicalRowsBuilder.init() orelse
+        return refuseCreateFace("the logical row builder could not start — the resident mesh has no indexable row table");
     defer logical.deinit();
-    if (!logical.appendAllSource()) return false;
+    if (!logical.appendAllSource())
+        return refuseCreateFace("the logical row builder could not read the current mesh rows");
     var mirror_logical = LogicalCloneMap{};
     defer mirror_logical.deinit();
 
     var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
         verts.deinit(std.heap.c_allocator);
-        return false;
+        return refuseCreateFace("the current mesh vertices could not be read");
     }
     const appended_logical_start = logical.rows.items.len;
 
@@ -3503,6 +3529,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 // between the two selected edges: it is a real surface the new face
                 // touches, so it decides the fill outright (req_4204).
                 mesh_edit.bridgeConnectingSideReferenceNormalPub(edges[0], edges[1], candidate);
+            if (winding == null) topoRefuse("the bridge quad has no winding authority: the two selected edges' surfaces disagree on facing, the quad's other two sides are not BOTH present as authored edges whose surfaces agree, boundary circulation across the selected pair disagrees, and no side the quad already shares resolved it either. One of the two surfaces is probably inside-out — flip it and retry.");
             if (winding) |reference| ok = appendQuadSplitFacingLogical(
                 &verts,
                 &logical,
@@ -3511,13 +3538,14 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 d,
                 c,
                 .{
-                    logicalIdForEditVertex(&logical, edges[0][0]) orelse return false,
-                    logicalIdForEditVertex(&logical, edges[0][1]) orelse return false,
-                    logicalIdForEditVertex(&logical, d_id) orelse return false,
-                    logicalIdForEditVertex(&logical, c_id) orelse return false,
+                    logicalIdForEditVertex(&logical, edges[0][0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                    logicalIdForEditVertex(&logical, edges[0][1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                    logicalIdForEditVertex(&logical, d_id) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                    logicalIdForEditVertex(&logical, c_id) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
                 },
                 reference,
             );
+            if (winding != null and !ok) topoRefuse("the bridge quad resolved a winding but its geometry could not be appended");
         } else if (agreed_normal) |reference_normal| {
             var order: [3]u32 = undefined;
             if (mesh_edit.triangleFromAdjacentEdges(edges[0], edges[1], &order)) {
@@ -3528,14 +3556,15 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     mesh_edit.vertPosPub(order[1]),
                     mesh_edit.vertPosPub(order[2]),
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[1]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[2]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
                     },
                     reference_normal,
                 );
-            }
-        }
+                if (!ok) topoRefuse("the corner triangle resolved a winding but its geometry could not be appended");
+            } else topoRefuse("the two selected edges share a vertex but do not close a triangle — their far endpoints are not joined");
+        } else topoRefuse("the two selected edges share a vertex, but the surfaces beside them disagree on facing, and a corner triangle has no winding fallback. Flip whichever face is inside-out and retry.");
     } else if (agreed_normal) |reference_normal| {
         var order: [4]u32 = undefined;
         if (closedEdgeLoopOrder(edges, &order)) |n| {
@@ -3550,9 +3579,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     p1,
                     p2,
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[1]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[2]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
                     },
                     reference_normal,
                 )
@@ -3565,17 +3594,19 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     p2,
                     mesh_edit.vertPosPub(order[3]),
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[1]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[2]) orelse return false,
-                        logicalIdForEditVertex(&logical, order[3]) orelse return false,
+                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[3]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
                     },
                     reference_normal,
                 );
-        }
-    }
+            if (!ok) topoRefuse("the loop fill resolved a winding but its geometry could not be appended");
+        } else topoRefuse("the selected edges do not form a CLOSED loop of exactly 3 or 4 edges — past 2 edges that is the only shape Create Face fills");
+    } else topoRefuse("a 3/4-edge loop fill takes its winding from the averaged normal of every selected edge's surface, and at least two of them oppose");
     if (!ok) {
         verts.deinit(std.heap.c_allocator);
+        if (g_topo_refusal.len == 0) topoRefuse("no fill shape was produced for this selection");
         return false;
     }
     // Triangle count of the SOURCE face alone — the twin appends below repeat it, and
@@ -3624,21 +3655,21 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 const mirrored_ids: [3]u32 = if (logical.enabled()) blk: {
                     const source_ids = logical.rows.items[appended_logical_start + row * 3 ..][0..3];
                     break :blk .{
-                        mirroredLogicalId(&logical, &mirror_logical, source_ids[0], subset) orelse return false,
-                        mirroredLogicalId(&logical, &mirror_logical, source_ids[2], subset) orelse return false,
-                        mirroredLogicalId(&logical, &mirror_logical, source_ids[1], subset) orelse return false,
+                        mirroredLogicalId(&logical, &mirror_logical, source_ids[0], subset) orelse return refuseCreateFace(MIRROR_ROW_REFUSAL),
+                        mirroredLogicalId(&logical, &mirror_logical, source_ids[2], subset) orelse return refuseCreateFace(MIRROR_ROW_REFUSAL),
+                        mirroredLogicalId(&logical, &mirror_logical, source_ids[1], subset) orelse return refuseCreateFace(MIRROR_ROW_REFUSAL),
                     };
                 } else .{ 0, 0, 0 };
                 if (!appendTriLogical(&verts, &logical, corners[0], corners[2], corners[1], mirrored_ids)) {
                     verts.deinit(std.heap.c_allocator);
-                    return false;
+                    return refuseCreateFace("the mirrored twin fill could not be appended — disarm Mirror Edit to land the source side alone");
                 }
             }
         }
     }
     const owned = verts.toOwnedSlice(std.heap.c_allocator) catch {
         verts.deinit(std.heap.c_allocator);
-        return false;
+        return refuseCreateFace("out of memory building the appended vertex buffer");
     };
     defer std.heap.c_allocator.free(owned);
     const added: u32 = @intCast((owned.len / 8) - @as(usize, g_edit_count));
@@ -3649,13 +3680,17 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
     const old_parts = capturePartOfFaces();
     defer if (old_parts) |parts| std.heap.c_allocator.free(parts);
-    const materials = captureFaceMaterials(old_faces + added / 3) orelse return false;
+    const materials = captureFaceMaterials(old_faces + added / 3) orelse
+        return refuseCreateFace("the face material table could not be captured for the appended faces");
     defer std.heap.c_allocator.free(materials);
     @memset(materials[old_faces..], indexed_edit_mesh.NO_MATERIAL);
-    var semantics = captureFaceSemantics(old_faces + added / 3) orelse return false;
+    var semantics = captureFaceSemantics(old_faces + added / 3) orelse
+        return refuseCreateFace("the face semantic table could not be captured for the appended faces");
     defer semantics.deinit();
-    const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
-    if (hostPartCount() > 0 and src_part == model_source.NO_PART) return false;
+    const src_part = mesh_edit.selectedEdgesCommonPartPub() orelse
+        return refuseCreateFace("the selected edges do not all belong to ONE Outliner part — an edge whose two endpoints sit in different parts, or two edges owned by different parts, has no part for the new face to join. Run `tools/seat action part-ownership` if the Outliner disagrees with the host.");
+    if (hostPartCount() > 0 and src_part == model_source.NO_PART)
+        return refuseCreateFace("this model has Outliner parts, but the selected edges belong to none of them, so the new face would have no owner");
     const inherited_retopo_band = if (g_retopo_pending_band_generation == g_edit_generation)
         g_retopo_pending_band
     else
@@ -3667,20 +3702,21 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const had_uv_zone = g_uv_zone != null;
     var uv_zone_carry = prepareZoneAppend(&g_uv_zone, @intCast(old_faces), @intCast(added / 3), UV_ZONE_UNASSIGNED);
     defer if (uv_zone_carry) |labels| std.heap.c_allocator.free(labels);
-    const logical_replacement = logical.replacement(g_edit_count + added) orelse return false;
+    const logical_replacement = logical.replacement(g_edit_count + added) orelse
+        return refuseCreateFace("the logical row replacement could not be built for the appended faces");
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added, logical_replacement);
     if (replaced) {
         if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part, source_tris)) {
             if (snap) |*before| _ = journalInstall(before);
             journalDiscard(&snap);
-            return false;
+            return refuseCreateFace("the fill landed but could not be adopted into an authored face group / Outliner part, so it was rolled back");
         }
         model_source.setFaceMaterials(materials);
         if (!model_source.setFaceSemantics(semantics.regions, semantics.instances)) {
             if (snap) |*before| _ = journalInstall(before);
             journalDiscard(&snap);
-            return false;
+            return refuseCreateFace("the semantic table refused the appended faces, so the fill was rolled back");
         }
         commitRetopoBandCarry(had_retopo_bands, &retopo_bands);
         commitZoneCarry(&g_uv_zone, had_uv_zone, &uv_zone_carry);
@@ -3703,7 +3739,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 ) catch {};
             }
         }
-    } else journalDiscard(&snap);
+    } else {
+        journalDiscard(&snap);
+        topoRefuse("the resident mesh refused to accept the appended fill — the indexed rebuild rejected the result");
+    }
     return replaced;
 }
 

@@ -1376,7 +1376,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       resyncPartRanges(); // the op may have renumbered groups — mirror the host's ranges (req_2644)
       refreshUvIfLive(); // the op rewrote the atlas layout — the UV panel must follow (req_2625 GG)
     } else {
-      setError(fail);
+      // The host names its own refusals (req_4114/req_4205). Prefer that over the
+      // caller's guess — the guess is what told someone their selection was wrong for
+      // half an hour while the selection was fine the whole time.
+      const named = host.__mesh_topo_refusal?.();
+      setError(typeof named === 'string' && named.trim() ? named.trim() : fail);
     }
   };
 
