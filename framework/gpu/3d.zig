@@ -1742,6 +1742,7 @@ const LogicalIdFailure = union(enum) {
 var g_last_logical_id_failure: LogicalIdFailure = .none;
 
 fn stableLogicalIdForEditVertex(edit_vertex: u32) ?u32 {
+    g_last_logical_id_failure = .none; // a stale cause must never explain a fresh null
     const rows = model_source.renderCornerLogicalIds() orelse {
         g_last_logical_id_failure = .no_table;
         return null;
@@ -1771,6 +1772,50 @@ fn stableLogicalIdForEditVertex(edit_vertex: u32) ?u32 {
 
 fn logicalIdForEditVertex(builder: *const LogicalRowsBuilder, edit_vertex: u32) ?u32 {
     return if (builder.enabled()) stableLogicalIdForEditVertex(edit_vertex) else 0;
+}
+
+/// The logical row a NEW fill corner should claim (req_4206). Where two surfaces meet at
+/// one welded point, that point carries one row per surface, and the strict lookup above
+/// refuses the ambiguity. That is right for a lookup and useless for a fill, because the
+/// fill's answer is not arbitrary: the face is being built FROM a selected edge, so its
+/// corner must claim the same logical vertex the surface beside THAT edge already uses —
+/// pick the other one and the new face comes apart from its neighbour the first time
+/// anything moves. Refusing here left an ordinary bridge between two touching surfaces
+/// impossible to build, with no explanation, which is how this cost an evening.
+///
+/// Falls through to the strict refusal when no selected edge's own face covers the
+/// corner, because then there genuinely is no continuity to preserve.
+fn fillCornerLogicalId(builder: *const LogicalRowsBuilder, edit_vertex: u32, edges: []const mesh_edit.Edge) ?u32 {
+    if (!builder.enabled()) return 0;
+    if (stableLogicalIdForEditVertex(edit_vertex)) |id| return id;
+    switch (g_last_logical_id_failure) {
+        .ambiguous => {},
+        else => return null,
+    }
+    const rows = model_source.renderCornerLogicalIds() orelse return null;
+    if (rows.len != g_edit_count) return null;
+    for (edges) |edge| {
+        const partner = if (edge[0] == edit_vertex)
+            edge[1]
+        else if (edge[1] == edit_vertex)
+            edge[0]
+        else
+            continue;
+        var face: u32 = 0;
+        while (face < g_edit_count / 3) : (face += 1) {
+            var corner_at: ?usize = null;
+            var holds_partner = false;
+            var corner: usize = 0;
+            while (corner < 3) : (corner += 1) {
+                const vertex = mesh_edit.cornerVertPub(face, @intCast(corner));
+                if (vertex == edit_vertex) corner_at = corner;
+                if (vertex == partner) holds_partner = true;
+            }
+            if (!holds_partner) continue;
+            if (corner_at) |shared| return rows[@as(usize, face) * 3 + shared];
+        }
+    }
+    return null;
 }
 
 fn editVertexForStableLogicalId(stable_id: u32) ?u32 {
@@ -3504,7 +3549,7 @@ fn refuseCreateFaceMissingLogicalRow() bool {
         ) catch "the logical row table is stale",
         .ambiguous => |split| std.fmt.bufPrint(
             &g_topo_refusal_buf,
-            "vertex {d} is ONE welded point whose face corners carry DIFFERENT logical rows ({d} and {d}) — two coincident vertices that were never merged. A new face there has no single corner to attach to. Merge that point (select it and weld) and retry.",
+            "vertex {d} is ONE welded point whose face corners carry DIFFERENT logical rows ({d} and {d}), and NEITHER belongs to a face touching the selected edges — so there is no neighbouring surface for the new corner to stay attached to. Include an edge of the surface you want it joined to.",
             .{ split.vertex, split.first, split.second },
         ) catch "a fill corner is welded from two unmerged logical vertices",
         .unused => |vertex| std.fmt.bufPrint(
@@ -3589,10 +3634,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 d,
                 c,
                 .{
-                    logicalIdForEditVertex(&logical, edges[0][0]) orelse return refuseCreateFaceMissingLogicalRow(),
-                    logicalIdForEditVertex(&logical, edges[0][1]) orelse return refuseCreateFaceMissingLogicalRow(),
-                    logicalIdForEditVertex(&logical, d_id) orelse return refuseCreateFaceMissingLogicalRow(),
-                    logicalIdForEditVertex(&logical, c_id) orelse return refuseCreateFaceMissingLogicalRow(),
+                    fillCornerLogicalId(&logical, edges[0][0], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                    fillCornerLogicalId(&logical, edges[0][1], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                    fillCornerLogicalId(&logical, d_id, edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                    fillCornerLogicalId(&logical, c_id, edges) orelse return refuseCreateFaceMissingLogicalRow(),
                 },
                 reference,
             );
@@ -3607,9 +3652,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     mesh_edit.vertPosPub(order[1]),
                     mesh_edit.vertPosPub(order[2]),
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[0], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[1], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[2], edges) orelse return refuseCreateFaceMissingLogicalRow(),
                     },
                     reference_normal,
                 );
@@ -3630,9 +3675,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     p1,
                     p2,
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[0], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[1], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[2], edges) orelse return refuseCreateFaceMissingLogicalRow(),
                     },
                     reference_normal,
                 )
@@ -3645,10 +3690,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     p2,
                     mesh_edit.vertPosPub(order[3]),
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFaceMissingLogicalRow(),
-                        logicalIdForEditVertex(&logical, order[3]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[0], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[1], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[2], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                        fillCornerLogicalId(&logical, order[3], edges) orelse return refuseCreateFaceMissingLogicalRow(),
                     },
                     reference_normal,
                 );
