@@ -1726,9 +1726,30 @@ fn appendQuadSplitFacingLogical(
 /// every resident corner welded into that edit handle agrees on the same stable
 /// id. Coincident but intentionally split v5 vertices therefore refuse instead of
 /// being guessed together.
+/// Why the last `stableLogicalIdForEditVertex` lookup came back null. Four unrelated
+/// conditions share that one null, and a caller refusing on it can otherwise only say
+/// "no logical row" — which names none of them (req_4205, the `topoRefuseIndexedError`
+/// pattern). Only the lookup itself can tell them apart, so it records which.
+const LogicalIdFailure = union(enum) {
+    none,
+    no_table,
+    stale_table: struct { rows: usize, corners: u32 },
+    /// One welded edit vertex whose face corners carry DIFFERENT stable rows: two
+    /// coincident logical vertices that were never merged. Common in imports.
+    ambiguous: struct { vertex: u32, first: u32, second: u32 },
+    unused: u32,
+};
+var g_last_logical_id_failure: LogicalIdFailure = .none;
+
 fn stableLogicalIdForEditVertex(edit_vertex: u32) ?u32 {
-    const rows = model_source.renderCornerLogicalIds() orelse return null;
-    if (!mesh_edit.ensureTopologyPub() or rows.len != g_edit_count) return null;
+    const rows = model_source.renderCornerLogicalIds() orelse {
+        g_last_logical_id_failure = .no_table;
+        return null;
+    };
+    if (!mesh_edit.ensureTopologyPub() or rows.len != g_edit_count) {
+        g_last_logical_id_failure = .{ .stale_table = .{ .rows = rows.len, .corners = g_edit_count } };
+        return null;
+    }
     var found: ?u32 = null;
     var face: u32 = 0;
     while (face < g_edit_count / 3) : (face += 1) {
@@ -1737,10 +1758,14 @@ fn stableLogicalIdForEditVertex(edit_vertex: u32) ?u32 {
             if (mesh_edit.cornerVertPub(face, @intCast(corner)) != edit_vertex) continue;
             const id = rows[@as(usize, face) * 3 + corner];
             if (found) |prior| {
-                if (prior != id) return null;
+                if (prior != id) {
+                    g_last_logical_id_failure = .{ .ambiguous = .{ .vertex = edit_vertex, .first = prior, .second = id } };
+                    return null;
+                }
             } else found = id;
         }
     }
+    if (found == null) g_last_logical_id_failure = .{ .unused = edit_vertex };
     return found;
 }
 
@@ -3461,9 +3486,35 @@ fn refuseCreateFace(why: []const u8) bool {
 }
 
 const MISSING_LOGICAL_ROW =
-    "a corner of the fill has no logical row id — the resident mesh's row table does not cover the selected vertices, so the model needs a reload before topology ops will land";
+    "a corner of the fill has no logical row id, and the lookup did not record which of its conditions caused that";
 const MIRROR_ROW_REFUSAL =
     "the mirrored twin fill has no logical row id on the far side — disarm Mirror Edit to land the source side alone";
+
+/// Refuse a fill whose corner has no single stable row, naming WHICH condition it hit.
+/// The `ambiguous` case is the interesting one and the only one the person at the mouse
+/// can act on: two coincident logical vertices that were never merged.
+fn refuseCreateFaceMissingLogicalRow() bool {
+    g_topo_refusal = switch (g_last_logical_id_failure) {
+        .none => MISSING_LOGICAL_ROW,
+        .no_table => "the resident mesh carries no logical row table at all, so no appended corner can be addressed — reload the model",
+        .stale_table => |stale| std.fmt.bufPrint(
+            &g_topo_refusal_buf,
+            "the logical row table is stale: {d} rows for {d} mesh corners. Reload the model before editing topology.",
+            .{ stale.rows, stale.corners },
+        ) catch "the logical row table is stale",
+        .ambiguous => |split| std.fmt.bufPrint(
+            &g_topo_refusal_buf,
+            "vertex {d} is ONE welded point whose face corners carry DIFFERENT logical rows ({d} and {d}) — two coincident vertices that were never merged. A new face there has no single corner to attach to. Merge that point (select it and weld) and retry.",
+            .{ split.vertex, split.first, split.second },
+        ) catch "a fill corner is welded from two unmerged logical vertices",
+        .unused => |vertex| std.fmt.bufPrint(
+            &g_topo_refusal_buf,
+            "vertex {d} is not used by any face corner, so it has no logical row to inherit",
+            .{vertex},
+        ) catch "a fill corner belongs to no face",
+    };
+    return false;
+}
 
 pub fn meshTopoCreateFaceFromEdges() bool {
     g_topo_refusal = "";
@@ -3538,10 +3589,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 d,
                 c,
                 .{
-                    logicalIdForEditVertex(&logical, edges[0][0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                    logicalIdForEditVertex(&logical, edges[0][1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                    logicalIdForEditVertex(&logical, d_id) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                    logicalIdForEditVertex(&logical, c_id) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                    logicalIdForEditVertex(&logical, edges[0][0]) orelse return refuseCreateFaceMissingLogicalRow(),
+                    logicalIdForEditVertex(&logical, edges[0][1]) orelse return refuseCreateFaceMissingLogicalRow(),
+                    logicalIdForEditVertex(&logical, d_id) orelse return refuseCreateFaceMissingLogicalRow(),
+                    logicalIdForEditVertex(&logical, c_id) orelse return refuseCreateFaceMissingLogicalRow(),
                 },
                 reference,
             );
@@ -3556,9 +3607,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     mesh_edit.vertPosPub(order[1]),
                     mesh_edit.vertPosPub(order[2]),
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFaceMissingLogicalRow(),
                     },
                     reference_normal,
                 );
@@ -3579,9 +3630,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     p1,
                     p2,
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFaceMissingLogicalRow(),
                     },
                     reference_normal,
                 )
@@ -3594,10 +3645,10 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                     p2,
                     mesh_edit.vertPosPub(order[3]),
                     .{
-                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
-                        logicalIdForEditVertex(&logical, order[3]) orelse return refuseCreateFace(MISSING_LOGICAL_ROW),
+                        logicalIdForEditVertex(&logical, order[0]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[1]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[2]) orelse return refuseCreateFaceMissingLogicalRow(),
+                        logicalIdForEditVertex(&logical, order[3]) orelse return refuseCreateFaceMissingLogicalRow(),
                     },
                     reference_normal,
                 );
