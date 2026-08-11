@@ -208,3 +208,112 @@ export function summarizeSelectedFaces(snapshot: ModelSelectionSnapshot): ModelS
 
 export const modelSelectionModeName = (mode: ModelSelectionMode): 'view' | 'vertex' | 'edge' | 'face' =>
   mode === 1 ? 'vertex' : mode === 2 ? 'edge' : mode === 3 ? 'face' : 'view';
+
+// ── Why won't Create Face fill THIS selection? (req_4202) ─────────────────────
+// `meshTopoCreateFaceFromEdges` (framework/gpu/3d.zig) answers one bool. When it is
+// false the person holding the mouse has no way to learn WHICH of its gates closed,
+// and the only probe available — pressing C again — mutates the model on the runs
+// where it happens to work. The shape gates are pure arithmetic over the selection
+// snapshot the host already publishes, so they can be read without touching anything.
+// Winding and edit-scope are NOT: those live behind host state this snapshot does not
+// carry, and they are reported as the host's to decide rather than guessed at.
+
+/** The host reads at most this many selected edges (`selected: [16]Edge` in 3d.zig). */
+export const CREATE_FACE_MAX_EDGES = 16;
+
+export type CreateFaceShape = 'bridge' | 'corner' | 'loop-fill' | 'none';
+export type CreateFaceReadiness = {
+  /** Which of the host's three fills this selection is asking for. */
+  shape: CreateFaceShape;
+  /** Gates this selection FAILS, measured from the snapshot. Empty means nothing
+   *  visible in the selection blocks the fill. */
+  blocking: string[];
+  /** Gates only the host can answer. Never reported as passing — an unmeasured
+   *  gate is unknown, and unknown is not clean. */
+  hostDecides: string[];
+};
+
+/** Undirected vertex degree over the selected edges, the same adjacency the host's
+ *  `closedEdgeLoopOrder` walks. */
+function selectedEdgeDegrees(edges: ModelSelectionEdge[]): Map<number, number> {
+  const degree = new Map<number, number>();
+  for (const edge of edges) for (const vertex of edge.vertices) degree.set(vertex, (degree.get(vertex) ?? 0) + 1);
+  return degree;
+}
+
+const edgesShareVertex = (a: ModelSelectionEdge, b: ModelSelectionEdge): boolean =>
+  a.vertices.some((vertex) => b.vertices.includes(vertex));
+
+/** Read a live selection against Create Face's own gate ladder. Pure. */
+export function describeCreateFaceReadiness(snapshot: ModelSelectionSnapshot): CreateFaceReadiness {
+  const mode = modelSelectionModeName(snapshot.mode);
+  if (mode !== 'edge') {
+    return {
+      shape: 'none',
+      blocking: [`Create Face fills an EDGE selection; the editor is in ${mode} mode`],
+      hostDecides: [],
+    };
+  }
+  const { count, edges } = snapshot;
+  const blocking: string[] = [];
+  const hostDecides: string[] = [];
+  if (snapshot.truncated) {
+    hostDecides.push(`the snapshot lists ${edges.length} of ${count} selected edges — the rest were truncated`);
+  }
+  if (count === 0) return { shape: 'none', blocking: ['no edge is selected'], hostDecides };
+  if (count === 1) {
+    return {
+      shape: 'none',
+      blocking: ['Create Face needs 2 or more edges; 1 is selected — the second pick must be ADDITIVE (a plain click replaces the selection)'],
+      hostDecides,
+    };
+  }
+  if (count > CREATE_FACE_MAX_EDGES) {
+    return {
+      shape: 'none',
+      blocking: [`the host reads at most ${CREATE_FACE_MAX_EDGES} selected edges; ${count} are selected`],
+      hostDecides,
+    };
+  }
+  // Only the host's `edgeInScopePub`-filtered view decides which selected edges it
+  // actually receives; the snapshot lists the selection unfiltered.
+  hostDecides.push('whether every selected edge is inside the active part scope, and is an authored edge rather than a triangulation diagonal');
+
+  if (count > 4) {
+    return {
+      shape: 'none',
+      blocking: [`past 2 edges Create Face only fills a CLOSED loop of 3 or 4 edges; ${count} are selected`],
+      hostDecides,
+    };
+  }
+  if (count >= 3) {
+    const degree = selectedEdgeDegrees(edges);
+    const open = [...degree.entries()].filter(([, uses]) => uses !== 2).map(([vertex]) => vertex);
+    if (degree.size !== count || open.length > 0) {
+      blocking.push(`a ${count}-edge fill must be a CLOSED loop — ${degree.size} distinct corners over ${count} edges, and ${open.length} of them are not shared by exactly two selected edges`);
+    }
+    hostDecides.push('whether the surfaces beside all selected edges agree on a facing — the loop fill takes its winding from their averaged normal and refuses when any two oppose');
+    return { shape: 'loop-fill', blocking, hostDecides };
+  }
+
+  const [first, second] = edges;
+  if (!first || !second) return { shape: 'none', blocking: ['the selected edges could not be read'], hostDecides };
+  if (edgesShareVertex(first, second)) {
+    hostDecides.push('whether the two surfaces beside the selected edges agree on a facing — a corner triangle has no fallback and refuses outright when they oppose');
+    return { shape: 'corner', blocking, hostDecides };
+  }
+  // The disjoint bridge has three winding authorities in order: the two edges' own
+  // neighbour normals, then the quad's OTHER two sides when those already exist as
+  // edges, then boundary circulation — and that last one needs exactly one incident
+  // triangle per selected edge, which is measurable here.
+  const closed = [first, second].filter((edge) => edge.faces > 1);
+  if (closed.length > 0) {
+    blocking.push(`${closed.map((edge) => `edge ${edge.id} already carries ${edge.faces} faces`).join(' and ')} — a bridge across closed surface has no boundary circulation to take its winding from, so it lands only if those surfaces already agree on a facing`);
+  }
+  const bare = [first, second].filter((edge) => edge.faces === 0);
+  if (bare.length > 0) {
+    blocking.push(`${bare.map((edge) => `edge ${edge.id}`).join(' and ')} carries no face at all — a wire edge has no surface to take a winding from`);
+  }
+  hostDecides.push('whether a winding survives: the two edges\' neighbour normals, else the quad\'s other two sides if they already exist as edges, else boundary circulation');
+  return { shape: 'bridge', blocking, hostDecides };
+}

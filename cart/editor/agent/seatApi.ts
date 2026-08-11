@@ -5,6 +5,13 @@
 
 import { countUvTextureFootprints, parseUvIslandRects } from '../model/uvLayout';
 import {
+  describeCreateFaceReadiness,
+  modelSelectionModeName,
+  parseModelSelectionSnapshot,
+  type CreateFaceReadiness,
+  type ModelSelectionSnapshot,
+} from '../model/modelSelectionFocus';
+import {
   NO_SEMANTIC_ID,
   declareRegion,
   type MeshSemanticRegion as SemanticRegion,
@@ -145,6 +152,12 @@ export type SeatBriefReply = Omit<SeatReply, 'percept'> & { brief: string };
 export type SeatElements = {
   vertices: { id: number; at: [number, number, number] }[];
   edges: { id: number; vertices: [number, number]; faces: number; open: boolean }[];
+};
+/** The resident selection with its mode spelled out, plus the Create Face gate ladder
+ *  read against it. `elements` describes the MESH; this describes what is selected in it. */
+export type SeatSelectionReport = Omit<ModelSelectionSnapshot, 'mode'> & {
+  mode: 'view' | 'vertex' | 'edge' | 'face';
+  createFace: CreateFaceReadiness;
 };
 export type SeatBoundaryContinuation = {
   open: [number, number];
@@ -799,6 +812,17 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return receipt;
   };
   const elements = (): SeatElements | null => parseJson<SeatElements>(host.__mesh_edit_elements?.());
+  /** The LIVE selection, measured (req_4202). Every edge-mode topology verb gates on
+   *  facts about the selected edges — how many faces each already carries, whether they
+   *  meet, which part they sit in — and the only way to learn them used to be running
+   *  the verb and reading its refusal. A probe that mutates on the runs where it happens
+   *  to succeed is the crossed wire req_4114 already paid for, so this reads and nothing
+   *  else: it sets no selection, changes no mode, and touches no geometry. */
+  const selection = (): SeatSelectionReport | null => {
+    const snapshot = parseModelSelectionSnapshot(host.__mesh_edit_selection?.());
+    if (!snapshot) return null;
+    return { ...snapshot, mode: modelSelectionModeName(snapshot.mode), createFace: describeCreateFaceReadiness(snapshot) };
+  };
   const readRetopoBands = (): SeatRetopoBandPlan | null => {
     const plan = parseJson<SeatRetopoBandPlan>(host.__mesh_retopo_bands_read?.());
     return plan?.version === 1 && Array.isArray(plan.bands) &&
@@ -2185,7 +2209,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: oracleAmbient(look()), ...(reason ? { reason } : {}) });
   return {
-    look, elements, retopoBands, boundaryContinuation, follow, followPatch,
+    look, elements, selection, retopoBands, boundaryContinuation, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
@@ -2259,7 +2283,7 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 // actions (viewport, retopo-bands, follow, uv-prestack diagnostics, ...).
 
 const SEAT_READ_ACTIONS = new Set([
-  'look', 'semantic-status', 'rig-status', 'face-table', 'elements', 'boundary-continuation', 'uv-state',
+  'look', 'semantic-status', 'rig-status', 'face-table', 'elements', 'selection', 'boundary-continuation', 'uv-state',
   'topo-refusal',
   'recipe-list', 'shot', 'claims', 'lore',
   // The host's part-ownership truth is a pure read of the journal log's `current`
@@ -2415,6 +2439,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'elements': {
         const result = seat.elements();
         return seat.reply('elements', !!result, result ?? undefined, result ? undefined : 'topology descriptors unavailable');
+      }
+      case 'selection': {
+        const result = seat.selection();
+        return seat.reply('selection', !!result, result ?? undefined, result ? undefined : 'the live selection snapshot is unavailable — no model is mounted');
       }
       // The read-only arithmetic lane (req_4052). These never generate geometry;
       // `align` is the one that acts, and it applies exactly the delta its own
