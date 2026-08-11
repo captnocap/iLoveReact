@@ -1110,6 +1110,19 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
       return { faces: Number(reply.faces) || 0, actionableFaces: Number(reply.actionableFaces) || 0, bbox: reply.bbox ?? [] };
     } catch { return null; }
   };
+  /** Put the selection on every point whose corners carry more than one logical row
+   *  (req_4206) — the set that can block a fill. Reports POINTS in `points`; a number
+   *  nobody can locate is not actionable, so this marks them and lets the viewport
+   *  settle it. These are NOT coincident vertices: `stats anomalies` is the verb that
+   *  answers that, and it read zero on the model that hit this. */
+  const selectSplitPoints = (): { points: number; actionablePoints: number; bbox: number[] } | null => {
+    try {
+      const reply = JSON.parse(String(automation(() => host.__mesh_select_split_points?.()) ?? 'null'));
+      if (reply?.ok !== true) return null;
+      notifySelectionChanged();
+      return { points: Number(reply.faces) || 0, actionablePoints: Number(reply.actionableFaces) || 0, bbox: reply.bbox ?? [] };
+    } catch { return null; }
+  };
   /** Rename a region, or remove it so its faces go back to unnamed (req_3894).
    *  Naming used to be a one-way door — a mistyped or repurposed region was
    *  permanent, for the Seat exactly as for the GUI. */
@@ -2210,7 +2223,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   const reply = (op: string, ok: boolean, result?: unknown, reason?: string): SeatReply => ({ ok, op, result, percept: oracleAmbient(look()), ...(reason ? { reason } : {}) });
   return {
     look, elements, selection, retopoBands, boundaryContinuation, follow, followPatch,
-    select, selectEdge, selectVertex, selectFace, selectAudit, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
+    select, selectEdge, selectVertex, selectFace, selectAudit, selectSplitPoints, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
     mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, uvZone, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
@@ -2516,6 +2529,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const remove = args.remove === true;
         const result = seat.editRegion(String(args.name ?? ''), remove ? null : String(args.rename ?? ''), remove);
         return seat.reply('region-edit', !!result, result ?? undefined, result ? undefined : 'needs an existing region name plus either rename:"<new>" (unique, non-empty) or remove:true');
+      }
+      case 'select-split-points': {
+        const result = seat.selectSplitPoints();
+        return seat.reply('select-split-points', !!result, result ?? undefined, result ? undefined : 'no live mesh, or the resident mesh carries no logical row table to compare against');
       }
       case 'select-audit': {
         const result = seat.selectAudit(String(args.kind ?? 'both'));

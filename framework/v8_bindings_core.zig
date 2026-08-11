@@ -1131,6 +1131,24 @@ fn hostMeshSelectAudit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, reply);
 }
 
+/// __mesh_select_split_points() → {ok,faces,actionableFaces,bbox}. Selects every
+/// welded point the model still treats as more than one vertex — where two surfaces
+/// touch without being joined (req_4206). `faces` counts POINTS here; the field name
+/// is the shared MeshSelectorResult shape.
+fn hostMeshSelectSplitPoints(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const result = scene3d.meshSelectSplitPoints() orelse
+        return setReturnString(info, "{\"ok\":false,\"reason\":\"no live mesh or no logical row table\"}");
+    state.markDirty();
+    var buf: [320]u8 = undefined;
+    const reply = std.fmt.bufPrint(
+        &buf,
+        "{{\"ok\":true,\"faces\":{d},\"actionableFaces\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+        .{ result.faces, result.actionable_faces, result.bbox[0], result.bbox[1], result.bbox[2], result.bbox[3], result.bbox[4], result.bbox[5] },
+    ) catch return setReturnString(info, "{\"ok\":false,\"reason\":\"encode failed\"}");
+    setReturnString(info, reply);
+}
+
 /// __mesh_texture_slot_assign(index) / _clear() mutate metadata on the selected
 /// authored faces. Return the number of authored faces whose role changed.
 fn hostMeshTextureSlotAssign(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -5115,6 +5133,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
         v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
         v8_runtime.registerHostFn("__mesh_select_audit", hostMeshSelectAudit);
+        v8_runtime.registerHostFn("__mesh_select_split_points", hostMeshSelectSplitPoints);
         v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
         v8_runtime.registerHostFn("__mesh_texture_slot_clear", hostMeshTextureSlotClear);
         v8_runtime.registerHostFn("__mesh_texture_slot_remove", hostMeshTextureSlotRemove);
@@ -5374,6 +5393,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
     v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
     v8_runtime.registerHostFn("__mesh_select_audit", hostMeshSelectAudit);
+    v8_runtime.registerHostFn("__mesh_select_split_points", hostMeshSelectSplitPoints);
     v8_runtime.registerHostFn("__mesh_texture_slot_assign", hostMeshTextureSlotAssign);
     v8_runtime.registerHostFn("__mesh_texture_slot_clear", hostMeshTextureSlotClear);
     v8_runtime.registerHostFn("__mesh_texture_slot_remove", hostMeshTextureSlotRemove);

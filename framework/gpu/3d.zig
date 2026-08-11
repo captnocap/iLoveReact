@@ -14766,6 +14766,72 @@ pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
     return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox, .unmatched_sources = unmatched };
 }
 
+/// Select every point whose face corners carry MORE THAN ONE logical row (req_4206) —
+/// the exact set that can block a fill, marked so it can be looked at instead of
+/// theorised about.
+///
+/// These are NOT duplicate vertices, and calling them that was wrong: `stats anomalies`
+/// reports zero coincident positions on the model that hit this. One position, several
+/// logical vertices in the id namespace — whatever produced the split, it is a fact
+/// about the row table, not about the geometry, and this reports only what it measures.
+///
+/// A count nobody can locate is not actionable — the rule `meshSelectAuditFaces`
+/// follows — so this does not return a number to be believed, it puts the selection on
+/// the points and lets the viewport settle the argument.
+///
+/// Returns null when there is no live mesh or no logical row table to compare against.
+pub fn meshSelectSplitPoints() ?MeshSelectorResult {
+    const rows = model_source.renderCornerLogicalIds() orelse return null;
+    if (!mesh_edit.ensureTopologyPub() or rows.len != g_edit_count) return null;
+    const face_count = g_edit_count / 3;
+    const vertex_count = mesh_edit.vertCount();
+    if (face_count == 0 or vertex_count == 0) return null;
+
+    const allocator = std.heap.c_allocator;
+    const first_row = allocator.alloc(u32, vertex_count) catch return null;
+    defer allocator.free(first_row);
+    const unmerged = allocator.alloc(bool, vertex_count) catch return null;
+    defer allocator.free(unmerged);
+    const NO_ROW = std.math.maxInt(u32);
+    @memset(first_row, NO_ROW);
+    @memset(unmerged, false);
+
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const vertex = mesh_edit.cornerVertPub(face, corner);
+            if (vertex >= vertex_count) continue;
+            const row = rows[@as(usize, face) * 3 + corner];
+            if (first_row[vertex] == NO_ROW) {
+                first_row[vertex] = row;
+            } else if (first_row[vertex] != row) {
+                unmerged[vertex] = true;
+            }
+        }
+    }
+
+    mesh_edit.setMode(.vertex);
+    mesh_edit.clearSelection();
+    var matched: u32 = 0;
+    var actionable: u32 = 0;
+    var bbox: [6]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    var vertex: u32 = 0;
+    while (vertex < vertex_count) : (vertex += 1) {
+        if (!unmerged[vertex]) continue;
+        _ = mesh_edit.selectVertexByIndex(vertex, matched != 0);
+        matched += 1;
+        if (mesh_edit.vertInScopePub(vertex)) actionable += 1;
+        const at = mesh_edit.vertPosPub(vertex);
+        for (0..3) |axis| {
+            bbox[axis] = @min(bbox[axis], at[axis]);
+            bbox[axis + 3] = @max(bbox[axis + 3], at[axis]);
+        }
+    }
+    if (matched == 0) bbox = .{ 0, 0, 0, 0, 0, 0 };
+    return .{ .faces = matched, .actionable_faces = actionable, .bbox = bbox };
+}
+
 /// Which audited fact to select. `both` is the union — one press to see every
 /// triangle the SHAPE panel is complaining about.
 pub const AuditSelectKind = enum(u8) { intersecting = 0, unreachable_faces = 1, both = 2 };
