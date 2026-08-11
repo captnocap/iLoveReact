@@ -1815,6 +1815,19 @@ fn fillCornerLogicalId(builder: *const LogicalRowsBuilder, edit_vertex: u32, edg
             if (corner_at) |shared| return rows[@as(usize, face) * 3 + shared];
         }
     }
+    // No selected edge's own face covers this corner, so there is no continuity to
+    // prefer — but there is still nothing to refuse over. USER RULING (req_4207):
+    // "there is 0 reason it should be blocking." Every row at this point denotes THIS
+    // point; which id a new corner inherits is bookkeeping, and bookkeeping does not get
+    // to veto a modelling operation. Take the first one deterministically.
+    var any: u32 = 0;
+    while (any < g_edit_count / 3) : (any += 1) {
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            if (mesh_edit.cornerVertPub(any, corner) != edit_vertex) continue;
+            return rows[@as(usize, any) * 3 + corner];
+        }
+    }
     return null;
 }
 
