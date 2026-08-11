@@ -1553,6 +1553,11 @@ const LogicalTopologyReplacement = union(enum) {
     },
     /// Deleting the final triangle intentionally leaves no logical rows.
     empty,
+    /// A verified journal snapshot recorded a document that HAD no logical
+    /// topology. Restoring it must clear a resident table (the first structural
+    /// op on such a document mints one — undoing that op un-mints it). Journal
+    /// restore only; live operations stay behind the `.absent` guard.
+    restore_absent,
 };
 
 fn logicalReplacementExactOrAbsent(
@@ -1566,6 +1571,22 @@ fn logicalReplacementExactOrAbsent(
         .vertex_count = logical_vertex_count,
     } };
     return .absent;
+}
+
+/// Journal restores are the one crossing allowed to CLEAR a resident logical
+/// table: undoing the first structural op on a document that had no table must
+/// un-mint the rows that op created (first-action undo, req_4220).
+fn logicalReplacementForJournalRestore(
+    rows: ?[]const u32,
+    count: u32,
+    logical_vertex_count: u32,
+) LogicalTopologyReplacement {
+    if (count == 0) return .empty;
+    if (rows) |exact_rows| return .{ .exact = .{
+        .rows = exact_rows,
+        .vertex_count = logical_vertex_count,
+    } };
+    return .restore_absent;
 }
 
 /// Parallel provenance stream for soup-building structural operations. Existing
@@ -2060,6 +2081,9 @@ fn logicalReplacementPreflight(new_verts: []const f32, count: u32, replacement: 
     if (new_verts.len < need) return false;
     return switch (replacement) {
         .absent => model_source.renderCornerLogicalIds() == null,
+        // The snapshot was validated by journalMeshPreflight; clearing a resident
+        // table is the exact restore, not the req_4194 silent drop.
+        .restore_absent => count > 0,
         .empty => count == 0,
         .preserve_same_order => if (model_source.renderCornerLogicalIds()) |rows|
             rows.len == count and count > 0 and meshdoc_format.logicalRowsValid(
@@ -2089,7 +2113,7 @@ fn replaceSourceGeometryWithLogical(
 ) bool {
     const need = @as(usize, count) * 8;
     return switch (replacement) {
-        .absent, .empty => blk: {
+        .absent, .restore_absent, .empty => blk: {
             model_source.retain(key, new_verts[0..need], count);
             break :blk model_source.count() == count and model_source.renderCornerLogicalIds() == null;
         },
@@ -8705,7 +8729,7 @@ fn journalInstall(e: *const JournalEntry) bool {
         beginPaintStableReplace()
     else if (carry_repacked_atlas)
         beginPaintRasterCarry();
-    const journal_logical = logicalReplacementExactOrAbsent(
+    const journal_logical = logicalReplacementForJournalRestore(
         e.logical_ids,
         e.count,
         e.logical_vertex_count,
