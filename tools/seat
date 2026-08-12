@@ -295,15 +295,26 @@ const notReadyYet = (reply) => {
   if (state === 'starting' || state === 'dialog-blocked') return true;
   if (faceTablePendingReceipt(reply)) return true;
   if (reply.ok) return false;
-  return typeof reply.reason === 'string' && /no live model|not ready|still starting|shell bridge is unavailable|Auto-Rig is still running|native session table refused/i.test(reply.reason);
+  const reason = sessionRefusalReason(reply) ?? (typeof reply.reason === 'string' ? reply.reason : '');
+  return /no live model|not ready|still starting|shell bridge is unavailable|Auto-Rig is still running|native session table refused/i.test(reason);
 };
 
 /** A background session-select refusal usually means a sub-second gesture (drag,
  *  gizmo, historical preview, retained write lease) owns the resident session in
- *  the visible editor. Worth one short grace window even without --wait. */
+ *  the visible editor. Worth one short grace window even without --wait. A batch
+ *  counts only when its FIRST row is the refusal — later rows may have mutated,
+ *  and replaying those needs agent judgment, not an automatic retry. */
+const sessionRefusalReason = (reply) => {
+  if (!reply || reply.ok) return null;
+  if (typeof reply.reason === 'string') return reply.reason;
+  if (reply.op === 'batch' && Array.isArray(reply.result)) {
+    const failed = reply.result.findIndex((row) => row && row.ok === false);
+    if (failed === 0 && typeof reply.result[0]?.reason === 'string') return reply.result[0].reason;
+  }
+  return null;
+};
 const transientSessionRefusal = (outcome) => outcome?.kind === 'reply'
-  && typeof outcome.reply?.reason === 'string'
-  && /native session table refused/i.test(outcome.reply.reason);
+  && /native session table refused/i.test(sessionRefusalReason(outcome.reply) ?? '');
 
 const sendOnce = () => new Promise((resolve) => {
   const id = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
