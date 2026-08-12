@@ -3,7 +3,7 @@
   "at": "2026-08-12T00:32:03.501Z",
   "origin": "codex:019ff350",
   "text": "great now when you open a model and you select face/verts/edges there is no means of turning any one mode off entirely, which makes it really hard to actually view a model without some sort of overlay, usualyl getting around it by making some outliner that is unrelated and off screen, its a bad hackaround, and should be able to just turn off all the overlays as needed",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019ff350-31ea-7b32-b9f8-08b83d748935",
   "captureMode": "hook",
   "events": [
@@ -19,6 +19,18 @@
       "actor": "codex",
       "kind": "note",
       "text": "Added an explicit View Only model tool (0) to the Studio action bar, Edit > Mesh Select section, and model context Select group. It routes to native selection mode 0, which hides vertex/edge/face dressing, mirror planes, and selection gizmos without changing outliner focus or destroying dormant element selections. Passed 27/27 editor command tests, test-mesh-edit, and the complete ReleaseFast editor ship build."
+    },
+    {
+      "at": "2026-08-12T00:37:52.852Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Studio model documents now expose View Only as the first selection tool in the action bar, Edit menu, and model context menu, with 0 as its shortcut. It enters the existing native neutral mode, hiding vertex, edge, face, mirror, and gizmo dressing without changing outliner focus or destroying dormant element selections, so authors can inspect the model directly instead of selecting an unrelated off-screen part.",
+  "shas": [
+    "3139e702a"
+  ],
+  "resolvedAt": "2026-08-12T00:37:52.852Z"
 }
