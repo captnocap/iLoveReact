@@ -2931,6 +2931,21 @@ pub fn build(b: *std.Build) void {
     b.step("test-humanoid-clips", "Run canonical local-quaternion character clip tests")
         .dependOn(&b.addRunArtifact(humanoid_clips_test).step);
 
+    const motion_document_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/motion_document.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const motion_document_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/motion_document.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    motion_document_test_mod.addImport("motion_document", motion_document_mod_t);
+    const motion_document_test = b.addTest(.{ .name = "motion-document-test", .root_module = motion_document_test_mod });
+    b.step("test-motion-document", "Run RJAN role-addressed motion document tests")
+        .dependOn(&b.addRunArtifact(motion_document_test).step);
+
     const player_character_pose_mod_t = b.createModule(.{
         .root_source_file = b.path("framework/player_character_pose_module.zig"),
         .target = target,
@@ -3139,8 +3154,26 @@ pub fn build(b: *std.Build) void {
         .name = "dev-module-abi-test",
         .root_module = dev_module_abi_test_mod,
     });
-    b.step("test-dev-module-abi", "Run native development module ABI and loader tests")
-        .dependOn(&b.addRunArtifact(dev_module_abi_test).step);
+    const scene3d_runtime_face_drain_options = b.addOptions();
+    scene3d_runtime_face_drain_options.addOption(bool, "dev_native_modules", true);
+    scene3d_runtime_face_drain_options.addOption(bool, "dev_scene3d_module", false);
+    scene3d_runtime_face_drain_options.addOption(bool, "dev_game_module", false);
+    const scene3d_runtime_face_drain_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_scene3d_runtime_face_drain.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    scene3d_runtime_face_drain_test_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    scene3d_runtime_face_drain_test_mod.addImport("wgpu", wgpu_mod);
+    scene3d_runtime_face_drain_test_mod.addOptions("build_options", scene3d_runtime_face_drain_options);
+    const scene3d_runtime_face_drain_test = b.addTest(.{
+        .name = "scene3d-runtime-face-drain-test",
+        .root_module = scene3d_runtime_face_drain_test_mod,
+    });
+    const dev_module_abi_test_step = b.step("test-dev-module-abi", "Run native development module ABI and loader tests");
+    dev_module_abi_test_step.dependOn(&b.addRunArtifact(dev_module_abi_test).step);
+    dev_module_abi_test_step.dependOn(&b.addRunArtifact(scene3d_runtime_face_drain_test).step);
 
     // Assistant task ownership and cancellation. Root at framework/ so the
     // assistant modules' sibling imports remain in one module.
