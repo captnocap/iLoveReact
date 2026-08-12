@@ -182,3 +182,82 @@ test "the role-addressed clip path matches sampleForBind on the canonical rig" {
         try std.testing.expect(@abs(dot) > 1.0 - 1.0e-5);
     }
 }
+
+test "a motion document replays onto two different bodies through their role palettes" {
+    const motion = mounted_pose.motion_document;
+    const keys = [_]motion.Key{
+        .{ .time_seconds = 0, .coverage = 0b11, .root_translation = .{ 0, 0, 0 }, .deltas = &.{ fk.IDENTITY_QUAT, fk.IDENTITY_QUAT } },
+        .{
+            .time_seconds = 1.0,
+            .coverage = 0b11,
+            .root_translation = .{ 0, 0.2, 0 },
+            .deltas = &.{
+                try fk.axisAngle(.{ 1, 0, 0 }, 0.6),
+                try fk.axisAngle(.{ 1, 0, 0 }, -0.4),
+            },
+        },
+    };
+    const doc = motion.Document{
+        .allocator = std.testing.allocator,
+        .name = "wave",
+        .looping = false,
+        .duration_seconds = 1.0,
+        .source = .hand,
+        .channel_ids = &.{ "pelvis", "upper_arm_left" },
+        .keys = &keys,
+        .runs = &.{},
+    };
+    try motion.validate(&doc);
+
+    // Body one: the canonical rig — channels land on canonical indices.
+    const bones = canonicalBones();
+    var canonical_state: mounted_pose.State = .{};
+    try canonical_state.resetRig(&bones, clips.PALETTE_IDS[0..]);
+    try canonical_state.playMotion(&doc, clips.PALETTE_IDS[0..]);
+    const on_canonical = try canonical_state.advance(0.5, .idle, null);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), on_canonical.root_translation[1], 1.0e-5);
+
+    // Body two: a 53-bone adopted rig with role aliases on scattered indices.
+    const count = 53;
+    var external_bones: [count]rig_pose.Bone = undefined;
+    var ids: [count][]const u8 = undefined;
+    var id_storage: [count][24]u8 = undefined;
+    for (&external_bones, &ids, 0..) |*bone, *id, index| {
+        bone.* = .{
+            .parent_index = if (index == 0) null else @intCast(index - 1),
+            .bind_translation = if (index == 0) .{ 0, 0, 0 } else .{ 0, 0.01, 0 },
+            .constraint = .unconstrained,
+        };
+        id.* = std.fmt.bufPrint(&id_storage[index], "external_joint_{d}", .{index}) catch unreachable;
+    }
+    ids[7] = "pelvis";
+    ids[29] = "upper_arm_left";
+    var external_state: mounted_pose.State = .{};
+    try external_state.resetRig(&external_bones, &ids);
+    try external_state.playMotion(&doc, &ids);
+    const on_external = try external_state.advance(0.5, .idle, null);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), on_external.root_translation[1], 1.0e-5);
+
+    // The same halfway delta reaches each body's own bone for the role.
+    const external_arm = on_external.local_quaternions[29];
+    const bind = external_state.bind_local_rotations[29];
+    const dot = external_arm[0] * bind[0] + external_arm[1] * bind[1] + external_arm[2] * bind[2] + external_arm[3] * bind[3];
+    try std.testing.expect(@abs(dot) < 1.0 - 1.0e-6);
+    // Unmapped bones hold bind exactly.
+    try std.testing.expectEqual(external_state.bind_local_rotations[30], on_external.local_quaternions[30]);
+
+    // A document speaking only roles this body lacks is refused loudly.
+    const foreign = motion.Document{
+        .allocator = std.testing.allocator,
+        .name = "tail-swish",
+        .looping = false,
+        .duration_seconds = 1.0,
+        .source = .hand,
+        .channel_ids = &.{"tail"},
+        .keys = &.{.{ .time_seconds = 0, .coverage = 0b1, .deltas = &.{fk.IDENTITY_QUAT} }},
+        .runs = &.{},
+    };
+    var refused: mounted_pose.State = .{};
+    try refused.resetRig(&external_bones, &ids);
+    try std.testing.expectError(error.NoMotionChannels, refused.playMotion(&foreign, &ids));
+}

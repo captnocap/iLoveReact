@@ -13,16 +13,28 @@ const std = @import("std");
 pub const pose_stream = @import("../skeleton/pose_stream.zig");
 pub const clips = @import("../skeleton/humanoid_clips.zig");
 pub const rig_pose = @import("../skeleton/rig_pose.zig");
+pub const motion_document = @import("../skeleton/motion_document.zig");
 
 pub const MAX_OWNER_BYTES: usize = 64;
 pub const HOST_OWNER: []const u8 = "compiled-world-host";
 
-pub const Error = pose_stream.Error || clips.Error || error{
+pub const Error = pose_stream.Error || clips.Error || motion_document.Error || error{
     InvalidOwner,
     OwnerMismatch,
     ExternalPoseInactive,
     RigNotInitialized,
     EvaluatedFrameMismatch,
+    NoMotionChannels,
+};
+
+/// One mounted motion document (req_4285): a replayed capture take, an
+/// authored keyframe document, or a migrated clip, resolved onto this body's
+/// role palette once at play time. The document is borrowed — its owner is
+/// whoever mounted it (the world runtime), never this state.
+pub const ActiveMotion = struct {
+    document: *const motion_document.Document,
+    channel_targets: [motion_document.MAX_CHANNELS]?u8,
+    elapsed_seconds: f32 = 0,
 };
 
 pub const OwnerId = struct {
@@ -59,6 +71,7 @@ pub const State = struct {
     bind_local_rotations: [pose_stream.MAX_BONES]pose_stream.Quat = @splat(pose_stream.fk.IDENTITY_QUAT),
     owner: OwnerId = .{},
     interpolator: ?pose_stream.Interpolator = null,
+    motion: ?ActiveMotion = null,
     last_root_translation: pose_stream.Vec3 = .{ 0, 0, 0 },
     last_external_frame_id: ?u64 = null,
     current_clip: clips.ClipId = .idle,
@@ -169,6 +182,54 @@ pub const State = struct {
         return true;
     }
 
+    /// Mount a motion document as this body's pose source. Channels resolve
+    /// against the same role-aliased palette clips use; a document whose
+    /// roles this body does not bind at all is refused rather than silently
+    /// frozen. An active external owner (capture, host stream) still wins.
+    pub fn playMotion(
+        self: *State,
+        document: *const motion_document.Document,
+        role_ids: []const []const u8,
+    ) Error!void {
+        if (self.bone_count == 0) return error.RigNotInitialized;
+        if (role_ids.len != self.bone_count) return error.PaletteSizeMismatch;
+        var targets: [motion_document.MAX_CHANNELS]?u8 = @splat(null);
+        var matched: usize = 0;
+        for (document.channel_ids, 0..) |channel_id, channel| {
+            for (role_ids, 0..) |role_id, index| {
+                if (std.mem.eql(u8, role_id, channel_id)) {
+                    targets[channel] = @intCast(index);
+                    matched += 1;
+                    break;
+                }
+            }
+        }
+        if (matched == 0) return error.NoMotionChannels;
+        self.motion = .{ .document = document, .channel_targets = targets };
+    }
+
+    pub fn stopMotion(self: *State) void {
+        self.motion = null;
+    }
+
+    fn advanceMotion(self: *State, active: *ActiveMotion, dt: f32) Error!pose_stream.Frame {
+        active.elapsed_seconds += dt;
+        const sampled = try motion_document.sample(active.document, active.elapsed_seconds);
+        var frame = self.bindFrame();
+        if (sampled.has_root) frame.root_translation = sampled.root_translation;
+        for (0..active.document.channel_ids.len) |channel| {
+            const bit = @as(u32, 1) << @intCast(channel);
+            if ((sampled.coverage & bit) == 0) continue;
+            const target = active.channel_targets[channel] orelse continue;
+            frame.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
+                self.bind_local_rotations[target],
+                sampled.deltas[channel],
+            ));
+        }
+        self.last_root_translation = frame.root_translation;
+        return frame;
+    }
+
     fn updateClipClock(self: *State, dt: f32, clip: clips.ClipId) Error!void {
         if (!std.math.isFinite(dt) or dt < 0) return error.InvalidDeltaTime;
         if (clip != self.current_clip) {
@@ -208,6 +269,10 @@ pub const State = struct {
             self.last_root_translation = sampled.root_translation;
             return sampled;
         }
+
+        // A mounted motion document outranks the built-in clips but never an
+        // explicit external owner — the priority chain the mixer generalizes.
+        if (self.motion) |*active| return self.advanceMotion(active, dt);
 
         // Built-in clips are role-addressed: a body answers to a clip channel
         // exactly when its rig bound that semantic role. A rig without the
