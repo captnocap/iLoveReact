@@ -9,6 +9,8 @@
 pub const Tuning = struct {
     /// One stage tile is one authored world metre.
     pub const tile_meters: f32 = 1.0;
+    /// Studio modeling units retain the Blockbench-compatible 16 u = 1 m contract.
+    pub const units_per_meter: f32 = 16.0;
     /// Physical player capsule from the game scale contract.
     pub const player_collider_height_meters: f32 = 1.65;
     /// Stylized player head top; this is visual, not collision height.
@@ -20,6 +22,17 @@ pub const Tuning = struct {
     /// Whole-metre ticks agree with the stage's coarse tile panels.
     pub const ruler_major_tick_meters: f32 = tile_meters;
 };
+
+/// View furniture is opt-in. In particular, the player reference must never return
+/// merely because the Studio remounted or loaded another document.
+pub const OverlayOptions = struct {
+    player_scale: bool = false,
+    measurements: bool = false,
+};
+
+pub fn metersToUnits(meters: f32) f32 {
+    return meters * Tuning.units_per_meter;
+}
 
 pub const MarkTone = enum {
     meter,

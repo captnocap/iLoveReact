@@ -2424,6 +2424,66 @@ pub const SelectionSnapshotTuning = struct {
     pub const max_detail_rows: u32 = 256;
 };
 
+pub const MeasurementSubject = enum {
+    /// The active vertex/edge/face selection wins whenever it affects vertices.
+    selection,
+    /// With no element selection, an outliner/edit scope measures the focused part(s).
+    scope,
+    /// Neutral view with no scope measures the complete resident model.
+    model,
+};
+
+pub const MeasurementBounds = struct {
+    subject: MeasurementSubject,
+    min: [3]f32,
+    max: [3]f32,
+    vertex_count: u32,
+
+    pub fn size(self: MeasurementBounds) [3]f32 {
+        return .{
+            self.max[0] - self.min[0],
+            self.max[1] - self.min[1],
+            self.max[2] - self.min[2],
+        };
+    }
+};
+
+/// The one native size subject used by every Studio measurement overlay. Selection
+/// outranks focused scope, which outranks the whole model. Walking welded logical
+/// vertices keeps triangulation diagonals and duplicate triangle corners from changing
+/// the answer; no geometry or per-frame data crosses into React.
+pub fn measurementBoundsPub() ?MeasurementBounds {
+    if (!ensureTopology()) return null;
+    const selection = fillAffectedVerts();
+    const subject: MeasurementSubject = if (selection != null)
+        .selection
+    else if (g_scope_active)
+        .scope
+    else
+        .model;
+
+    var min: [3]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) };
+    var max: [3]f32 = .{ -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) };
+    var count: u32 = 0;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        const included = switch (subject) {
+            .selection => selection.?[vertex],
+            .scope => vertInScopePub(vertex),
+            .model => true,
+        };
+        if (!included) continue;
+        const point = vertPosPub(vertex);
+        for (0..3) |axis| {
+            min[axis] = @min(min[axis], point[axis]);
+            max[axis] = @max(max[axis], point[axis]);
+        }
+        count += 1;
+    }
+    if (count == 0) return null;
+    return .{ .subject = subject, .min = min, .max = max, .vertex_count = count };
+}
+
 /// JSON schema v1:
 /// { mode, count, affectedVertices, selectedTriangles, truncated, pivot, bounds,
 ///   vertices:[{id,at,part}], edges:[{id,vertices,length,faces,open,part}],

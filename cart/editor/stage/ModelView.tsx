@@ -221,7 +221,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -347,6 +347,8 @@ export type ModelToolApi = {
   pathEdges: () => void;
   focus: () => void;
   wire: () => void;
+  measurements: () => void;
+  playerScale: () => void;
   xray: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
   camLock: () => void;
@@ -719,7 +721,7 @@ const TOOL_TWIG_KEY = 'editor:meshtool:v1';
 // __model_cam_pose read — [yaw, pitch, dist, target x/y/z].
 export type CamBookmark = { name: string; pose: number[] };
 type ToolTwig = {
-  wire: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
+  wire: boolean; measurements: boolean; playerScale: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
@@ -1126,6 +1128,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(toolTwig?.wire ?? false);
+  // View furniture is cold-default OFF. Hot reload retains an explicit author choice;
+  // no model/save/export payload can resurrect the old persistent mannequin.
+  const [measurements, setMeasurements] = useState(toolTwig?.measurements ?? false);
+  const [playerScale, setPlayerScale] = useState(toolTwig?.playerScale ?? false);
   // Session-local and edit-mode-only. Persisting this view toggle made a remount or
   // document switch appear to turn X-Ray on by itself.
   const [xray, setXray] = useState(false);
@@ -2924,8 +2930,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Mirror the tool-holding state into its hot twig on every change (req_2898) —
   // cheap (one small JSON into the host map), and the next mount seeds from it.
   useEffect(() => {
-    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
-  }, [wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, measurements, playerScale, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, measurements, playerScale, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
 
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
@@ -3084,6 +3090,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     pathEdges: togglePathEdges,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
+    measurements: () => setMeasurements((v) => !v),
+    playerScale: () => setPlayerScale((v) => !v),
     xray: () => {
       if (selMode === 0 || paintMode) {
         setXray(false);
@@ -3764,8 +3772,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = extrude ? 'extrude' : bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, measurements, playerScale, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -4713,6 +4721,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         backgroundColor="#0b0d12"
         showAxes={false}
         wireframe={triangleWireframeVisible(wire, selMode)}
+        measurementOverlay={measurements}
+        playerScaleOverlay={playerScale}
         // Sculpt-style form reading (req_3766): shade by view-space normal so
         // edges/creases stay legible without the vert/edge overlays. Paint mode
         // and Flat both kill it — while judging colour, shading must not
@@ -5000,6 +5010,30 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             }}
           >
             <Text style={{ color: wire ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Wireframe</Text>
+          </Pressable>
+        )}
+        {!hostChrome && model && (
+          <Pressable
+            onPress={() => setMeasurements((value) => !value)}
+            tooltip="Toggle exact model / focused-part / selection dimensions in metres and modeling units"
+            style={{
+              marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: measurements ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: measurements ? '#5a86c0' : '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: measurements ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Measure</Text>
+          </Pressable>
+        )}
+        {!hostChrome && model && (
+          <Pressable
+            onPress={() => setPlayerScale((value) => !value)}
+            tooltip="Toggle the 1 m / 1.65 m collider / 2.04 m visual player scale reference"
+            style={{
+              marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: playerScale ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: playerScale ? '#5a86c0' : '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: playerScale ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Player Scale</Text>
           </Pressable>
         )}
         {!hostChrome && model && (

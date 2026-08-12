@@ -1985,6 +1985,10 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonBool(v)) |b| node.scene3d_wireframe = b;
         } else if (std.mem.eql(u8, k, "scene3dMatcap")) {
             if (jsonBool(v)) |b| node.scene3d_matcap = b;
+        } else if (std.mem.eql(u8, k, "scene3dPlayerScaleOverlay")) {
+            if (jsonBool(v)) |b| node.scene3d_player_scale_overlay = b;
+        } else if (std.mem.eql(u8, k, "scene3dMeasurementOverlay")) {
+            if (jsonBool(v)) |b| node.scene3d_measurement_overlay = b;
         } else if (std.mem.eql(u8, k, "scene3dCameraOrbit")) {
             // Drop-to-view orbit camera: the host owns the view (gpu/3d.zig orbit
             // state). Distinct from scene3dCameraNative, which binds the game FPS

@@ -1,0 +1,24 @@
+{
+  "id": "req_4234",
+  "at": "2026-08-12T00:14:40.148Z",
+  "origin": "codex:019ff350",
+  "text": "in the studio there is a persistant player scale overlay that has finally got to go, well, not that you need to delete it but you need to make it default off and a toggle on state. also, while you are at it, go ahead and give us a proper measurement tooling and overlays so that we can be less blind about sizes.",
+  "status": "doing",
+  "sessionId": "019ff350-31ea-7b32-b9f8-08b83d748935",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-12T00:14:44.921Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-12T00:27:47.839Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented default-off Player Scale and Measurements view toggles; native bounds precedence is selection > focused scope > model, with AABB and X/Y/Z labels in metres plus 16u-per-metre units. Passed test-stage-scale, test-mesh-edit, test-scene3d-mesh-drag, 26/26 editor command tests, and dev-scene3d-module ReleaseFast build. Full editor TS bundle passes; native ship is presently blocked by unrelated framework/skeleton/character_hashes.zig const-pointer compilation in concurrent work."
+    }
+  ]
+}

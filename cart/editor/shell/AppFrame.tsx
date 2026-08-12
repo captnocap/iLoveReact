@@ -3595,6 +3595,8 @@ export default function AppFrame() {
         else if (commandId === 'mesh-path-edges') api.pathEdges();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
+        else if (commandId === 'mesh-measurements') api.measurements();
+        else if (commandId === 'mesh-player-scale') api.playerScale();
         else if (commandId === 'mesh-xray') api.xray();
         else if (commandId === 'mesh-cam-lock') api.camLock();
         else if (commandId === 'mesh-cam-store') api.camStore();

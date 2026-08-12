@@ -11072,6 +11072,10 @@ pub fn meshEditGuardResolve(action: u8) bool {
 // gate + tool read; the gesture state itself lives in the engine event loop.
 var g_me_capture: bool = false;
 var g_me_focus_tool: bool = false;
+// Viewport furniture is declared by the Scene3D node that actually owns the resident
+// edit target. Defaults are intentionally quiet; a model load/remount never resurrects
+// the old persistent player mannequin.
+var g_stage_overlay_options: stage_scale.OverlayOptions = .{};
 // Whole-mesh retopology teaching map. It never mutates atlas, material,
 // semantics, journal, or mesh geometry, but its exact membership and frozen
 // source are durable model-package authoring data.
@@ -12400,6 +12404,38 @@ const STAGE_SCALE_CUE = struct {
     const guide_alpha: f32 = 0.54;
     const text_shadow = [4]f32{ 0.02, 0.03, 0.07, 0.90 };
 };
+// Exact-size overlay (req_4234): one native bounds pass, one set of projected leaders.
+// Every behavior-affecting number lives here so dense model documents don't acquire a
+// scattering of cosmetic offsets that quietly become measurement behavior.
+const STAGE_MEASUREMENT_CUE = struct {
+    const leader_offset_fraction: f32 = 0.065;
+    const leader_offset_min_m: f32 = 0.045;
+    const leader_offset_max_m: f32 = 0.24;
+    const endpoint_tick_fraction: f32 = 0.36;
+    const endpoint_tick_min_m: f32 = 0.025;
+    const endpoint_tick_max_m: f32 = 0.09;
+    const bounds_width_px: f32 = 1.35;
+    const leader_width_px: f32 = 2.0;
+    const extension_width_px: f32 = 1.0;
+    const label_font_px: u16 = 11;
+    const label_pad_px: f32 = 7;
+    const label_rise_px: f32 = 5.5;
+    const title_rise_px: f32 = 12;
+    const bounds = [4]f32{ 0.82, 0.88, 1.0, 0.62 };
+    const extension = [4]f32{ 0.72, 0.79, 0.94, 0.46 };
+    const axis_x = [4]f32{ 1.0, 0.39, 0.34, 0.96 };
+    const axis_y = [4]f32{ 0.38, 0.88, 0.49, 0.96 };
+    const axis_z = [4]f32{ 0.37, 0.64, 1.0, 0.96 };
+    const title = [4]f32{ 0.88, 0.92, 1.0, 0.94 };
+    const text_shadow = [4]f32{ 0.02, 0.03, 0.07, 0.94 };
+};
+
+const StageMeasurementFrame = struct {
+    bounds: mesh_edit.MeasurementBounds,
+    axis_label_points: [3][3]f32,
+    title_point: [3]f32,
+};
+var g_stage_measurement_frame: ?StageMeasurementFrame = null;
 // ── Viewport orientation compass (req_2643 gap LL) ─────────────────────────────────
 // The old studio's bottom-left nav ball, host-native: a small ball whose three axis
 // arms are the CURRENT camera's rotation applied to the world basis (rotation only —
@@ -13359,6 +13395,138 @@ fn drawStageScaleText(cam: model_paint.Camera, ox: f32, oy: f32) void {
         drawStageScaleLabel(mark.label, p[0] + STAGE_SCALE_CUE.label_pad_px, p[1] - STAGE_SCALE_CUE.label_center_rise_px, col);
     }
 }
+
+fn stageMeasurementMidpoint(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ (a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5 };
+}
+
+fn drawStageMeasurementBox(cam: model_paint.Camera, min: [3]f32, max: [3]f32, ox: f32, oy: f32) void {
+    const corners = [8][3]f32{
+        .{ min[0], min[1], min[2] }, .{ max[0], min[1], min[2] },
+        .{ min[0], max[1], min[2] }, .{ max[0], max[1], min[2] },
+        .{ min[0], min[1], max[2] }, .{ max[0], min[1], max[2] },
+        .{ min[0], max[1], max[2] }, .{ max[0], max[1], max[2] },
+    };
+    const edges = [12][2]u8{
+        .{ 0, 1 }, .{ 2, 3 }, .{ 4, 5 }, .{ 6, 7 },
+        .{ 0, 2 }, .{ 1, 3 }, .{ 4, 6 }, .{ 5, 7 },
+        .{ 0, 4 }, .{ 1, 5 }, .{ 2, 6 }, .{ 3, 7 },
+    };
+    for (edges) |edge| {
+        stageLine(cam, corners[edge[0]], corners[edge[1]], STAGE_MEASUREMENT_CUE.bounds, STAGE_MEASUREMENT_CUE.bounds_width_px, ox, oy);
+    }
+}
+
+fn drawStageMeasurementTick(cam: model_paint.Camera, point: [3]f32, axis: usize, half_tick_m: f32, color: [4]f32, ox: f32, oy: f32) void {
+    var a = point;
+    var b = point;
+    const cross_axis: usize = if (axis == 1) 0 else 1;
+    a[cross_axis] -= half_tick_m;
+    b[cross_axis] += half_tick_m;
+    stageLine(cam, a, b, color, STAGE_MEASUREMENT_CUE.leader_width_px, ox, oy);
+}
+
+/// Draw model/part/selection bounds and three world-axis dimension leaders. The welded
+/// topology owns the measured subject; this layer only projects that answer, so render
+/// geometry and measurement geometry cannot become competing sources of truth.
+fn drawStageMeasurements(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    g_stage_measurement_frame = null;
+    const bounds = mesh_edit.measurementBoundsPub() orelse return;
+    const size = bounds.size();
+    const largest = @max(size[0], @max(size[1], size[2]));
+    const offset_m = std.math.clamp(
+        largest * STAGE_MEASUREMENT_CUE.leader_offset_fraction,
+        STAGE_MEASUREMENT_CUE.leader_offset_min_m,
+        STAGE_MEASUREMENT_CUE.leader_offset_max_m,
+    );
+    const half_tick_m = std.math.clamp(
+        offset_m * STAGE_MEASUREMENT_CUE.endpoint_tick_fraction,
+        STAGE_MEASUREMENT_CUE.endpoint_tick_min_m,
+        STAGE_MEASUREMENT_CUE.endpoint_tick_max_m,
+    );
+    drawStageMeasurementBox(cam, bounds.min, bounds.max, ox, oy);
+
+    // X (width) sits below the near-low edge.
+    const x_start = [3]f32{ bounds.min[0], bounds.min[1] - offset_m, bounds.min[2] };
+    const x_end = [3]f32{ bounds.max[0], bounds.min[1] - offset_m, bounds.min[2] };
+    stageLine(cam, .{ bounds.min[0], bounds.min[1], bounds.min[2] }, x_start, STAGE_MEASUREMENT_CUE.extension, STAGE_MEASUREMENT_CUE.extension_width_px, ox, oy);
+    stageLine(cam, .{ bounds.max[0], bounds.min[1], bounds.min[2] }, x_end, STAGE_MEASUREMENT_CUE.extension, STAGE_MEASUREMENT_CUE.extension_width_px, ox, oy);
+    stageLine(cam, x_start, x_end, STAGE_MEASUREMENT_CUE.axis_x, STAGE_MEASUREMENT_CUE.leader_width_px, ox, oy);
+    drawStageMeasurementTick(cam, x_start, 0, half_tick_m, STAGE_MEASUREMENT_CUE.axis_x, ox, oy);
+    drawStageMeasurementTick(cam, x_end, 0, half_tick_m, STAGE_MEASUREMENT_CUE.axis_x, ox, oy);
+
+    // Y (height) sits outside the near-right edge.
+    const y_start = [3]f32{ bounds.max[0] + offset_m, bounds.min[1], bounds.min[2] };
+    const y_end = [3]f32{ bounds.max[0] + offset_m, bounds.max[1], bounds.min[2] };
+    stageLine(cam, .{ bounds.max[0], bounds.min[1], bounds.min[2] }, y_start, STAGE_MEASUREMENT_CUE.extension, STAGE_MEASUREMENT_CUE.extension_width_px, ox, oy);
+    stageLine(cam, .{ bounds.max[0], bounds.max[1], bounds.min[2] }, y_end, STAGE_MEASUREMENT_CUE.extension, STAGE_MEASUREMENT_CUE.extension_width_px, ox, oy);
+    stageLine(cam, y_start, y_end, STAGE_MEASUREMENT_CUE.axis_y, STAGE_MEASUREMENT_CUE.leader_width_px, ox, oy);
+    drawStageMeasurementTick(cam, y_start, 1, half_tick_m, STAGE_MEASUREMENT_CUE.axis_y, ox, oy);
+    drawStageMeasurementTick(cam, y_end, 1, half_tick_m, STAGE_MEASUREMENT_CUE.axis_y, ox, oy);
+
+    // Z (depth) sits below and just outside the left edge, clear of the X label.
+    const z_start = [3]f32{ bounds.min[0] - offset_m, bounds.min[1] - offset_m, bounds.min[2] };
+    const z_end = [3]f32{ bounds.min[0] - offset_m, bounds.min[1] - offset_m, bounds.max[2] };
+    stageLine(cam, .{ bounds.min[0], bounds.min[1], bounds.min[2] }, z_start, STAGE_MEASUREMENT_CUE.extension, STAGE_MEASUREMENT_CUE.extension_width_px, ox, oy);
+    stageLine(cam, .{ bounds.min[0], bounds.min[1], bounds.max[2] }, z_end, STAGE_MEASUREMENT_CUE.extension, STAGE_MEASUREMENT_CUE.extension_width_px, ox, oy);
+    stageLine(cam, z_start, z_end, STAGE_MEASUREMENT_CUE.axis_z, STAGE_MEASUREMENT_CUE.leader_width_px, ox, oy);
+    drawStageMeasurementTick(cam, z_start, 2, half_tick_m, STAGE_MEASUREMENT_CUE.axis_z, ox, oy);
+    drawStageMeasurementTick(cam, z_end, 2, half_tick_m, STAGE_MEASUREMENT_CUE.axis_z, ox, oy);
+
+    g_stage_measurement_frame = .{
+        .bounds = bounds,
+        .axis_label_points = .{
+            stageMeasurementMidpoint(x_start, x_end),
+            stageMeasurementMidpoint(y_start, y_end),
+            stageMeasurementMidpoint(z_start, z_end),
+        },
+        .title_point = .{ bounds.max[0], bounds.max[1] + offset_m, bounds.max[2] },
+    };
+}
+
+fn stageMeasurementSubjectLabel(subject: mesh_edit.MeasurementSubject) []const u8 {
+    return switch (subject) {
+        .selection => "SELECTION SIZE",
+        .scope => "FOCUSED PART SIZE",
+        .model => "MODEL SIZE",
+    };
+}
+
+fn drawStageMeasurementLabel(label: []const u8, x: f32, y: f32, color: [4]f32) void {
+    const shadow = STAGE_MEASUREMENT_CUE.text_shadow;
+    core.drawTextLine(label, x + 1, y + 1, STAGE_MEASUREMENT_CUE.label_font_px, shadow[0], shadow[1], shadow[2], shadow[3]);
+    core.drawTextLine(label, x, y, STAGE_MEASUREMENT_CUE.label_font_px, color[0], color[1], color[2], color[3]);
+}
+
+fn drawStageMeasurementText(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const frame = g_stage_measurement_frame orelse return;
+    const size = frame.bounds.size();
+    const colors = [3][4]f32{ STAGE_MEASUREMENT_CUE.axis_x, STAGE_MEASUREMENT_CUE.axis_y, STAGE_MEASUREMENT_CUE.axis_z };
+    const axis_names = [3]u8{ 'X', 'Y', 'Z' };
+    var axis: usize = 0;
+    while (axis < 3) : (axis += 1) {
+        const projected = ovProject(cam, frame.axis_label_points[axis], ox, oy) orelse continue;
+        var buffer: [64]u8 = undefined;
+        const label = std.fmt.bufPrint(&buffer, "{c}  {d:.3} m  ·  {d:.2} u", .{
+            axis_names[axis],
+            size[axis],
+            stage_scale.metersToUnits(size[axis]),
+        }) catch continue;
+        drawStageMeasurementLabel(
+            label,
+            projected[0] + STAGE_MEASUREMENT_CUE.label_pad_px,
+            projected[1] - STAGE_MEASUREMENT_CUE.label_rise_px,
+            colors[axis],
+        );
+    }
+    const title = ovProject(cam, frame.title_point, ox, oy) orelse return;
+    drawStageMeasurementLabel(
+        stageMeasurementSubjectLabel(frame.bounds.subject),
+        title[0] + STAGE_MEASUREMENT_CUE.label_pad_px,
+        title[1] - STAGE_MEASUREMENT_CUE.title_rise_px,
+        STAGE_MEASUREMENT_CUE.title,
+    );
+}
 /// Faces the current selection touches (any mode) — alloc'd, caller frees. Null when
 /// nothing is selected (or allocation fails), so callers can skip the lookup entirely.
 fn selectionFaceMaskAlloc(fc: u32) ?[]bool {
@@ -13962,6 +14130,13 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
         drawStageLines(cam, ox, oy);
         overlayLayerBreak(ox, oy);
         drawCharacterRigOverlay(cam, ox, oy);
+        if (g_stage_overlay_options.measurements) drawStageMeasurements(cam, ox, oy) else g_stage_measurement_frame = null;
+        if (g_stage_overlay_options.player_scale) drawStageScaleCue(cam, ox, oy);
+        if (g_stage_overlay_options.measurements or g_stage_overlay_options.player_scale) {
+            overlayLayerBreak(ox, oy);
+            if (g_stage_overlay_options.measurements) drawStageMeasurementText(cam, ox, oy);
+            if (g_stage_overlay_options.player_scale) drawStageScaleText(cam, ox, oy);
+        }
         if (compassVisible()) {
             overlayLayerBreak(ox, oy);
             drawCompassBall(cam);
@@ -14038,14 +14213,18 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // Backdrop move session (req_3080): the reference image's own move gizmo — drawn in
     // ANY mode (tracing setup isn't an edit mode), quiet only while paint owns the surface.
     drawBdGizmoOverlay(cam, ox, oy);
-    // Scale ladder + mannequin (req_2869): passive stage furniture, always present even
-    // in paint/view mode so the author can judge an asset before it ever reaches play.
-    drawStageScaleCue(cam, ox, oy);
+    // Scale and size references are deliberate view tools, never persistent stage
+    // furniture. Both default off; each can be enabled independently from Studio View.
+    if (g_stage_overlay_options.measurements) drawStageMeasurements(cam, ox, oy) else g_stage_measurement_frame = null;
+    if (g_stage_overlay_options.player_scale) drawStageScaleCue(cam, ox, oy);
     drawMarqueeOverlay();
-    // Text needs a later segment than the ruler capsules; otherwise the batch's glyph
-    // flush lands under them and the numerical height marks become unreadable.
-    overlayLayerBreak(ox, oy);
-    drawStageScaleText(cam, ox, oy);
+    // Text needs a later segment than measurement/ruler capsules; otherwise the batch's
+    // glyph flush lands under them and the numerical marks become unreadable.
+    if (g_stage_overlay_options.measurements or g_stage_overlay_options.player_scale) {
+        overlayLayerBreak(ox, oy);
+        if (g_stage_overlay_options.measurements) drawStageMeasurementText(cam, ox, oy);
+        if (g_stage_overlay_options.player_scale) drawStageScaleText(cam, ox, oy);
+    }
     // Layer 5: the orientation compass — always-on view furniture like the stage
     // (req_2643 gap LL). Ball/arms/dots ride this capsule segment (on top of the mesh
     // dressing); the break puts labels + the angle readout in a LATER segment so the
@@ -19820,6 +19999,10 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
         g_paint_vp_h = h;
         g_paint_vp_x = vp_x;
         g_paint_vp_y = vp_y;
+        g_stage_overlay_options = .{
+            .player_scale = scene_node.scene3d_player_scale_overlay,
+            .measurements = scene_node.scene3d_measurement_overlay,
+        };
     }
 
     // One-shot raycast probe (RJIT_PAINTPROBE): paint four KNOWN viewport pixels with

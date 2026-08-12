@@ -152,6 +152,10 @@ export const COMMANDS: Command[] = [
   // Reference images (req_2758 — the old studio's tracing backdrops, req_1280): drop a
   // blueprint/photo on one of the six cardinal planes behind the model and build over it.
   { id: 'model-ref-images', menu: 'View', scope: 'model', name: 'Reference Images...', icon: 'Image', key: '', context: true, native: false, undoable: false },
+  // Native viewport furniture (req_4234). Both are presentation toggles and default off;
+  // they never mutate or publish model geometry.
+  { id: 'mesh-measurements', menu: 'View', scope: 'model', name: 'Measurements Overlay', icon: 'RulerDimensionLine', key: '', context: true, native: true, undoable: false },
+  { id: 'mesh-player-scale', menu: 'View', scope: 'model', name: 'Player Scale Reference', icon: 'PersonStanding', key: '', context: true, native: true, undoable: false },
 
   // ── Map (world) ───────────────────────────────────────────────────────────────────────────
   // Grow the world by 120 m chunks from a 2D topology view (req_2703): the dialog
@@ -481,7 +485,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     },
   ],
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), MESH_SUBMENU],
-  View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('model-ref-images')],
+  View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('mesh-measurements'), cmd('mesh-player-scale'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
@@ -499,7 +503,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-focus', 'mesh-wire', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
+const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -589,7 +593,7 @@ const MODEL_CONTEXT_GROUPS: {
   { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-vertex', 'mesh-edge', 'mesh-face'] },
   { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-scale-by', 'mesh-rotate'] },
   { id: 'mirror', label: 'Mirror', icon: 'FlipHorizontal2', commandIds: ['mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z'] },
-  { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'] },
+  { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'] },
 ];
 
 const MODEL_CONTEXT_MIRROR_PART_IDS = new Set(['mesh-mirror-x', 'mesh-mirror-y', 'mesh-mirror-z']);
@@ -636,7 +640,7 @@ export function deviceToolReplayable(id: string, scope: 'world' | 'model'): bool
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
 // highlight. Gizmo tools only read active inside a select mode; view/paint/focus are exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; pathEdges?: boolean; focus: boolean; wire: boolean; xray?: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; pathEdges?: boolean; focus: boolean; wire: boolean; measurements?: boolean; playerScale?: boolean; xray?: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
   switch (id) {
     case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
     case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
@@ -655,6 +659,8 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-paint-pen': return tool.paint && tool.brushTool === 'pen';
     case 'mesh-focus': return tool.focus;
     case 'mesh-wire': return tool.wire;
+    case 'mesh-measurements': return tool.measurements === true;
+    case 'mesh-player-scale': return tool.playerScale === true;
     case 'mesh-xray': return tool.xray === true;
     case 'mesh-cam-lock': return tool.camLock === true;
     // "Active" = a view is pinned — the store button stays lit so the user can see a

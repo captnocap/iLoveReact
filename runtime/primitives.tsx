@@ -466,7 +466,7 @@ function _scaleVec3(v: any): [number, number, number] {
   return [1, 1, 1];
 }
 const _AUTO_FOG_COLOR = [-1, -1, -1];
-const Scene3DBase: any = ({ wireframe, matcap, ...rest }: any) =>
+const Scene3DBase: any = ({ wireframe, matcap, playerScaleOverlay, measurementOverlay, ...rest }: any) =>
   h('View', {
     ...rest,
     scene3d: true,
@@ -478,6 +478,10 @@ const Scene3DBase: any = ({ wireframe, matcap, ...rest }: any) =>
     // any normal change reads as a tone/hue change, so edges and creases stay
     // legible where flat N·L shading collapses them into one band (req_3766).
     scene3dMatcap: !!matcap,
+    // Studio measurement furniture is declared by the viewport and defaults off.
+    // Neither overlay becomes mesh data or crosses the JS bridge per frame.
+    scene3dPlayerScaleOverlay: !!playerScaleOverlay,
+    scene3dMeasurementOverlay: !!measurementOverlay,
   }, rest.children);
 // `far` = draw radius in world units: the hard clip plane AND the per-mesh cull
 // distance (meshes whose nearest point is past `far` are skipped entirely). `near`

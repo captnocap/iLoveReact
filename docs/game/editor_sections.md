@@ -1,6 +1,6 @@
 # Editor UI sections — the prompting vocabulary (A–H)
 
-Active surface: `cart/editor/`. Last verified: 2026-07-20.
+Active surface: `cart/editor/`. Last verified: 2026-08-11.
 USER ASK req_2970 ("i am sick and tired of trying to point out a specific area
 of the ui that i want something to land in ... we are going to recategorize
 everything by a section number so prompting can turn into 'add that to
@@ -35,6 +35,23 @@ geometry.
 | F  | Stage Tabs      | `stage/StageTabs.tsx`       | the open-document tab strip at the bottom edge of the stage |
 | G  | Focus Panel     | `inspector/Inspector.tsx`   | contextual focus body + persistent 40px rail; model view exposes Model / Paint / Rig, and pressing the active button again collapses/reopens the body |
 | H  | Status Bar      | `shell/BuildDock.tsx`       | build dock: undo/redo · build journal · eventbus · perf · memory · status line · coords |
+
+## Model-stage measurement view furniture
+
+Section E's model viewport owns two independent, default-off View toggles:
+
+- **Measurements Overlay** measures the active native subject in strict order:
+  selected vertices/edges/faces, focused outliner scope, then the complete model. It
+  projects the subject's exact axis-aligned bounds, X/Y/Z leader lines, and labels in
+  both metres and Studio units (`16 u = 1 m`). Bounds are computed from the welded
+  logical topology in `framework/gpu/mesh_edit.zig`; React declares only visibility.
+- **Player Scale Reference** restores the optional native 0–3 m ruler, 1 m mark,
+  1.65 m collider mark, ~2.04 m visual-head mark, and mannequin. It is no longer
+  persistent stage furniture and a cold Studio start always begins with it off.
+
+Both commands live in the View menu and the model context menu's View group. Their
+explicit state survives a hot reload through the existing mesh-tool twig, but neither
+overlay is model data, save data, or export data.
 
 ## The rules
 

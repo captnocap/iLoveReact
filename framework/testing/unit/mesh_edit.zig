@@ -512,6 +512,45 @@ test "selection snapshot exposes the native face edge and vertex facts the inspe
     try testing.expect(std.mem.indexOf(u8, edge_json, "\"length\":1,\"faces\":1,\"open\":true,\"part\":0") != null);
 }
 
+test "measurement bounds prefer selection then focused scope then the whole model" {
+    var soup = [_]f32{0} ** (6 * 8);
+    const positions = [_][3]f32{
+        .{ -1, 0, 0 },  .{ 1, 0, 0 },   .{ -1, 2, 0 },
+        .{ 10, -2, 3 }, .{ 14, -2, 3 }, .{ 10, 1, 7 },
+    };
+    for (positions, 0..) |position, row| {
+        soup[row * 8] = position[0];
+        soup[row * 8 + 1] = position[1];
+        soup[row * 8 + 2] = position[2];
+        soup[row * 8 + 5] = 1;
+    }
+    mesh_edit.test_support.loadGroupedSoup(4234, soup[0..], 6, &.{ 10, 20 });
+    defer mesh_edit.test_support.clear();
+
+    mesh_edit.setMode(.none);
+    const whole = mesh_edit.measurementBoundsPub() orelse return error.MissingModelMeasurement;
+    try testing.expectEqual(mesh_edit.MeasurementSubject.model, whole.subject);
+    try testing.expectEqualSlices(f32, &.{ -1, -2, 0 }, &whole.min);
+    try testing.expectEqualSlices(f32, &.{ 14, 2, 7 }, &whole.max);
+
+    mesh_edit.setEditScope(10, 11);
+    const focused = mesh_edit.measurementBoundsPub() orelse return error.MissingScopeMeasurement;
+    try testing.expectEqual(mesh_edit.MeasurementSubject.scope, focused.subject);
+    try testing.expectEqualSlices(f32, &.{ -1, 0, 0 }, &focused.min);
+    try testing.expectEqualSlices(f32, &.{ 1, 2, 0 }, &focused.max);
+    const focused_size = focused.size();
+    try testing.expectEqualSlices(f32, &.{ 2, 2, 0 }, &focused_size);
+
+    mesh_edit.setEditScope(0, 0);
+    try testing.expect(mesh_edit.selectFaceByIndex(1, false));
+    const selected = mesh_edit.measurementBoundsPub() orelse return error.MissingSelectionMeasurement;
+    try testing.expectEqual(mesh_edit.MeasurementSubject.selection, selected.subject);
+    try testing.expectEqualSlices(f32, &.{ 10, -2, 3 }, &selected.min);
+    try testing.expectEqualSlices(f32, &.{ 14, 1, 7 }, &selected.max);
+    const selected_size = selected.size();
+    try testing.expectEqualSlices(f32, &.{ 4, 3, 4 }, &selected_size);
+}
+
 test "follow action queue retains rapid native lessons and drains them exactly once" {
     var queue: mesh_edit.FollowActionQueue = .{};
     defer queue.deinit(testing.allocator);

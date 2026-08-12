@@ -7,8 +7,19 @@ const scale = @import("stage_scale");
 
 test "stage scale is the ruled game metre contract" {
     try testing.expectEqual(@as(f32, 1.0), scale.Tuning.tile_meters);
+    try testing.expectEqual(@as(f32, 16.0), scale.Tuning.units_per_meter);
     try testing.expectEqual(@as(f32, 1.65), scale.Tuning.player_collider_height_meters);
     try testing.expectEqual(@as(f32, 2.04), scale.Tuning.player_visual_head_top_meters);
+    try testing.expectEqual(@as(f32, 20.0), scale.metersToUnits(1.25));
+}
+
+test "stage overlays are quiet until the author turns them on" {
+    const defaults: scale.OverlayOptions = .{};
+    try testing.expect(!defaults.player_scale);
+    try testing.expect(!defaults.measurements);
+    const measuring: scale.OverlayOptions = .{ .measurements = true };
+    try testing.expect(measuring.measurements);
+    try testing.expect(!measuring.player_scale);
 }
 
 test "stage scale keeps collider and visual head as distinct references" {

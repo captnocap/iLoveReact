@@ -198,7 +198,7 @@ test('model context menu folds stable tool families without hiding a command', (
   assert(ids(layout.groups[0]!.commands).join('|') === 'mesh-vertex|mesh-edge|mesh-face', 'select modes escaped their group');
   assert(ids(layout.groups[1]!.commands).join('|') === 'mesh-move|mesh-scale|mesh-scale-by|mesh-rotate', 'gizmos escaped their group');
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
-  assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-xray|mesh-cam-lock|mesh-cam-store|mesh-cam-recall', 'view tools escaped their group');
+  assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-measurements|mesh-player-scale|mesh-xray|mesh-cam-lock|mesh-cam-store|mesh-cam-recall', 'view tools escaped their group');
   assert(ids(layout.directToolCommands).join('|') === 'mesh-paint|mesh-path-plane|mesh-path-edges', 'Paint Faces and both Pen tools must remain one click away');
   assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-path-array|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
 
@@ -215,6 +215,15 @@ test('X-Ray is not replayed as remembered pointer-device input state', () => {
   assert(commandById('mesh-xray').tool !== true, 'X-Ray was registered as a replayable input tool');
   assert(!deviceToolReplayable('mesh-xray', 'model'), 'a stale device slot can still replay X-Ray');
   assert(deviceToolReplayable('mesh-face', 'model'), 'the device gate rejected a real model input tool');
+});
+
+test('measurement furniture is default-off presentation state, not replayable input', () => {
+  assert(commandById('mesh-measurements').tool !== true, 'Measurements were registered as a replayable input tool');
+  assert(commandById('mesh-player-scale').tool !== true, 'Player Scale was registered as a replayable input tool');
+  assert(!deviceToolReplayable('mesh-measurements', 'model'), 'a stale device slot can arm Measurements');
+  assert(!deviceToolReplayable('mesh-player-scale', 'model'), 'a stale device slot can arm Player Scale');
+  const view = menuNodes('View').filter((node) => node.kind === 'cmd').map((node) => node.id);
+  assert(view.includes('mesh-measurements') && view.includes('mesh-player-scale'), 'Studio View menu cannot reach both measurement overlays');
 });
 
 test('model context mirror group omits part actions without a focused part', () => {
