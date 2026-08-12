@@ -139,6 +139,13 @@ pub const Runtime = struct {
     /// ordinary mesh node borrows this slice; no second CharacterAsset or skin
     /// palette is constructed for the diagnostic specimen.
     player_bind_specimen: ?m_character_specimen.BindSpecimen = null,
+    /// Aspect used by the capture-owned measured camera. Null outside capture;
+    /// a changed pane aspect triggers exactly one native re-fit.
+    player_target_camera_aspect: ?f32 = null,
+    /// One mounted RJAN motion document owned by this runtime; the pose state
+    /// borrows it (req_4285). Replaced through the play door and freed on
+    /// every player-character teardown.
+    player_motion: ?m_player_character_pose.motion_document.Document = null,
     /// Revisioned mounted owner for strict saved-weight NPC instances. Every
     /// instance owns its own CharacterAsset, FK clock, and GPU palette.
     npc_character_session: m_npc_character_session.Session = .{},

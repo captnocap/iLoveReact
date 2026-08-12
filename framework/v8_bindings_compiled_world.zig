@@ -5,9 +5,9 @@
 
 const std = @import("std");
 const v8 = @import("v8");
-const v8_runtime = @import("v8_runtime.zig");
+const v8_runtime = @import("dev_modules/v8_runtime_api.zig");
 const world_loader = @import("world_loader.zig");
-const world_window = @import("gpu/world_window.zig");
+const world_window = @import("dev_modules/world_window_api.zig");
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
     if (idx >= info.length()) return null;
@@ -468,87 +468,115 @@ fn hostSetResidentMeshes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, "ok");
 }
 
-// __compiled_world_set_player_model(Float32Array verts, Float32Array groupTable) stages the
-// editor's EXPORTED player-role character as the loader's player figure (req_2780). Process-
-// global (no nodeId): staged BEFORE a loader constructs, consumed by every construct whose
-// gamefile has no player lump — the blank playtest world's case. Table rows are 8 floats
-// [vertStart, vertCount, cx, cy, cz, r, g, b]; verts are stride-8, LOCAL to each group's
-// center. Two empty arrays clear the staging (back to the stand-in figure).
-fn hostSetPlayerModel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+// __compiled_world_set_player_character(JSON string) stages one already-bound
+// immutable character. Runtime reopens RJMD/RJSK and refuses every stale hash;
+// it never receives render buffers and never invokes the binding solver.
+fn hostSetPlayerCharacter(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const verts = argView(info, 0) orelse {
-        setReturnString(info, "error:BadVerts");
+    const request = argToStringAlloc(info, 0) orelse {
+        world_loader.clearPendingPlayerCharacter();
+        setReturnString(info, "error:BadCharacterRequest");
         return;
     };
-    const table = argView(info, 1) orelse {
-        setReturnString(info, "error:BadTable");
-        return;
-    };
-    world_loader.setPendingPlayerModel(verts, table);
-    setReturnString(info, "ok");
-}
-
-// __compiled_world_set_player_skin(Float32Array verts, Float32Array boneTable) stages the
-// SKINNED player figure (SKIN-3499) — same process-global staging discipline as the model
-// door, and it WINS over the per-part model at construct. Verts are stride-16 rows
-// [pos3, normal3, uv2, joint4, weight4] in MODEL space (not re-based); bone rows are 8
-// floats [cx, cy, cz, r, g, b, poseMarkerKind, reserved] in the clips' node
-// order. poseMarkerKind is zero in ordinary play and opt-in on the Animation
-// diagnostic surface. Two empty arrays clear the staging.
-fn hostSetPlayerSkin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const verts = argView(info, 0) orelse {
-        setReturnString(info, "error:BadVerts");
-        return;
-    };
-    const bones = argView(info, 1) orelse {
-        setReturnString(info, "error:BadBones");
-        return;
-    };
-    // Phase-2 auto-weights run at staging unless RJIT_SKIN_SOLVE=0 (the
-    // debug escape back to rigid per-part weights).
+    defer std.heap.c_allocator.free(request);
     const host = v8_runtime.hostContext(info.getIsolate());
-    const solve = if (host.environ.get("RJIT_SKIN_SOLVE")) |v| !std.mem.eql(u8, v, "0") else true;
-    world_loader.setPendingPlayerSkin(verts, bones, solve);
-    setReturnString(info, "ok");
-}
-
-// __compiled_world_set_player_animation(Float32Array payload) stages the basic animation
-// shapes generated for the pushed body (req_2781) — same staging discipline as the model
-// door: process-global, consumed at construct when the gamefile carries no animation and
-// the payload's node count matches the model's groups. Empty payload clears.
-fn hostSetPlayerAnimation(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const payload = argView(info, 0) orelse {
-        setReturnString(info, "error:BadPayload");
+    world_loader.setPendingPlayerCharacter(host.io, request) catch |err| {
+        var buffer: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:CharacterLoad";
+        setReturnString(info, message);
         return;
     };
-    world_loader.setPendingPlayerAnimation(payload);
-    setReturnString(info, "ok");
+    const reply = world_loader.playerCharacterPaletteJsonAlloc(std.heap.c_allocator) catch {
+        world_loader.clearPendingPlayerCharacter();
+        setReturnString(info, "error:PaletteReply");
+        return;
+    };
+    defer std.heap.c_allocator.free(reply);
+    setReturnString(info, reply);
 }
 
-// __compiled_world_set_player_live_pose(nodeId, Float32Array n*9) — the CAPTURE feed
-// (req_2786): per-node transforms pushed every solve tick override the clip sampler
-// while fresh; _clear drops the override. Node-scoped: only the capture surface's
-// loader wears the camera pose.
-fn hostSetPlayerLivePose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+// __compiled_world_npc_character_session(JSON string) owns explicit NPC
+// instances on one mounted WorldLoader. Every open/replace reloads bound
+// RJMD/RJSK artifacts through CharacterAsset before atomically changing nodes.
+fn hostNpcCharacterSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const request = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "error:BadNpcCharacterSessionRequest");
+        return;
+    };
+    defer std.heap.c_allocator.free(request);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const reply = world_loader.npcCharacterSessionJsonAlloc(
+        host.io,
+        std.heap.c_allocator,
+        request,
+    ) catch |err| {
+        var buffer: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:NpcCharacterSession";
+        setReturnString(info, message);
+        return;
+    };
+    defer std.heap.c_allocator.free(reply);
+    setReturnString(info, reply);
+}
+
+// __compiled_world_set_player_pose(nodeId, Uint8Array) publishes one complete
+// local-quaternion v1 frame into the strict CharacterAsset already mounted at
+// that node. Empty bytes release only this direct-host override so canonical
+// native clips resume. The exact accepted frameId is returned for diagnostics.
+fn hostSetPlayerPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const node_id = argToNodeId(info, 0) orelse {
         setReturnString(info, "error:BadNodeId");
         return;
     };
     const bytes = argView(info, 1) orelse {
-        setReturnString(info, "error:BadPose");
+        setReturnString(info, "error:BadPoseFrame");
         return;
     };
-    world_loader.setPlayerLivePose(node_id, bytes);
-    setReturnString(info, "ok");
+    const accepted = world_loader.setMountedPlayerCharacterPoseBytes(node_id, bytes) catch |err| {
+        var buffer: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:PoseFrameRejected";
+        setReturnString(info, message);
+        return;
+    };
+    var buffer: [96]u8 = undefined;
+    const reply = if (accepted) |frame_id|
+        std.fmt.bufPrint(&buffer, "{{\"ok\":true,\"version\":1,\"frameId\":{d}}}", .{frame_id}) catch "{\"ok\":true}"
+    else
+        "{\"ok\":true,\"version\":1,\"frameId\":null}";
+    setReturnString(info, reply);
 }
 
-fn hostClearPlayerLivePose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+// __compiled_world_play_motion(nodeId, path) mounts one RJAN motion document
+// from disk as the mounted player's pose source (req_4285); an empty path
+// stops playback and the built-in clips resume. Content-addressed
+// motion-<sha256>.rjan takes are hash-verified on reopen.
+fn hostPlayMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (argToNodeId(info, 0)) |node_id| world_loader.clearPlayerLivePose(node_id);
-    setReturnString(info, "ok");
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const path = argToStringAlloc(info, 1) orelse {
+        setReturnString(info, "error:BadMotionPath");
+        return;
+    };
+    defer std.heap.c_allocator.free(path);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const reply = world_loader.playMountedPlayerMotionJsonAlloc(
+        host.io,
+        std.heap.c_allocator,
+        node_id,
+        path,
+    ) catch |err| {
+        var buffer: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:MotionRejected";
+        setReturnString(info, message);
+        return;
+    };
+    defer std.heap.c_allocator.free(reply);
+    setReturnString(info, reply);
 }
 
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
@@ -629,11 +657,10 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_ground_hit", hostGroundHit);
     v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
-    v8_runtime.registerHostFn("__compiled_world_set_player_model", hostSetPlayerModel);
-    v8_runtime.registerHostFn("__compiled_world_set_player_skin", hostSetPlayerSkin);
-    v8_runtime.registerHostFn("__compiled_world_set_player_animation", hostSetPlayerAnimation);
-    v8_runtime.registerHostFn("__compiled_world_set_player_live_pose", hostSetPlayerLivePose);
-    v8_runtime.registerHostFn("__compiled_world_clear_player_live_pose", hostClearPlayerLivePose);
+    v8_runtime.registerHostFn("__compiled_world_set_player_character", hostSetPlayerCharacter);
+    v8_runtime.registerHostFn("__compiled_world_npc_character_session", hostNpcCharacterSession);
+    v8_runtime.registerHostFn("__compiled_world_set_player_pose", hostSetPlayerPose);
+    v8_runtime.registerHostFn("__compiled_world_play_motion", hostPlayMotion);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);

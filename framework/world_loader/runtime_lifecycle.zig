@@ -3,7 +3,7 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
-const material_tex = @import("../gpu/material_tex.zig");
+const material_tex = @import("../dev_modules/material_api.zig");
 const decal_raster = @import("../gpu/decal_raster.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
@@ -26,6 +26,22 @@ fn envFlag(environ: *const std.process.Environ.Map, name: []const u8) bool {
     return value.len == 0 or value[0] != '0';
 }
 
+/// Construct the paint-first empty world without manufacturing a filesystem
+/// error. Modular dev calls this when the cold host has already classified the
+/// source path as absent.
+pub fn initBlankInPlace(self: anytype, io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, path: []const u8, node_id: u32) !void {
+    self.* = @TypeOf(self.*){
+        .allocator = allocator,
+        .node_id = node_id,
+        .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
+        .live_log = envFlag(environ, "RJIT_LIVELOG"),
+        .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
+        .scene = constructor.blankScene(),
+    };
+    log.print("[loader] no game file at {s} — BLANK world (paint-first canvas)\n", .{path});
+    try build(self, io, environ);
+}
+
 pub fn initInPlace(self: anytype, io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !void {
     const bytes = loadGameFile(io, allocator, path) catch |err| {
         // BLANKBOOT req_2490: no game file at this path yet — the paint-first
@@ -35,17 +51,7 @@ pub fn initInPlace(self: anytype, io: std.Io, environ: *const std.process.Enviro
         // the real bake in. Only file-absence blanks; a corrupt file still
         // fails LOUDLY below.
         if (err == error.FileNotFound) {
-            self.* = @TypeOf(self.*){
-                .allocator = allocator,
-                .node_id = node_id,
-                .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
-                .live_log = envFlag(environ, "RJIT_LIVELOG"),
-                .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
-                .scene = constructor.blankScene(),
-            };
-            log.print("[loader] no game file at {s} — BLANK world (paint-first canvas)\n", .{path});
-            try build(self, io, environ);
-            return;
+            return initBlankInPlace(self, io, environ, allocator, path, node_id);
         }
         log.print("[loader] failed to read game-file {s}: {any}\n", .{ path, err });
         return err;
@@ -140,6 +146,13 @@ pub fn ensureMaterials(self: anytype, io: std.Io, environ: *const std.process.En
 }
 
 pub fn deinit(self: anytype, io: std.Io) void {
+    if (self.player_target_candidate) |candidate| candidate.deinit();
+    self.player_target_candidate = null;
+    if (self.player_motion) |*document| document.deinit();
+    self.player_motion = null;
+    if (self.player_bind_specimen) |*bind| bind.deinit();
+    self.player_bind_specimen = null;
+    self.npc_character_session.deinit(self.allocator);
     self.mesh_by_hash.deinit(self.allocator);
     self.live_cooked_door_by_identity.deinit(self.allocator);
     if (self.resident) |*res| res.deinit(self.allocator);
@@ -163,8 +176,6 @@ pub fn deinit(self: anytype, io: std.Io) void {
     if (self.mesh_prop_islands.len > 0) self.allocator.free(self.mesh_prop_islands);
     for (self.player_geom_keys.items) |key| self.allocator.free(key);
     self.player_geom_keys.deinit(self.allocator);
-    if (self.player_skin_palette.len > 0) self.allocator.free(self.player_skin_palette);
-    self.player_skin_palette = &.{};
     for (self.paint_slot_key) |maybe_key| {
         if (maybe_key) |key| self.allocator.free(key);
     }
@@ -202,7 +213,6 @@ pub fn deinit(self: anytype, io: std.Io) void {
         while (it.next()) |key| self.allocator.free(key.*);
         self.live_slot_keys.deinit(self.allocator);
     }
-    self.npcs.deinit(self.allocator);
     if (self.material_batches.len > 0) {
         for (self.material_batches) |batch| batch.deinit(self.allocator);
         self.allocator.free(self.material_batches);

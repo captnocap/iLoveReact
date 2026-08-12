@@ -53,6 +53,7 @@ const character_animation = @import("world_loader/animation.zig");
 const character_camera = @import("world_loader/camera.zig");
 const npc_character_session = @import("world_loader/npc_character_session.zig");
 pub const player_character_pose = @import("world_loader/player_character_pose.zig");
+const character_hashes = @import("skeleton/character_hashes.zig");
 pub const pose_stream = player_character_pose.pose_stream;
 pub const rig_pose = player_character_pose.rig_pose;
 
@@ -386,6 +387,9 @@ pub fn activateMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) 
         bind_geometry_key,
     );
 
+    // The capture target replaces the character; any mounted motion document
+    // resolved against the OLD palette dies with it.
+    dropMountedPlayerMotion(runtime);
     const next = candidate.*;
     runtime.player_target_candidate = null;
     runtime.player_target_candidate_owner.clear();
@@ -432,6 +436,74 @@ pub fn clearMountedPlayerCharacterPose(node_id: u32, owner_id: []const u8) void 
     character.evaluate(bind.root_translation, bind.rotations()) catch {};
 }
 
+pub const MAX_MOTION_BYTES: usize = 64 << 20;
+
+fn dropMountedPlayerMotion(runtime: *Runtime) void {
+    runtime.player_character_pose.stopMotion();
+    if (runtime.player_motion) |*document| document.deinit();
+    runtime.player_motion = null;
+}
+
+/// Mount one RJAN motion document from disk as the mounted player's pose
+/// source (req_4285); an empty path stops playback and clips resume. The
+/// `motion-` basename prefix is reserved for content-addressed takes and is
+/// hash-verified on reopen, the saved-character law; other names decode and
+/// validate only (the editable library case). Returns a compact JSON summary.
+pub fn playMountedPlayerMotionJsonAlloc(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    node_id: u32,
+    path: []const u8,
+) ![]u8 {
+    const runtime = try requireMountedRuntime(node_id);
+    if (path.len == 0) {
+        dropMountedPlayerMotion(runtime);
+        return allocator.dupe(u8, "{\"ok\":true,\"playing\":false}");
+    }
+    const character = if (runtime.scene.player_character) |*value| value else return error.MissingMountedCharacter;
+
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, runtime.allocator, .limited(MAX_MOTION_BYTES));
+    defer runtime.allocator.free(bytes);
+    const basename = std.fs.path.basename(path);
+    if (std.mem.startsWith(u8, basename, "motion-") and std.mem.endsWith(u8, basename, ".rjan")) {
+        const hash_text = basename["motion-".len .. basename.len - ".rjan".len];
+        const expected = character_hashes.parseHex(hash_text) catch return error.NonContentAddressedPath;
+        var actual: character_hashes.Hash = undefined;
+        std.crypto.hash.sha2.Sha256.hash(bytes, &actual, .{});
+        if (!std.mem.eql(u8, &expected, &actual)) return error.MotionArtifactHashMismatch;
+    }
+    var document = try player_character_pose.motion_document.decodeAlloc(runtime.allocator, bytes);
+    errdefer document.deinit();
+
+    dropMountedPlayerMotion(runtime);
+    runtime.player_motion = document;
+    const resident = &runtime.player_motion.?;
+    runtime.player_character_pose.playMotion(resident, character.retargetBoneIds()) catch |err| {
+        resident.deinit();
+        runtime.player_motion = null;
+        return err;
+    };
+
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    try output.writer.writeAll("{\"ok\":true,\"playing\":true,\"name\":\"");
+    for (resident.name) |byte| switch (byte) {
+        '"' => try output.writer.writeAll("\\\""),
+        '\\' => try output.writer.writeAll("\\\\"),
+        0...31 => try output.writer.print("\\u{x:0>4}", .{byte}),
+        else => try output.writer.writeByte(byte),
+    };
+    try output.writer.print(
+        "\",\"durationSeconds\":{d},\"looping\":{s},\"channelCount\":{d}}}",
+        .{
+            resident.duration_seconds,
+            if (resident.looping) "true" else "false",
+            resident.channel_ids.len,
+        },
+    );
+    return allocator.dupe(u8, output.written());
+}
+
 /// Close only the candidate/active target owned by `owner_id`. A late close
 /// from a replaced session cannot tear down the newer session's character.
 pub fn closeMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) void {
@@ -443,6 +515,7 @@ pub fn closeMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) voi
     }
     if (!runtime.player_target_active_owner.matches(owner_id)) return;
     if (!disablePlayerCharacterNodes(runtime)) return;
+    dropMountedPlayerMotion(runtime);
     _ = runtime.player_character_pose.clear(owner_id);
     runtime.player_target_active_owner.clear();
     runtime.player_target_camera_aspect = null;
