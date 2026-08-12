@@ -169,20 +169,20 @@ pub const Error = fk.Error || error{
     CalibrationUnavailable,
 };
 
+// A calibration frame is valid when the CORE that defines the sample's center
+// and scale (hip center, hip-to-head height, shoulder line, facial baseline)
+// is confidently observed. Limb keypoints join every sample at their reported
+// positions regardless of confidence — the median over the 30 samples is the
+// noise filter — because footage of a moving subject (the video workflow,
+// req_4265) essentially never offers 30 frames where all four limbs are
+// simultaneously confident, and demanding that made calibration a lottery.
+// Live retargeting still gates each limb per frame at its own stricter floor.
 const REQUIRED_KEYPOINTS = [_]KeypointName{
     .nose,
     .shoulder_left,
     .shoulder_right,
-    .elbow_left,
-    .elbow_right,
-    .wrist_left,
-    .wrist_right,
     .hip_left,
     .hip_right,
-    .knee_left,
-    .knee_right,
-    .ankle_left,
-    .ankle_right,
 };
 
 const SegmentDefinition = struct {

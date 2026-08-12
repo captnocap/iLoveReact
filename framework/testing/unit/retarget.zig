@@ -107,7 +107,7 @@ test "calibration requires 30 distinct valid frames above the minimum confidence
     var calibrator = try source.Calibrator.init(source.DEFAULT_TUNING);
     calibrator.begin(0);
     var rejected = makeFrame(1, 100, 0.8);
-    rejected.keypoints[@intFromEnum(source.KeypointName.wrist_left)].confidence = bar - 0.001;
+    rejected.keypoints[@intFromEnum(source.KeypointName.hip_left)].confidence = bar - 0.001;
     try testing.expectEqual(source.CalibrationPush.ignored_invalid, try calibrator.push(&rejected));
     try testing.expectEqual(@as(u8, 0), calibrator.valid_frame_count);
 

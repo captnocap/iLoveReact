@@ -415,7 +415,7 @@ test "30 valid frames within ten seconds promote one atomic triplet and freeze p
     const session_id = manager.currentSessionId().?;
 
     var low_confidence = makeDetected(1, 1_100, 0.8);
-    low_confidence.keypoints[@intFromEnum(source.KeypointName.wrist_left)].confidence =
+    low_confidence.keypoints[@intFromEnum(source.KeypointName.hip_left)].confidence =
         source.DEFAULT_TUNING.minimum_confidence - 0.001;
     try manager.beginInference(session_id, immutableFrame(1, 1_100, 1_001));
     try testing.expectEqual(

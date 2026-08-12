@@ -365,6 +365,11 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
         if (opened.depthSign !== preferredDepthSignRef.current) {
           opened = api.setDepthSign(preferredDepthSignRef.current);
         }
+        // Calibration begins the moment a session opens (req_4265): the feed
+        // is the rest reference, and sessions reopen on camera change and hot
+        // reload — demanding a manual click after each one reads as "detection
+        // is dead". The calibrate button remains as the manual re-baseline.
+        try { opened = api.calibrate(); } catch { /* button remains the manual path */ }
         setSnapshot(opened);
         setSessionError(null);
         beginSnapshotPolling();
@@ -497,6 +502,34 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   useEffect(() => {
     console.warn(`[capture-probe] calibration state=${calibrationState} valid=${calibrationValid}/30 sessionError=${sessionError ?? 'none'}`);
   }, [calibrationState, calibrationValid, sessionError]);
+  // Weak footage fails the 10s calibration deadline; retry quietly so the
+  // session recovers by itself once the feed improves (req_4265).
+  useEffect(() => {
+    if (calibrationState !== 'failed') return;
+    const timer = setTimeout(() => applyCommand((api) => api.calibrate()), 4000);
+    return () => clearTimeout(timer);
+  }, [calibrationState]);
+  const targetBoneIds = snapshot?.targetSkeleton?.bones?.map((bone) => bone.boneId).join(',') ?? '';
+  useEffect(() => {
+    if (targetBoneIds) console.warn(`[capture-probe] target bones: ${targetBoneIds}`);
+  }, [targetBoneIds]);
+  const skeletonBones = snapshot?.targetSkeleton?.bones;
+  useEffect(() => {
+    if (!skeletonBones || frameId === null || frameId % 30 !== 0) return;
+    let max = 0;
+    let movedBone = 'none';
+    for (const bone of skeletonBones) {
+      if (!bone.deformedPosition) continue;
+      const d = Math.hypot(
+        bone.deformedPosition[0] - bone.bindPosition[0],
+        bone.deformedPosition[1] - bone.bindPosition[1],
+        bone.deformedPosition[2] - bone.bindPosition[2],
+      );
+      if (d > max) { max = d; movedBone = bone.boneId; }
+    }
+    const rootText = root ? `${root[0].toFixed(3)},${root[1].toFixed(3)},${root[2].toFixed(3)}` : 'none';
+    console.warn(`[capture-probe] frame=${frameId} deform-vs-bind max=${max.toFixed(4)}m at ${movedBone} root=${rootText} localRot=${localRotationCount}`);
+  }, [frameId]);
 
   return (
     <C.HW_WorldEditorSurface>
