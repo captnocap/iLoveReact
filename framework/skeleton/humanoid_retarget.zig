@@ -67,6 +67,15 @@ const Channel = struct {
     } = .full,
 };
 
+/// The role wire ids capture drives, in stable channel order. This is the
+/// recording channel table (req_4285): a captured take persists exactly the
+/// channels the retargeter steers; everything else rides bind by construction.
+pub const DRIVEN_CHANNEL_IDS = blk: {
+    var ids: [CHANNELS.len][]const u8 = undefined;
+    for (CHANNELS, 0..) |channel, index| ids[index] = channel.bone_id;
+    break :blk ids;
+};
+
 const CHANNELS = [_]Channel{
     .{ .bone_id = "pelvis", .segment = .hip_line },
     .{ .bone_id = "spine_lower", .segment = .spine, .share_kind = .spine_lower },

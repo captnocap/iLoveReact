@@ -59,6 +59,9 @@ const TestContext = struct {
     activated_valid: bool = true,
     render_source_buf: [96]u8 = undefined,
     render_source_len: usize = 0,
+    save_motion_count: usize = 0,
+    saved_motion_buf: [65536]u8 = undefined,
+    saved_motion_len: usize = 0,
 
     fn init() TestContext {
         var state = TestContext{};
@@ -179,6 +182,19 @@ fn closeTarget(raw: ?*anyopaque, _: []const u8, _: []const u8, _: u32) void {
     ctx(raw).close_count += 1;
 }
 
+fn saveMotion(raw: ?*anyopaque, directory: []const u8, encoded: []const u8) anyerror!capture.SavedMotion {
+    const state = ctx(raw);
+    state.save_motion_count += 1;
+    if (encoded.len > state.saved_motion_buf.len) return error.TestMotionTooLarge;
+    @memcpy(state.saved_motion_buf[0..encoded.len], encoded);
+    state.saved_motion_len = encoded.len;
+    var saved = capture.SavedMotion{};
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/motion-test.rjan", .{directory});
+    try saved.set(path);
+    return saved;
+}
+
 fn hooks(state: *TestContext) capture.Hooks {
     return .{
         .context = state,
@@ -190,6 +206,7 @@ fn hooks(state: *TestContext) capture.Hooks {
         .publish_triplet = publishTriplet,
         .clear_triplet = clearTriplet,
         .close_target = closeTarget,
+        .save_motion = saveMotion,
     };
 }
 
@@ -592,4 +609,109 @@ test "deadline failure and discarded or mismatched inference release only their 
     const calibration = snapshot.value.object.get("value").?.object.get("calibration").?.object;
     try testing.expectEqualStrings("failed", calibration.get("state").?.string);
     try testing.expect(calibration.get("detail") != null);
+}
+
+fn recordStopRequest(manager: *capture.Manager, session_id: []const u8, revision: u64) ![]u8 {
+    var buffer: [320]u8 = undefined;
+    const request = try std.fmt.bufPrint(
+        &buffer,
+        "{{\"op\":\"recordStop\",\"sessionId\":\"{s}\",\"expectedRevision\":{d}," ++
+            "\"payload\":{{\"directory\":\"/tmp/motion\",\"name\":\"take-1\"}}}}",
+        .{ session_id, revision },
+    );
+    return manager.handle(request);
+}
+
+test "recording taps promoted frames into a durable role-addressed take" {
+    var state: TestContext = undefined;
+    try state.initExternal();
+    var manager = try capture.Manager.init(testing.allocator, hooks(&state), capture.DEFAULT_TUNING);
+    defer manager.deinit();
+    const open_reply = try manager.handle(OPEN_REQUEST);
+    defer testing.allocator.free(open_reply);
+    var open_parsed = try expectReplyOk(open_reply);
+    defer open_parsed.deinit();
+    try beginCalibration(&manager);
+    try calibrateThirty(&manager, 1, 1_100);
+    const session_id = manager.currentSessionId().?;
+
+    const record_reply = try command(&manager, "record", session_id, manager.currentRevision().?);
+    defer testing.allocator.free(record_reply);
+    var record_parsed = try expectReplyOk(record_reply);
+    defer record_parsed.deinit();
+    const recording_state = record_parsed.value.object.get("value").?.object.get("recording").?.object;
+    try testing.expectEqual(@as(i64, 0), recording_state.get("frameCount").?.integer);
+
+    for (0..3) |index| {
+        const frame_id = 40 + index;
+        const timestamp_ms = 5_000 + index * 33;
+        try manager.beginInference(session_id, immutableFrame(frame_id, timestamp_ms, 20_000 + frame_id));
+        const result = try manager.ingestCompletedFrame(session_id, makeDetected(frame_id, timestamp_ms, 0.8));
+        try testing.expectEqual(capture.IngestResult.promoted, result);
+    }
+
+    const stop_reply = try recordStopRequest(&manager, session_id, manager.currentRevision().?);
+    defer testing.allocator.free(stop_reply);
+    var stop_parsed = try expectReplyOk(stop_reply);
+    defer stop_parsed.deinit();
+    const stop_value = stop_parsed.value.object.get("value").?.object;
+    try testing.expectEqual(@as(i64, 3), stop_value.get("frameCount").?.integer);
+    try testing.expectEqualStrings("/tmp/motion/motion-test.rjan", stop_value.get("path").?.string);
+    try testing.expect(!stop_value.get("truncated").?.bool);
+    try testing.expectEqual(@as(usize, 1), state.save_motion_count);
+
+    // The persisted bytes are a valid RJAN capture document: the 12 role
+    // channels this rig binds, one dense run, real per-frame times, root
+    // motion — and it evaluates.
+    var doc = try capture.motion_document.decodeAlloc(
+        testing.allocator,
+        state.saved_motion_buf[0..state.saved_motion_len],
+    );
+    defer doc.deinit();
+    try testing.expectEqual(capture.motion_document.SourceKind.capture, doc.source);
+    try testing.expectEqualStrings("take-1", doc.name);
+    try testing.expectEqual(@as(usize, 12), doc.channel_ids.len);
+    try testing.expectEqualStrings("pelvis", doc.channel_ids[0]);
+    try testing.expectEqual(@as(usize, 0), doc.keys.len);
+    try testing.expectEqual(@as(usize, 1), doc.runs.len);
+    try testing.expectEqual(@as(usize, 3), doc.runs[0].frameCount());
+    try testing.expectApproxEqAbs(@as(f32, 0.066), doc.runs[0].times[2], 0.001);
+    try testing.expect(doc.runs[0].root_translations != null);
+
+    const sampled = try capture.motion_document.sample(&doc, 0.03);
+    try testing.expectEqual(@as(u32, 0xFFF), sampled.coverage);
+    try testing.expect(sampled.has_root);
+
+    // A second stop is a protocol error, not a crash.
+    const double_stop = try recordStopRequest(&manager, session_id, manager.currentRevision().?);
+    defer testing.allocator.free(double_stop);
+    var double_parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, double_stop, .{});
+    defer double_parsed.deinit();
+    try testing.expect(!double_parsed.value.object.get("ok").?.bool);
+}
+
+test "recalibration discards an active recording instead of splicing rest references" {
+    var state: TestContext = undefined;
+    try state.initExternal();
+    var manager = try capture.Manager.init(testing.allocator, hooks(&state), capture.DEFAULT_TUNING);
+    defer manager.deinit();
+    const open_reply = try manager.handle(OPEN_REQUEST);
+    defer testing.allocator.free(open_reply);
+    var open_parsed = try expectReplyOk(open_reply);
+    defer open_parsed.deinit();
+    try beginCalibration(&manager);
+    try calibrateThirty(&manager, 1, 1_100);
+    const session_id = manager.currentSessionId().?;
+
+    const record_reply = try command(&manager, "record", session_id, manager.currentRevision().?);
+    defer testing.allocator.free(record_reply);
+    var record_parsed = try expectReplyOk(record_reply);
+    defer record_parsed.deinit();
+
+    const recalibrate_reply = try command(&manager, "calibrate", session_id, manager.currentRevision().?);
+    defer testing.allocator.free(recalibrate_reply);
+    var recalibrate_parsed = try expectReplyOk(recalibrate_reply);
+    defer recalibrate_parsed.deinit();
+    const snapshot = recalibrate_parsed.value.object.get("value").?.object;
+    try testing.expect(snapshot.get("recording").? == .null);
 }
