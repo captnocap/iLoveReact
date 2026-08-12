@@ -47,3 +47,32 @@ test "pointer-blocking chrome consumes middle-click before content behind it" {
     try testing.expectEqual(&root.children[1], hit);
     try testing.expect(hit.handlers.js_on_middle_click == null);
 }
+
+test "scroll container owns wheel across its blank body and interactive children" {
+    const blank = Node{
+        .computed = .{ .x = 40, .y = 40, .w = 220, .h = 210 },
+    };
+    const button = Node{
+        .computed = .{ .x = 60, .y = 60, .w = 90, .h = 28 },
+        .handlers = .{ .js_on_press = "__dispatchEvent(7,'onClick')" },
+    };
+    var scroll_children = [_]Node{ blank, button };
+    const scroll = Node{
+        .computed = .{ .x = 40, .y = 40, .w = 220, .h = 210 },
+        .style = .{ .overflow = .scroll },
+        .content_height = 640,
+        .children = &scroll_children,
+    };
+    const viewport = Node{
+        .computed = .{ .x = 0, .y = 0, .w = 640, .h = 480 },
+    };
+    var children = [_]Node{ viewport, scroll };
+    var root = Node{
+        .computed = .{ .x = 0, .y = 0, .w = 640, .h = 480 },
+        .children = &children,
+    };
+
+    try testing.expect(events.scrollContainerOwnsWheel(&root, 190, 170));
+    try testing.expect(events.scrollContainerOwnsWheel(&root, 80, 72));
+    try testing.expect(!events.scrollContainerOwnsWheel(&root, 320, 170));
+}

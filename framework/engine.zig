@@ -5480,15 +5480,20 @@ pub fn run(config_in: AppConfig) !void {
                     // SDL3: mouse_x/mouse_y are in the wheel event itself
                     const mx: f32 = event.wheel.mouse_x;
                     const my: f32 = event.wheel.mouse_y;
+                    const events = @import("events.zig");
+                    // Wheel ownership is stricter than click ownership. A ScrollView's blank
+                    // body has no click handler, but it is still the scroll surface under the
+                    // pointer and must win before the native model camera. Interactive children
+                    // are irrelevant to this decision (req_4244).
+                    const scroll_container_owns_wheel = events.scrollContainerOwnsWheel(config.root, mx, my);
                     // Native mesh-editor zoom (modelview): wheel over the viewport dollies the
-                    // orbit camera. Over chrome (e.g. a scrollable panel) it falls through.
-                    if (r3d.meshEditCapturing() and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {
+                    // orbit camera. Over chrome or any scroll surface it falls through.
+                    if (r3d.meshEditCapturing() and !scroll_container_owns_wheel and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {
                         r3d.orbitZoom(event.wheel.y);
                         state_mod.markDirty();
                         continue;
                     }
                     witness.recordScroll(mx, my, event.wheel.x, event.wheel.y);
-                    const events = @import("events.zig");
                     // Terminal scrollback — mouse wheel scrolls history (check all terminals).
                     // When a terminal is nested inside a Canvas.Node its computed rect is in
                     // graph space; transform the cursor into graph space before hit-testing.

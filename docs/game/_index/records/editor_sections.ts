@@ -28,6 +28,16 @@ export const editor_sections: DocIndex = {
       consumers: ['cart/editor/data/commands.ts', 'framework/gpu/3d.zig', 'framework/gpu/mesh_edit.zig', 'framework/gpu/stage_scale.zig'],
       status: 'live',
     },
+    {
+      name: 'Studio wheel ownership boundary',
+      purpose: ['ui', 'input'],
+      kind: 'system',
+      sourceFile: 'framework/events.zig',
+      description:
+        'A ScrollView owns wheel input across its full visible rectangle, including blank body space. framework/engine.zig consults this scroll-surface hit before native model-camera zoom, so hovering a child button never changes the wheel target and the stage receives wheel input only when no scroll container claims the point.',
+      consumers: ['framework/engine.zig', 'runtime/primitives.tsx', 'cart/editor/'],
+      status: 'live',
+    },
   ],
   patterns: [
     {

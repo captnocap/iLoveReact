@@ -561,3 +561,11 @@ pub fn findScrollContainer(node: *Node, mx: f32, my: f32) ?*Node {
 
     return null;
 }
+
+/// Wheel ownership is a property of the scroll surface under the pointer, not of
+/// whichever interactive descendant a generic click hit-test happens to find. Native
+/// viewports consult this before camera zoom so the blank body of a ScrollView owns the
+/// wheel exactly like one of its buttons does.
+pub fn scrollContainerOwnsWheel(node: *Node, mx: f32, my: f32) bool {
+    return findScrollContainer(node, mx, my) != null;
+}

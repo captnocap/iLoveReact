@@ -1,0 +1,24 @@
+{
+  "id": "req_4244",
+  "at": "2026-08-12T02:21:02.967Z",
+  "origin": "codex:019ff350",
+  "text": "ok good next basically anything that is a scroll container when trying to scroll it makes the studio camera move and not the scroll container, unless it has like a button, then when hovering that type of element, it will hit the scroll for the container and then drop off when no longer focusing such element",
+  "status": "doing",
+  "sessionId": "019ff350-31ea-7b32-b9f8-08b83d748935",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-12T02:21:14.326Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-12T02:26:34.759Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Fixed native wheel ownership at the framework boundary: before model-camera zoom, engine.zig now asks events.zig whether a ScrollView owns the pointer position. Ownership covers the full visible container, including blank space, rather than depending on an interactive child hit. Added a Zig regression for blank body, child button, and outside points. Passed test-events and the complete ReleaseFast editor ship build."
+    }
+  ]
+}

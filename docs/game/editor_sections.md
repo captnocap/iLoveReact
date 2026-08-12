@@ -62,6 +62,15 @@ dressing, face wash, mirror planes, and selection gizmos; returning to Vertex, E
 or Face restores that mode's prior selection. This is the supported way to inspect a
 model without edit overlays—moving outliner focus to an unrelated part is not.
 
+## Wheel ownership across editor chrome
+
+Every `ScrollView` under the pointer owns the mouse wheel across its complete visible
+rectangle, including padding and blank space between or beyond interactive children.
+The native input router resolves that scroll surface before allowing a model-stage
+camera to zoom. Buttons are not wheel proxies: entering or leaving a button inside a
+list must not change which surface scrolls. Camera zoom receives the wheel only when
+no scroll container or other explicit chrome control claims the pointer position.
+
 ## The rules
 
 - **A section is a block in the UI flow**, not a pixel shape — the Left Rail
