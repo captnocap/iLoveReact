@@ -261,3 +261,65 @@ test "a motion document replays onto two different bodies through their role pal
     try refused.resetRig(&external_bones, &ids);
     try std.testing.expectError(error.NoMotionChannels, refused.playMotion(&foreign, &ids));
 }
+
+test "the five clips migrate into documents with playback parity on both bodies" {
+    const clip_documents = @import("player_character_pose").clip_documents;
+    const allocator = std.testing.allocator;
+
+    const canonical_bones = canonicalBones();
+    const count = 53;
+    var external_bones: [count]rig_pose.Bone = undefined;
+    var ids: [count][]const u8 = undefined;
+    var id_storage: [count][24]u8 = undefined;
+    for (&external_bones, &ids, 0..) |*bone, *id, index| {
+        bone.* = .{
+            .parent_index = if (index == 0) null else @intCast(index - 1),
+            .bind_translation = if (index == 0) .{ 0, 0, 0 } else .{ 0, 0.01, 0 },
+            .constraint = .unconstrained,
+        };
+        id.* = std.fmt.bufPrint(&id_storage[index], "external_joint_{d}", .{index}) catch unreachable;
+    }
+    for (clips.CHANNEL_IDS, 0..) |channel_id, channel| {
+        ids[3 + channel * 4] = channel_id;
+    }
+
+    const all_clips = [_]clips.ClipId{ .idle, .walk, .jump, .sit, .lay };
+    for (all_clips) |clip| {
+        var doc = try clip_documents.clipDocument(allocator, clip);
+        defer doc.deinit();
+        const duration = clips.clipInfo(clip).duration_seconds;
+
+        var step: usize = 0;
+        while (step <= 24) : (step += 1) {
+            // Sweep past the end too: loop seams wrap, non-looping holds.
+            const t = duration * @as(f32, @floatFromInt(step)) / 20.0;
+
+            inline for (.{ "canonical", "external" }) |body| {
+                const is_canonical = comptime std.mem.eql(u8, body, "canonical");
+                const bones: []const rig_pose.Bone = if (is_canonical) &canonical_bones else &external_bones;
+                const role_ids: []const []const u8 = if (is_canonical) clips.PALETTE_IDS[0..] else &ids;
+
+                var clip_state: mounted_pose.State = .{};
+                try clip_state.resetRig(bones, role_ids);
+                const via_clip = try clip_state.advance(0, clip, t);
+
+                var doc_state: mounted_pose.State = .{};
+                try doc_state.resetRig(bones, role_ids);
+                try doc_state.playMotion(&doc, role_ids);
+                const via_doc = try doc_state.advance(t, clip, null);
+
+                for (0..3) |axis| {
+                    try std.testing.expectApproxEqAbs(
+                        via_clip.root_translation[axis],
+                        via_doc.root_translation[axis],
+                        1.0e-4,
+                    );
+                }
+                for (via_clip.rotations(), via_doc.rotations()) |a, b| {
+                    const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+                    try std.testing.expect(@abs(dot) > 1.0 - 1.0e-4);
+                }
+            }
+        }
+    }
+}
