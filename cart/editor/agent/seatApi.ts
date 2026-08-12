@@ -2031,7 +2031,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
         faces: percept.faces,
         unnamed: percept.unnamed,
         placeholders: percept.placeholders,
-        regions: percept.table.regions.length,
+        // Populated regions only: renaming a generator region leaves its old table
+        // row behind empty, and an empty row labels no face — counting it turned
+        // the naming-density gate into a tax on the correct rename workflow.
+        regions: percept.regions.length,
         islands: percept.islands,
         parts: percept.parts.length,
         auditComputed: percept.auditComputed,
@@ -2251,7 +2254,7 @@ export const seatRequestTarget = (request: SeatRequest, activeModel: string | nu
 export const seatModelClaimedByToken = (model: string | null, token: string | undefined): boolean =>
   claimHolder(model) !== null && claimAdmits(model, token).ok;
 
-const BACKGROUND_VISIBLE_VIEWPORT_ACTIONS = new Set(['viewport', 'reference', 'paint-tool', 'path', 'thumbnail']);
+const BACKGROUND_VISIBLE_VIEWPORT_ACTIONS = new Set(['viewport', 'reference', 'paint-tool', 'path', 'thumbnail', 'auto-rig']);
 const BACKGROUND_FOCUS_BRIDGE_ACTIONS = new Set([
   'uv-state', 'uv-select', 'uv-layout', 'uv-prestack', 'uv-stitch', 'uv-two-sheet',
   'uv-geometry', 'uv-history', 'uv-atlas', 'uv-layer', 'paint-variant', 'semantic-status', 'face-table', 'face-select',
@@ -2312,12 +2315,17 @@ const SEAT_READ_ACTIONS = new Set([
   // `regions` joins two arrays of the percept and touches nothing else, so a supervisor
   // can read a claimed model's named surfaces without taking the claim.
   'regions',
+  // Listing/opening a saved package changes only visible editor focus. It is
+  // the cold-start door that lets a verifier mount a model without scraping
+  // manifests for ids or asking a person to reconstruct UI state.
+  'model-open',
   // The oracle routes docs and reads its own workflow cursor. It never touches the
   // resident mesh or the live selection, so a lane can consult it before it claims.
   'oracle',
 ]);
 
 const seatRequestReads = (request: SeatRequest): boolean => {
+  if (request.action === 'auto-rig' && request.args?.operation === 'status') return true;
   if (SEAT_READ_ACTIONS.has(request.action)) return true;
   const operation = String((request.args ?? {}).operation ?? '');
   if (operation === 'read') return true;
@@ -2764,6 +2772,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'parts-group': case 'parts-ungroup': case 'group-rename': case 'group-visibility':
       case 'group-duplicate': case 'group-dissolve': case 'outliner-move': case 'role-name':
       case 'model-rename': case 'model-import': case 'model-export': case 'model-starter':
+      case 'model-open': case 'auto-rig':
       case 'thumbnail':
       case 'viewport': case 'reference': case 'uv-state': case 'uv-select': case 'uv-layout': case 'uv-prestack': case 'uv-stitch': case 'uv-two-sheet':
       case 'uv-geometry': case 'uv-history': case 'uv-atlas': case 'uv-layer':
