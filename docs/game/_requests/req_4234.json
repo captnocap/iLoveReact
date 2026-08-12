@@ -3,7 +3,7 @@
   "at": "2026-08-12T00:14:40.148Z",
   "origin": "codex:019ff350",
   "text": "in the studio there is a persistant player scale overlay that has finally got to go, well, not that you need to delete it but you need to make it default off and a toggle on state. also, while you are at it, go ahead and give us a proper measurement tooling and overlays so that we can be less blind about sizes.",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019ff350-31ea-7b32-b9f8-08b83d748935",
   "captureMode": "hook",
   "events": [
@@ -19,6 +19,18 @@
       "actor": "codex",
       "kind": "note",
       "text": "Implemented default-off Player Scale and Measurements view toggles; native bounds precedence is selection > focused scope > model, with AABB and X/Y/Z labels in metres plus 16u-per-metre units. Passed test-stage-scale, test-mesh-edit, test-scene3d-mesh-drag, 26/26 editor command tests, and dev-scene3d-module ReleaseFast build. Full editor TS bundle passes; native ship is presently blocked by unrelated framework/skeleton/character_hashes.zig const-pointer compilation in concurrent work."
+    },
+    {
+      "at": "2026-08-12T00:27:55.500Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Player scale is now cold-default off and independently toggleable. Studio measurement furniture resolves the active native subject by selection, focused scope, then model, rendering exact bounds and X/Y/Z dimensions in metres and 16-unit modelling scale without storing overlay state in model or export data.",
+  "shas": [
+    "40d816d8b"
+  ],
+  "resolvedAt": "2026-08-12T00:27:55.500Z"
 }
