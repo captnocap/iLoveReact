@@ -1,0 +1,24 @@
+{
+  "id": "req_4237",
+  "at": "2026-08-12T00:32:03.501Z",
+  "origin": "codex:019ff350",
+  "text": "great now when you open a model and you select face/verts/edges there is no means of turning any one mode off entirely, which makes it really hard to actually view a model without some sort of overlay, usualyl getting around it by making some outliner that is unrelated and off screen, its a bad hackaround, and should be able to just turn off all the overlays as needed",
+  "status": "doing",
+  "sessionId": "019ff350-31ea-7b32-b9f8-08b83d748935",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-08-12T00:32:09.180Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-08-12T00:37:25.458Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Added an explicit View Only model tool (0) to the Studio action bar, Edit > Mesh Select section, and model context Select group. It routes to native selection mode 0, which hides vertex/edge/face dressing, mirror planes, and selection gizmos without changing outliner focus or destroying dormant element selections. Passed 27/27 editor command tests, test-mesh-edit, and the complete ReleaseFast editor ship build."
+    }
+  ]
+}

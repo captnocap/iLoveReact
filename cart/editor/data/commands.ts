@@ -219,6 +219,7 @@ export const COMMANDS: Command[] = [
   // ── Model-surface mesh tools (Edit → Mesh; the host-native mesh editor) ──────────────────────
   // scope 'model' → only enabled when a model document is the active surface. Keys resolve per
   // surface through the keymap; ModelView owns their live dispatch.
+  { id: 'mesh-view', menu: 'Edit', scope: 'model', name: 'View Only', icon: 'MousePointer2Off', key: '0', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-vertex', menu: 'Edit', scope: 'model', name: 'Vertex Select', icon: 'Grip', key: '1', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-edge', menu: 'Edit', scope: 'model', name: 'Edge Select', icon: 'Spline', key: '2', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-face', menu: 'Edit', scope: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
@@ -449,7 +450,7 @@ const section = (label: string): MenuNode => ({ kind: 'section', label });
 const MESH_SUBMENU: MenuNode = {
   kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
   children: [
-    section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
+    section('Select'), cmd('mesh-view'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-align-loop'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),
@@ -503,7 +504,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
+const MESH_TOOL_IDS = ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -590,7 +591,7 @@ const MODEL_CONTEXT_GROUPS: {
   icon: string;
   commandIds: string[];
 }[] = [
-  { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-vertex', 'mesh-edge', 'mesh-face'] },
+  { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face'] },
   { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-scale-by', 'mesh-rotate'] },
   { id: 'mirror', label: 'Mirror', icon: 'FlipHorizontal2', commandIds: ['mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z'] },
   { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'] },
@@ -645,6 +646,7 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
     case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
     case 'mesh-sym-z': return ((tool.mirror ?? 0) & 4) !== 0;
+    case 'mesh-view': return tool.selMode === 0 && !tool.paint && !tool.focus && tool.pathPlane !== true && tool.pathEdges !== true;
     case 'mesh-vertex': return tool.selMode === 1 && !tool.paint && !tool.focus;
     case 'mesh-edge': return tool.selMode === 2 && !tool.paint && !tool.focus;
     case 'mesh-face': return tool.selMode === 3 && !tool.paint && !tool.focus;

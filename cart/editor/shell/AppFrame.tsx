@@ -3584,7 +3584,8 @@ export default function AppFrame() {
     if (commandId.startsWith('mesh-') && isMeshToolCommand(commandId)) {
       const api = modelToolApiRef.current;
       if (api) withNativeMeshActionSource(source, () => {
-        if (commandId === 'mesh-vertex') api.selMode(1);
+        if (commandId === 'mesh-view') api.selMode(0);
+        else if (commandId === 'mesh-vertex') api.selMode(1);
         else if (commandId === 'mesh-edge') api.selMode(2);
         else if (commandId === 'mesh-face') api.selMode(3);
         else if (commandId === 'mesh-move') api.gizmo(0);

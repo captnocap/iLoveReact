@@ -10,7 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  COMMANDS, MENUS, blockingOverlay, commandById, commandEnabled, deviceToolReplayable, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  COMMANDS, MENUS, blockingOverlay, commandById, commandEnabled, deviceToolReplayable, menuNodes, meshPartCommands, meshToolActive, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
   menuDropdownLeft, publishCharacterRigUndoDepths, undoDepths, worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
@@ -195,7 +195,7 @@ test('structural merge requires the explicit selected set, not list adjacency', 
 test('model context menu folds stable tool families without hiding a command', () => {
   const layout = modelContextMenuLayout(true, 2);
   assert(layout.groups.map((group) => group.id).join('|') === 'select|gizmo|mirror|view', 'context groups drifted');
-  assert(ids(layout.groups[0]!.commands).join('|') === 'mesh-vertex|mesh-edge|mesh-face', 'select modes escaped their group');
+  assert(ids(layout.groups[0]!.commands).join('|') === 'mesh-view|mesh-vertex|mesh-edge|mesh-face', 'select modes escaped their group');
   assert(ids(layout.groups[1]!.commands).join('|') === 'mesh-move|mesh-scale|mesh-scale-by|mesh-rotate', 'gizmos escaped their group');
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
   assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-measurements|mesh-player-scale|mesh-xray|mesh-cam-lock|mesh-cam-store|mesh-cam-recall', 'view tools escaped their group');
@@ -215,6 +215,29 @@ test('X-Ray is not replayed as remembered pointer-device input state', () => {
   assert(commandById('mesh-xray').tool !== true, 'X-Ray was registered as a replayable input tool');
   assert(!deviceToolReplayable('mesh-xray', 'model'), 'a stale device slot can still replay X-Ray');
   assert(deviceToolReplayable('mesh-face', 'model'), 'the device gate rejected a real model input tool');
+});
+
+test('View Only is the explicit neutral model tool and has a direct 0 shortcut', () => {
+  const neutral = { selMode: 0, gizmoTool: 0, paint: false, pathPlane: false, pathEdges: false, focus: false, wire: false };
+  assert(meshToolActive('mesh-view', neutral), 'neutral model state did not highlight View Only');
+  assert(!meshToolActive('mesh-vertex', neutral) && !meshToolActive('mesh-edge', neutral) && !meshToolActive('mesh-face', neutral), 'an element overlay remained active in View Only');
+  assert(deviceToolReplayable('mesh-view', 'model'), 'View Only cannot be remembered as the active pointer-device tool');
+
+  const state = {
+    workspaceDocuments: [{ id: 'model', kind: 'model', title: 'Model' }],
+    activeWorkspaceDocumentId: 'model',
+    materialFocused: false,
+    newMeshPrompt: null,
+    fileExplorerOpen: false,
+    mapDocumentOpen: false,
+    buildDialogOpen: false,
+    addChunkOpen: false,
+    worldUndo: [],
+    worldRedo: [],
+    modelTool: { ...neutral, blocking: null, sel: 0 },
+  } as unknown as EditorState;
+  const mods = { ctrl: false, shift: false, alt: false, meta: false };
+  assert(commandForKeyEvent(state, '0', mods) === 'mesh-view', '0 did not resolve the neutral model view tool');
 });
 
 test('measurement furniture is default-off presentation state, not replayable input', () => {

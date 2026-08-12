@@ -967,7 +967,7 @@ const readGuard = (): GuardInfo | null => {
   }
 };
 const resolveGuard = (action: number) => host.__mesh_edit_guard_resolve?.(action);
-const SEL_MODES = ['Object', 'Vertex', 'Edge', 'Face'];
+const SEL_MODES = ['View', 'Vertex', 'Edge', 'Face'];
 const GIZMO_TOOLS = ['Move', 'Scale', 'Rotate'];
 const MODEL_EDIT_PRESENTATION = Object.freeze({ xrayOpacity: 0.28 });
 // Re-decimate the model to clustering resolution `grid` (8..256, higher = more detail)
@@ -3885,7 +3885,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark, semanticRevision, selectionRevision]);
 
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
-  // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
+  // key (W/P/F/G/S/R/0/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
   // through runCommand → this same tool api — so binding them here too would double-fire and cancel
   // the toggles. Standalone (no shell) keeps the full local map. Delete/Backspace/Escape are
   // viewport-native (not registry commands) and stay bound in both modes. They only fire when no
@@ -3898,7 +3898,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       g: () => chooseGizmoTool(0), G: () => chooseGizmoTool(0),
       s: () => chooseGizmoTool(1), S: () => chooseGizmoTool(1),
       r: () => chooseGizmoTool(2), R: () => chooseGizmoTool(2),
-      '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
+      '0': () => chooseSelMode(0), '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
     }),
     // Delete is inert while a blocking session is unresolved (req_2626 HH) — deleting
     // faces over a loop-cut's captured base mesh is exactly the stacked-state bug.
@@ -5120,7 +5120,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               <Pressable
                 key={label}
                 onPress={() => chooseSelMode(m)}
-                tooltip={m === 0 ? 'View / orbit' : `${label} select (${m})`}
+                tooltip={m === 0 ? 'View only — hide vertex, edge, face, mirror, and gizmo overlays (0)' : `${label} select (${m})`}
                 style={{
                   paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
                   backgroundColor: active ? '#2a466e' : '#16233aee',

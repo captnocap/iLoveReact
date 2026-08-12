@@ -53,6 +53,15 @@ Both commands live in the View menu and the model context menu's View group. The
 explicit state survives a hot reload through the existing mesh-tool twig, but neither
 overlay is model data, save data, or export data.
 
+## Neutral model viewing
+
+Section D's model action bar and every model Select menu begin with **View Only**
+(`0`). It selects native mode 0 without changing outliner focus or destroying the
+saved vertex/edge/face sets. Native mode 0 suppresses element dots, boundary-edge
+dressing, face wash, mirror planes, and selection gizmos; returning to Vertex, Edge,
+or Face restores that mode's prior selection. This is the supported way to inspect a
+model without edit overlays—moving outliner focus to an unrelated part is not.
+
 ## The rules
 
 - **A section is a block in the UI flow**, not a pixel shape — the Left Rail

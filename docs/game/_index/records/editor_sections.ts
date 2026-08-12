@@ -24,7 +24,7 @@ export const editor_sections: DocIndex = {
       kind: 'component',
       sourceFile: 'cart/editor/stage/ModelView.tsx',
       description:
-        'Section E declares two independent default-off Scene3D view options. Measurements resolves selection → focused scope → whole model and renders native AABB plus X/Y/Z leaders in metres and 16-u-per-metre Studio units; Player Scale restores the ruled 1m / 1.65m collider / ~2.04m visual reference. Visibility hot-resumes through the existing mesh-tool twig but never enters model or export data.',
+        'Section E declares two independent default-off Scene3D view options. Measurements resolves selection → focused scope → whole model and renders native AABB plus X/Y/Z leaders in metres and 16-u-per-metre Studio units; Player Scale restores the ruled 1m / 1.65m collider / ~2.04m visual reference. Section D and every model Select menu also expose View Only (0), the neutral native mode that suppresses edit overlays without changing outliner focus or destroying dormant element selections. Visibility hot-resumes through the existing mesh-tool twig but never enters model or export data.',
       consumers: ['cart/editor/data/commands.ts', 'framework/gpu/3d.zig', 'framework/gpu/mesh_edit.zig', 'framework/gpu/stage_scale.zig'],
       status: 'live',
     },

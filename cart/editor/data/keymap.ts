@@ -65,6 +65,7 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   // (req_4152). Assign UV Mask Zone is Shift+M: the mask sibling of Merge Faces, and
   // deliberately next to it because it is what you reach for INSTEAD of merging.
   { key: 'm', commandId: 'mesh-uv-zone', mode: 'face', shift: true },
+  { key: '0', commandId: 'mesh-view' },
   { key: '1', commandId: 'mesh-vertex' },
   { key: '2', commandId: 'mesh-edge' },
   { key: '3', commandId: 'mesh-face' },

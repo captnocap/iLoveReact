@@ -551,6 +551,26 @@ test "measurement bounds prefer selection then focused scope then the whole mode
     try testing.expectEqualSlices(f32, &.{ 4, 3, 4 }, &selected_size);
 }
 
+test "neutral view suppresses edit selection without destroying its dormant set" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(4237, soup[0..], 3, &.{42});
+    defer mesh_edit.test_support.clear();
+
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+    try testing.expectEqual(mesh_edit.Mode.face, mesh_edit.mode());
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selCount());
+
+    mesh_edit.setMode(.none);
+    try testing.expectEqual(@as(u32, 0), mesh_edit.selCount());
+
+    mesh_edit.setMode(.face);
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selCount());
+}
+
 test "follow action queue retains rapid native lessons and drains them exactly once" {
     var queue: mesh_edit.FollowActionQueue = .{};
     defer queue.deinit(testing.allocator);
