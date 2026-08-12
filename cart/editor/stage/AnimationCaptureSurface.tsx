@@ -443,6 +443,7 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   // the preview never feeds calibration, reconstruction, or the target rig.
   const nativeDetected = detectedKeypoints.length > 0;
   const [previewKeypoints, setPreviewKeypoints] = useState<{ name: string; x: number; y: number; confidence: number }[]>([]);
+  const [feedFrameAspect, setFeedFrameAspect] = useState<number | null>(null);
   useEffect(() => {
     if (nativeDetected) {
       setPreviewKeypoints([]);
@@ -453,6 +454,7 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
       cancelRequest?.();
       cancelRequest = requestPose(cameraSrc, (result) => {
         if ('error' in result) return; // transient busy/no-frame; next tick retries
+        if (result.width && result.height) setFeedFrameAspect(result.width / result.height);
         setPreviewKeypoints(result.keypoints.map((keypoint) => ({
           name: keypoint.name,
           x: keypoint.x,
@@ -463,6 +465,18 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
     }, 200);
     return () => { clearInterval(timer); cancelRequest?.(); };
   }, [cameraSrc, nativeDetected]);
+
+  // Landmark x/y are normalized to the camera frame, but RenderTarget paints
+  // that frame contain-fit inside the 4:3 feed box (render_surfaces aspect
+  // "contain"), so dots must land on the fitted rect, not the box. The host
+  // requests 1280x720 for cams and stubborn devices deliver 1920x1080 — both
+  // 16:9 — so that is the fallback until a dimension-carrying reply arrives.
+  const feedBoxAspect = CAPTURE_UI_TUNING.feedWidth / CAPTURE_UI_TUNING.feedHeight;
+  const fittedAspect = feedFrameAspect ?? 16 / 9;
+  const fittedWidth = fittedAspect > feedBoxAspect ? CAPTURE_UI_TUNING.feedWidth : CAPTURE_UI_TUNING.feedHeight * fittedAspect;
+  const fittedHeight = fittedAspect > feedBoxAspect ? CAPTURE_UI_TUNING.feedWidth / fittedAspect : CAPTURE_UI_TUNING.feedHeight;
+  const fittedLeft = (CAPTURE_UI_TUNING.feedWidth - fittedWidth) / 2;
+  const fittedTop = (CAPTURE_UI_TUNING.feedHeight - fittedHeight) / 2;
 
   const displayKeypoints = nativeDetected ? detectedKeypoints : previewKeypoints;
   const confidentKeypoints = displayKeypoints.filter((keypoint) => keypoint.confidence >= CAPTURE_UI_TUNING.landmarkConfidence);
@@ -559,8 +573,8 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
                     key={keypoint.name}
                     style={{
                       position: 'absolute',
-                      left: Math.round(keypoint.x * CAPTURE_UI_TUNING.feedWidth - CAPTURE_UI_TUNING.markerSize / 2),
-                      top: Math.round(keypoint.y * CAPTURE_UI_TUNING.feedHeight - CAPTURE_UI_TUNING.markerSize / 2),
+                      left: Math.round(fittedLeft + keypoint.x * fittedWidth - CAPTURE_UI_TUNING.markerSize / 2),
+                      top: Math.round(fittedTop + keypoint.y * fittedHeight - CAPTURE_UI_TUNING.markerSize / 2),
                       width: CAPTURE_UI_TUNING.markerSize,
                       height: CAPTURE_UI_TUNING.markerSize,
                       borderRadius: CAPTURE_UI_TUNING.markerSize / 2,

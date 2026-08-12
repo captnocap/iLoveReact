@@ -29,6 +29,14 @@ const segment = @import("ml/segment.zig");
 const pose = @import("ml/pose.zig");
 const render_surfaces = @import("render/render_surfaces.zig");
 const video_devices = @import("render/video_devices.zig");
+const capture_session = @import("v8_bindings_capture_session.zig");
+const build_options = @import("build_options");
+const capture_world_target = if (@hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world)
+    @import("v8_capture_world_target.zig")
+else
+    struct {
+        pub fn register(_: *HostContext) void {}
+    };
 
 const SCRATCH_DIR = "/tmp/_reactjit_cutout";
 
@@ -384,7 +392,11 @@ fn hostPoseCameraDevices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, out.items);
 }
 
-pub fn registerOnnx(_: anytype) void {
+fn hostCharacterCaptureSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    capture_session.hostCaptureSession(info_c);
+}
+
+pub fn registerOnnx(host: *HostContext) void {
     v8_runtime.registerHostFn("__onnx_test", hostTest);
     v8_runtime.registerHostFn("__segment_open", hostSegmentOpen);
     v8_runtime.registerHostFn("__segment_close", hostSegmentClose);
@@ -392,6 +404,9 @@ pub fn registerOnnx(_: anytype) void {
     v8_runtime.registerHostFn("__pose_estimate_async", hostPoseEstimateAsync);
     v8_runtime.registerHostFn("__pose_estimate_image", hostPoseEstimateImage);
     v8_runtime.registerHostFn("__pose_camera_devices", hostPoseCameraDevices);
+    capture_session.register(host);
+    capture_world_target.register(host);
+    v8_runtime.registerHostFn("__capture_session", hostCharacterCaptureSession);
 }
 
 fn emitPoseResult(host: *HostContext, result: *const pose.AsyncResult) void {
@@ -404,12 +419,21 @@ fn emitPoseResult(host: *HostContext, result: *const pose.AsyncResult) void {
         const escaped = jsonEscape(alloc, message) catch message;
         break :blk std.fmt.allocPrint(
             alloc,
-            "{{\"ok\":false,\"error\":\"{s}\",\"elapsed_ms\":{d}}}",
-            .{ escaped, result.elapsed_ms },
+            "{{\"ok\":false,\"frameId\":{d},\"timestampMs\":{d},\"error\":\"{s}\",\"elapsed_ms\":{d}}}",
+            .{ result.frame_id, result.timestamp_ms, escaped, result.elapsed_ms },
         ) catch return;
     } else blk: {
         var out: std.ArrayList(u8) = .empty;
-        out.appendSlice(alloc, "{\"ok\":true,\"kp\":[") catch return;
+        // Keypoints are normalized to the inference frame; name that space so
+        // display-side projection can contain-fit without guessing the aspect.
+        const frame_w: u32 = if (result.frame) |frame| frame.width else 0;
+        const frame_h: u32 = if (result.frame) |frame| frame.height else 0;
+        const header = std.fmt.allocPrint(
+            alloc,
+            "{{\"ok\":true,\"frameId\":{d},\"timestampMs\":{d},\"w\":{d},\"h\":{d},\"kp\":[",
+            .{ result.frame_id, result.timestamp_ms, frame_w, frame_h },
+        ) catch return;
+        out.appendSlice(alloc, header) catch return;
         for (result.keypoints, 0..) |kp, i| {
             const chunk = std.fmt.allocPrint(
                 alloc,
@@ -430,8 +454,14 @@ fn emitPoseResult(host: *HostContext, result: *const pose.AsyncResult) void {
 }
 
 pub fn tickDrain(host: *HostContext) void {
+    capture_session.tickSubmit(host);
     while (pose.pollAsync(host.io)) |result_value| {
-        const result = result_value;
-        emitPoseResult(host, &result);
+        var result = result_value;
+        defer result.deinit();
+        if (!capture_session.consumePoseResult(host, &result)) emitPoseResult(host, &result);
     }
+    // A completion frees the one-entry pose mailbox. Submit here as well as at
+    // the start of the tick so capture stays inference-bound without waiting
+    // an extra render frame; the native cadence floor still applies.
+    capture_session.tickSubmit(host);
 }

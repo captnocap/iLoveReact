@@ -24,7 +24,9 @@ export const POSE_KEYPOINT_NAMES = [
 export type PoseKeypointName = typeof POSE_KEYPOINT_NAMES[number];
 
 export type PoseKeypoint = { name: PoseKeypointName; x: number; y: number; score: number };
-export type PoseFrame = { keypoints: PoseKeypoint[]; elapsedMs: number };
+/** width/height are the inference frame the keypoints are normalized to;
+ * hosts older than the dimension-carrying reply omit them. */
+export type PoseFrame = { keypoints: PoseKeypoint[]; elapsedMs: number; width?: number; height?: number };
 export type PoseResult = PoseFrame | { error: string };
 export type PoseCameraDevice = {
   index: number;
@@ -113,7 +115,12 @@ export function parsePoseReply(reply: unknown): PoseResult {
     const keypoints: PoseKeypoint[] = POSE_KEYPOINT_NAMES.map((name, i) => ({
       name, x: kp[i * 3] ?? 0, y: kp[i * 3 + 1] ?? 0, score: kp[i * 3 + 2] ?? 0,
     }));
-    return { keypoints, elapsedMs: Math.max(0, Number(o.elapsed_ms) || 0) };
+    const frame: PoseFrame = { keypoints, elapsedMs: Math.max(0, Number(o.elapsed_ms) || 0) };
+    if (Number.isFinite(o.w) && o.w > 0 && Number.isFinite(o.h) && o.h > 0) {
+      frame.width = Number(o.w);
+      frame.height = Number(o.h);
+    }
+    return frame;
   } catch {
     return { error: 'bad reply' };
   }
