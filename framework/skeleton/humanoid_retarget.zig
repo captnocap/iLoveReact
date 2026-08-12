@@ -16,11 +16,13 @@ pub const Quat = rig.Quat;
 pub const Mat4 = rig.Mat4;
 
 pub const Tuning = struct {
-    // Matches source_skeleton.Tuning.minimum_confidence: MoveNet Lightning
-    // reports 0.37..0.77 on valid full-body footage that doesn't fill the
-    // frame (measured, req_4262). At 0.5 the wrist/forearm channels never
-    // cleared the bar, so calibrated sessions tracked with dead arms; the
-    // hold/fade window below already absorbs brief dips.
+    // Deliberately STRICTER than source_skeleton's calibration floor (0.25).
+    // Calibration medians can absorb a low-confidence sample; a live drive
+    // channel cannot — an occluded wrist (~0.27 with a guessed position,
+    // measured req_4263) should hold/fade rather than steer the forearm.
+    // 0.35 clears what MoveNet reports for genuinely visible limbs on
+    // non-frame-filling footage (0.37..0.77, req_4262) while parking
+    // occluded ones; the hold/fade window below absorbs brief dips.
     minimum_confidence: f32 = 0.35,
     missing_hold_ms: u64 = 150,
     missing_fade_ms: u64 = 350,

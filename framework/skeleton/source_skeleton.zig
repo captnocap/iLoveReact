@@ -16,13 +16,16 @@ pub const SEGMENT_COUNT: usize = 12;
 pub const CALIBRATION_FRAME_COUNT: usize = 30;
 
 pub const Tuning = struct {
-    // MoveNet Lightning scores full-body footage where the person spans a
-    // fraction of a 16:9 frame at 0.37..0.77 after the 192x192 letterbox
-    // (measured on the OBS reference feed, req_4262). 0.5 made every such
-    // frame invalid — calibration could never collect a sample — while real
-    // misses score ~0.1..0.2. 0.35 accepts what the model actually reports
-    // on working footage and still rejects absent limbs.
-    minimum_confidence: f32 = 0.35,
+    // MoveNet Lightning scores full-body footage that doesn't fill the 16:9
+    // frame at ~0.27..0.77 after the 192x192 letterbox (measured live on the
+    // OBS reference feed, req_4262/req_4263). The old 0.5 floor made every
+    // such frame invalid — calibration could never collect one sample — and
+    // even ordinary occlusion (a hand resting in a pocket) reports ~0.27 with
+    // a plausible position. Absent limbs score ~0.1..0.2. 0.25 lets the
+    // median-of-30 calibration accept what the model actually reports on
+    // working footage; live retargeting keeps its own stricter drive gate
+    // (humanoid_retarget.Tuning.minimum_confidence).
+    minimum_confidence: f32 = 0.25,
     calibration_frame_count: usize = CALIBRATION_FRAME_COUNT,
     calibration_deadline_ms: u64 = 10_000,
     numeric_epsilon: f32 = 1.0e-6,
