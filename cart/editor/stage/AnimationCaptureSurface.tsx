@@ -298,16 +298,27 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   const savedCameraIsAvailable = typeof savedCameraAtMount === 'string'
     && discoveredAtMount.some((device) => device.source === savedCameraAtMount);
   const [cameras, setCameras] = useState<PoseCameraDevice[]>(discoveredAtMount);
-  const [cameraMenuOpen, setCameraMenuOpen] = useState(!savedCameraIsAvailable && discoveredAtMount.length > 1);
-  const [cameraSrc, setCameraSrc] = useState(() => savedCameraIsAvailable
-    ? savedCameraAtMount as string
-    : discoveredAtMount[0]?.source ?? DEFAULT_CAMERA_SOURCE);
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(!savedCameraIsAvailable && discoveredAtMount.length > 0);
+  // The saved choice survives discovery misses (req_4270): an OBS virtual
+  // camera only advertises capture capability WHILE OBS produces, so a scan
+  // during a producer gap must not silently discard the user's selection —
+  // the feed mounts on it and retries until the producer returns. The menu
+  // auto-opens as the "not detected right now" nudge.
+  const [cameraSrc, setCameraSrc] = useState(() => (typeof savedCameraAtMount === 'string'
+    ? savedCameraAtMount
+    : discoveredAtMount[0]?.source ?? DEFAULT_CAMERA_SOURCE));
   const [viewportNodeId, setViewportNodeId] = useState(0);
   const [snapshot, setSnapshot] = useState<CaptureSessionSnapshot | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [preferredDepthSign, setPreferredDepthSign] = useState<1 | -1>(1);
 
-  const cameraChoices = cameras.length > 0 ? cameras : [DEFAULT_CAMERA];
+  const discoveredChoices = cameras.length > 0 ? cameras : [DEFAULT_CAMERA];
+  // A selected source the scan missed stays pickable/visible instead of
+  // vanishing — loopback cameras drop out of discovery whenever their
+  // producer pauses (req_4270).
+  const cameraChoices = discoveredChoices.some((device) => device.source === cameraSrc)
+    ? discoveredChoices
+    : [{ ...DEFAULT_CAMERA, source: cameraSrc, name: 'saved source · not detected — is the virtual camera running?' }, ...discoveredChoices];
   const selectedCamera = cameraChoices.find((device) => device.source === cameraSrc)
     ?? { ...DEFAULT_CAMERA, source: cameraSrc, name: 'Saved camera source' };
 

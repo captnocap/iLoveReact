@@ -72,7 +72,13 @@ fn queryLinuxDevice(io: std.Io, allocator: std.mem.Allocator, index: u32) !Video
         capability.device_caps
     else
         capability.capabilities;
-    if (!isCaptureCapabilities(caps)) return error.NotImageCapture;
+    // A v4l2loopback node (OBS Virtual Camera) advertises CAPTURE only while
+    // its producer is running (exclusive_caps), so a scan during a producer
+    // gap would hide a perfectly selectable camera (req_4270). Loopback nodes
+    // are always listed; a selected one simply streams once the producer
+    // starts. The capture filter still drops uvcvideo metadata companions.
+    const is_loopback = std.mem.eql(u8, std.mem.sliceTo(capability.driver[0..], 0), "v4l2 loopback");
+    if (!isCaptureCapabilities(caps) and !is_loopback) return error.NotImageCapture;
 
     const name = try sanitizedCString(allocator, capability.card[0..]);
     errdefer allocator.free(name);
