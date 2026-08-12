@@ -1,0 +1,698 @@
+324:pub fn retainedGeometryBytes() u64 {
+344:pub fn gpuMemoryStats() GpuMemoryStats {
+394:pub fn hostStashBytes() u64 {
+408:fn installHostMeshCopy(hash: u64, generation: u32, copy: []f32, count: u32) void {
+427:pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
+439:fn internFromStash(queue: *wgpu.Queue, key: []const u8) ?GeoSlice {
+479:fn residentMutationAllowed(domain: historical_preview.ResidentMutationDomain) bool {
+484:pub fn orbitSetLocked(on: bool) void {
+494:pub fn orbitPose() [6]f32 {
+501:pub fn orbitSetPose(yaw: f32, pitch: f32, dist: f32, target: [3]f32) bool {
+512:pub fn orbitFrame(target: [3]f32, radius: f32) void {
+519:pub fn meshLiveFrame() ?mesh_edit.SelectionFrame {
+527:pub fn orbitFrameCurrent(selection: bool) bool {
+538:pub fn orbitDrag(dx: f32, dy: f32) void {
+546:pub fn orbitZoom(delta: f32) void {
+551:fn orbitCamPos() math.Vec3 {
+564:pub fn orbitPan(dx: f32, dy: f32) void {
+578:pub fn orbitFocus(p: [3]f32) void {
+584:pub fn focusAt(mx: f32, my: f32) bool {
+649:fn clearIndexedEditMesh() void {
+654:fn flattenedLogicalRows(triangles: []const [3]u32) []const u32 {
+660:fn adoptIndexedEditMesh(mesh: *indexed_edit_mesh.Mesh, lowered: *const indexed_edit_mesh.Lowered) void {
+689:pub fn topoRefusal() []const u8 {
+693:fn topoRefuse(why: []const u8) void {
+702:fn topoRefuseIndexedError(err: anyerror) void {
+714:fn cloneIndexedEditMeshOrImport(
+778:fn ensureIndexedEditMesh() bool {
+832:pub fn characterRigPrepareOpenTopology(expected_range_object_count: usize) CharacterRigOpenPreparation {
+950:fn clearMeshGuardSnapshot() void {
+963:fn clearActiveEditGeometry() void {
+971:fn clearActiveEditMesh() void {
+1006:fn normalOf(a: [3]f32, b: [3]f32, c: [3]f32) [3]f32 {
+1025:fn copyPaintPositionsToEditVerts(first_face: u32, last_face: u32) bool {
+1056:fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
+1102:fn queueActiveEditMeshUpload() bool {
+1121:fn applyMeshMutation(m: mesh_edit.Mutation) bool {
+1160:pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+1194:fn setPaintTargetForGeneration(verts: []f32, count: u32) bool {
+1213:pub fn setQualityPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+1220:pub fn meshEditActiveKey() ?[]const u8 {
+1223:pub fn meshEditActiveCount() u32 {
+1226:pub fn meshEditGeneration() u32 {
+1275:pub fn stashActiveEditMesh() bool {
+1282:pub fn paintAtlasImportDimensionsFit(width: u32, height: u32) bool {
+1289:pub fn meshEditBeginModel() void {
+1297:fn appendFloats(list: *std.ArrayListUnmanaged(f32), values: []const f32) bool {
+1302:fn appendVertex(list: *std.ArrayListUnmanaged(f32), p: [3]f32, n: [3]f32) bool {
+1307:fn appendTri(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32) bool {
+1312:fn appendTriWithUvs(
+1337:fn installMirrorSynchronizedTriangulation() bool {
+1405:fn triArea2(a: [3]f32, b: [3]f32, c: [3]f32) f32 {
+1410:fn appendQuadSplit(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32) bool {
+1419:fn appendTriFacing(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32, reference: [3]f32) bool {
+1426:fn appendQuadSplitFacing(
+1450:fn trueFaceColor(f: u32) [4]u8 {
+1467:fn collectCurrentFaceColors() ?[]u8 {
+1484:fn restoreFaceColorMetadata(colors: []const u8) void {
+1494:fn applyCarriedFaceColors(old_colors: ?[]const u8, new_fc: u32) void {
+1518:fn applyExactFaceColors(colors: []const u8, face_count: u32) bool {
+1532:fn applyExactSourceFaceColors(colors: []const u8, face_count: u32) bool {
+1563:fn logicalReplacementExactOrAbsent(
+1579:fn logicalReplacementForJournalRestore(
+1684:fn appendTriLogical(
+1695:fn appendTriFacingLogical(
+1710:fn appendQuadSplitLogical(
+1729:fn appendQuadSplitFacingLogical(
+1765:fn stableLogicalIdForEditVertex(edit_vertex: u32) ?u32 {
+1794:fn logicalIdForEditVertex(builder: *const LogicalRowsBuilder, edit_vertex: u32) ?u32 {
+1809:fn fillCornerLogicalId(builder: *const LogicalRowsBuilder, edit_vertex: u32, edges: []const mesh_edit.Edge) ?u32 {
+1855:fn editVertexForStableLogicalId(stable_id: u32) ?u32 {
+1882:fn rollbackEdgeLogicalPromotion(promotion: EdgeLogicalPromotion) void {
+1901:fn mintLegacyLogicalTopologyForEdgeAuthoring() bool {
+1993:fn prepareLogicalTopologyForEdgeAuthoring() ?EdgeLogicalPromotion {
+2009:fn edgeSemanticTableResolvesInCurrentDocument(allocator: std.mem.Allocator, table_json: []const u8) bool {
+2029:fn mirroredLogicalId(
+2048:fn appendFreshIndependentSoupLogical(
+2079:fn logicalReplacementPreflight(new_verts: []const f32, count: u32, replacement: LogicalTopologyReplacement) bool {
+2108:fn replaceSourceGeometryWithLogical(
+2137:fn replaceActiveEditMesh(new_verts: []f32, count: u32, logical: LogicalTopologyReplacement) bool {
+2216:fn replaceActiveEditMeshPreservingAtlas(
+2281:fn edgeSharesVertex(a: mesh_edit.Edge, b: mesh_edit.Edge) bool {
+2285:fn dist2(a: [3]f32, b: [3]f32) f32 {
+2290:fn appendCurrentDisplayed(list: *std.ArrayListUnmanaged(f32)) bool {
+2316:fn semanticMintIntentClear() void {
+2324:pub fn meshSemanticExtrudeIntentSet(cap_region: u32, wall_region: u32, instance: u32, table_json: []const u8) bool {
+2335:fn faceExtrudePosKey(p: [3]f32) u64 {
+2342:fn faceEntityContains(e: FaceExtrudeEntity, f: u32) bool {
+2348:fn chainExtrudeBoundary(
+2415:fn faceLoopNormal(loop: []const FaceExtrudeBoundaryPoint) [3]f32 {
+2430:fn faceLoopCentroid(loop: []const FaceExtrudeBoundaryPoint) [3]f32 {
+2437:fn appendFaceColor(list: *std.ArrayListUnmanaged(u8), c: [4]u8) bool {
+2452:fn adoptAppendedFaces(old_groups: ?[]const u32, old_parts: ?[]const u32, old_faces: u32, src_part: u32, tris_per_face: u32) bool {
+2555:fn authoredFaceIdOf(grouped: bool, f: u32) u32 {
+2561:fn extendFaceMaskWithMirrorTwins(cur_verts: []const f32, tri_count: u32, mask: []bool) void {
+2637:pub fn meshTopoExtrudeFace(distance_raw: f32, taper_degrees_raw: f32) bool {
+2883:fn meshTopoExtrudeRegion(mask: []const bool, tri_count: u32, distance_raw: f32, taper_radians: f32, reply_mask: ?[]const bool) bool {
+3220:fn selectWeldedEdgeAt(p: [3]f32, q: [3]f32) bool {
+3228:fn pointWeldsIntoResidentSoup(p: [3]f32) bool {
+3243:fn mirrorReflectPoint(p: [3]f32, subset: u8) [3]f32 {
+3259:fn extrudeDistanceClearOfResidentVerts(frame: mesh_edit.EdgeExtrusionFrame, requested: f32, angle_radians: f32) f32 {
+3285:pub fn meshTopoExtrudeEdge(distance_raw: f32, angle_degrees_raw: f32) bool {
+3499:fn findUniqueIndex(items: []const u32, count: u32, v: u32) ?usize {
+3507:fn edgeConnects(edges: []const mesh_edit.Edge, a: u32, b: u32) bool {
+3514:fn closedEdgeLoopOrder(edges: []const mesh_edit.Edge, out: *[4]u32) ?u32 {
+3565:fn refuseCreateFace(why: []const u8) bool {
+3578:fn refuseCreateFaceMissingLogicalRow() bool {
+3601:pub fn meshTopoCreateFaceFromEdges() bool {
+3891:fn hostPartCount() u32 {
+3898:fn capturePartOfFaces() ?[]u32 {
+3912:fn repartitionLogicalTopologyByCurrentParts() bool {
+3937:fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
+4006:fn ensureDisjointPartRanges(context: []const u8) bool {
+4053:pub fn meshTopoLoopCut() bool {
+4113:pub fn meshTopoConnectVertices() bool {
+4188:pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
+4206:pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
+4347:fn lcFree() void {
+4362:fn domAxis(v: [3]f32) u8 {
+4373:fn lcPlanes(lo: f32, hi: f32, cuts: u32, offset: f32, out: []f32) u32 {
+4393:fn lcInstallLowered(
+4470:pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
+4599:pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
+4685:pub fn meshLoopCutFaceEnd(commit: bool) bool {
+4769:pub fn meshLcActive() bool {
+4783:pub fn meshLcState() ?LcState {
+4794:pub fn meshLcFallbackReason() ?[]const u8 {
+4832:fn bevelFree() void {
+4862:pub fn meshBevelBegin() ?BevelInfo {
+5122:pub fn meshBevelPreview(width_raw: f32, target_sides: u32) bool {
+5228:pub fn meshBevelEnd(commit: bool) bool {
+5329:pub fn meshBevelFallbackReason() ?[]const u8 {
+5341:pub fn meshDeleteSelection() bool {
+5377:pub fn meshTopoWeldSelection() bool {
+5470:pub fn meshRetopoWeldPairs(request: MeshRetopoWeldPairsRequest) bool {
+5553:pub fn meshRetopoNormalizeWidths(request: MeshRetopoNormalizeWidthsRequest) bool {
+5563:fn weldTriangleDegenerate(corners: []const f32) bool {
+5581:fn maskMalformedWeldFaceGroups(
+5616:pub fn meshDeleteGroupRange(lo: u32, hi: u32) bool {
+5643:fn beginPaintRasterCarry() void {
+5654:fn cancelPaintRasterCarry() void {
+5663:fn beginPaintStableReplace() void {
+5668:fn cancelPaintStableReplace() void {
+5673:fn paintStableJournalLabel(label: []const u8) bool {
+5692:fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8) bool {
+5701:fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8, corner_positions: ?[]const f32) bool {
+5866:fn captureFaceGroups() ?[]u32 {
+5876:fn captureFaceMaterials(total_faces: u32) ?[]u32 {
+5900:fn captureFaceSemantics(total_faces: u32) ?SemanticRows {
+5921:fn optionalU32SlicesEqual(expected: ?[]const u32, actual: ?[]const u32) bool {
+5926:fn optionalU8SlicesEqual(expected: ?[]const u8, actual: ?[]const u8) bool {
+5931:fn hiddenModelStateHash() u64 {
+6109:fn maxGroupId(groups: []const u32) i64 {
+6123:fn nextFreeGroupId(groups: []const u32) u32 {
+6142:pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []const u32, expected_parts: u32) AppendResult {
+6178:pub fn meshAppendPathPlane(points: []const f32, expected_parts: u32) AppendResult {
+6193:pub fn meshAppendPathWire(points: []const f32, closed: bool, expected_parts: u32) AppendResult {
+6202:fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
+6380:fn freeHiddenGroup(group: HiddenGroup) void {
+6391:fn clearHiddenGroups() void {
+6405:fn refuseExactIndexedCacheForSave(reason: []const u8) bool {
+6413:fn promoteLogicalTopologyFromExactIndexedCacheForSave() bool {
+6469:fn composeDocumentSnapshot(allocator: std.mem.Allocator, painted: bool) ?model_source.MeshDocSnapshot {
+6540:pub fn modelDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+6557:fn fullSemanticTableLossCount(allocator: std.mem.Allocator, json: []const u8) u64 {
+6567:fn recoverSemanticTableForSnapshotAlloc(
+6598:fn modelRecoverySnapshotWithReceipt(allocator: std.mem.Allocator) ?ModelRecoverySnapshotResult {
+6666:pub fn modelRecoverySnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+6705:fn recoveryCaptureAppend(
+6715:fn recoveryActionBits(delta: meshdoc_format.RecoveryChannelDelta) u32 {
+6722:fn recoveryCaptureAppendComposition(
+6755:pub fn captureRecoveryArtifactAlloc(
+6874:pub fn modelEncodeCurrentDocumentAlloc(
+6910:pub fn paintedDocumentSnapshot(allocator: std.mem.Allocator) ?model_source.MeshDocSnapshot {
+6917:pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool, journal: bool) bool {
+6930:fn hideGroup(lo: u32, hi: u32) bool {
+7107:fn showGroup(lo: u32, hi: u32) bool {
+7203:pub fn meshSurvivingGroups(lo: u32, hi: u32, out: []u32) u32 {
+7313:fn freeJournalHidden(hidden: JournalHidden) void {
+7324:fn cloneJournalHidden(hidden: HiddenGroup) !JournalHidden {
+7355:fn cloneHiddenGroup(hidden: JournalHidden) !HiddenGroup {
+7411:fn activeLeaseModelId(buffer: []u8) ?[]const u8 {
+7419:fn acquireMutationLease(label: []const u8) ?MutationLease {
+7443:fn releaseMutationLease(receipt_id: u64, owned: bool) void {
+7448:fn captureJournalSelection() ?JournalSelection {
+7485:fn restoreJournalSelection(selection: *const JournalSelection) bool {
+7511:fn partCountFromRanges(ranges: ?[]const u32) u32 {
+7515:fn currentPartCount() u32 {
+7519:fn enqueueMeshAction(
+7556:fn enqueueFollowJournalAction(
+7587:pub fn meshActionSourceSet(raw: u8) void {
+7591:pub fn meshActionDocumentSet(token: u32) void {
+7595:pub fn meshActionDrain(out: []MeshActionEvent) usize {
+7622:fn journalEntryBytes(e: *const JournalEntry) usize {
+7660:fn journalFreeEntry(e: *JournalEntry) void {
+7690:fn journalFreeStack(stack: *std.ArrayListUnmanaged(JournalEntry)) void {
+7695:fn cloneStringRows(rows: []const []const u8) ![][]u8 {
+7709:fn journalSnapshotCurrentInner(label: []const u8, new_document_action: bool) ?JournalEntry {
+7911:fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
+7915:fn journalSnapshotForNewAction(label: []const u8) ?JournalEntry {
+7940:fn armIntegrityRollCall(label: []const u8) void {
+7953:fn canonicalFaceBits(verts: []const f32, face: u32) ?[9]u32 {
+7986:fn meshIntegrityCheck(context: []const u8, act: bool) bool {
+8080:fn journalCommit(snap: *?JournalEntry) void {
+8147:fn journalDiscard(snap: *?JournalEntry) void {
+8157:fn journalDropLast() void {
+8186:pub fn meshJournalClear() void {
+8206:pub fn meshJournalNoteSet(note: []const u8) bool {
+8214:pub fn meshJournalNoteGet() ?[]const u8 {
+8218:pub fn meshJournalCounts() [2]u32 {
+8225:pub fn meshJournalMetadataCheckpoint(label: []const u8, before_note: []const u8, after_note: []const u8) bool {
+8243:pub fn meshJournalMetadataCheckpointLabel(kind: []const u8) ?[]const u8 {
+8247:fn journalLogEntryView(entry: *const JournalEntry) mesh_journal_log.EntryView {
+8261:fn journalCurrentStateBytes(groups: ?[]const u32) usize {
+8290:pub fn meshJournalLogJson(allocator: std.mem.Allocator) ?[]u8 {
+8349:pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
+8373:pub fn meshUndoLabel() []const u8 {
+8377:pub fn meshRedoLabel() []const u8 {
+8382:fn journalInstallUv(e: *const JournalEntry) bool {
+8399:fn journalInstallAtlas(e: *const JournalEntry) bool {
+8420:fn journalInstallPaint(e: *const JournalEntry) bool {
+8435:fn journalInstallRetopoGuide(e: *const JournalEntry) bool {
+8441:fn journalInstallUvZones(e: *const JournalEntry) bool {
+8452:fn journalMeshPreflight(e: *const JournalEntry) bool {
+8512:fn optionalU32RowsEqual(a: ?[]const u32, b: ?[]const u32) bool {
+8517:fn optionalBytesEqual(a: ?[]const u8, b: ?[]const u8) bool {
+8522:fn journalSelectionMatches(selection: *const JournalSelection) bool {
+8571:fn journalResidentDurableMatches(e: *const JournalEntry) bool {
+8605:fn cloneOptionalU32Rows(rows: ?[]const u32) !?[]u32 {
+8611:fn journalEntryFromDocument(
+8696:fn journalInstall(e: *const JournalEntry) bool {
+8816:fn journalStep(from_undo: bool) bool {
+8873:pub fn meshUndo() bool {
+8877:pub fn meshRedo() bool {
+8889:pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult {
+9011:fn pathArrayFail() PathArrayResult {
+9015:fn knownPartRange(part_ranges: []const u32, lo: u32, hi: u32) bool {
+9019:fn sourceRangeIndex(source_ranges: []const u32, group: u32) ?usize {
+9027:fn pathDot(a: [3]f32, b: [3]f32) f32 {
+9033:pub fn meshPathArrayHorizontalSpans(source_ranges: []const u32) ?[2]f32 {
+9066:pub fn meshPathArray(alloc: std.mem.Allocator, source_ranges: []const u32, params: PathArrayParams) PathArrayResult {
+9070:pub fn meshPathArrayPoints(alloc: std.mem.Allocator, source_ranges: []const u32, axis: PathArrayAxis, points: []const path_array.Vec3) PathArrayResult {
+9081:fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, params: PathArrayParams, point_path: ?[]const path_array.Vec3) PathArrayResult {
+9287:pub fn meshDetachSelection() AppendResult {
+9370:pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendResult {
+9444:pub fn normalizeSoupWinding(verts: []f32, vert_count: u32) u32 {
+9453:pub fn meshFlipSelectionWinding() bool {
+9519:fn commitIndexedFaceGrouping(
+9589:pub fn meshMergeSelectedFaces() bool {
+9752:pub fn meshMirrorMatchQuads(axis_mask_raw: u32) MirrorQuadStats {
+10023:pub fn meshMirrorReplaceSelection(axis_mask_raw: u32) indexed_edit_mesh.Mesh.MirrorReplaceStats {
+10102:fn quadifyRelease(session: *QuadifySession) void {
+10114:fn quadifyDrop() void {
+10120:fn quadifyRestoreBase(session: *const QuadifySession, restore_selection: bool) bool {
+10134:fn quadifyInstallPreview(session: *const QuadifySession, preview: *indexed_edit_mesh.Mesh) bool {
+10171:pub fn meshQuadifyBegin() ?QuadifyBeginInfo {
+10235:pub fn meshQuadifyPreview(evaluation_index: u32) ?indexed_edit_mesh.QuadifyStats {
+10266:pub fn meshQuadifyEnd(commit: bool) QuadifyEndInfo {
+10311:pub fn meshTrianglesToQuads() u32 {
+10329:pub fn meshSetSelectionGlass() bool {
+10388:pub fn meshRestoreGlass(glass_first_vertex: u32) bool {
+10412:fn partitionGlassFaces(colors: []const u8) bool {
+10543:fn ensureGlassTrailing() void {
+10562:fn editGlassFirstVert() u32 {
+10574:pub fn modelGlassFirstVertex() u32 {
+10593:pub fn meshSolidifySelection(thickness_raw: f32) bool {
+10837:fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
+10855:fn guardSplitPossible(bad_list: []const u32) bool {
+10882:fn guardSplitQuads() bool {
+10944:pub fn meshGizmoBegin() void {
+10961:pub fn meshGizmoGrabAt(mx: f32, my: f32, code: i32) void {
+10973:pub fn meshGizmoFinish() bool {
+11020:pub fn meshEditGuardInfo() [4]u32 {
+11024:pub fn meshEditGuardResolve(action: u8) bool {
+11119:fn cloneRetopoGuide(guide: mesh_edit.RetopoGuide) ?mesh_edit.OwnedRetopoGuide {
+11139:fn restoreRetopoGuideAndDiscard(snap: *?JournalEntry) void {
+11144:fn retopoBandColor(id: u16) [3]f32 {
+11148:fn clearRetopoBandPlan() bool {
+11154:fn clearRetopoManualBands() bool {
+11162:fn clearRetopoSourceGhost() bool {
+11168:fn captureRetopoSourceGhost(initial_bands: []const u16) bool {
+11186:fn ensureRetopoSourceGhost(face_count: usize) bool {
+11210:fn prepareZoneInheritance(row: *?[]u16, source_faces: []const u32) ?[]u16 {
+11220:fn prepareZoneCompaction(row: *?[]u16, removed: []const bool, kept_faces: usize) ?[]u16 {
+11230:fn prepareZoneAppend(row: *?[]u16, old_faces: usize, added_faces: usize, inherited: u16) ?[]u16 {
+11239:fn commitZoneCarry(row: *?[]u16, had_row: bool, prepared: *?[]u16) void {
+11247:fn prepareRetopoBandInheritance(source_faces: []const u32) ?[]u16 {
+11251:fn prepareRetopoBandCompaction(removed: []const bool, kept_faces: usize) ?[]u16 {
+11255:fn prepareRetopoBandAppend(old_faces: usize, added_faces: usize, inherited: u16) ?[]u16 {
+11265:fn uvZoneFaceCount() u32 {
+11272:fn publishUvZoneMask() void {
+11276:fn ensureUvZoneRow() ?[]u16 {
+11295:pub fn uvZoneAssignSelection(zone: u16) u32 {
+11317:pub fn uvZoneOfFace(face: u32) u16 {
+11323:pub fn uvZoneDelete(zone: u16) u32 {
+11338:pub fn uvZoneCounts(out: []u32) u32 {
+11350:pub fn uvZoneClearAll() bool {
+11362:fn commitRetopoBandCarry(had_manual: bool, prepared: *?[]u16) void {
+11368:fn clearRetopoBandPreview() bool {
+11379:pub fn meshRetopoGuideSnapshot() ?mesh_edit.RetopoGuide {
+11400:pub fn meshRetopoGuideRestore(guide: mesh_edit.RetopoGuide) bool {
+11430:pub fn setMeshEditCapture(on: bool) void {
+11433:pub fn meshEditCapturing() bool {
+11436:pub fn setMeshEditFocusTool(on: bool) void {
+11439:pub fn meshEditFocusTool() bool {
+11442:pub fn setMeshGizmoTool(t: u8) void {
+11449:pub fn meshGizmoToolRaw() u8 {
+11454:pub fn meshEditModeRaw() u8 {
+11458:pub fn meshEditSetMode(m: u8) void {
+11468:pub fn meshEditSetXray(on: bool) void {
+11471:pub fn meshEditXray() bool {
+11475:pub fn meshEditSetMirror(mask: u8) void {
+11478:pub fn meshEditMirrorRaw() u8 {
+11493:pub fn paintLayoutStale() bool {
+11500:pub fn invalidatePaintLayout() void {
+11506:pub fn setPaintSession(io: std.Io, environ: *const std.process.Environ.Map, on: bool) void {
+11522:pub fn paintSessionActive() bool {
+11527:pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
+11643:fn characterRigReleaseSkin() void {
+11652:pub fn characterRigClearViewport() void {
+11658:fn characterRigGeometryFingerprint(state: *const character_rig_session.RigViewportState) u64 {
+11666:fn characterRigBuildSkin(state: *const character_rig_session.RigViewportState, fingerprint: u64) bool {
+11716:fn characterRigFrameSpecimens(state: *const character_rig_session.RigViewportState) void {
+11752:pub fn characterRigSyncViewport(state: *const character_rig_session.RigViewportState) void {
+11828:fn characterRigSkinSource(node_key: []const u8) ?CharacterRigSkinSource {
+11844:fn characterRigTransformPoint(matrix: [16]f32, point: [3]f32) [3]f32 {
+11852:fn characterRigWorldPoint(matrix: [16]f32, local: [3]f32, x_offset: f32) [3]f32 {
+11858:fn characterRigOrigin(matrix: [16]f32, x_offset: f32) [3]f32 {
+11862:fn characterRigParentAxis(bone_index: usize, axis: usize) [3]f32 {
+11875:fn characterRigGizmoPivot(bone_index: usize) [3]f32 {
+11884:fn characterRigQuatMultiply(left: [4]f32, right: [4]f32) [4]f32 {
+11893:fn characterRigQuatNormalize(value: [4]f32) [4]f32 {
+11899:pub fn characterRigActive() bool {
+11905:pub fn characterRigGizmoHit(mx: f32, my: f32) i32 {
+11939:pub fn characterRigGizmoBegin(code: i32) bool {
+11954:pub fn characterRigGizmoDrag(dx: f32, dy: f32, fine: bool) bool {
+11977:pub fn characterRigGizmoCancel() void {
+11981:pub fn characterRigGizmoEnd() ?CharacterRigGizmoCommit {
+12005:fn characterRigDrawSkeleton(
+12053:fn characterRigDrawHoveredName(
+12083:fn characterRigDrawGizmo(cam: model_paint.Camera, ox: f32, oy: f32) void {
+12121:fn drawCharacterRigOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+12144:fn characterRigBoneHitInSkeleton(
+12177:fn characterRigJointHoverInSkeleton(
+12202:fn characterRigHoveredJointAt(mx: f32, my: f32) ?character_specimen.HoveredJoint {
+12231:fn characterRigUpdateHoveredJoint(mx: f32, my: f32) void {
+12235:pub fn characterRigPickBone(mx: f32, my: f32) ?u8 {
+12248:pub fn characterRigPickLogicalVertex(mx: f32, my: f32) ?u32 {
+12267:pub fn meshEditOutOfScopePartAt(mx: f32, my: f32) i32 {
+12275:pub fn meshEditClear() void {
+12280:pub fn meshEditSelectAll() i32 {
+12287:pub fn meshSetMarquee(x0: f32, y0: f32, x1: f32, y1: f32) void {
+12291:pub fn meshClearMarquee() void {
+12476:fn ovDepthColor(depth: f32) [3]f32 {
+12480:fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
+12485:fn overlayLine(ax: f32, ay: f32, bx: f32, by: f32, r: f32, g: f32, b: f32, w: f32) void {
+12490:fn axisVec(axis: i32) [3]f32 {
+12497:fn axisColor(axis: i32) [3]f32 {
+12504:fn vadd(a: [3]f32, b: [3]f32) [3]f32 {
+12507:fn vsub(a: [3]f32, b: [3]f32) [3]f32 {
+12510:fn vmul(a: [3]f32, s: f32) [3]f32 {
+12513:fn vdot(a: [3]f32, b: [3]f32) f32 {
+12516:fn vcross(a: [3]f32, b: [3]f32) [3]f32 {
+12519:fn vnorm(a: [3]f32) [3]f32 {
+12524:fn worldUnitsPerPixel(cam: model_paint.Camera, p: [3]f32) f32 {
+12534:fn axisScreenInfo(cam: model_paint.Camera, pivot: [3]f32, u: [3]f32) ?AxisScreen {
+12540:fn gizmoFaceOnPxPerUnit(cam: model_paint.Camera, p: [3]f32) f32 {
+12548:fn gizmoAxisGrabbable(s: AxisScreen, face_on_px_per_unit: f32) bool {
+12552:fn gizmoArmEnd(s: AxisScreen, sign: f32) [2]f32 {
+12555:fn segDist2(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
+12568:fn ringBasis(axis: [3]f32) [2][3]f32 {
+12579:fn gizmoRingWorldR(cam: model_paint.Camera, pivot: [3]f32) f32 {
+12587:fn drawGizmoRing(cam: model_paint.Camera, pivot: [3]f32, axis: i32, ox: f32, oy: f32) void {
+12606:fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: f32) f32 {
+12630:fn drawMirrorPlanesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+12661:fn gizmoAxisDrawColor(axis: i32) [3]f32 {
+12667:fn drawGizmoArrowHead(x: f32, y: f32, dx: f32, dy: f32, col: [3]f32) void {
+12675:fn drawGizmoSquare(x: f32, y: f32, col: [3]f32) void {
+12683:fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+12757:pub fn meshGizmoHit(mx: f32, my: f32) i32 {
+12821:pub fn bdGizmoSet(x: f32, y: f32, z: f32) void {
+12825:pub fn bdGizmoClear() void {
+12829:pub fn bdGizmoActive() bool {
+12832:pub fn bdGizmoPos() [3]f32 {
+12837:pub fn bdGizmoHit(mx: f32, my: f32) i32 {
+12861:pub fn bdGizmoBegin(code: i32) void {
+12869:pub fn bdGizmoDrag(dx: f32, dy: f32, shift: bool, free: bool) bool {
+12883:pub fn bdGizmoFinish() void {
+12888:fn drawBdGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+12933:fn snapStep(value: f32, step: f32, fine: f32, shift: bool, free: bool) f32 {
+12940:fn setGizmoReadout(comptime fmt: []const u8, args: anytype) void {
+12951:fn selectionSnapReference() ?[3]f32 {
+12980:fn vertexSnapAlongAxis(axis: [3]f32, px_per_unit: f32) ?VertexLock {
+13013:fn gizmoDragReset() void {
+13022:pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, snap_vertex: bool) bool {
+13126:pub fn meshGizmoNudge(axis: u8, amount: f32) bool {
+13138:pub fn meshGizmoScaleBy(factor: f32) bool {
+13157:pub fn meshAlignLoop() ?u8 {
+13173:pub fn meshTransformTranslate(delta: [3]f32) bool {
+13181:pub fn meshTransformScaleAxis(axis: [3]f32, pivot: [3]f32, factor: f32) bool {
+13189:pub fn meshTransformRotateAxis(axis: [3]f32, pivot: [3]f32, radians: f32) bool {
+13198:fn ovProject(cam: model_paint.Camera, p: [3]f32, ox: f32, oy: f32) ?[2]f32 {
+13206:fn overlayLayerBreak(ox: f32, oy: f32) void {
+13211:fn drawMarqueeOverlay() void {
+13224:fn stageLine(cam: model_paint.Camera, a: [3]f32, b: [3]f32, col: [4]f32, w: f32, ox: f32, oy: f32) void {
+13232:fn drawStagePanels(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13253:fn drawStageLines(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13276:fn stageScaleCameraRight(cam: model_paint.Camera) [3]f32 {
+13282:fn stageScalePoint(origin: [3]f32, right: [3]f32, lateral_m: f32, height_m: f32) [3]f32 {
+13286:fn stageScaleRulerOrigin(cam: model_paint.Camera, right: [3]f32) [3]f32 {
+13295:fn stageScaleMannequinOrigin(ruler: [3]f32, right: [3]f32) [3]f32 {
+13299:fn stageScaleMarkColor(tone: stage_scale.MarkTone) [4]f32 {
+13307:fn stageScaleTickEnd(ruler: [3]f32, right: [3]f32, height_m: f32, length_m: f32) [3]f32 {
+13311:fn stageScalePointInViewport(p: [2]f32) bool {
+13319:fn drawStageScaleMannequin(cam: model_paint.Camera, origin: [3]f32, right: [3]f32, ox: f32, oy: f32) void {
+13359:fn drawStageScaleCue(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13386:fn drawStageScaleLabel(label: []const u8, x: f32, y: f32, col: [4]f32) void {
+13393:fn drawStageScaleText(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13406:fn stageMeasurementMidpoint(a: [3]f32, b: [3]f32) [3]f32 {
+13410:fn drawStageMeasurementBox(cam: model_paint.Camera, min: [3]f32, max: [3]f32, ox: f32, oy: f32) void {
+13427:fn drawStageMeasurementTick(cam: model_paint.Camera, point: [3]f32, axis: usize, half_tick_m: f32, color: [4]f32, ox: f32, oy: f32) void {
+13439:fn drawStageMeasurements(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13494:fn stageMeasurementSubjectLabel(subject: mesh_edit.MeasurementSubject) []const u8 {
+13502:fn drawStageMeasurementLabel(label: []const u8, x: f32, y: f32, color: [4]f32) void {
+13508:fn drawStageMeasurementText(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13539:fn selectionFaceMaskAlloc(fc: u32) ?[]bool {
+13549:fn drawFaceSemanticDot(x: f32, y: f32, selected: bool, glass: bool) void {
+13564:fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13595:fn drawRetopoBandOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13634:fn drawRetopoSourceGhost(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13656:fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13710:fn faceCornerIdentityColor(vertex: u32) [3]f32 {
+13735:fn drawFaceCornerIdentityOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13759:fn drawWireEdgesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13775:fn drawEdgeOverlay(cam: model_paint.Camera, mode: u8, ox: f32, oy: f32) void {
+13832:fn lcHandleGeom(cam: model_paint.Camera) ?LcHandleGeom {
+13854:fn drawLoopCutOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+13869:pub fn meshLcHandleHit(mx: f32, my: f32) bool {
+13891:pub fn meshLcHandleDrag(dx: f32, dy: f32, snap: bool) bool {
+13931:fn compassVisible() bool {
+13938:fn compassGeom(cam: model_paint.Camera) CompassGeom {
+13961:fn drawCompassBall(cam: model_paint.Camera) void {
+13995:fn drawCompassText(cam: model_paint.Camera) void {
+14018:pub fn meshCompassHit(mx: f32, my: f32) i32 {
+14045:pub fn meshCompassSnap(code: i32) bool {
+14064:fn drawHistoricalPreviewSelection(cam: model_paint.Camera, ox: f32, oy: f32) void {
+14106:pub fn drawEditorOverlay(ox: f32, oy: f32) void {
+14248:pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
+14255:pub fn meshEditSnapshot() void {
+14258:pub fn meshEditRevert() void {
+14262:pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
+14271:pub fn characterRigSelectFaces(face_indices: []const u32) u32 {
+14286:pub fn meshEditSelectVertex(idx: u32, additive: bool) bool {
+14292:pub fn meshEditSelectUvOrientation() i32 {
+14297:pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
+14303:pub fn meshEditSetScope(lo: u32, hi: u32) void {
+14309:pub fn meshEditSetScopeRanges(pairs: []const u32) void {
+14315:pub fn meshEditSetFaceGroups(groups: []const u32) void {
+14325:pub fn meshEditInferQuadFaceGroups() ?[]u32 {
+14334:pub fn meshEditSetFaceMaterials(materials: []const u32) bool {
+14344:pub fn meshEditSetFaceSemantics(regions: []const u32, instances: []const u32, table_json: []const u8) bool {
+14361:pub fn meshSemanticRestoreFromDocument(
+14405:pub fn meshSemanticAssignSelection(region: u32, instance: u32, table_json: []const u8) u32 {
+14444:pub fn meshEdgeSemanticAssignSelection(
+14522:pub fn meshEdgeSemanticSelect(region_id: u32, additive: bool) u32 {
+14556:pub fn meshSemanticRegionEdit(region: u32, remove: bool, table_json: []const u8) i32 {
+14586:pub fn meshSemanticBootstrapAxes(ids: [6]u32, table_json: []const u8) bool {
+14631:pub fn meshSemanticNamePrimitive(
+14675:pub fn meshSemanticStampPartRanges(stamps: []const u32, table_json: []const u8) i32 {
+14745:fn invalidateMeshAudit() void {
+14750:fn meshAuditFacts(allocator: std.mem.Allocator, verts: []const f32, face_count: u32) mesh_audit.Facts {
+14786:pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
+14901:fn selectorHasRegion(query: MeshSelectorQuery, region: u32) bool {
+14907:fn triangleCentroidAxis(verts: []const f32, face: usize, axis: usize) f32 {
+14912:fn centroidsCoincide(centroid: [3]f32, other: []const f32, tolerance: f32) bool {
+14921:pub fn meshSelectQuery(query: MeshSelectorQuery) ?MeshSelectorResult {
+15058:pub fn meshSelectSplitPoints() ?MeshSelectorResult {
+15122:pub fn meshSelectAuditFaces(kind: AuditSelectKind) ?MeshSelectorResult {
+15184:pub fn meshTextureSlotAssign(material: u32) u32 {
+15209:pub fn meshTextureSlotRemove(material: u32) u32 {
+15238:pub fn meshTextureSlotSelect(material: u32) u32 {
+15251:pub fn meshEditSetPartRanges(pairs: []const u32) void {
+15284:pub fn meshGroupFaceCount(lo: u32, hi: u32) u32 {
+15297:pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
+15321:pub fn meshPaintSelection(io: std.Io, environ: *const std.process.Environ.Map, r: u8, g: u8, b: u8) u32 {
+15363:pub fn meshEditSelectEdge(idx: u32, additive: bool) bool {
+15369:pub fn meshEditElementsJson(allocator: std.mem.Allocator) ?[]u8 {
+15408:pub fn meshEditSelectionJson(allocator: std.mem.Allocator) ?[]u8 {
+15413:fn retopoBandPlanJson(allocator: std.mem.Allocator) ?[]u8 {
+15439:fn retopoManualBandsJson(allocator: std.mem.Allocator) ?[]u8 {
+15487:pub fn meshRetopoBandsPlanJson(allocator: std.mem.Allocator, axis: u8, width: f32, origin: ?f32) ?[]u8 {
+15508:pub fn meshRetopoBandsPlanRailsJson(allocator: std.mem.Allocator, rail_pairs: []const f32) ?[]u8 {
+15529:pub fn meshRetopoBandsReadJson(allocator: std.mem.Allocator) ?[]u8 {
+15533:pub fn meshRetopoBandsClear() bool {
+15544:pub fn meshRetopoSourceGhostVisible(visible: ?bool) i32 {
+15555:pub fn meshRetopoSourceGhostJson(allocator: std.mem.Allocator) ?[]u8 {
+15569:pub fn meshRetopoBandTintSelection(id: i32) i32 {
+15614:pub fn meshRetopoBandSelect(id: i32) i32 {
+15629:pub fn meshFollowPatchJson(allocator: std.mem.Allocator, faces: ?[]const u32, rings: u32) ?[]u8 {
+15638:pub fn meshWalkPlanJson(allocator: std.mem.Allocator, request: MeshWalkRequest) ?[]u8 {
+15642:pub fn meshWalkApply(token: u64, additive: bool) ?u32 {
+15651:pub fn meshFollowActionDrainJson(allocator: std.mem.Allocator) ?[]u8 {
+15654:pub fn meshEditReset() void {
+15661:pub fn meshEditCounts() [4]u32 {
+15669:pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
+15701:pub fn setPaintMaterial(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
+15705:pub fn clearPaintMaterial() void {
+15709:pub fn hasPaintMaterial() bool {
+15716:pub fn paintProgramRead() ?[]u8 {
+15721:pub fn paintProgramBaseline() ?[]const u8 {
+15728:pub fn paintProgramApply(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
+15747:pub fn paintProgramApplyOverBase(io: std.Io, environ: *const std.process.Environ.Map, blob: []const u8) bool {
+15763:pub fn paintStrokeEnd(io: std.Io, environ: *const std.process.Environ.Map) bool {
+15782:pub fn paintStrokeUndo(io: std.Io, environ: *const std.process.Environ.Map) bool {
+15789:pub fn paintStrokeRedo(io: std.Io, environ: *const std.process.Environ.Map) bool {
+15796:pub fn paintHistoryCounts() [2]u32 {
+15799:pub fn paintUndoLabel() []const u8 {
+15802:pub fn paintRedoLabel() []const u8 {
+15809:pub fn paintLayerCount() usize {
+15812:pub fn paintLayerAt(i: usize) PaintLayerInfo {
+15815:pub fn paintActiveLayer() u32 {
+15818:pub fn paintLayerAdd() u32 {
+15825:pub fn paintLayerDelete(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
+15834:pub fn paintLayerMove(io: std.Io, environ: *const std.process.Environ.Map, id: u32, up: bool) bool {
+15843:pub fn paintLayerSetVisible(io: std.Io, environ: *const std.process.Environ.Map, id: u32, on: bool) bool {
+15850:pub fn paintLayerSetActive(id: u32) bool {
+15855:pub fn paintLayerRename(id: u32, name: []const u8) bool {
+15862:pub fn paintLayerMergeDown(io: std.Io, environ: *const std.process.Environ.Map, id: u32) bool {
+15874:pub fn applyPaintColors(colors: []const u8) void {
+15887:pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
+15898:pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
+15932:pub fn paintFaceCount() u32 {
+15949:pub fn paintModeSet(mode: i32) void {
+15956:pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
+15973:fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8, spec: model_paint.BrushShape) void {
+15985:fn stampGroupMirrored(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8, spec: model_paint.BrushShape) void {
+16022:pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32, spec: model_paint.BrushShape) i32 {
+16046:pub fn paintPolygonAt(points: []const f32, r: u8, g: u8, b: u8, flow: f32, blend: u8) bool {
+16089:pub fn setPaintDetail(px: i32) i32 {
+16109:pub fn refreshPaintLayout() bool {
+16133:pub fn setPaintFit(fit_texels: i32) i32 {
+16150:pub fn estimatePaintAtlas(density: f32) ?PaintEstimate {
+16155:pub fn estimatePaintAtlasFit(fit_texels: u32) ?PaintEstimate {
+16160:pub fn paintIslands() ?[]const paint_islands_mod.Island {
+16167:pub fn paintUvTriangle(face: u32) ?PaintUvTriangle {
+16170:pub fn paintUvCornerVertices(face: u32) ?[3]u32 {
+16177:pub fn paintFaceGroup(face: u32) u32 {
+16184:pub fn paintIslandSelected(island_index: u32) bool {
+16193:pub fn paintFaceSelected(face: u32) bool {
+16201:pub fn meshEditSelectPaintIslands(island_indices: []const u32) bool {
+16213:pub fn meshEditSelectPaintIsland(island_index: u32, additive: bool) bool {
+16235:pub fn applyUvIslandRects(rects: []const u32) bool {
+16256:pub fn applyUvCornerGeometry(corners: []const f32) bool {
+16273:pub fn applyUvCornerGeometryJournaled(corners: []const f32, label: []const u8) bool {
+16292:pub fn restoreUvIslandShapesJournaled(island_indices: []const u32) bool {
+16304:pub fn autoUvIslandSizesJournaled(island_indices: []const u32) bool {
+16317:pub fn projectUvFromViewJournaled(island_indices: []const u32) bool {
+16334:fn opaqueImportCopy(rgba: []const u8) ?[]u8 {
+16344:pub fn replacePaintAtlas(rgba: []const u8) bool {
+16355:pub fn replacePaintAtlasJournaled(rgba: []const u8) bool {
+16378:pub fn importPaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
+16392:pub fn importPaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool {
+16416:pub fn resizePaintAtlas(rgba: []const u8, width: u32, height: u32) bool {
+16428:pub fn resizePaintAtlasJournaled(rgba: []const u8, width: u32, height: u32) bool {
+16449:pub fn compilePaintAtlasWorkspace(
+16490:pub fn paintAtlas() ?PaintAtlas {
+16498:pub fn paintVariantUvCoverage(allocator: std.mem.Allocator) ?PaintVariantUvCoverage {
+16504:pub fn samplePaintAt(mx: f32, my: f32) ?[3]u8 {
+16515:pub fn paintAtlasPalette(out: [][3]u8) usize {
+16523:pub fn paintedMeshVerts() ?[]const f32 {
+16530:pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
+16558:pub fn paintTintSuspend() void {
+16561:pub fn paintTintResume() void {
+16695:pub fn staticInstanceMemoryStats() StaticInstanceMemoryStats {
+16717:fn staticRetainWarn(pool: []const u8, what: []const u8, rows: u32, used: u32) void {
+16723:fn framePoolWarn(pool: []const u8) void {
+16735:fn growStaticPool(device: *wgpu.Device, queue: *wgpu.Queue, buf: *?*wgpu.Buffer, cap_rows: *u32, top_bytes: u64, row_bytes: u64, needed_rows: u64, label: []const u8) bool {
+16775:fn staticCacheSlot(cache: []StaticInstEntry, len: *usize, now: u64) ?*StaticInstEntry {
+16893:pub fn setRegionFormula(formula: []const u8) void {
+16904:pub fn setRegion(key: []const u8, region_id: i32, faces: []const u32, data: []const f32) bool {
+16957:pub fn setRegionSlotBound(key: []const u8, region_id: i32, slot_material: u32, data: []const f32) bool {
+17002:pub fn clearRegions(key: []const u8, region_id: i32) void {
+17018:pub fn regionsBoundForKey(key: []const u8) bool {
+17022:fn regionCountForKeyHash(kh: u64) u32 {
+17036:fn regionLightRgb(region_id: i32, t: f32) ?[3]f32 {
+17179:fn recordDraw(vertex_count: u32, instance_count: u32) void {
+17197:fn sphereInFrustum(planes: *const [6][4]f32, cx: f32, cy: f32, cz: f32, radius: f32) bool {
+17208:fn drawStaticInstanceRange(pass: *wgpu.RenderPassEncoder, group_verts: u32, sd_offset: u64, is_slim: bool, first: u32, count: u32) void {
+17224:fn perfLogOn() bool {
+17232:fn censusOn() bool {
+17246:fn fpsHudOn() bool {
+17250:pub fn drawFpsHud(io: std.Io) void {
+17270:pub fn telemetryStats() TelemetryStats {
+17329:pub fn init(environ: *const std.process.Environ.Map) void {
+18119:pub fn getTexBindGroupLayout() ?*wgpu.BindGroupLayout {
+18127:pub fn getDiffuseSampler() ?*wgpu.Sampler {
+18131:pub fn getUvSamplingUniform(finite_atlas: bool) ?*wgpu.Buffer {
+18135:pub fn deinit() void {
+18231:pub fn frameCleanup() void {
+18254:pub fn resetForReload() void {
+18305:fn acquireRt(w: u32, h: u32) ?*Rt {
+18327:fn ensureRt(slot: *Rt, w: u32, h: u32) ?*Rt {
+18384:fn max3(a: f32, b: f32, c: f32) f32 {
+18388:fn estimateMeshRadius(node: *const Node) f32 {
+18431:fn hashTex(w: u32, h: u32, data: []const u8) u64 {
+18447:fn texFingerprint(w: u32, h: u32, data: []const u8) u64 {
+18481:fn memoHashTex(w: u32, h: u32, data: []const u8, fp: u64) u64 {
+18498:fn dropTexEntry(e: *TexEntry) void {
+18505:fn getOrCreateTexBindGroup(rgba: []const u8, w: u32, h: u32) ?*wgpu.BindGroup {
+18615:fn paintBindGroup() ?*wgpu.BindGroup {
+18714:fn hashKey(key: []const u8) u64 {
+18732:fn lookupGeometry(key: []const u8) ?GeoSlice {
+18743:fn packVertexRow(src: []const f32) Vertex {
+18763:fn stageVertexRows(queue: *wgpu.Queue, buf: *wgpu.Buffer, dst_offset: u64, verts: []const f32, count: u32) void {
+18776:fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
+18829:fn lookupSkinnedGeometry(key: []const u8) ?GeoSlice {
+18837:fn packSkinnedVertexRow(src: []const f32) SkinnedVertex {
+18860:fn stageSkinnedVertexRows(queue: *wgpu.Queue, buf: *wgpu.Buffer, dst_offset: u64, verts: []const f32, count: u32) void {
+18873:fn internSkinnedGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
+18905:fn dynSlotLocate(prefix_len: usize, key: []const u8) ?DynLoc {
+18939:fn dynEnsureRegion(s: *DynSlot, count: u32, reserve_hint: u32) ?u64 {
+18956:fn existingDyn(s: *const DynSlot) ?GeoSlice {
+18962:fn dynWarnFull(what: []const u8, cap: u64) void {
+18972:fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, count: u32) ?GeoSlice {
+19000:pub fn patchDynSlotById(id: []const u8, verts: []const f32, count: u32) bool {
+19029:fn hfWaveActive(w: HfWave) bool {
+19032:fn hfWaveAt(w: HfWave, x: f32, z: f32, t: f32) f32 {
+19043:fn hfHeightAt(hs: []const f32, cols: usize, rows: usize, ix: i64, iz: i64) f32 {
+19049:fn hfNormalAt(hs: []const f32, cols: usize, rows: usize, i: usize, j: usize, dx: f32, dz: f32) [3]f32 {
+19068:fn hfPos(hs: []const f32, cols: usize, i: usize, j: usize, x0: f32, dx: f32, z0: f32, dz: f32) [3]f32 {
+19072:fn hfPush(n: *usize, p: [3]f32, nrm: [3]f32, u: f32, vv: f32) void {
+19085:fn hfSkirt(n: *usize, a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, nrm: [3]f32, su: f32) void {
+19099:fn hfDepthU(depths: ?[]const f32, idx: usize, fallback: f32) f32 {
+19108:fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base: f32, wave: HfWave, t: f32, depths: ?[]const f32) u32 {
+19202:fn initGroundGridTopology(device: *wgpu.Device) void {
+19237:fn resolveDynamicHeightfield(io: std.Io, queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32, wave: HfWave, depths: ?[]const f32) ?GeoSlice {
+19268:pub fn update(_: f32) void {
+19275:pub fn render(io: std.Io, environ: *const std.process.Environ.Map, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
+19311:pub fn flushPending(io: std.Io, environ: *const std.process.Environ.Map) void {
+19349:pub fn renderDetached(io: std.Io, environ: *const std.process.Environ.Map, target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wgpu.TextureView {
+19365:pub fn modelShotOffscreen(io: std.Io, environ: *const std.process.Environ.Map, node: *Node, path: []const u8, w: u32, h: u32, pose: ?[6]f32) bool {
+19393:fn drawSky(io: std.Io, pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_pos: math.Vec3) void {
+19429:fn quantAngleU16(deg: f32) u16 {
+19439:fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, sy: f32, sz: f32, cr: f32, cg: f32, cb: f32, ca: f32) InstanceData {
+19453:fn makeSlimInstance(px: f32, py: f32, pz: f32, pitch: f32, yaw: f32, wide: f32, len: f32, cr: f32, cg: f32, cb: f32) SlimInstance {
+19486:fn stageStaticInstanceBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: u32, dst_offset: u64) void {
+19516:fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32, populated_hint: u32) ?StaticInstDraw {
+19576:fn stageStaticSlimBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: u32, dst_offset: u64) void {
+19601:fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, stride: u32, version: u32, populated_hint: u32) ?StaticInstDraw {
+19651:fn ensureGroundPipeline(io: std.Io, environ: *const std.process.Environ.Map, formula: []const u8) void {
+19747:fn ensureRegionPipeline(io: std.Io, environ: *const std.process.Environ.Map, formula: []const u8) void {
+19826:fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32) void {
+21282:fn docStateSave(s: *DocState) void {
+21287:fn docStateLoad(s: *const DocState) void {
+21292:fn docStateReset() void {
+21311:pub fn modelSessionActiveToken() u32 {
+21372:fn sha256Hex(bytes: []const u8) [64]u8 {
+21378:fn modelWriteIdentity(
+21397:fn modelWriteIdentityIsResident(identity: model_write_lease.Identity, require_generation: bool) bool {
+21404:fn leaseRefusedJsonAlloc(allocator: std.mem.Allocator) ![]u8 {
+21422:pub fn modelWriteLeaseAcquireJsonAlloc(
+21471:pub fn modelFieldCandidateJsonAlloc(
+21565:pub fn modelDocumentFinalize(
+21579:pub fn modelWriteLeaseReleaseJsonAlloc(
+21657:fn rollbackAdoptedJournalAction(
+21713:pub fn modelDocumentAdoptBytesJsonAlloc(
+21860:pub fn modelDocumentRollbackJsonAlloc(
+21931:fn historicalPreviewDegradationsAlloc(
+21952:pub fn historicalPreviewOpenJsonAlloc(
+22023:pub fn historicalPreviewReleaseJsonAlloc(
+22046:pub fn historicalPreviewActive() bool {
+22111:fn facePlaneKind(plane: FacePlaneRequestV1) ?FacePlaneKind {
+22126:fn faceAddressView(address: FaceAddressRequestV1) ?mesh_face_table.AddressView {
+22147:pub fn modelDocumentTokenForId(model_id: []const u8) u32 {
+22153:fn faceSessionTokenMatches(text: []const u8) bool {
+22158:fn faceSessionTokenText(buffer: []u8) ?[]const u8 {
+22162:fn faceRecoveryErrorJsonAlloc(
+22183:fn objectNamespaceHash(model_id: []const u8, object_ids: []const []const u8, ranges: []const u32) [64]u8 {
+22190:pub fn meshSessionIdentityJsonAlloc(allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+22217:pub fn meshPublishObjectIdsJsonAlloc(allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+22264:fn semanticRegionName(root: std.json.Value, region_id: u32) ?[]const u8 {
+22291:fn residentFaceAnalysisJobAlloc(
+22370:fn residentFacePlaneHashAlloc(
+22408:fn residentAnalysisErrorAlloc(
+22420:fn residentFaceAnalysisLookup(
+22460:fn faceRequestIsDiff(allocator: std.mem.Allocator, request_json: []const u8) bool {
+22474:fn diffQueryErrorJsonAlloc(
+22488:fn meshFaceDiffJsonAlloc(
+22598:pub fn meshFaceTableJsonAlloc(io: std.Io, allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+22649:pub fn meshFaceAnalysisReadyJsonAlloc(
+22659:pub fn meshFaceAnalysisStop(io: std.Io) void {
+22664:fn faceSelectFaceReceiptJsonAlloc(
+22709:fn faceSelectBuildIssueReceiptJsonAlloc(
+22736:pub fn meshFaceSelectJsonAlloc(io: std.Io, allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+22885:pub fn meshFaceSeekJsonAlloc(io: std.Io, allocator: std.mem.Allocator, request_json: []const u8) ![]u8 {
+22986:pub fn modelSessionResident() bool {
+22990:fn findModelSession(token: u32) ?*ModelSession {
+22997:fn modelSessionRecord(token: u32) ?*ModelSession {
+23014:pub fn modelSessionSelect(token: u32) bool {
