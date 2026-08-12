@@ -103,7 +103,13 @@ import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, type CharacterRigBoundaryAudit, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig, type SkinBindingRef } from '../../../runtime/skeleton';
 import { createCharacterRigApi, type NativeCharacterRigApi } from '../skeleton/characterRigSession';
-import { humanoidSemanticMembershipFromKey } from '../skeleton/humanoidSemanticAssignment';
+import { humanoidSemanticMembershipFromKey, stampHumanoidSemanticsFromParts } from '../skeleton/humanoidSemanticAssignment';
+import {
+  EXTERNAL_AUTO_RIG_PREVIEW_OVERLAY,
+  IDLE_EXTERNAL_AUTO_RIG,
+  requestSkinTokensRig,
+  type ExternalAutoRigUiState,
+} from '../skeleton/externalAutoRig';
 import {
   parseCharacterRigSeatAction,
   rigStatusFromSnapshot,
@@ -530,6 +536,9 @@ export default function AppFrame() {
   const [characterRigSnapshot, setCharacterRigSnapshot] = useState<CharacterRigSnapshot | null>(null);
   const characterRigSnapshotRef = useRef<CharacterRigSnapshot | null>(characterRigSnapshot);
   characterRigSnapshotRef.current = characterRigSnapshot;
+  const [externalAutoRigState, setExternalAutoRigState] = useState<ExternalAutoRigUiState>(IDLE_EXTERNAL_AUTO_RIG);
+  const externalAutoRigStateRef = useRef<ExternalAutoRigUiState>(externalAutoRigState);
+  externalAutoRigStateRef.current = externalAutoRigState;
   // Migrated application commands read and atomically replace this live
   // snapshot before publishing their outcome. React is a projection of that
   // commit; menu/toolbar/hotkey callers never receive setState.
@@ -1808,7 +1817,7 @@ export default function AppFrame() {
     const token = modelDocumentToken(modelId);
     if (token === restoreToken) return run();
     if (host.__mesh_session_select?.(token) !== 1) {
-      return refuse(`the native session table refused target model ${modelId}`);
+      return refuse(`the native session table refused target model ${modelId} — a drag gesture, historical preview, or retained write lease briefly owns the resident session; retry shortly (tools/seat retries this automatically)`);
     }
     host.__mesh_action_document?.(token);
     const known = modelIdByMeshTokenRef.current.get(token);
@@ -2945,6 +2954,117 @@ export default function AppFrame() {
       status: receipt.changed > 0
         ? `assigned ${receipt.changed} selected face${receipt.changed === 1 ? '' : 's'} to ${receipt.roleKey} — display name remains "${receipt.displayName}"`
         : `assigned stable role ${receipt.roleKey} to display region "${receipt.displayName}"`,
+    }));
+  };
+
+  const publishExternalAutoRigState = (next: ExternalAutoRigUiState) => {
+    externalAutoRigStateRef.current = next;
+    setExternalAutoRigState(next);
+  };
+
+  const runExternalAutoRig = async () => {
+    const current = stateRef.current;
+    const modelId = activeSessionModelIdRef.current;
+    const pkg = modelId ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes) : null;
+    const api = characterRigApiRef.current;
+    const prior = externalAutoRigStateRef.current;
+    if (prior.phase === 'running') return;
+    if (!modelId || !pkg || !hasCharacterRigCapability(pkg) || !api?.currentSnapshot() ||
+        api.currentOpenTarget?.()?.modelId !== modelId) {
+      setState((prev) => ({ ...prev, status: 'Auto-Rig needs the visible model to have an open humanoid rig session' }));
+      return;
+    }
+    const roll = prior.modelId === modelId ? prior.roll + 1 : 1;
+    publishExternalAutoRigState({ phase: 'running', modelId, roll });
+    try {
+      // The first roll exports an explicit saved revision. A reroll reuses that
+      // immutable geometry and must not accidentally persist the preview it is
+      // about to replace.
+      if (!(prior.phase === 'preview' && prior.modelId === modelId) &&
+          !saveActiveModelNow('Saved before Auto-Rig', 'explicit')) {
+        throw new Error('Auto-Rig stopped because the character could not be saved');
+      }
+      const packageDir = resolvePackageDir(pkg.kind, pkg.id);
+      if (!packageDir) throw new Error('Auto-Rig could not resolve the saved character package');
+      const liveRows = (stateRef.current.modelParts[modelId] ?? [])
+        .slice()
+        .sort((left, right) => (left.lo ?? Number.MAX_SAFE_INTEGER) - (right.lo ?? Number.MAX_SAFE_INTEGER));
+      if (liveRows.some((part) => part.visible === false)) {
+        throw new Error('Auto-Rig needs every character part visible so anatomy stamping is complete');
+      }
+      const snapshot = api.currentSnapshot();
+      if (!snapshot) throw new Error('Auto-Rig lost the native character session');
+      const metadata = characterRigPartMetadata(
+        snapshot.objectBindings,
+        liveRows,
+        packageMeshDocParts(pkg) ?? [],
+        { name: pkg.name, color: pkg.color },
+      );
+      const rangeJson = (globalThis as any).__mesh_part_ranges?.();
+      const rangeReply = typeof rangeJson === 'string' && rangeJson ? JSON.parse(rangeJson) : null;
+      const ranges = Array.isArray(rangeReply?.ranges) ? rangeReply.ranges as [number, number][] : [];
+      if (ranges.length !== metadata.length) {
+        throw new Error(`Auto-Rig found ${ranges.length} resident part ranges for ${metadata.length} stable character objects`);
+      }
+      const parts = ranges.map((range, index) => ({
+        name: metadata[index]!.name,
+        lo: Number(range[0]),
+        hi: Number(range[1]),
+      }));
+      const rig = await requestSkinTokensRig({
+        geometryPath: modelPackageGeometryPath(packageDir, pkg.skeleton),
+        packageDir,
+        roll,
+      });
+      if (activeSessionModelIdRef.current !== modelId || api.currentOpenTarget?.()?.modelId !== modelId) {
+        throw new Error('Auto-Rig finished after the visible model changed; reopen the character and reroll');
+      }
+      const semanticReceipt = withNativeMeshActionSource('dock', () =>
+        stampHumanoidSemanticsFromParts(globalThis as any, parts));
+      if (!semanticReceipt) {
+        throw new Error('Auto-Rig anatomy stamping is unavailable — restart into the rebuilt editor');
+      }
+      api.command({
+        kind: 'adoptExternalRig',
+        partNames: metadata.map((part) => part.name),
+        rig,
+      });
+      const previewSnapshot = api.command({
+        kind: 'setOverlay',
+        overlay: EXTERNAL_AUTO_RIG_PREVIEW_OVERLAY,
+      });
+      characterRigSnapshotRef.current = previewSnapshot;
+      setCharacterRigSnapshot(previewSnapshot);
+      markModelDirty(modelId);
+      const preview: ExternalAutoRigUiState = {
+        phase: 'preview',
+        modelId,
+        roll,
+        seconds: typeof rig.seconds === 'number' ? rig.seconds : null,
+        joints: rig.joints.length,
+      };
+      publishExternalAutoRigState(preview);
+      setState((prev) => ({
+        ...prev,
+        rightPane: 'rig',
+        rightPanelCollapsed: false,
+        status: `Auto-Rig roll ${roll}: ${rig.joints.length} joints previewing${semanticReceipt.recognizedParts > 0 ? `; ${semanticReceipt.recognizedParts} named parts stamped into model semantics` : ''} — adjust, Reroll, or Accept`,
+      }));
+    } catch (error) {
+      if (externalAutoRigStateRef.current.phase === 'running' &&
+          externalAutoRigStateRef.current.modelId === modelId) publishExternalAutoRigState(IDLE_EXTERNAL_AUTO_RIG);
+      setState((prev) => ({ ...prev, status: `Auto-Rig failed: ${error instanceof Error ? error.message : String(error)}` }));
+    }
+  };
+
+  const acceptExternalAutoRig = () => {
+    const preview = externalAutoRigStateRef.current;
+    if (preview.phase !== 'preview' || preview.modelId !== activeSessionModelIdRef.current) return;
+    if (!saveActiveModelNow('Accepted Auto-Rig', 'explicit')) return;
+    publishExternalAutoRigState(IDLE_EXTERNAL_AUTO_RIG);
+    setState((prev) => ({
+      ...prev,
+      status: `Accepted Auto-Rig roll ${preview.roll}: RJSK, rig descriptor, and model semantics committed`,
     }));
   };
 
@@ -7490,6 +7610,29 @@ export default function AppFrame() {
         setCharacterRigSnapshot(snapshot);
         return ok({ model: pkg.id, name: pkg.name, capability: 'attached', ...rigStatusFromSnapshot(snapshot) });
       }
+      if (action === 'auto-rig') {
+        if (background) return fail('Auto-Rig belongs to the visible model document');
+        const operation = String(args.operation ?? 'status');
+        const lane = externalAutoRigStateRef.current;
+        if (operation === 'status') {
+          if (lane.phase === 'running') return fail('Auto-Rig is still running');
+          if (lane.phase === 'preview') return ok(lane);
+          return fail(live.status.startsWith('Auto-Rig failed:') ? live.status : 'no Auto-Rig preview is active');
+        }
+        if (operation === 'start' || operation === 'reroll') {
+          if (lane.phase === 'running') return fail('Auto-Rig is still running');
+          void runExternalAutoRig();
+          return ok({ state: 'started', roll: lane.modelId === modelId ? lane.roll + 1 : 1 });
+        }
+        if (operation === 'accept') {
+          if (lane.phase !== 'preview' || lane.modelId !== modelId) return fail('no Auto-Rig preview is active for this model');
+          acceptExternalAutoRig();
+          return externalAutoRigStateRef.current.phase === 'idle'
+            ? ok({ state: 'accepted', roll: lane.roll })
+            : fail(stateRef.current.status);
+        }
+        return fail('Auto-Rig operation must be start, reroll, status, or accept');
+      }
       // A page of saved triangles is a lookup, not a dump: past this the reply stops
       // answering a question and becomes a transcript the agent has to re-parse.
       const PACKAGE_TRIANGLE_PAGE = 64;
@@ -7501,6 +7644,20 @@ export default function AppFrame() {
       // seat is the only correct parser of its own format, so it exposes one.
       if (action === 'package') {
         const operation = String(args.operation ?? 'info');
+        if (operation === 'list') {
+          const kind = typeof args.kind === 'string' ? args.kind : null;
+          return ok({
+            models: visibleModels
+              .filter((candidate) => !kind || candidate.kind === kind)
+              .map((candidate) => ({
+                id: candidate.id,
+                name: candidate.name,
+                kind: candidate.kind,
+                saved: resolvePackageDir(candidate.kind, candidate.id) !== null,
+                characterRig: hasCharacterRigCapability(candidate),
+              })),
+          });
+        }
         const requested = typeof args.model === 'string' && args.model.length > 0 ? args.model : modelId;
         if (!requested) return fail('no model in view — open a model document or pass model:"<id>"');
         const pkg = modelPackageById(requested);
@@ -7538,6 +7695,10 @@ export default function AppFrame() {
         };
         if (operation === 'info') {
           const parts = packageMeshDocParts(pkg) ?? [];
+          const storedSkeleton = readManifest(pkg.kind, pkg.id)?.skeleton;
+          const storedDescriptor = storedSkeleton?.characterRig ?? null;
+          const storedMeshes = storedSkeleton?.meshes;
+          const storedBinding = storedMeshes?.kind === 'skinned' ? storedMeshes.binding ?? null : null;
           return ok({
             ...identity,
             triangles: savedTriangles,
@@ -7555,6 +7716,14 @@ export default function AppFrame() {
             glassFirstVertex: doc.glassFirstVertex ?? null,
             bbox: meshDocBounds(doc),
             parts: parts.map((part) => ({ name: part.name, objectId: part.objectId ?? null, kind: part.kind ?? null, visible: part.visible })),
+            characterRig: storedDescriptor ? {
+              state: storedDescriptor.state,
+              bones: storedSkeleton?.bones.length ?? 0,
+              external: storedDescriptor.externalProvenance ?? null,
+              semanticBindings: storedDescriptor.semanticBindings.length,
+              binding: storedBinding,
+              bindingPath: storedBinding ? `${dir}/${storedBinding.path}` : null,
+            } : null,
           });
         }
         if (operation === 'regions') {
@@ -7666,7 +7835,14 @@ export default function AppFrame() {
             ...compareMeshDocs(doc, otherDoc, Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : undefined),
           });
         }
-        return fail(`unknown package operation "${operation}" — info, regions, ranges, triangles, diff, or compare`);
+        return fail(`unknown package operation "${operation}" — list, info, regions, ranges, triangles, diff, or compare`);
+      }
+      if (action === 'model-open') {
+        const requested = String(args.model ?? args.id ?? '').trim();
+        const pkg = visibleModels.find((candidate) => candidate.id === requested || candidate.name === requested);
+        if (!pkg) return fail(`no model package "${requested}"`);
+        openModelDocument(pkg);
+        return ok({ model: pkg.id, name: pkg.name, kind: pkg.kind });
       }
       if (action === 'model-export' && String(args.id ?? '') === 'export-character' && (args.role === 'player' || args.role === 'npc')) {
         exportCharacterAs(args.role);
@@ -8002,6 +8178,17 @@ export default function AppFrame() {
           } as const)[rigAction.test];
           return ok(api.inspect({ kind: 'bendTest', test, side: rigAction.side }));
         }
+        if (rigAction.operation === 'bone-role') {
+          const membership = humanoidSemanticMembershipFromKey(rigAction.role);
+          if (!membership) return fail(`unknown stable humanoid role "${rigAction.role}"`);
+          const snapshot = adoptRigSnapshot(api.command({
+            kind: 'setSemanticBinding',
+            boneId: rigAction.bone,
+            role: membership.role,
+            ...(membership.side ? { side: membership.side } : {}),
+          }), true);
+          return ok({ bone: rigAction.bone, role: rigAction.role, status: rigStatusFromSnapshot(snapshot) });
+        }
         if (rigAction.operation === 'role') {
           const membership = humanoidSemanticMembershipFromKey(rigAction.role);
           if (!membership) return fail(`unknown stable humanoid role "${rigAction.role}"`);
@@ -8041,6 +8228,17 @@ export default function AppFrame() {
           adoptRigSnapshot(api.command({ kind: 'mirrorJoints', source: rigAction.source }), true);
           return ok(api.inspect({ kind: 'skeleton' }));
         }
+        if (rigAction.operation === 'scale-skeleton') {
+          const snapshot = adoptRigSnapshot(api.command({
+            kind: 'scaleExternalSkeleton',
+            factor: rigAction.factor,
+          }), true);
+          return ok({
+            factor: rigAction.factor,
+            status: rigStatusFromSnapshot(snapshot),
+            skeleton: api.inspect({ kind: 'skeleton' }),
+          });
+        }
         if (rigAction.operation === 'bind') {
           const before = currentRigStatus();
           const failures = primaryGateFailures(before.status);
@@ -8055,6 +8253,16 @@ export default function AppFrame() {
           });
           const snapshot = adoptRigSnapshot(api.command({ kind: 'autoBind' }), true);
           return ok({ status: rigStatusFromSnapshot(snapshot), saved: false });
+        }
+        if (rigAction.operation === 'save') {
+          const before = currentRigStatus();
+          if (before.snapshot.state !== 'bound' || before.snapshot.weightsStale) {
+            return fail('character rig save refused — the resident external weights are not current and bound');
+          }
+          if (!saveActiveModelNow('Saved character rig by Agent Seat', 'explicit')) {
+            return fail(stateRef.current.status);
+          }
+          return ok({ model: pkg.id, state: before.snapshot.state, saved: true });
         }
         if (rigAction.operation === 'undo' || rigAction.operation === 'redo') {
           const snapshot = adoptRigSnapshot(rigAction.operation === 'undo' ? api.undo() : api.redo(), true);
@@ -9624,6 +9832,10 @@ export default function AppFrame() {
             characterRigSnapshot={characterRigSnapshot}
             onCharacterRigSnapshot={setCharacterRigSnapshot}
             onCharacterRigStatus={(status) => setState((prev) => ({ ...prev, status }))}
+            externalAutoRigAvailable={Boolean(activeModelPkg && hasCharacterRigCapability(activeModelPkg) && characterRigSnapshot)}
+            externalAutoRigState={externalAutoRigState.modelId === activeModelId ? externalAutoRigState : IDLE_EXTERNAL_AUTO_RIG}
+            onExternalAutoRig={() => { void runExternalAutoRig(); }}
+            onAcceptExternalAutoRig={acceptExternalAutoRig}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
@@ -9907,6 +10119,12 @@ export default function AppFrame() {
               const editor = stateRef.current;
               const dirtyModels = Object.entries(editor.modelDirty).filter(([, dirty]) => dirty).map(([id]) => id);
               if (dirtyModels.length > 0 || manualWorldDirty) {
+                const reason = dirtyModels.length > 0
+                  ? `RESTART BLOCKED · ${dirtyModels.length} dirty model${dirtyModels.length === 1 ? '' : 's'} only exist in the running editor. Applying this rebuild would discard those resident edits.`
+                  : 'RESTART BLOCKED · the world has unsaved edits that would be discarded by this rebuild.';
+                setNativeUpdateNotice((notice) => notice?.token === current.token
+                  ? { ...notice, safetyMessage: reason }
+                  : notice);
                 setState((prev) => ({
                   ...prev,
                   status: `Native update still waiting — save ${dirtyModels.length > 0 ? `${dirtyModels.length} dirty model${dirtyModels.length === 1 ? '' : 's'}` : 'the dirty world'} first`,
@@ -9915,6 +10133,10 @@ export default function AppFrame() {
               }
               const blocking = blockingNow(editor);
               if (blocking) {
+                const reason = `RESTART BLOCKED · finish ${blocking.label} first.`;
+                setNativeUpdateNotice((notice) => notice?.token === current.token
+                  ? { ...notice, safetyMessage: reason }
+                  : notice);
                 setState((prev) => ({ ...prev, status: `Native update still waiting — finish ${blocking.label} first` }));
                 return;
               }

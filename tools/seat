@@ -54,10 +54,10 @@ else if (action === 'follow') {
     } : {}),
   } };
 }
-// package <info|regions|diff> [model-id] — read what the last SAVE actually wrote,
+// package <list|info|regions|diff> [model-id] — read what the last SAVE actually wrote,
 // with the editor's own RJMD decoder. Never parse mesh/doc.blob by hand: the header
 // grew 40 → 48 bytes at RJMD v5 and a hand reader just returns wrong numbers.
-// package <info|regions|ranges|diff> [model] · package triangles <lo> [count] | <a,b,c>
+// package <list|info|regions|ranges|diff> [model] · package triangles <lo> [count] | <a,b,c>
 // · package compare <otherModel> — all read through the editor's own RJMD decoder.
 else if (action === 'package') {
   const operation = args.shift() || 'info';
@@ -68,6 +68,8 @@ else if (action === 'package') {
       : { operation, lo: Number(head), limit: Number(args[1] || 16) } };
   } else if (operation === 'compare') {
     request = { action, args: { operation, other: args[0], ...(args[1] ? { tolerance: Number(args[1]) } : {}) } };
+  } else if (operation === 'list') {
+    request = { action, args: { operation, ...(args[0] ? { kind: args[0] } : {}) } };
   } else request = { action, args: { operation, ...(args[0] ? { model: args[0] } : {}) } };
 }
 // measure <bbox <target> | distance <a> <b> | contact <a> <b>> — the editor does the
@@ -255,7 +257,7 @@ else if (action === 'do') {
   try { request = { action: 'batch', args: { requests: JSON.parse(args.join(' ')) } }; }
   catch { console.error('seat do expects a JSON array of {action,args} rows'); process.exit(2); }
 } else {
-  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|face-table [--source resident|saved|preview|diff] [--sort column[:asc|desc]] [--filter kind] [--limit n]|new <kind> [size height sides]|elements|selection|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <info|regions|ranges|diff> [model]|package triangles <lo> [n]|<a,b,c>|package compare <model>|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|boundary|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|regions [filter] [--all]|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
+  console.error('usage: tools/seat [--brief] look|semantic-status|rig-status|face-table [--source resident|saved|preview|diff] [--sort column[:asc|desc]] [--filter kind] [--limit n]|new <kind> [size height sides]|elements|selection|follow <start [label]|read|stop|clear|inspect [faceCsv] [rings]>|select <selector>|select-face|select-edge|select-vertex <id> [+]|name <name> [instance]|extrude <distance> <name>|extrude-edge <distance>|connect|create-face <name>|bevel <width>|inset ...|move x y z|scale ...|rotate ...|mirror x|y|z [-]|cut|basic-cut <dir> <cuts> [offset]|tris-to-quads|collect-uv-orientation|delete|merge-faces|weld|solidify <thickness>|detach <name>|flip|glass|paint r g b|atlas ...|material <slot|clear>|uv <restore|auto-size|project-view>|save|add ...|shot <path>|recipes|recipe <name> <json-object>|claim <password> [agent]|dismiss [password]|claims|command <editor-command-id>|action <seat-action> <json-object>|undo|redo|do <json-array>|package <list|info|regions|ranges|diff> [model]|package triangles <lo> [n]|<a,b,c>|package compare <model>|measure <bbox <target>|distance <a> <b>|contact <a> <b>>|stats <edges [target]|boundary|symmetry <axis>|anomalies [target]>|align <moving> onto <target> [axis] [--dry-run]|select-path <a> <b> [axis]|select-loop|select-ring <edge>|select-grow [rings]|select-similar <face> [by] [tol]  (all preview; add --apply [+])|regions [filter] [--all]|set-position <axis> <value> [min|center|max]|for-each <selector> <action> [json]|wait-ready [seconds]|oracle <start "<task>"|status [--doc]|advance|attest <id> "<note>"|note [kind] "<text>"|ask "<query>"|spec [class]|exemplar <class> <model> --by <who> [--reject "<why>"]|telemetry|stop|plans>  (global: --brief, --wait <seconds>, --fields <a,b.c>)');
   process.exit(2);
 }
 
@@ -293,8 +295,15 @@ const notReadyYet = (reply) => {
   if (state === 'starting' || state === 'dialog-blocked') return true;
   if (faceTablePendingReceipt(reply)) return true;
   if (reply.ok) return false;
-  return typeof reply.reason === 'string' && /no live model|not ready|still starting|shell bridge is unavailable/i.test(reply.reason);
+  return typeof reply.reason === 'string' && /no live model|not ready|still starting|shell bridge is unavailable|Auto-Rig is still running|native session table refused/i.test(reply.reason);
 };
+
+/** A background session-select refusal usually means a sub-second gesture (drag,
+ *  gizmo, historical preview, retained write lease) owns the resident session in
+ *  the visible editor. Worth one short grace window even without --wait. */
+const transientSessionRefusal = (outcome) => outcome?.kind === 'reply'
+  && typeof outcome.reply?.reason === 'string'
+  && /native session table refused/i.test(outcome.reply.reason);
 
 const sendOnce = () => new Promise((resolve) => {
   const id = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -356,7 +365,8 @@ const emit = (outcome) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (async () => {
-  const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
+  let deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
+  let sessionGraceSpent = false;
   let last = null;
   for (;;) {
     const outcome = await sendOnce();
@@ -365,6 +375,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     if (outcome.kind === 'malformed') { console.error(`seat: ${outcome.message}`); process.exit(1); }
     // Everything below this line is a "not yet": the socket is not up, or the shell
     // answered that it is still starting or blocked behind a dialog.
+    if (!sessionGraceSpent && Date.now() >= deadline && transientSessionRefusal(outcome)) {
+      sessionGraceSpent = true;
+      deadline = Date.now() + 2500;
+    }
     if (Date.now() >= deadline) break;
     const retry = last?.kind === 'reply' ? faceTablePendingReceipt(last.reply) : null;
     await sleep(retry?.retryAfterMs ?? RETRY_DELAY_MS);

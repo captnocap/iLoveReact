@@ -1022,6 +1022,20 @@ fn hostMeshSemanticNamePrimitive(info_c: ?*const v8.c.FunctionCallbackInfo) call
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_semantic_stamp_part_ranges([lo, hi, region...], tableJson) → changed
+/// triangles, or -1 when the complete native transaction is refused.
+fn hostMeshSemanticStampPartRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return setReturnNumber(info, -1);
+    if (bytes.len == 0 or bytes.len % (3 * @sizeOf(u32)) != 0) return setReturnNumber(info, -1);
+    const stamps: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    const table_json = argToStringAlloc(info, 1) orelse return setReturnNumber(info, -1);
+    defer std.heap.c_allocator.free(table_json);
+    const changed = scene3d.meshSemanticStampPartRanges(stamps, table_json);
+    if (changed >= 0) state.markDirty();
+    setReturnNumber(info, @floatFromInt(changed));
+}
+
 /// __mesh_semantic_region_edit(region, remove, tableJson) → faces changed, or -1 when
 /// refused. Rename (remove=0) leaves membership alone and lands only the rewritten
 /// table; remove=1 additionally unnames every face wearing the region (req_3894).
@@ -1933,7 +1947,10 @@ fn hostMeshActionDocument(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
 /// __mesh_session_select(token) → 1|0 — park the active document's native mesh
 /// session (topology, journal, selection, paint, semantics) and restore the
 /// session keyed by this cart-supplied document token, creating a fresh one for
-/// an unseen token (req_3850). 0 only when session bookkeeping cannot allocate.
+/// an unseen token (req_3850). 0 when session bookkeeping cannot allocate, and
+/// also — transiently — while an active historical preview or a retained
+/// restore/field/gizmo write lease owns the resident session (both usually
+/// sub-second; callers should retry briefly before treating it as fatal).
 fn hostMeshSessionSelect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const token: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
@@ -3420,7 +3437,12 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
 ///
 /// The editor's entire inspect/bind workflow crosses this one revisioned door.
 /// The session module owns mutable rig state; React receives compact JSON
-/// snapshots and never receives resident geometry or weight arrays.
+/// snapshots and never receives resident geometry or weight arrays. External
+/// adoption keeps render-corner indices authoritative and admits only an exact
+/// signed-axis basis that maps the service mesh back to those resident corners;
+/// comparison separation exists only while both rig specimens are visible.
+/// External weights make connectivity advisory, while semantic bone-role
+/// coverage remains an explicit retargeting gate.
 fn hostCharacterRigSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const io = v8_runtime.hostContext(info.getIsolate()).io;
@@ -5128,6 +5150,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_semantic_extrude_intent", hostMeshSemanticExtrudeIntent);
         v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
         v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
+        v8_runtime.registerHostFn("__mesh_semantic_stamp_part_ranges", hostMeshSemanticStampPartRanges);
         v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
         v8_runtime.registerHostFn("__mesh_semantics_restore_from_rjmd", hostMeshSemanticsRestoreFromRjmd);
         v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
@@ -5388,6 +5411,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_semantic_extrude_intent", hostMeshSemanticExtrudeIntent);
     v8_runtime.registerHostFn("__mesh_semantic_bootstrap_axes", hostMeshSemanticBootstrapAxes);
     v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
+    v8_runtime.registerHostFn("__mesh_semantic_stamp_part_ranges", hostMeshSemanticStampPartRanges);
     v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
     v8_runtime.registerHostFn("__mesh_semantics_restore_from_rjmd", hostMeshSemanticsRestoreFromRjmd);
     v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
