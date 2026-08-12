@@ -89,6 +89,10 @@
           "zig": "hostMeshSemanticNamePrimitive"
         },
         {
+          "js": "__mesh_semantic_stamp_part_ranges",
+          "zig": "hostMeshSemanticStampPartRanges"
+        },
+        {
           "js": "__mesh_semantic_state",
           "zig": "hostMeshSemanticState"
         },
@@ -107,6 +111,10 @@
         {
           "js": "__mesh_select_audit",
           "zig": "hostMeshSelectAudit"
+        },
+        {
+          "js": "__mesh_select_split_points",
+          "zig": "hostMeshSelectSplitPoints"
         },
         {
           "js": "__mesh_texture_slot_assign",
@@ -253,6 +261,22 @@
           "zig": "hostMeshTopoCreateFace"
         },
         {
+          "js": "__mesh_topo_extrude_to",
+          "zig": "hostMeshTopoExtrudeTo"
+        },
+        {
+          "js": "__mesh_topo_marquee_cut",
+          "zig": "hostMeshTopoMarqueeCut"
+        },
+        {
+          "js": "__mesh_edit_invert",
+          "zig": "hostMeshEditInvert"
+        },
+        {
+          "js": "__mesh_edit_path_pick",
+          "zig": "hostMeshEditPathPick"
+        },
+        {
           "js": "__mesh_topo_flip_faces",
           "zig": "hostMeshTopoFlipFaces"
         },
@@ -367,6 +391,26 @@
         {
           "js": "__mesh_session_resident",
           "zig": "hostMeshSessionResident"
+        },
+        {
+          "js": "__mesh_session_identity",
+          "zig": "hostMeshSessionIdentity"
+        },
+        {
+          "js": "__mesh_publish_object_ids",
+          "zig": "hostMeshPublishObjectIds"
+        },
+        {
+          "js": "__mesh_face_table",
+          "zig": "hostMeshFaceTable"
+        },
+        {
+          "js": "__mesh_face_select",
+          "zig": "hostMeshFaceSelect"
+        },
+        {
+          "js": "__mesh_face_seek",
+          "zig": "hostMeshFaceSeek"
         },
         {
           "js": "__mesh_action_drain",
@@ -4002,6 +4046,10 @@
           "zig": "hostSetPlayerPose"
         },
         {
+          "js": "__compiled_world_play_motion",
+          "zig": "hostPlayMotion"
+        },
+        {
           "js": "__compiled_world_window",
           "zig": "hostWindowOpen"
         },
@@ -4037,11 +4085,19 @@
       "module": "framework/v8_bindings_lore.zig",
       "registerFn": "registerLore",
       "grepPrefix": "__lore_",
-      "tickDrain": "noop",
+      "tickDrain": "real",
       "hostFns": [
         {
           "js": "__lore_snapshot",
           "zig": "hostLoreSnapshot"
+        },
+        {
+          "js": "__lore_verified_save_receipt",
+          "zig": "hostLoreVerifiedSaveReceipt"
+        },
+        {
+          "js": "__lore_verified_save_snapshot",
+          "zig": "hostLoreVerifiedSaveSnapshot"
         },
         {
           "js": "__lore_history",
@@ -4052,8 +4108,20 @@
           "zig": "hostLorePreview"
         },
         {
+          "js": "__mesh_preview_session",
+          "zig": "hostMeshPreviewSession"
+        },
+        {
           "js": "__lore_restore",
           "zig": "hostLoreRestore"
+        },
+        {
+          "js": "__model_recovery_transaction",
+          "zig": "hostModelRecoveryTransaction"
+        },
+        {
+          "js": "__model_face_field_edit",
+          "zig": "hostModelFaceFieldEdit"
         },
         {
           "js": "__lore_pin",

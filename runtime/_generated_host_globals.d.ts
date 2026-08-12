@@ -23,11 +23,13 @@ declare global {
   function __mesh_semantic_extrude_intent(...args: unknown[]): unknown;
   function __mesh_semantic_bootstrap_axes(...args: unknown[]): unknown;
   function __mesh_semantic_name_primitive(...args: unknown[]): unknown;
+  function __mesh_semantic_stamp_part_ranges(...args: unknown[]): unknown;
   function __mesh_semantic_state(...args: unknown[]): unknown;
   function __mesh_semantics_restore_from_rjmd(...args: unknown[]): unknown;
   function __mesh_semantic_region_edit(...args: unknown[]): unknown;
   function __mesh_select_query(...args: unknown[]): unknown;
   function __mesh_select_audit(...args: unknown[]): unknown;
+  function __mesh_select_split_points(...args: unknown[]): unknown;
   function __mesh_texture_slot_assign(...args: unknown[]): unknown;
   function __mesh_texture_slot_clear(...args: unknown[]): unknown;
   function __mesh_texture_slot_remove(...args: unknown[]): unknown;
@@ -64,6 +66,10 @@ declare global {
   function __mesh_topo_extrude_edge(...args: unknown[]): unknown;
   function __mesh_topo_extrude_face(...args: unknown[]): unknown;
   function __mesh_topo_create_face(...args: unknown[]): unknown;
+  function __mesh_topo_extrude_to(...args: unknown[]): unknown;
+  function __mesh_topo_marquee_cut(...args: unknown[]): unknown;
+  function __mesh_edit_invert(...args: unknown[]): unknown;
+  function __mesh_edit_path_pick(...args: unknown[]): unknown;
   function __mesh_topo_flip_faces(...args: unknown[]): unknown;
   function __mesh_topo_weld(...args: unknown[]): unknown;
   function __mesh_retopo_weld_pairs(...args: unknown[]): unknown;
@@ -93,6 +99,11 @@ declare global {
   function __mesh_action_document(...args: unknown[]): unknown;
   function __mesh_session_select(...args: unknown[]): unknown;
   function __mesh_session_resident(...args: unknown[]): unknown;
+  function __mesh_session_identity(...args: unknown[]): unknown;
+  function __mesh_publish_object_ids(...args: unknown[]): unknown;
+  function __mesh_face_table(...args: unknown[]): unknown;
+  function __mesh_face_select(...args: unknown[]): unknown;
+  function __mesh_face_seek(...args: unknown[]): unknown;
   function __mesh_action_drain(...args: unknown[]): unknown;
   function __mesh_journal_note(...args: unknown[]): unknown;
   function __mesh_journal_checkpoint(...args: unknown[]): unknown;
@@ -991,6 +1002,7 @@ declare global {
   function __compiled_world_set_player_character(...args: unknown[]): unknown;
   function __compiled_world_npc_character_session(...args: unknown[]): unknown;
   function __compiled_world_set_player_pose(...args: unknown[]): unknown;
+  function __compiled_world_play_motion(...args: unknown[]): unknown;
   function __compiled_world_window(...args: unknown[]): unknown;
   function __compiled_world_window_close(...args: unknown[]): unknown;
   function __compiled_world_window_status(...args: unknown[]): unknown;
@@ -1001,9 +1013,14 @@ declare global {
 
   // lore (framework/v8_bindings_lore.zig)
   function __lore_snapshot(...args: unknown[]): unknown;
+  function __lore_verified_save_receipt(...args: unknown[]): unknown;
+  function __lore_verified_save_snapshot(...args: unknown[]): unknown;
   function __lore_history(...args: unknown[]): unknown;
   function __lore_preview(...args: unknown[]): unknown;
+  function __mesh_preview_session(...args: unknown[]): unknown;
   function __lore_restore(...args: unknown[]): unknown;
+  function __model_recovery_transaction(...args: unknown[]): unknown;
+  function __model_face_field_edit(...args: unknown[]): unknown;
   function __lore_pin(...args: unknown[]): unknown;
   function __lore_server_status(...args: unknown[]): unknown;
 
