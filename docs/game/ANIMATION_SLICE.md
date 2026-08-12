@@ -4,6 +4,8 @@ Survey doc (req_4281, 2026-08-12). Written after the req_4279 diagnosis (SkinTok
 player loads into the world rigid). Everything below is disk truth with file:line cites as
 of this date; it is a map, not a ruling. Related history: V6 (animation DSL semantics,
 hmsc era), req_0576 (animation workbench plan), req_4208 (rigging tier direction).
+The follow-up proposal that names the roof over this slice: `ANIMATION_ROOF.md`
+(req_4285, awaiting ruling).
 
 ## The one-paragraph story
 
