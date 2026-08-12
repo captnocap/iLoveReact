@@ -114,12 +114,13 @@ result is fed **back** into the interpolator (`acceptEvaluated`,
 `player_character_pose.zig:223`) so a hostile out-of-range frame can't make the next
 blend start from an invisible pose.
 
-**The gate that makes SkinTokens rigs rigid:** `resetRig`
-(`player_character_pose.zig:69-76`) marks the palette canonical only when bone count
-== 24 **and** every ID string matches `HUMANOID_V1_BONE_IDS` in order. Non-canonical →
-`advance()` returns the bind frame forever (`player_character_pose.zig:196-203`):
-*"A role-mapped external rig remains visible in bind pose until an explicit
-capture/animation stream takes ownership of all its bones."*
+**The gate is role-addressed as of req_4285 (was: the canonical-palette gate that
+made SkinTokens rigs rigid).** `resetRig` now resolves each clip channel
+(`humanoid_clips.zig CHANNEL_IDS`, the 12 driven rotations) against the role-aliased
+palette (`CharacterAsset.retargetBoneIds`); a body answers to clips exactly when every
+clip role is bound. Unbound rigs still hold bind pose until an explicit
+capture/animation stream takes ownership. The old law (bone count == 24 + exact ID
+order) is dead; M4004's 13 role-bound joints satisfy the clip channel set.
 
 **NPCs** (`world_loader/npc_character_session.zig:110-115`): canonical idle clip only,
 though each instance owns its own clock, quaternion state, and GPU palette.
@@ -214,12 +215,11 @@ Net: richer skeleton, zero shared vocabulary with the clip/capture channel table
 
 ## 7. The named gaps (filed, not decided)
 
-1. **Clips → role retarget.** The role bindings adoption already computes cover every
-   channel the clips drive; `humanoid_retarget` already knows how to apply deltas onto
-   an arbitrary target through constraints. Routing canonical clip samples through a
-   role-keyed (not ID-keyed) channel map would animate any adopted rig; unbound extras
-   (fingers, toes, neck) ride their parents. Same fix would let motion capture drive
-   SkinTokens rigs.
+1. **Clips → role retarget. CLOSED by req_4285 step 1.** Clips sample as
+   role-addressed bind-relative deltas (`sampleChannels`) and rebase per channel onto
+   any rig that binds the clip roles; unbound extras (fingers, toes, neck) ride their
+   parents. Capture already spoke the role vocabulary through `retargetBoneIds` —
+   both halves of the slice now address motion by role, never bone-ID string.
 2. **Weights-only SkinTokens (Tier 1, req_4208 direction).** Author the canonical
    skeleton, run SkinTokens `--use_skeleton` for weights only → palette check passes,
    clips and capture work today, untouched.

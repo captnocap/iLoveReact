@@ -479,7 +479,7 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     try self.kid_list.append(self.allocator, .{});
 
     if (self.scene.player_character) |*character| {
-        try self.player_character_pose.resetRig(character.rig_bones);
+        try self.player_character_pose.resetRig(character.rig_bones, character.retargetBoneIds());
         try self.player_geom_keys.ensureUnusedCapacity(self.allocator, 1);
 
         const skin_key = try std.fmt.allocPrint(
