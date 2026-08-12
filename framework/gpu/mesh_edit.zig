@@ -5192,14 +5192,14 @@ fn collectNakedLoopEdges(seed: u32) ?CollectedEdgeWalk {
     return .{ .ids = owned, .terminated = termination, .stopped_at = stopped_at };
 }
 
-/// Every usable boundary edge of one authored face group — the loop AROUND an
-/// n-gon. On a capped cylinder this is the top/bottom loop itself: the rim vertex
+/// Every usable boundary edge of one authored face group — the loop AROUND a
+/// face. On a capped cylinder this is the top/bottom loop itself: the rim vertex
 /// is never a 4-way junction (so the quad-loop walk stops immediately) and the cap
 /// is not a quad (so the ring walk refuses), but the cap's boundary IS the loop
-/// the click meant (req_4271, the pot rim). Quads are deliberately excluded — the
-/// loop and ring walks already own quad territory.
+/// the click meant (req_4271, the pot rim). Quads count too — a cube's top ring
+/// is exactly the top face's boundary, and nothing else can reach it through the
+/// cube's all-pole corners (req_4277).
 fn collectGroupBoundaryEdges(group: u32) ?CollectedEdgeWalk {
-    if (walkGroupDistinctVertCount(group) == 4) return null;
     var collected = std.ArrayListUnmanaged(u32).empty;
     defer collected.deinit(alloc);
     var edge: u32 = 0;
@@ -5247,8 +5247,12 @@ pub fn pathPick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32,
     // Build the candidate list fresh each click — the mesh is live and a stale run
     // would select edges that no longer mean what they meant. Order is stated and
     // fixed: open-boundary loop (a rim is what you meant when you clicked a rim),
-    // the boundary of an adjacent n-gon (a capped rim's top loop), quad loop, edge
-    // ring, the single edge; identical sets collapse so the cycle never repeats.
+    // the quad loop when it actually travelled (the long ring stays the first look
+    // on interior edges), adjacent face-boundary loops (a cube's top ring, a cap's
+    // rim — the loops no walk can reach through all-pole corners, req_4277), the
+    // edge ring when IT travelled, then the single edge. A walk that terminated at
+    // its seed is not a path — it never claims an early cycle slot; identical sets
+    // collapse so the cycle never repeats a look.
     var candidates: [6][]u32 = undefined;
     var candidate_count: u32 = 0;
     defer for (candidates[0..candidate_count]) |ids| alloc.free(ids);
@@ -5265,15 +5269,24 @@ pub fn pathPick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32,
         }
     }.add;
     if (collectNakedLoopEdges(seed)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+    if (collectLoopEdges(seed)) |run| {
+        if (run.ids.len > 1) addCandidate(&candidates, &candidate_count, run.ids) else alloc.free(run.ids);
+    }
     {
         var seed_groups: [8]u32 = undefined;
         const seed_group_count = walkEdgeGroups(seed, &seed_groups);
-        for (seed_groups[0..seed_group_count]) |group| {
-            if (collectGroupBoundaryEdges(group)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+        // A non-quad neighbour's boundary (a cap n-gon) outranks a quad's own
+        // perimeter: a pot-rim click means the cap loop, never the wall's sides.
+        for ([2]bool{ false, true }) |quads_pass| {
+            for (seed_groups[0..seed_group_count]) |group| {
+                if ((walkGroupDistinctVertCount(group) == 4) != quads_pass) continue;
+                if (collectGroupBoundaryEdges(group)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+            }
         }
     }
-    if (collectLoopEdges(seed)) |run| addCandidate(&candidates, &candidate_count, run.ids);
-    if (collectRingEdges(seed)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+    if (collectRingEdges(seed)) |run| {
+        if (run.ids.len > 1) addCandidate(&candidates, &candidate_count, run.ids) else alloc.free(run.ids);
+    }
     single: {
         const one = alloc.alloc(u32, 1) catch break :single;
         one[0] = seed;
