@@ -3,6 +3,7 @@
 // semantic row after an accepted mutation, undo, or redo.
 
 import type { CommandSource } from '../../../runtime/commands';
+import type { WorkspaceDocument } from '../data/types';
 
 export const NATIVE_MESH_ACTIONS = [
   { kind: 'extrude-face', label: 'extrude face', commandId: 'model.mesh.extrude-face' },
@@ -44,6 +45,15 @@ export const NATIVE_MESH_ACTIONS = [
   { kind: 'bevel', label: 'bevel', commandId: 'model.mesh.bevel' },
   { kind: 'paint-faces', label: 'paint faces', commandId: 'model.paint.fill-selection' },
   { kind: 'retopo-guide', label: 'edit retopology guide', commandId: 'model.retopology.edit-guide' },
+  // Ordinals 33–34 existed host-side (mesh_journal_log.zig) without mirror rows,
+  // so their events decoded as undefined and were silently dropped — backfilled
+  // alongside the req_4271 appends below so the bridge contract lines up again.
+  { kind: 'historical-restore', label: 'historical restore', commandId: 'model.recovery.restore' },
+  { kind: 'field-edit', label: 'guarded field edit', commandId: 'model.recovery.field-edit' },
+  // Append-only ordinals 35–36 (req_4271): Basic Cut's own identity (its "cut"
+  // label previously mapped to NO kind at all), and the marquee-projected cut.
+  { kind: 'basic-cut', label: 'cut', commandId: 'model.mesh.basic-cut' },
+  { kind: 'marquee-cut', label: 'marquee cut', commandId: 'model.mesh.marquee-cut' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;
@@ -83,6 +93,29 @@ export function modelDocumentToken(modelId: string): number {
     hash = Math.imul(hash ^ modelId.charCodeAt(i), 0x01000193) >>> 0;
   }
   return (hash & 0x7fff_ffff) || 1;
+}
+
+export type NativeModelSessionBinding = Readonly<{
+  token: number;
+  modelId: string | null;
+}>;
+
+/** Reconcile JS's disposable session refs with the workspace document that
+ * survived it. AppFrame calls this synchronously during render so a hot-reload
+ * remount selects the resident native model before ModelView or Save can observe
+ * a null model id. */
+export function reconcileNativeModelSession(
+  current: NativeModelSessionBinding,
+  document: Pick<WorkspaceDocument, 'kind' | 'sourceId'> | null,
+  select: (token: number) => number,
+): { status: 'unchanged' | 'selected' | 'refused'; binding: NativeModelSessionBinding } {
+  const modelId = document?.kind === 'model' ? (document.sourceId ?? null) : null;
+  const token = modelId ? modelDocumentToken(modelId) : 0;
+  if (current.modelId === modelId && current.token === token) {
+    return { status: 'unchanged', binding: current };
+  }
+  if (select(token) !== 1) return { status: 'refused', binding: current };
+  return { status: 'selected', binding: { token, modelId } };
 }
 
 export function nativeMeshActionSourceOrdinal(source: string): number {

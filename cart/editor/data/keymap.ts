@@ -12,6 +12,13 @@ import type { Modifiers } from '../../../runtime/hooks/useModifiers';
 import type { EditorState, ModelToolSnapshot } from './types';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
 
+// Model-surface chords outrank the globals while a model is in view: Ctrl+I means
+// Invert Selection at the mesh (req_4271, the Blender muscle-memory chord); Import
+// Model File keeps the chord on every other surface.
+const MODEL_CHORDS: Record<string, string> = {
+  'ctrl+i': 'mesh-invert',
+};
+
 // Global chords fire on any surface. Each command still self-gates through
 // commandEnabled. Keyed by a normalized chord string.
 const GLOBAL_CHORDS: Record<string, string> = {
@@ -191,12 +198,17 @@ function modelCommandForKey(key: string, tool: ModelToolSnapshot, mods: Modifier
 export function commandForKeyEvent(state: EditorState, key: string, mods: Modifiers): string | null {
   const gate = (id: string): string | null => (commandEnabled(commandById(id), state).on ? id : null);
 
+  const surface = activeSurface(state);
+  if (surface === 'model') {
+    const modelChord = MODEL_CHORDS[chord(key, mods)];
+    if (modelChord) return gate(modelChord);
+  }
+
   const global = GLOBAL_CHORDS[chord(key, mods)];
   if (global) return gate(global);
 
   if (mods.ctrl || mods.meta || mods.alt) return null;
 
-  const surface = activeSurface(state);
   if (surface === 'world') {
     const world = WORLD_KEYS[key];
     if (world) return gate(world);

@@ -7,6 +7,7 @@
 //! resolves adjacency by ids.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const mesh_semantics = @import("mesh_semantics.zig");
 
 pub const NO_GROUP: u32 = std.math.maxInt(u32);
@@ -20,9 +21,10 @@ const IMPORT_WELD_SCALE: f32 = 1024.0;
 /// survive its own save/load cycle (req_3435 — loop cuts at a clamped offset).
 pub const IMPORT_WELD_EPS: f32 = 1.0 / IMPORT_WELD_SCALE;
 const MIRROR_MATCH_SCALE: f32 = 1000.0;
-// Merge Faces is a planar dissolve, not a general polygon stitch. A permissive
-// normal gate can turn a bent perimeter into a fan whose diagonals cut through the
-// model even when its output triangle count happens to match the input.
+// Machine-chosen triangle pairing is a planar dissolve, not a general polygon
+// stitch. Interactive Merge Faces is explicit user intent and may author a warped
+// face while retaining its exact source tessellation; the bulk quadifier still
+// uses this gate so it cannot silently fuse across a crease.
 const MERGE_FACE_NORMAL_DOT_MIN: f32 = 0.9999;
 const MERGE_FACE_PLANE_ABS_EPS: f32 = IMPORT_WELD_EPS * 2.0;
 const MERGE_FACE_PLANE_REL_EPS: f32 = 0.00001;
@@ -458,13 +460,178 @@ pub const FacePolygonSelection = struct {
     max_width: f32,
 };
 
-const FacePolygonFrame = struct {
+/// One disclosed tuning table owns every behavior-affecting face-fact threshold.
+/// The table response publishes these values so native diagnostics and UI labels
+/// cannot drift into different meanings.
+pub const FaceFactTuning = struct {
+    pub const area_definition = "sum_of_lowered_member_triangle_areas";
+    pub const centroid_edge_clearance_definition = "min_distance_from_canonical_face_centroid_to_boundary_edge_line";
+    pub const aspect_definition = "max_edge_over_twice_centroid_edge_clearance";
+    pub const scale_epsilon: f32 = IMPORT_WELD_EPS;
+    pub const tiny_area_relative_to_scale_squared: f32 = 0.000001;
+    pub const zero_area_epsilon: f32 = IMPORT_WELD_EPS * IMPORT_WELD_EPS;
+    pub const owner_capture_budget_us: u32 = 4000;
+
+    pub fn tinyAreaThreshold(mesh_scale: f32) f32 {
+        const finite_scale = if (std.math.isFinite(mesh_scale)) @max(mesh_scale, scale_epsilon) else scale_epsilon;
+        return @max(
+            scale_epsilon * scale_epsilon,
+            finite_scale * finite_scale * tiny_area_relative_to_scale_squared,
+        );
+    }
+};
+
+pub const FaceDegeneracy = enum {
+    repeated_vertex,
+    nonfinite_position,
+    short_edge,
+    zero_normal,
+    zero_area_member,
+    too_few_corners,
+};
+
+pub const FaceConvexity = enum {
+    convex,
+    concave,
+    indeterminate,
+};
+
+pub const FaceGeometryFacts = struct {
+    corner_count: u32,
+    triangle_count: u32,
+    area: f32,
+    perimeter: f32,
+    centroid_edge_clearance: ?f32,
+    min_edge: f32,
+    max_edge: f32,
+    aspect: ?f32,
+    planarity_deviation: ?f32,
+    convexity: FaceConvexity,
+    degeneracy: std.EnumSet(FaceDegeneracy) = .empty,
+};
+
+pub const FaceOperation = enum {
+    indexed_build,
+    loop_cut,
+    face_to_ngon,
+    bevel,
+    merge,
+    extrude,
+    solidify,
+};
+
+pub const OperationStatus = enum { allowed, blocked, not_analyzed };
+
+pub const OperationRefusalCode = enum {
+    duplicate_outgoing_boundary,
+    too_few_boundary_edges,
+    missing_boundary_continuation,
+    boundary_did_not_close,
+    mixed_material,
+    mixed_semantic,
+    no_face_selection,
+    face_out_of_range,
+    face_deleted,
+    too_few_corners,
+    too_many_corners,
+    no_source_triangles,
+    concave_boundary,
+    zero_normal,
+    non_planar,
+    short_edge,
+    too_small,
+    invalid_frame,
+    invalid_seed_edge,
+    target_out_of_range,
+    target_deleted,
+    edge_not_manifold,
+    coplanar_edge,
+    invalid_recede,
+    insufficient_valence,
+    boundary_not_open,
+    width_below_minimum,
+};
+
+pub const OperationMetrics = struct {
+    boundary_edges: ?f32 = null,
+    source_triangles: ?f32 = null,
+    max_width: ?f32 = null,
+    direction: ?f32 = null,
+    seed_edge: ?f32 = null,
+    valence: ?f32 = null,
+};
+
+pub const OperationEligibility = struct {
+    status: OperationStatus,
+    code: ?OperationRefusalCode = null,
+    detail: []const u8,
+    metrics: ?OperationMetrics = null,
+
+    pub fn allowed(metrics: ?OperationMetrics) OperationEligibility {
+        return .{ .status = .allowed, .detail = "", .metrics = metrics };
+    }
+
+    pub fn blocked(code: OperationRefusalCode, detail: []const u8, metrics: ?OperationMetrics) OperationEligibility {
+        return .{ .status = .blocked, .code = code, .detail = detail, .metrics = metrics };
+    }
+
+    pub fn notAnalyzed() OperationEligibility {
+        return .{ .status = .not_analyzed, .detail = "canonical noncommitting predicate is not exposed" };
+    }
+};
+
+pub const FacePolygonFrame = struct {
     center: Vec3,
     normal: Vec3,
     u: Vec3,
     v: Vec3,
-    inradius: f32,
+    centroid_edge_clearance: f32,
 };
+
+pub const FacePolygonEligibility = struct {
+    eligibility: OperationEligibility,
+    frame: ?FacePolygonFrame = null,
+};
+
+pub const LoopCutEligibility = struct {
+    eligibility: OperationEligibility,
+    seed_edge: ?[2]u32 = null,
+};
+
+pub const BevelContextKind = enum { edge, vertex, boundary };
+
+pub const BevelContextTarget = union(BevelContextKind) {
+    edge: [2]u32,
+    vertex: u32,
+    boundary: u32,
+};
+
+/// Test-only counters prove diagnostic analysis never invokes a committing
+/// topology entry point. They are reset explicitly by the focused native test.
+pub var operation_predicate_calls: [7]u64 = @splat(0);
+pub var operation_mutation_calls: [7]u64 = @splat(0);
+pub var last_operation_refusal: ?OperationEligibility = null;
+
+pub fn resetOperationInstrumentation() void {
+    operation_predicate_calls = @splat(0);
+    operation_mutation_calls = @splat(0);
+    last_operation_refusal = null;
+}
+
+fn notePredicate(operation: FaceOperation) void {
+    if (builtin.is_test) operation_predicate_calls[@intFromEnum(operation)] += 1;
+}
+
+fn beginMutation(operation: FaceOperation) void {
+    if (builtin.is_test) operation_mutation_calls[@intFromEnum(operation)] += 1;
+    last_operation_refusal = null;
+}
+
+fn acceptOrRemember(eligibility: OperationEligibility) bool {
+    if (eligibility.status == .allowed) return true;
+    last_operation_refusal = eligibility;
+    return false;
+}
 
 pub const BevelKind = enum { vertex, edge };
 pub const BevelTarget = union(BevelKind) {
@@ -492,6 +659,47 @@ pub const Vertex = struct {
     position: Vec3,
     alive: bool = true,
     cut_origin: ?CutOrigin = null,
+};
+
+/// Why one persisted authored-face bucket could not be reconstructed as one
+/// closed logical boundary. These tags are durable provenance: callers must not
+/// rediscover a different explanation by walking the degraded triangle faces.
+pub const FaceBuildIssueCode = enum {
+    duplicate_outgoing_boundary,
+    too_few_boundary_edges,
+    missing_boundary_continuation,
+    boundary_did_not_close,
+    mixed_material,
+    mixed_semantic,
+};
+
+pub const FaceBuildIssue = struct {
+    part: u32,
+    source_group: u32,
+    source_triangles: std.ArrayListUnmanaged(u32) = .empty,
+    code: FaceBuildIssueCode,
+    detail: []u8,
+    degraded_to_groups: std.ArrayListUnmanaged(u32) = .empty,
+
+    pub fn deinit(issue: *FaceBuildIssue, allocator: std.mem.Allocator) void {
+        issue.source_triangles.deinit(allocator);
+        allocator.free(issue.detail);
+        issue.degraded_to_groups.deinit(allocator);
+        issue.* = undefined;
+    }
+
+    fn clone(issue: *const FaceBuildIssue, allocator: std.mem.Allocator) !FaceBuildIssue {
+        var out = FaceBuildIssue{
+            .part = issue.part,
+            .source_group = issue.source_group,
+            .code = issue.code,
+            .detail = try allocator.dupe(u8, issue.detail),
+        };
+        errdefer out.deinit(allocator);
+        try out.source_triangles.appendSlice(allocator, issue.source_triangles.items);
+        try out.degraded_to_groups.appendSlice(allocator, issue.degraded_to_groups.items);
+        return out;
+    }
 };
 
 pub const Face = struct {
@@ -543,6 +751,85 @@ pub const Face = struct {
     }
 };
 
+/// Owned storage inspected before `Mesh.deinit` dereferences or frees it.  The
+/// diagnostic is intentionally structural: a damaged owner must be reported at
+/// the teardown boundary instead of turning an already-recoverable editor error
+/// into a process-ending null-page access.
+pub const MeshStorageField = enum {
+    allocator_vtable,
+    vertices,
+    faces,
+    build_issues,
+    render_triangles,
+    render_normals,
+    render_uvs,
+    face_vertices,
+    face_uvs,
+    face_source_triangles,
+    build_issue_source_triangles,
+    build_issue_detail,
+    build_issue_degraded_to_groups,
+};
+
+pub const MeshDeinitRefusal = struct {
+    field: MeshStorageField,
+    /// Row within `faces` or `build_issues`; null for a top-level field.
+    owner_index: ?usize = null,
+    address: usize,
+    len: usize,
+    capacity: usize,
+};
+
+const minimum_plausible_owned_address: usize = std.heap.page_size_min;
+
+fn ownedHeaderRefusal(
+    comptime T: type,
+    items: []const T,
+    capacity: usize,
+    field: MeshStorageField,
+    owner_index: ?usize,
+) ?MeshDeinitRefusal {
+    if (items.len > capacity) return .{
+        .field = field,
+        .owner_index = owner_index,
+        .address = @intFromPtr(items.ptr),
+        .len = items.len,
+        .capacity = capacity,
+    };
+    if (capacity == 0) return null;
+
+    const address = @intFromPtr(items.ptr);
+    const byte_count = std.math.mul(usize, capacity, @sizeOf(T)) catch return .{
+        .field = field,
+        .owner_index = owner_index,
+        .address = address,
+        .len = items.len,
+        .capacity = capacity,
+    };
+    if (byte_count == 0 or
+        address < minimum_plausible_owned_address or
+        address % @alignOf(T) != 0)
+    {
+        return .{
+            .field = field,
+            .owner_index = owner_index,
+            .address = address,
+            .len = items.len,
+            .capacity = capacity,
+        };
+    }
+    return null;
+}
+
+fn ownedListRefusal(
+    comptime T: type,
+    list: std.ArrayListUnmanaged(T),
+    field: MeshStorageField,
+    owner_index: ?usize,
+) ?MeshDeinitRefusal {
+    return ownedHeaderRefusal(T, list.items, list.capacity, field, owner_index);
+}
+
 pub const SeedInfo = struct {
     face_id: u32,
     part: u32,
@@ -557,6 +844,10 @@ pub const SeedInfo = struct {
 pub const Lowered = struct {
     allocator: std.mem.Allocator,
     positions: []f32,
+    /// Exact per-render-corner normals (nine floats per triangle). Imported
+    /// source tessellation retains its authored rows; newly tessellated faces
+    /// receive the deterministic geometric normal used by the lowered soup.
+    normals: []f32,
     /// Normalized per-render-corner UVs (six floats per triangle). These are
     /// edit topology, not disposable render metadata: loop cut interpolates them
     /// so the derived soup can keep the current painted atlas exactly.
@@ -589,6 +880,7 @@ pub const Lowered = struct {
 
     pub fn deinit(lowered: *Lowered) void {
         lowered.allocator.free(lowered.positions);
+        lowered.allocator.free(lowered.normals);
         lowered.allocator.free(lowered.uvs);
         lowered.allocator.free(lowered.triangle_vertices);
         lowered.allocator.free(lowered.groups);
@@ -602,15 +894,82 @@ pub const Lowered = struct {
     }
 };
 
+/// A face-group table rewritten into the Outliner's ownership law: every part owns
+/// one contiguous interval of authored group ids, ordered by part and then by each
+/// group's first displayed face. Faces without a part are kept after all declared
+/// ranges. The geometry does not change; this is the metadata partition that lets a
+/// topology preview expose every face it just minted inside the focused part.
+pub const GroupPartPartition = struct {
+    groups: []u32,
+    ranges: []u32,
+
+    pub fn deinit(partition: *GroupPartPartition, allocator: std.mem.Allocator) void {
+        allocator.free(partition.groups);
+        allocator.free(partition.ranges);
+        partition.* = undefined;
+    }
+};
+
+pub fn partitionFaceGroupsByPart(
+    allocator: std.mem.Allocator,
+    groups: []const u32,
+    face_parts: []const u32,
+    part_count: u32,
+) !GroupPartPartition {
+    if (groups.len != face_parts.len) return error.InvalidFacePartTable;
+    for (face_parts) |owner| {
+        if (owner != NO_PART and owner >= part_count) return error.InvalidPartOwner;
+    }
+
+    const normalized = try allocator.dupe(u32, groups);
+    errdefer allocator.free(normalized);
+    const ranges = try allocator.alloc(u32, @as(usize, part_count) * 2);
+    errdefer allocator.free(ranges);
+
+    var next: u32 = 0;
+    var pass: u32 = 0;
+    while (pass <= part_count) : (pass += 1) {
+        const wanted = if (pass == part_count) NO_PART else pass;
+        const start = next;
+        var remap = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer remap.deinit(allocator);
+        for (groups, face_parts, 0..) |group, owner, face| {
+            if (owner != wanted) continue;
+            if (group == NO_GROUP) {
+                normalized[face] = NO_GROUP;
+                continue;
+            }
+            const entry = try remap.getOrPut(allocator, group);
+            if (!entry.found_existing) {
+                entry.value_ptr.* = next;
+                next += 1;
+            }
+            normalized[face] = entry.value_ptr.*;
+        }
+        if (pass < part_count) {
+            ranges[@as(usize, pass) * 2] = start;
+            ranges[@as(usize, pass) * 2 + 1] = next;
+        }
+    }
+    return .{ .groups = normalized, .ranges = ranges };
+}
+
 pub const Mesh = struct {
     allocator: std.mem.Allocator,
     vertices: std.ArrayListUnmanaged(Vertex) = .empty,
     faces: std.ArrayListUnmanaged(Face) = .empty,
+    /// Original authored buckets that had to degrade into independently
+    /// selectable triangle faces. The table and persistence adapters consume
+    /// this exact record; neither repeats the canonical boundary walk.
+    build_issues: std.ArrayListUnmanaged(FaceBuildIssue) = .empty,
     /// Stable vertex ids for each triangle/corner in the CURRENT resident soup order.
     /// Imports preserve the source diagonal/order; lowering replaces this map with the
     /// deterministic derived order. Position-only gizmo mutations must use this map,
     /// never guess that an old model was already lowered by today's diagonal policy.
     render_triangles: std.ArrayListUnmanaged([3]u32) = .empty,
+    /// Exact normals paired with `render_triangles`. Unlike logical positions,
+    /// normal splits are render-corner data and must survive a cold diff.
+    render_normals: std.ArrayListUnmanaged([3]Vec3) = .empty,
     /// Exact per-corner UVs paired with `render_triangles`. Authored n-gons may be
     /// concave and their source triangles may sample independent atlas pins, so a
     /// polygon fan cannot reconstruct this state.
@@ -621,12 +980,74 @@ pub const Mesh = struct {
     has_explicit_logical_topology: bool = false,
 
     pub fn deinit(mesh: *Mesh) void {
+        _ = mesh.deinitChecked(@returnAddress());
+    }
+
+    /// Return the first corrupt owned-storage header without dereferencing it.
+    /// This catches the concrete crash signature where `faces.items.ptr == 0x3`,
+    /// along with length/capacity corruption and equivalent nested list damage.
+    /// It cannot prove that an otherwise plausible arbitrary address is mapped;
+    /// allocator provenance remains the owning subsystem's responsibility.
+    pub fn deinitRefusal(mesh: *const Mesh) ?MeshDeinitRefusal {
+        const allocator_vtable_address = @intFromPtr(mesh.allocator.vtable);
+        if (allocator_vtable_address < minimum_plausible_owned_address or
+            allocator_vtable_address % @alignOf(std.mem.Allocator.VTable) != 0)
+        {
+            return .{
+                .field = .allocator_vtable,
+                .address = allocator_vtable_address,
+                .len = 0,
+                .capacity = 0,
+            };
+        }
+        if (ownedListRefusal(Vertex, mesh.vertices, .vertices, null)) |refusal| return refusal;
+        if (ownedListRefusal(Face, mesh.faces, .faces, null)) |refusal| return refusal;
+        if (ownedListRefusal(FaceBuildIssue, mesh.build_issues, .build_issues, null)) |refusal| return refusal;
+        if (ownedListRefusal([3]u32, mesh.render_triangles, .render_triangles, null)) |refusal| return refusal;
+        if (ownedListRefusal([3]Vec3, mesh.render_normals, .render_normals, null)) |refusal| return refusal;
+        if (ownedListRefusal([3]Vec2, mesh.render_uvs, .render_uvs, null)) |refusal| return refusal;
+
+        for (mesh.faces.items, 0..) |face, index| {
+            if (ownedListRefusal(u32, face.vertices, .face_vertices, index)) |refusal| return refusal;
+            if (ownedListRefusal(Vec2, face.uvs, .face_uvs, index)) |refusal| return refusal;
+            if (ownedListRefusal(u32, face.source_triangles, .face_source_triangles, index)) |refusal| return refusal;
+        }
+        for (mesh.build_issues.items, 0..) |issue, index| {
+            if (ownedListRefusal(u32, issue.source_triangles, .build_issue_source_triangles, index)) |refusal| return refusal;
+            if (ownedHeaderRefusal(u8, issue.detail, issue.detail.len, .build_issue_detail, index)) |refusal| return refusal;
+            if (ownedListRefusal(u32, issue.degraded_to_groups, .build_issue_degraded_to_groups, index)) |refusal| return refusal;
+        }
+        return null;
+    }
+
+    /// Teardown with a refusal receipt.  On corruption no pointer is
+    /// dereferenced or freed: the owner is left intact for postmortem logging,
+    /// and the caller may safely drop/quarantine the containing object.
+    pub fn deinitChecked(mesh: *Mesh, caller_address: usize) bool {
+        if (mesh.deinitRefusal()) |refusal| {
+            if (refusal.owner_index) |index| {
+                std.debug.print(
+                    "[indexed-edit] REFUSING Mesh.deinit: corrupt {s}[{}] header mesh=0x{x} ptr=0x{x} len={} cap={} caller=0x{x}; ownership left untouched\n",
+                    .{ @tagName(refusal.field), index, @intFromPtr(mesh), refusal.address, refusal.len, refusal.capacity, caller_address },
+                );
+            } else {
+                std.debug.print(
+                    "[indexed-edit] REFUSING Mesh.deinit: corrupt {s} header mesh=0x{x} ptr=0x{x} len={} cap={} caller=0x{x}; ownership left untouched\n",
+                    .{ @tagName(refusal.field), @intFromPtr(mesh), refusal.address, refusal.len, refusal.capacity, caller_address },
+                );
+            }
+            return false;
+        }
         for (mesh.faces.items) |*face| face.deinit(mesh.allocator);
         mesh.faces.deinit(mesh.allocator);
+        for (mesh.build_issues.items) |*issue| issue.deinit(mesh.allocator);
+        mesh.build_issues.deinit(mesh.allocator);
         mesh.vertices.deinit(mesh.allocator);
         mesh.render_triangles.deinit(mesh.allocator);
+        mesh.render_normals.deinit(mesh.allocator);
         mesh.render_uvs.deinit(mesh.allocator);
         mesh.* = undefined;
+        return true;
     }
 
     pub fn clone(mesh: *const Mesh) !Mesh {
@@ -638,8 +1059,18 @@ pub const Mesh = struct {
         errdefer out.deinit();
         try out.vertices.appendSlice(mesh.allocator, mesh.vertices.items);
         try out.render_triangles.appendSlice(mesh.allocator, mesh.render_triangles.items);
+        try out.render_normals.appendSlice(mesh.allocator, mesh.render_normals.items);
         try out.render_uvs.appendSlice(mesh.allocator, mesh.render_uvs.items);
-        for (mesh.faces.items) |*face| try out.faces.append(mesh.allocator, try face.clone(mesh.allocator));
+        for (mesh.faces.items) |*face| {
+            var copied = try face.clone(mesh.allocator);
+            errdefer copied.deinit(mesh.allocator);
+            try out.faces.append(mesh.allocator, copied);
+        }
+        for (mesh.build_issues.items) |*issue| {
+            var copied = try issue.clone(mesh.allocator);
+            errdefer copied.deinit(mesh.allocator);
+            try out.build_issues.append(mesh.allocator, copied);
+        }
         return out;
     }
 
@@ -666,7 +1097,9 @@ pub const Mesh = struct {
         semantic_regions: ?[]const u32,
         semantic_instances: ?[]const u32,
     ) bool {
-        if (mesh.render_triangles.items.len != tri_count or mesh.render_uvs.items.len != tri_count) return false;
+        if (mesh.render_triangles.items.len != tri_count or
+            mesh.render_normals.items.len != tri_count or
+            mesh.render_uvs.items.len != tri_count) return false;
         if (groups) |rows| if (rows.len < tri_count) return false;
         if (parts) |rows| if (rows.len < tri_count) return false;
         if (materials) |rows| if (rows.len < tri_count) return false;
@@ -702,14 +1135,56 @@ pub const Mesh = struct {
     }
 
     /// UV editing mutates the resident interleaved soup without changing face
-    /// metadata. A cached topology with old UV rows must be re-imported before the
-    /// next structural edit or it would lower stale atlas coordinates over the model.
+    /// metadata. A cached topology with stale UV rows must be re-imported before
+    /// the next structural edit or it would lower stale atlas coordinates over the
+    /// model. Position transforms intentionally recompute normals, so normals do
+    /// not participate in this PRE-transform guard; updatePositionsFromInterleaved
+    /// adopts those rows together with the new positions.
     pub fn residentUvsMatch(mesh: *const Mesh, interleaved: []const f32, tri_count: u32) bool {
-        if (mesh.render_uvs.items.len != tri_count or interleaved.len < @as(usize, tri_count) * 24) return false;
+        if (mesh.render_uvs.items.len != tri_count or
+            interleaved.len < @as(usize, tri_count) * 24) return false;
         for (mesh.render_uvs.items, 0..) |triangle_uvs, triangle| {
             for (triangle_uvs, 0..) |uv, corner| {
                 const base = (triangle * 3 + corner) * 8;
                 if (uv[0] != interleaved[base + 6] or uv[1] != interleaved[base + 7]) return false;
+            }
+        }
+        return true;
+    }
+
+    /// Exact position guard for a cached resident lowering. Save recovery may only
+    /// restore stable logical ids from an explicit indexed cache when every current
+    /// render corner still names the same indexed vertex position. Unlike the live
+    /// position-update path, this is read-only: it proves provenance rather than
+    /// adopting an anonymous soup's positions into the cache.
+    pub fn residentPositionsMatch(mesh: *const Mesh, interleaved: []const f32, tri_count: u32) bool {
+        if (mesh.render_triangles.items.len != tri_count or
+            interleaved.len < @as(usize, tri_count) * 24) return false;
+        for (mesh.render_triangles.items, 0..) |triangle, rendered| {
+            for (triangle, 0..) |vertex_id, corner| {
+                if (vertex_id >= mesh.vertices.items.len) return false;
+                const position = mesh.vertices.items[vertex_id].position;
+                const base = (rendered * 3 + corner) * 8;
+                if (position[0] != interleaved[base] or
+                    position[1] != interleaved[base + 1] or
+                    position[2] != interleaved[base + 2]) return false;
+            }
+        }
+        return true;
+    }
+
+    /// Exact render-channel guard for clone/metadata-only paths. Those paths do
+    /// not own a position transform and therefore may not silently absorb changed
+    /// normal rows from some external writer.
+    pub fn residentRenderChannelsMatch(mesh: *const Mesh, interleaved: []const f32, tri_count: u32) bool {
+        if (!mesh.residentUvsMatch(interleaved, tri_count) or
+            mesh.render_normals.items.len != tri_count) return false;
+        for (mesh.render_normals.items, 0..) |triangle_normals, triangle| {
+            for (triangle_normals, 0..) |normal, corner| {
+                const base = (triangle * 3 + corner) * 8;
+                if (normal[0] != interleaved[base + 3] or
+                    normal[1] != interleaved[base + 4] or
+                    normal[2] != interleaved[base + 5]) return false;
             }
         }
         return true;
@@ -806,6 +1281,7 @@ pub const Mesh = struct {
         part: u32,
         material: u32,
         semantic: mesh_semantics.Face,
+        metadata_issue: ?FaceBuildIssueCode = null,
         triangles: std.ArrayListUnmanaged(u32) = .empty,
     };
 
@@ -1004,6 +1480,11 @@ pub const Mesh = struct {
                 corner_vertex[triangle * 3 + 1],
                 corner_vertex[triangle * 3 + 2],
             });
+            try mesh.render_normals.append(allocator, .{
+                .{ interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 3], interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 4], interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 5] },
+                .{ interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 3], interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 4], interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 5] },
+                .{ interleaved[(@as(usize, triangle) * 3 + 2) * 8 + 3], interleaved[(@as(usize, triangle) * 3 + 2) * 8 + 4], interleaved[(@as(usize, triangle) * 3 + 2) * 8 + 5] },
+            });
             try mesh.render_uvs.append(allocator, .{
                 .{ interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 6], interleaved[(@as(usize, triangle) * 3 + 0) * 8 + 7] },
                 .{ interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 6], interleaved[(@as(usize, triangle) * 3 + 1) * 8 + 7] },
@@ -1040,37 +1521,48 @@ pub const Mesh = struct {
             } else {
                 const bucket = &buckets.items[entry.value_ptr.*];
                 if (materials != null and bucket.material != materials.?[triangle]) {
-                    // One authored face cannot wear two texture roles. Reject corrupt
-                    // persistence at the import boundary instead of choosing a triangle.
-                    return error.InconsistentFaceMaterial;
+                    // Retain this as typed build provenance. The bucket is degraded
+                    // below, where each triangle keeps its own material row.
+                    if (bucket.metadata_issue == null) bucket.metadata_issue = .mixed_material;
                 }
                 const semantic = mesh_semantics.Face{
                     .region = if (semantic_regions) |rows| rows[triangle] else mesh_semantics.NO_ID,
                     .instance = if (semantic_instances) |rows| rows[triangle] else mesh_semantics.NO_ID,
                 };
-                if (!mesh_semantics.eql(bucket.semantic, semantic)) return error.InconsistentFaceSemantic;
+                if (!mesh_semantics.eql(bucket.semantic, semantic) and bucket.metadata_issue == null) {
+                    bucket.metadata_issue = .mixed_semantic;
+                }
             }
             try buckets.items[entry.value_ptr.*].triangles.append(allocator, triangle);
             if (group != NO_GROUP and group >= mesh.next_group) mesh.next_group = group + 1;
         }
 
         for (buckets.items) |*bucket| {
-            var face = buildFaceFromBucket(allocator, interleaved, corner_vertex, bucket) catch |err| switch (err) {
-                // ONE face group that cannot close a boundary loop used to reject the
-                // WHOLE composite mesh, which silently disabled loop cut, Basic Cut,
-                // bevel, merge-faces and tris-to-quads across the entire model — over a
-                // 2 mm sliver no human can see, let alone select (req_4114). Degrade just
-                // that group into loose triangles instead. The rest of the model stays
-                // fully editable and the offender survives as ordinary selectable faces,
-                // so it can be found and repaired rather than blocking everything.
-                error.MalformedFaceBoundary => {
-                    try appendDegradedBucket(&mesh, allocator, interleaved, corner_vertex, bucket);
-                    continue;
+            switch (try buildFaceFromBucket(allocator, interleaved, corner_vertex, bucket)) {
+                .face => |built| {
+                    var face = built;
+                    face.id = @intCast(mesh.faces.items.len);
+                    try mesh.faces.append(allocator, face);
                 },
-                else => return err,
-            };
-            face.id = @intCast(mesh.faces.items.len);
-            try mesh.faces.append(allocator, face);
+                .issue => |build_issue| {
+                    // Append the provenance BEFORE degrading so the exact target
+                    // groups are filled on the resident record as they are minted.
+                    const issue_index = mesh.build_issues.items.len;
+                    try mesh.build_issues.append(allocator, build_issue);
+                    try appendDegradedBucket(
+                        &mesh,
+                        allocator,
+                        interleaved,
+                        corner_vertex,
+                        bucket,
+                        parts,
+                        materials,
+                        semantic_regions,
+                        semantic_instances,
+                        &mesh.build_issues.items[issue_index].degraded_to_groups,
+                    );
+                },
+            }
         }
         try mesh.collapseCoincidentDuplicateFaces();
         return mesh;
@@ -1173,10 +1665,53 @@ pub const Mesh = struct {
     pub var last_malformed_triangle: i64 = -1;
     pub var last_malformed_group: i64 = -1;
 
-    fn malformedBoundary(bucket: *const Bucket) error{MalformedFaceBoundary} {
+    fn noteMalformedBoundary(bucket: *const Bucket) void {
         last_malformed_triangle = if (bucket.triangles.items.len > 0) @intCast(bucket.triangles.items[0]) else -1;
         last_malformed_group = @intCast(bucket.group);
-        return error.MalformedFaceBoundary;
+    }
+
+    const FaceBuildResult = union(enum) {
+        face: Face,
+        issue: FaceBuildIssue,
+    };
+
+    fn buildIssueDetail(code: FaceBuildIssueCode) []const u8 {
+        return switch (code) {
+            .duplicate_outgoing_boundary => "two boundary edges leave the same logical vertex",
+            .too_few_boundary_edges => "fewer than three boundary edges remain after internal edges cancel",
+            .missing_boundary_continuation => "the directed boundary walk cannot continue from its current vertex",
+            .boundary_did_not_close => "the directed boundary edges do not form one closed loop",
+            .mixed_material => "one authored face group contains multiple material indices",
+            .mixed_semantic => "one authored face group contains multiple semantic memberships",
+        };
+    }
+
+    fn buildIssueFromBucket(
+        allocator: std.mem.Allocator,
+        bucket: *const Bucket,
+        code: FaceBuildIssueCode,
+    ) !FaceBuildIssue {
+        noteMalformedBoundary(bucket);
+        var issue = FaceBuildIssue{
+            .part = bucket.part,
+            .source_group = bucket.group,
+            .code = code,
+            .detail = try allocator.dupe(u8, buildIssueDetail(code)),
+        };
+        errdefer issue.deinit(allocator);
+        try issue.source_triangles.appendSlice(allocator, bucket.triangles.items);
+        return issue;
+    }
+
+    fn failFaceBuild(
+        allocator: std.mem.Allocator,
+        face: *Face,
+        bucket: *const Bucket,
+        code: FaceBuildIssueCode,
+    ) !FaceBuildResult {
+        const issue = try buildIssueFromBucket(allocator, bucket, code);
+        face.deinit(allocator);
+        return .{ .issue = issue };
     }
 
     /// Emit every triangle of a face group that failed to close a boundary loop as its
@@ -1189,14 +1724,25 @@ pub const Mesh = struct {
         interleaved: []const f32,
         corner_vertex: []const u32,
         bucket: *const Bucket,
+        parts: ?[]const u32,
+        materials: ?[]const u32,
+        semantic_regions: ?[]const u32,
+        semantic_instances: ?[]const u32,
+        degraded_to_groups: *std.ArrayListUnmanaged(u32),
     ) !void {
+        try mesh.faces.ensureUnusedCapacity(allocator, bucket.triangles.items.len);
+        try degraded_to_groups.ensureUnusedCapacity(allocator, bucket.triangles.items.len);
         for (bucket.triangles.items) |triangle| {
+            const group = mesh.next_group;
             var face = Face{
                 .id = @intCast(mesh.faces.items.len),
-                .group = mesh.next_group,
-                .part = bucket.part,
-                .material = bucket.material,
-                .semantic = bucket.semantic,
+                .group = group,
+                .part = if (parts) |rows| rows[triangle] else bucket.part,
+                .material = if (materials) |rows| rows[triangle] else bucket.material,
+                .semantic = .{
+                    .region = if (semantic_regions) |rows| rows[triangle] else bucket.semantic.region,
+                    .instance = if (semantic_instances) |rows| rows[triangle] else bucket.semantic.instance,
+                },
                 .source_tessellation_valid = true,
             };
             errdefer face.deinit(allocator);
@@ -1207,7 +1753,8 @@ pub const Mesh = struct {
                 const base = (@as(usize, triangle) * 3 + corner) * 8;
                 try face.uvs.append(allocator, .{ interleaved[base + 6], interleaved[base + 7] });
             }
-            try mesh.faces.append(allocator, face);
+            mesh.faces.appendAssumeCapacity(face);
+            degraded_to_groups.appendAssumeCapacity(group);
             mesh.next_group += 1;
         }
     }
@@ -1217,7 +1764,7 @@ pub const Mesh = struct {
         interleaved: []const f32,
         corner_vertex: []const u32,
         bucket: *const Bucket,
-    ) !Face {
+    ) !FaceBuildResult {
         var face = Face{
             .id = 0,
             .group = bucket.group,
@@ -1229,6 +1776,8 @@ pub const Mesh = struct {
         errdefer face.deinit(allocator);
         try face.source_triangles.appendSlice(allocator, bucket.triangles.items);
 
+        if (bucket.metadata_issue) |code| return failFaceBuild(allocator, &face, bucket, code);
+
         if (bucket.triangles.items.len == 1) {
             const triangle = bucket.triangles.items[0];
             var corner: u32 = 0;
@@ -1237,7 +1786,7 @@ pub const Mesh = struct {
                 const base = (@as(usize, triangle) * 3 + corner) * 8;
                 try face.uvs.append(allocator, .{ interleaved[base + 6], interleaved[base + 7] });
             }
-            return face;
+            return .{ .face = face };
         }
 
         // Provenance drives colour inheritance after lowering.  When the first
@@ -1291,25 +1840,26 @@ pub const Mesh = struct {
         for (directed.items, 0..) |edge, index| {
             if ((uses.get(edge.key) orelse 0) != 1) continue;
             const entry = try next.getOrPut(allocator, edge.from);
-            if (entry.found_existing) return malformedBoundary(bucket);
+            if (entry.found_existing) return failFaceBuild(allocator, &face, bucket, .duplicate_outgoing_boundary);
             entry.value_ptr.* = @intCast(index);
             if (start == null) start = edge.from;
             boundary_count += 1;
         }
-        if (boundary_count < 3) return malformedBoundary(bucket);
+        if (boundary_count < 3) return failFaceBuild(allocator, &face, bucket, .too_few_boundary_edges);
 
         var current = start.?;
         const first = current;
         var visited: u32 = 0;
         while (visited < boundary_count) : (visited += 1) {
-            const index = next.get(current) orelse return malformedBoundary(bucket);
+            const index = next.get(current) orelse return failFaceBuild(allocator, &face, bucket, .missing_boundary_continuation);
             const edge = directed.items[index];
             try face.vertices.append(allocator, edge.from);
             try face.uvs.append(allocator, edge.uv);
             current = edge.to;
             if (current == first) break;
         }
-        if (current != first or face.vertices.items.len != boundary_count) return malformedBoundary(bucket);
+        if (current != first or face.vertices.items.len != boundary_count)
+            return failFaceBuild(allocator, &face, bucket, .boundary_did_not_close);
         // Recover the exact diagonal that triangulated an imported authored quad.
         // Once inside the indexed model this edge is topology, never re-guessed from
         // positions after a non-planar edit.
@@ -1325,7 +1875,7 @@ pub const Mesh = struct {
                 }
             }
         }
-        return face;
+        return .{ .face = face };
     }
 
     fn faceFullySelected(face: *const Face, selected_triangles: []const bool) bool {
@@ -1364,72 +1914,168 @@ pub const Mesh = struct {
         return selected_triangle_count > 0 and covered_triangle_count == selected_triangle_count;
     }
 
+    fn buildIssueRefusalCode(code: FaceBuildIssueCode) OperationRefusalCode {
+        return switch (code) {
+            .duplicate_outgoing_boundary => .duplicate_outgoing_boundary,
+            .too_few_boundary_edges => .too_few_boundary_edges,
+            .missing_boundary_continuation => .missing_boundary_continuation,
+            .boundary_did_not_close => .boundary_did_not_close,
+            .mixed_material => .mixed_material,
+            .mixed_semantic => .mixed_semantic,
+        };
+    }
+
+    /// Indexed-build eligibility is the provenance emitted by the canonical
+    /// bucket boundary walk, never a second reconstruction attempt.
+    pub fn indexedBuildEligibility(mesh: *const Mesh, face_id: u32) OperationEligibility {
+        notePredicate(.indexed_build);
+        if (face_id >= mesh.faces.items.len)
+            return .blocked(.face_out_of_range, "indexed-build face id is out of range", null);
+        const face = &mesh.faces.items[face_id];
+        if (!face.alive) return .blocked(.face_deleted, "indexed-build face is deleted", null);
+        for (mesh.build_issues.items) |*issue| {
+            for (issue.degraded_to_groups.items) |group| {
+                if (group != face.group) continue;
+                return .blocked(
+                    buildIssueRefusalCode(issue.code),
+                    issue.detail,
+                    .{
+                        .boundary_edges = @floatFromInt(face.vertices.items.len),
+                        .source_triangles = @floatFromInt(issue.source_triangles.items.len),
+                    },
+                );
+            }
+        }
+        return .allowed(.{
+            .boundary_edges = @floatFromInt(face.vertices.items.len),
+            .source_triangles = @floatFromInt(face.source_triangles.items.len),
+        });
+    }
+
     /// Exactly which gate rejected the last Face-to-N-gon frame. Ten different geometric
     /// conditions all returned one bare `null`, so the tool could only ever say "no" and
     /// the user was left guessing between "too small", "concave", "not planar" and
     /// "not one face" — which are four unrelated fixes (req_4132).
     pub var last_face_polygon_stage: []const u8 = "";
 
-    fn facePolygonFrame(mesh: *const Mesh, face_id: u32) ?FacePolygonFrame {
-        last_face_polygon_stage = "";
-        if (face_id >= mesh.faces.items.len) {
-            last_face_polygon_stage = "face id out of range";
-            return null;
-        }
-        const face = &mesh.faces.items[face_id];
-        if (!face.alive) {
-            last_face_polygon_stage = "that face is deleted";
-            return null;
-        }
-        if (face.vertices.items.len < 3) {
-            last_face_polygon_stage = "the face has fewer than 3 corners (wire/degenerate)";
-            return null;
-        }
-        if (face.vertices.items.len > FacePolygonTuning.maximum_target_sides) {
-            last_face_polygon_stage = "the face has more corners than the N-gon limit";
-            return null;
-        }
-        if (face.source_triangles.items.len == 0) {
-            last_face_polygon_stage = "the face has no source triangles";
-            return null;
-        }
-        if (mesh.loopIsConcavePositions(face.vertices.items)) {
-            last_face_polygon_stage = "the face boundary is CONCAVE — Face to N-gon needs a convex face";
-            return null;
-        }
-        const normal = faceNormal(mesh, face);
-        if (length3(normal) < 0.5) {
-            last_face_polygon_stage = "the face normal is degenerate (zero-area or collapsed face)";
-            return null;
-        }
-        const center = mesh.faceCentroid(face);
-        for (face.vertices.items) |vertex_id| {
-            const position = mesh.vertices.items[vertex_id].position;
-            if (@abs(dot3(sub3(position, center), normal)) > FacePolygonTuning.planar_epsilon_m) {
-                last_face_polygon_stage = "the face is NOT PLANAR — its corners do not lie in one plane";
-                return null;
+    const FaceMeasurement = struct {
+        facts: FaceGeometryFacts,
+        center: Vec3 = .{ 0, 0, 0 },
+        normal: Vec3 = .{ 0, 0, 0 },
+        u: Vec3 = .{ 0, 0, 0 },
+        v: Vec3 = .{ 0, 0, 0 },
+    };
+
+    fn loweredTriangleArea(lowered: *const Lowered, triangle: usize) f32 {
+        const at = triangle * 9;
+        if (at + 9 > lowered.positions.len) return 0;
+        const a = Vec3{ lowered.positions[at], lowered.positions[at + 1], lowered.positions[at + 2] };
+        const b = Vec3{ lowered.positions[at + 3], lowered.positions[at + 4], lowered.positions[at + 5] };
+        const c = Vec3{ lowered.positions[at + 6], lowered.positions[at + 7], lowered.positions[at + 8] };
+        if (!positionFinite(a) or !positionFinite(b) or !positionFinite(c)) return std.math.nan(f32);
+        return length3(cross3(sub3(b, a), sub3(c, a))) * 0.5;
+    }
+
+    fn measureFaceGeometry(
+        mesh: *const Mesh,
+        face: *const Face,
+        lowered: ?*const Lowered,
+    ) FaceMeasurement {
+        var facts = FaceGeometryFacts{
+            .corner_count = @intCast(face.vertices.items.len),
+            .triangle_count = 0,
+            .area = 0,
+            .perimeter = 0,
+            .centroid_edge_clearance = null,
+            .min_edge = 0,
+            .max_edge = 0,
+            .aspect = null,
+            .planarity_deviation = null,
+            .convexity = .indeterminate,
+        };
+        if (lowered) |rows| {
+            for (rows.face_ids, 0..) |member_face, triangle| {
+                if (member_face != face.id) continue;
+                facts.triangle_count += 1;
+                const member_area = loweredTriangleArea(rows, triangle);
+                if (!std.math.isFinite(member_area)) {
+                    facts.degeneracy.insert(.nonfinite_position);
+                    continue;
+                }
+                facts.area += member_area;
+                if (member_area <= FaceFactTuning.zero_area_epsilon) facts.degeneracy.insert(.zero_area_member);
             }
+        } else {
+            facts.triangle_count = @intCast(face.source_triangles.items.len);
         }
 
-        var inradius = std.math.inf(f32);
+        if (face.vertices.items.len < 3) {
+            facts.degeneracy.insert(.too_few_corners);
+            return .{ .facts = facts };
+        }
+
+        var center = Vec3{ 0, 0, 0 };
+        for (face.vertices.items, 0..) |vertex_id, corner| {
+            if (vertex_id >= mesh.vertices.items.len or !mesh.vertices.items[vertex_id].alive) {
+                facts.degeneracy.insert(.nonfinite_position);
+                return .{ .facts = facts };
+            }
+            const position = mesh.vertices.items[vertex_id].position;
+            if (!positionFinite(position)) facts.degeneracy.insert(.nonfinite_position);
+            center = add3(center, position);
+            for (face.vertices.items[0..corner]) |prior| {
+                if (prior == vertex_id) facts.degeneracy.insert(.repeated_vertex);
+            }
+        }
+        if (facts.degeneracy.contains(.nonfinite_position)) return .{ .facts = facts };
+        center = mul3(center, 1.0 / @as(f32, @floatFromInt(face.vertices.items.len)));
+
+        const normal = faceNormal(mesh, face);
+        if (length3(normal) < 0.5) facts.degeneracy.insert(.zero_normal);
+
+        var min_edge = std.math.inf(f32);
+        var max_edge: f32 = 0;
+        var clearance = std.math.inf(f32);
         for (face.vertices.items, 0..) |vertex_id, corner| {
             const next_id = face.vertices.items[(corner + 1) % face.vertices.items.len];
             const a = mesh.vertices.items[vertex_id].position;
             const b = mesh.vertices.items[next_id].position;
             const edge = sub3(b, a);
             const edge_length = length3(edge);
-            if (edge_length <= IMPORT_WELD_EPS) {
-                last_face_polygon_stage = "one face edge is shorter than the weld epsilon";
-                return null;
+            facts.perimeter += edge_length;
+            min_edge = @min(min_edge, edge_length);
+            max_edge = @max(max_edge, edge_length);
+            if (edge_length <= IMPORT_WELD_EPS) facts.degeneracy.insert(.short_edge);
+            if (length3(normal) >= 0.5 and edge_length > IMPORT_WELD_EPS) {
+                const distance = @abs(dot3(cross3(edge, sub3(center, a)), normal)) / edge_length;
+                clearance = @min(clearance, distance);
             }
-            const distance = @abs(dot3(cross3(edge, sub3(center, a)), normal)) / edge_length;
-            inradius = @min(inradius, distance);
         }
-        if (!std.math.isFinite(inradius) or
-            inradius * FacePolygonTuning.maximum_width_fraction < FacePolygonTuning.minimum_width_m)
+        facts.min_edge = if (std.math.isFinite(min_edge)) min_edge else 0;
+        facts.max_edge = max_edge;
+
+        if (!facts.degeneracy.contains(.zero_normal)) {
+            var max_deviation: f32 = 0;
+            for (face.vertices.items) |vertex_id| {
+                max_deviation = @max(max_deviation, @abs(dot3(
+                    sub3(mesh.vertices.items[vertex_id].position, center),
+                    normal,
+                )));
+            }
+            facts.planarity_deviation = max_deviation;
+        }
+
+        if (!facts.degeneracy.contains(.zero_normal) and
+            facts.planarity_deviation.? <= FacePolygonTuning.planar_epsilon_m)
         {
-            last_face_polygon_stage = "the face is TOO SMALL for the minimum inset width";
-            return null;
+            facts.convexity = if (mesh.loopIsConcavePositionsWithNormal(face.vertices.items, normal)) .concave else .convex;
+        }
+        if (facts.convexity == .convex and
+            !facts.degeneracy.contains(.short_edge) and
+            std.math.isFinite(clearance))
+        {
+            facts.centroid_edge_clearance = clearance;
+            facts.aspect = max_edge / @max(2.0 * clearance, FaceFactTuning.scale_epsilon);
         }
 
         var u = norm3(sub3(mesh.vertices.items[face.vertices.items[0]].position, center));
@@ -1439,13 +2085,73 @@ pub const Mesh = struct {
             u = norm3(sub3(second, first));
         }
         const v = norm3(cross3(normal, u));
-        if (length3(u) < 0.5 or length3(v) < 0.5) return null;
-        return .{ .center = center, .normal = normal, .u = u, .v = v, .inradius = inradius };
+        return .{ .facts = facts, .center = center, .normal = normal, .u = u, .v = v };
+    }
+
+    /// Complete non-mutating facts over the exact lowered member triangles.
+    pub fn faceGeometryFactsFromLowered(mesh: *const Mesh, face_id: u32, lowered: *const Lowered) ?FaceGeometryFacts {
+        if (face_id >= mesh.faces.items.len or !mesh.faces.items[face_id].alive) return null;
+        return mesh.measureFaceGeometry(&mesh.faces.items[face_id], lowered).facts;
+    }
+
+    /// Convenience read for callers that do not already own a document lowering.
+    /// FaceTableService lowers once and calls `faceGeometryFactsFromLowered` for
+    /// every row, avoiding one allocation/traversal per face.
+    pub fn faceGeometryFacts(mesh: *const Mesh, face_id: u32) !?FaceGeometryFacts {
+        var lowered = try mesh.lower();
+        defer lowered.deinit();
+        return mesh.faceGeometryFactsFromLowered(face_id, &lowered);
+    }
+
+    /// Canonical Face-to-N-gon predicate. The mutation and table adapter both
+    /// consume this exact typed result; no diagnostic tolerance is duplicated.
+    pub fn facePolygonEligibility(mesh: *const Mesh, face_id: u32) FacePolygonEligibility {
+        notePredicate(.face_to_ngon);
+        if (face_id >= mesh.faces.items.len) return .{ .eligibility = .blocked(.face_out_of_range, "face id out of range", null) };
+        const face = &mesh.faces.items[face_id];
+        if (!face.alive) return .{ .eligibility = .blocked(.face_deleted, "that face is deleted", null) };
+        if (face.vertices.items.len < 3) return .{ .eligibility = .blocked(.too_few_corners, "the face has fewer than 3 corners (wire/degenerate)", null) };
+        if (face.vertices.items.len > FacePolygonTuning.maximum_target_sides) return .{ .eligibility = .blocked(.too_many_corners, "the face has more corners than the N-gon limit", null) };
+        if (face.source_triangles.items.len == 0) return .{ .eligibility = .blocked(.no_source_triangles, "the face has no source triangles", null) };
+
+        const measured = mesh.measureFaceGeometry(face, null);
+        if (measured.facts.convexity == .concave) return .{ .eligibility = .blocked(.concave_boundary, "the face boundary is CONCAVE — Face to N-gon needs a convex face", null) };
+        if (measured.facts.degeneracy.contains(.zero_normal)) return .{ .eligibility = .blocked(.zero_normal, "the face normal is degenerate (zero-area or collapsed face)", null) };
+        if (measured.facts.planarity_deviation == null or
+            measured.facts.planarity_deviation.? > FacePolygonTuning.planar_epsilon_m)
+        {
+            return .{ .eligibility = .blocked(.non_planar, "the face is NOT PLANAR — its corners do not lie in one plane", null) };
+        }
+        if (measured.facts.degeneracy.contains(.short_edge)) return .{ .eligibility = .blocked(.short_edge, "one face edge is shorter than the weld epsilon", null) };
+        const clearance = measured.facts.centroid_edge_clearance orelse
+            return .{ .eligibility = .blocked(.invalid_frame, "the face has no valid centroid-to-edge clearance", null) };
+        const max_width = clearance * FacePolygonTuning.maximum_width_fraction;
+        if (!std.math.isFinite(clearance) or max_width < FacePolygonTuning.minimum_width_m) {
+            return .{ .eligibility = .blocked(.too_small, "the face is TOO SMALL for the minimum inset width", .{ .max_width = max_width }) };
+        }
+        if (length3(measured.u) < 0.5 or length3(measured.v) < 0.5) return .{ .eligibility = .blocked(.invalid_frame, "the face cannot establish a stable planar basis", null) };
+        return .{
+            .eligibility = .allowed(.{ .max_width = max_width }),
+            .frame = .{
+                .center = measured.center,
+                .normal = measured.normal,
+                .u = measured.u,
+                .v = measured.v,
+                .centroid_edge_clearance = clearance,
+            },
+        };
+    }
+
+    fn facePolygonFrame(mesh: *const Mesh, face_id: u32) ?FacePolygonFrame {
+        const result = mesh.facePolygonEligibility(face_id);
+        last_face_polygon_stage = result.eligibility.detail;
+        if (!acceptOrRemember(result.eligibility)) return null;
+        return result.frame;
     }
 
     pub fn facePolygonLimit(mesh: *const Mesh, face_id: u32) ?f32 {
         const frame = mesh.facePolygonFrame(face_id) orelse return null;
-        return frame.inradius * FacePolygonTuning.maximum_width_fraction;
+        return frame.centroid_edge_clearance * FacePolygonTuning.maximum_width_fraction;
     }
 
     /// One and only one complete selected authored face is the source. The popup
@@ -1477,9 +2183,9 @@ pub const Mesh = struct {
         const frame = mesh.facePolygonFrame(face_id) orelse return null;
         last_face_polygon_frame_ok = true;
         const face = &mesh.faces.items[face_id];
-        const max_width = frame.inradius * FacePolygonTuning.maximum_width_fraction;
+        const max_width = frame.centroid_edge_clearance * FacePolygonTuning.maximum_width_fraction;
         const default_width = std.math.clamp(
-            frame.inradius * FacePolygonTuning.default_width_fraction,
+            frame.centroid_edge_clearance * FacePolygonTuning.default_width_fraction,
             FacePolygonTuning.minimum_width_m,
             max_width,
         );
@@ -2541,6 +3247,7 @@ pub const Mesh = struct {
     /// trianglesFormConvexQuad (tris-to-quads) KEEPS its gate, because there nothing has
     /// expressed intent and fusing across a crease would be a silent wrong answer.
     pub fn mergeSelected(mesh: *Mesh, selected_triangles: []const bool) !?MergedFace {
+        beginMutation(.merge);
         return mesh.mergeSelectedImpl(selected_triangles, false);
     }
 
@@ -2551,6 +3258,7 @@ pub const Mesh = struct {
     /// millimetres out of plane, which the interactive gate rightly refuses to
     /// CREATE but must not refuse to COPY).
     pub fn mergeSelectedTrusted(mesh: *Mesh, selected_triangles: []const bool) !?MergedFace {
+        beginMutation(.merge);
         return mesh.mergeSelectedImpl(selected_triangles, false);
     }
 
@@ -2913,14 +3621,12 @@ pub const Mesh = struct {
     /// clean loop, ahead of any mutation). Newell normal, same 1e-9 turn epsilon.
     fn loopIsConcavePositions(mesh: *const Mesh, loop: []const u32) bool {
         if (loop.len < 4) return false;
-        var normal: Vec3 = .{ 0, 0, 0 };
-        for (loop, 0..) |vertex_id, corner| {
-            const current = mesh.vertices.items[vertex_id].position;
-            const next = mesh.vertices.items[loop[(corner + 1) % loop.len]].position;
-            normal[0] += (current[1] - next[1]) * (current[2] + next[2]);
-            normal[1] += (current[2] - next[2]) * (current[0] + next[0]);
-            normal[2] += (current[0] - next[0]) * (current[1] + next[1]);
-        }
+        const normal = norm3(newellNormal(mesh, loop));
+        return mesh.loopIsConcavePositionsWithNormal(loop, normal);
+    }
+
+    fn loopIsConcavePositionsWithNormal(mesh: *const Mesh, loop: []const u32, normal: Vec3) bool {
+        if (loop.len < 4 or length3(normal) < 0.5) return false;
         var sign: f32 = 0;
         for (loop, 0..) |vertex_id, corner| {
             const previous = mesh.vertices.items[loop[(corner + loop.len - 1) % loop.len]].position;
@@ -2937,10 +3643,50 @@ pub const Mesh = struct {
     /// The js-bench-editor/Blockbench walk, ported structurally: split a quad across
     /// its opposite edge, walk into the adjacent face, walk the other direction for
     /// a quad seed, stop on boundaries/processed closure, and split a terminal tri.
+    pub fn loopCutEligibility(mesh: *const Mesh, face_id: u32, direction: u32, seed_edge: ?[2]u32) LoopCutEligibility {
+        notePredicate(.loop_cut);
+        if (face_id >= mesh.faces.items.len) return .{ .eligibility = .blocked(.face_out_of_range, "loop-cut face id is out of range", null) };
+        const face = &mesh.faces.items[face_id];
+        if (!face.alive) return .{ .eligibility = .blocked(.face_deleted, "loop-cut face is deleted", null) };
+        if (face.vertices.items.len < 2) return .{ .eligibility = .blocked(.too_few_corners, "loop-cut face has fewer than two corners", null) };
+        const edge = seed_edge orelse [2]u32{
+            face.vertices.items[direction % face.vertices.items.len],
+            face.vertices.items[(direction + 1) % face.vertices.items.len],
+        };
+        const first = indexOf(face.vertices.items, edge[0]) orelse
+            return .{ .eligibility = .blocked(.invalid_seed_edge, "loop-cut seed edge is not on the authored face", null) };
+        const next = face.vertices.items[(first + 1) % face.vertices.items.len];
+        const previous = face.vertices.items[(first + face.vertices.items.len - 1) % face.vertices.items.len];
+        if (edge[1] != next and edge[1] != previous) return .{ .eligibility = .blocked(.invalid_seed_edge, "loop-cut seed vertices are not one boundary edge", null) };
+        if (edge[0] >= mesh.vertices.items.len or edge[1] >= mesh.vertices.items.len or
+            !mesh.vertices.items[edge[0]].alive or !mesh.vertices.items[edge[1]].alive)
+        {
+            return .{ .eligibility = .blocked(.target_deleted, "loop-cut seed edge references a deleted vertex", null) };
+        }
+        const edge_length = length3(sub3(mesh.vertices.items[edge[1]].position, mesh.vertices.items[edge[0]].position));
+        if (!std.math.isFinite(edge_length) or edge_length <= IMPORT_WELD_EPS) {
+            return .{ .eligibility = .blocked(.short_edge, "loop-cut seed edge is shorter than the weld epsilon", null) };
+        }
+        return .{
+            .eligibility = .allowed(.{
+                .direction = @floatFromInt(direction),
+                .seed_edge = @floatFromInt(first),
+            }),
+            .seed_edge = edge,
+        };
+    }
+
     pub fn loopCut(mesh: *Mesh, selected_triangles: []const bool, direction: u32, cuts_raw: u32, offset_fraction_raw: f32) !bool {
-        const start_face = mesh.firstSelectedFace(selected_triangles) orelse return false;
+        beginMutation(.loop_cut);
+        const start_face = mesh.firstSelectedFace(selected_triangles) orelse {
+            last_operation_refusal = .blocked(.no_face_selection, "loop cut needs one complete authored-face selection", null);
+            return false;
+        };
         const face = &mesh.faces.items[start_face];
-        if (face.vertices.items.len < 2) return false;
+        if (face.vertices.items.len < 2) {
+            last_operation_refusal = .blocked(.too_few_corners, "loop-cut face has fewer than two corners", null);
+            return false;
+        }
         var start_edge = [2]u32{
             face.vertices.items[direction % face.vertices.items.len],
             face.vertices.items[(direction + 1) % face.vertices.items.len],
@@ -2959,6 +3705,9 @@ pub const Mesh = struct {
             }
         }
 
+        const eligibility = mesh.loopCutEligibility(start_face, direction, start_edge);
+        if (!acceptOrRemember(eligibility.eligibility)) return false;
+
         var context = CutContext{
             .mesh = mesh,
             .direction = direction,
@@ -2971,6 +3720,7 @@ pub const Mesh = struct {
     }
 
     pub fn loopCutFromEdge(mesh: *Mesh, a: Vec3, b: Vec3, part: ?u32, cuts: u32, offset_fraction: f32) !bool {
+        beginMutation(.loop_cut);
         var start_face: ?u32 = null;
         var start_edge: [2]u32 = undefined;
         for (mesh.faces.items) |*face| {
@@ -2992,8 +3742,13 @@ pub const Mesh = struct {
             }
             if (start_face != null) break;
         }
-        const face_id = start_face orelse return false;
+        const face_id = start_face orelse {
+            last_operation_refusal = .blocked(.invalid_seed_edge, "loop-cut edge does not resolve in the requested part", null);
+            return false;
+        };
         const face = &mesh.faces.items[face_id];
+        const eligibility = mesh.loopCutEligibility(face_id, 0, start_edge);
+        if (!acceptOrRemember(eligibility.eligibility)) return false;
         var context = CutContext{
             .mesh = mesh,
             .direction = 0,
@@ -3365,6 +4120,137 @@ pub const Mesh = struct {
         return false;
     }
 
+    /// Marquee-projected cut kernel (req_4271): split every face in `family` that
+    /// `plane` genuinely crosses, appending each new piece back into `family` so a
+    /// later plane cuts the pieces too. Crossing points mint shared vertices
+    /// (cached per undirected edge in `minted`, so sibling pieces weld); a corner
+    /// within the weld epsilon of the plane is reused instead of minting a sliver
+    /// beside it. A loop the plane enters more than twice (a concave piece would
+    /// need a multi-segment cut) is left whole rather than guessed at. Returns how
+    /// many faces were split.
+    pub fn cutFamilyByPlane(
+        mesh: *Mesh,
+        family: *std.ArrayListUnmanaged(u32),
+        plane_normal: Vec3,
+        plane_offset: f32,
+        minted: *std.AutoHashMapUnmanaged(u64, u32),
+    ) !u32 {
+        var changed: u32 = 0;
+        const family_before = family.items.len;
+        var family_at: usize = 0;
+        while (family_at < family_before) : (family_at += 1) {
+            const face_id = family.items[family_at];
+            if (face_id >= mesh.faces.items.len) continue;
+            if (!mesh.faces.items[face_id].alive) continue;
+            const count = mesh.faces.items[face_id].vertices.items.len;
+            if (count < 3) continue;
+
+            const dists = try mesh.allocator.alloc(f32, count);
+            defer mesh.allocator.free(dists);
+            const on_plane = try mesh.allocator.alloc(bool, count);
+            defer mesh.allocator.free(on_plane);
+            const eps = IMPORT_WELD_EPS * 2.0;
+            var has_positive = false;
+            var has_negative = false;
+            for (mesh.faces.items[face_id].vertices.items, 0..) |vertex_id, corner| {
+                const d = dot3(mesh.vertices.items[vertex_id].position, plane_normal) - plane_offset;
+                dists[corner] = d;
+                on_plane[corner] = @abs(d) <= eps;
+                if (!on_plane[corner]) {
+                    if (d > 0) has_positive = true else has_negative = true;
+                }
+            }
+            if (!has_positive or !has_negative) continue; // the plane never enters this face
+
+            // Count the cut points first — an on-plane corner, or an edge whose two
+            // off-plane endpoints sit on strictly opposite sides. Exactly two make a
+            // clean split; anything else leaves the face whole.
+            var cut_points: u32 = 0;
+            for (0..count) |corner| {
+                if (on_plane[corner]) cut_points += 1;
+                const next = (corner + 1) % count;
+                if (!on_plane[corner] and !on_plane[next] and (dists[corner] > 0) != (dists[next] > 0)) cut_points += 1;
+            }
+            if (cut_points != 2) continue;
+
+            // Build the augmented loop: source corners in order, with a minted (or
+            // cached) crossing vertex inserted on each strictly-crossing edge.
+            var loop_ids = std.ArrayListUnmanaged(u32).empty;
+            defer loop_ids.deinit(mesh.allocator);
+            var loop_uvs = std.ArrayListUnmanaged(Vec2).empty;
+            defer loop_uvs.deinit(mesh.allocator);
+            var loop_is_cut = std.ArrayListUnmanaged(bool).empty;
+            defer loop_is_cut.deinit(mesh.allocator);
+            for (0..count) |corner| {
+                const face = &mesh.faces.items[face_id];
+                const vertex_id = face.vertices.items[corner];
+                try loop_ids.append(mesh.allocator, vertex_id);
+                try loop_uvs.append(mesh.allocator, face.uvs.items[corner]);
+                try loop_is_cut.append(mesh.allocator, on_plane[corner]);
+                const next = (corner + 1) % count;
+                if (on_plane[corner] or on_plane[next] or (dists[corner] > 0) == (dists[next] > 0)) continue;
+                const next_id = face.vertices.items[next];
+                const t = dists[corner] / (dists[corner] - dists[next]);
+                const key = edgeKey(vertex_id, next_id);
+                const crossing = minted.get(key) orelse blk: {
+                    const id: u32 = @intCast(mesh.vertices.items.len);
+                    try mesh.vertices.append(mesh.allocator, .{
+                        .position = lerp3(mesh.vertices.items[vertex_id].position, mesh.vertices.items[next_id].position, t),
+                    });
+                    try minted.put(mesh.allocator, key, id);
+                    break :blk id;
+                };
+                try loop_ids.append(mesh.allocator, crossing);
+                try loop_uvs.append(mesh.allocator, lerp2(face.uvs.items[corner], face.uvs.items[next], t));
+                try loop_is_cut.append(mesh.allocator, true);
+            }
+
+            var first_cut: ?usize = null;
+            var second_cut: ?usize = null;
+            for (loop_is_cut.items, 0..) |is_cut, at| {
+                if (!is_cut) continue;
+                if (first_cut == null) first_cut = at else second_cut = at;
+            }
+            const m0 = first_cut orelse continue;
+            const m1 = second_cut orelse continue;
+
+            var first_vertices = std.ArrayListUnmanaged(u32).empty;
+            defer first_vertices.deinit(mesh.allocator);
+            var first_uvs = std.ArrayListUnmanaged(Vec2).empty;
+            defer first_uvs.deinit(mesh.allocator);
+            var second_vertices = std.ArrayListUnmanaged(u32).empty;
+            defer second_vertices.deinit(mesh.allocator);
+            var second_uvs = std.ArrayListUnmanaged(Vec2).empty;
+            defer second_uvs.deinit(mesh.allocator);
+            const loop_len = loop_ids.items.len;
+            var at = m0;
+            while (true) : (at = (at + 1) % loop_len) {
+                try first_vertices.append(mesh.allocator, loop_ids.items[at]);
+                try first_uvs.append(mesh.allocator, loop_uvs.items[at]);
+                if (at == m1) break;
+            }
+            at = m1;
+            while (true) : (at = (at + 1) % loop_len) {
+                try second_vertices.append(mesh.allocator, loop_ids.items[at]);
+                try second_uvs.append(mesh.allocator, loop_uvs.items[at]);
+                if (at == m0) break;
+            }
+            // Two adjacent cut points would leave a 2-gon; that is a graze, not a cut.
+            if (first_vertices.items.len < 3 or second_vertices.items.len < 3) continue;
+
+            var source = try mesh.faces.items[face_id].clone(mesh.allocator);
+            defer source.deinit(mesh.allocator);
+            try mesh.replaceFaceLoop(face_id, first_vertices.items, first_uvs.items);
+            var split = try mesh.makeSplitFace(&source, second_vertices.items, second_uvs.items);
+            errdefer split.deinit(mesh.allocator);
+            const split_id = split.id;
+            try mesh.faces.append(mesh.allocator, split);
+            try family.append(mesh.allocator, split_id);
+            changed += 1;
+        }
+        return changed;
+    }
+
     fn replaceFaceLoop(mesh: *Mesh, face_id: u32, vertices: []const u32, uvs: []const Vec2) !void {
         const face = &mesh.faces.items[face_id];
         face.vertices.clearRetainingCapacity();
@@ -3501,25 +4387,34 @@ pub const Mesh = struct {
         return count;
     }
 
-    fn boundaryChamferLimit(mesh: *const Mesh, loop: []const u32) ?f32 {
-        if (loop.len < BoundaryChamferTuning.minimum_sides) return null;
+    fn boundaryLoopEligibility(mesh: *const Mesh, loop: []const u32) OperationEligibility {
+        if (loop.len < BoundaryChamferTuning.minimum_sides)
+            return .blocked(.too_few_corners, "boundary bevel needs at least three sides", null);
         var shortest = std.math.inf(f32);
         for (loop, 0..) |vertex, index| {
             const next = loop[(index + 1) % loop.len];
             if (vertex == next or vertex >= mesh.vertices.items.len or next >= mesh.vertices.items.len or
-                !mesh.vertices.items[vertex].alive or !mesh.vertices.items[next].alive or
-                mesh.edgeIncidentFaceCount(.{ vertex, next }) != 1)
-            {
-                return null;
-            }
-            for (loop[0..index]) |prior| if (prior == vertex) return null;
+                !mesh.vertices.items[vertex].alive or !mesh.vertices.items[next].alive)
+                return .blocked(.target_deleted, "boundary bevel references a missing or deleted vertex", null);
+            if (mesh.edgeIncidentFaceCount(.{ vertex, next }) != 1)
+                return .blocked(.boundary_not_open, "every boundary bevel edge must have exactly one incident face", null);
+            for (loop[0..index]) |prior| if (prior == vertex)
+                return .blocked(.invalid_seed_edge, "boundary bevel loop repeats a logical vertex", null);
             shortest = @min(shortest, length3(sub3(
                 mesh.vertices.items[next].position,
                 mesh.vertices.items[vertex].position,
             )));
         }
         const limit = shortest * BoundaryChamferTuning.edge_fraction;
-        return if (std.math.isFinite(limit) and limit >= BoundaryChamferTuning.minimum_width_m) limit else null;
+        if (!std.math.isFinite(limit) or limit < BoundaryChamferTuning.minimum_width_m)
+            return .blocked(.width_below_minimum, "boundary bevel maximum width is below the durable minimum", .{ .max_width = limit, .valence = @floatFromInt(loop.len) });
+        return .allowed(.{ .max_width = limit, .valence = @floatFromInt(loop.len) });
+    }
+
+    fn boundaryChamferLimit(mesh: *const Mesh, loop: []const u32) ?f32 {
+        const eligibility = mesh.boundaryLoopEligibility(loop);
+        if (eligibility.status != .allowed) return null;
+        return eligibility.metrics.?.max_width;
     }
 
     /// Resolve an unordered selected edge set into one strict closed loop. Every
@@ -3645,47 +4540,80 @@ pub const Mesh = struct {
         }
     }
 
-    /// The widest meaningful bevel for this exact topology target. Null is the
-    /// strict boundary refusal: boundary/non-manifold/coplanar edge, or a corner
-    /// with fewer than three incident edges.
-    pub fn bevelLimit(mesh: *const Mesh, target: BevelTarget) ?f32 {
-        const limit = switch (target) {
+    /// Canonical noncommitting bevel predicate for an exact logical target.
+    /// The mutation, popup resolver, and face table all consume this result.
+    pub fn bevelEligibility(mesh: *const Mesh, target: BevelTarget) OperationEligibility {
+        notePredicate(.bevel);
+        const result: OperationEligibility = switch (target) {
             .edge => |edge| edge_limit: {
                 if (edge[0] >= mesh.vertices.items.len or edge[1] >= mesh.vertices.items.len or
                     !mesh.vertices.items[edge[0]].alive or !mesh.vertices.items[edge[1]].alive)
-                {
-                    break :edge_limit 0;
-                }
+                    break :edge_limit .blocked(.target_deleted, "bevel edge references a missing or deleted vertex", null);
                 var incident: [2]u32 = undefined;
-                if (!mesh.edgeIncidentFaces(edge, &incident)) break :edge_limit 0;
+                if (!mesh.edgeIncidentFaces(edge, &incident))
+                    break :edge_limit .blocked(.edge_not_manifold, "bevel edge must have exactly two incident authored faces", null);
                 const normal0 = faceNormal(mesh, &mesh.faces.items[incident[0]]);
                 const normal1 = faceNormal(mesh, &mesh.faces.items[incident[1]]);
-                if (@abs(dot3(normal0, normal1)) > BevelTuning.coplanar_normal_dot) break :edge_limit 0;
-                const recede0 = mesh.edgeRecede(incident[0], edge) orelse break :edge_limit 0;
-                const recede1 = mesh.edgeRecede(incident[1], edge) orelse break :edge_limit 0;
+                if (@abs(dot3(normal0, normal1)) > BevelTuning.coplanar_normal_dot)
+                    break :edge_limit .blocked(.coplanar_edge, "bevel edge is coplanar and has no chamfer angle", null);
+                const recede0 = mesh.edgeRecede(incident[0], edge) orelse
+                    break :edge_limit .blocked(.invalid_recede, "first incident face has no valid bevel recede direction", null);
+                const recede1 = mesh.edgeRecede(incident[1], edge) orelse
+                    break :edge_limit .blocked(.invalid_recede, "second incident face has no valid bevel recede direction", null);
                 const edge_length = length3(sub3(mesh.vertices.items[edge[1]].position, mesh.vertices.items[edge[0]].position));
-                break :edge_limit @min(
+                const limit = @min(
                     edge_length * BevelTuning.vertex_edge_fraction,
                     @min(recede0.reach, recede1.reach) * BevelTuning.edge_reach_fraction,
                 );
+                if (!std.math.isFinite(limit) or limit < BevelTuning.minimum_width_m)
+                    break :edge_limit .blocked(.width_below_minimum, "bevel edge maximum width is below the durable minimum", .{ .max_width = limit });
+                break :edge_limit .allowed(.{ .max_width = limit, .valence = 2 });
             },
             .vertex => |vertex| vertex_limit: {
-                if (vertex >= mesh.vertices.items.len or !mesh.vertices.items[vertex].alive) break :vertex_limit 0;
+                if (vertex >= mesh.vertices.items.len or !mesh.vertices.items[vertex].alive)
+                    break :vertex_limit .blocked(.target_deleted, "bevel vertex is missing or deleted", null);
                 var incident = std.ArrayListUnmanaged(u32).empty;
                 defer incident.deinit(mesh.allocator);
                 var neighbors = std.ArrayListUnmanaged(u32).empty;
                 defer neighbors.deinit(mesh.allocator);
-                mesh.collectVertexNeighborhood(vertex, &incident, &neighbors) catch break :vertex_limit 0;
-                if (neighbors.items.len < 3) break :vertex_limit 0;
+                mesh.collectVertexNeighborhood(vertex, &incident, &neighbors) catch
+                    break :vertex_limit .blocked(.invalid_frame, "bevel vertex neighborhood could not be measured", null);
+                if (neighbors.items.len < 3)
+                    break :vertex_limit .blocked(.insufficient_valence, "bevel vertex needs at least three incident logical edges", .{ .valence = @floatFromInt(neighbors.items.len) });
                 const origin = mesh.vertices.items[vertex].position;
                 var shortest = std.math.inf(f32);
                 for (neighbors.items) |neighbor| {
                     shortest = @min(shortest, length3(sub3(mesh.vertices.items[neighbor].position, origin)));
                 }
-                break :vertex_limit shortest * BevelTuning.vertex_edge_fraction;
+                const limit = shortest * BevelTuning.vertex_edge_fraction;
+                if (!std.math.isFinite(limit) or limit < BevelTuning.minimum_width_m)
+                    break :vertex_limit .blocked(.width_below_minimum, "bevel vertex maximum width is below the durable minimum", .{ .max_width = limit, .valence = @floatFromInt(neighbors.items.len) });
+                break :vertex_limit .allowed(.{ .max_width = limit, .valence = @floatFromInt(neighbors.items.len) });
             },
         };
-        return if (std.math.isFinite(limit) and limit >= BevelTuning.minimum_width_m) limit else null;
+        return result;
+    }
+
+    pub fn bevelContextEligibility(mesh: *const Mesh, target: BevelContextTarget) OperationEligibility {
+        return switch (target) {
+            .edge => |edge| mesh.bevelEligibility(.{ .edge = edge }),
+            .vertex => |vertex| mesh.bevelEligibility(.{ .vertex = vertex }),
+            .boundary => |face_id| blk: {
+                notePredicate(.bevel);
+                if (face_id >= mesh.faces.items.len)
+                    break :blk .blocked(.face_out_of_range, "boundary bevel face id is out of range", null);
+                const face = &mesh.faces.items[face_id];
+                if (!face.alive) break :blk .blocked(.face_deleted, "boundary bevel face is deleted", null);
+                break :blk mesh.boundaryLoopEligibility(face.vertices.items);
+            },
+        };
+    }
+
+    /// Compatibility value read used by existing popup resolution.
+    pub fn bevelLimit(mesh: *const Mesh, target: BevelTarget) ?f32 {
+        const eligibility = mesh.bevelEligibility(target);
+        if (eligibility.status != .allowed) return null;
+        return eligibility.metrics.?.max_width;
     }
 
     fn replaceFaceVertex(mesh: *Mesh, face_id: u32, from: u32, replacements: []const u32) !bool {
@@ -3949,6 +4877,7 @@ pub const Mesh = struct {
     /// triangles. It therefore supports every target side count without ever
     /// hiding the transition in six-vertex authored faces.
     pub fn polygonizeFace(mesh: *Mesh, face_id: u32, width_raw: f32, target_sides: usize) !?u32 {
+        beginMutation(.face_to_ngon);
         if (target_sides < FacePolygonTuning.minimum_target_sides or
             target_sides > FacePolygonTuning.maximum_target_sides or
             !std.math.isFinite(width_raw) or width_raw < FacePolygonTuning.minimum_width_m)
@@ -3957,7 +4886,7 @@ pub const Mesh = struct {
         }
         const frame = mesh.facePolygonFrame(face_id) orelse return null;
         const source = &mesh.faces.items[face_id];
-        const max_width = frame.inradius * FacePolygonTuning.maximum_width_fraction;
+        const max_width = frame.centroid_edge_clearance * FacePolygonTuning.maximum_width_fraction;
         if (width_raw > max_width) return null;
         const outer = source.vertices.items;
         const outer_uvs = source.uvs.items;
@@ -4213,9 +5142,15 @@ pub const Mesh = struct {
     /// Chamfer one already-resolved target. Width is clamped to the topology's
     /// strict limit, so popup and headless callers share the same durable boundary.
     pub fn bevel(mesh: *Mesh, target: BevelTarget, width_raw: f32) !bool {
-        const limit = mesh.bevelLimit(target) orelse return false;
+        beginMutation(.bevel);
+        const eligibility = mesh.bevelEligibility(target);
+        if (!acceptOrRemember(eligibility)) return false;
+        const limit = eligibility.metrics.?.max_width.?;
         const width = @min(width_raw, limit);
-        if (!std.math.isFinite(width) or width < BevelTuning.minimum_width_m) return false;
+        if (!std.math.isFinite(width) or width < BevelTuning.minimum_width_m) {
+            last_operation_refusal = .blocked(.width_below_minimum, "requested bevel width is below the durable minimum", .{ .max_width = limit });
+            return false;
+        }
         return switch (target) {
             .edge => |edge| mesh.bevelEdge(edge, width),
             .vertex => |vertex| mesh.bevelVertex(vertex, width),
@@ -4363,6 +5298,8 @@ pub const Mesh = struct {
     pub fn lower(mesh: *const Mesh) !Lowered {
         var positions = std.ArrayListUnmanaged(f32).empty;
         defer positions.deinit(mesh.allocator);
+        var normals = std.ArrayListUnmanaged(f32).empty;
+        defer normals.deinit(mesh.allocator);
         var uvs = std.ArrayListUnmanaged(f32).empty;
         defer uvs.deinit(mesh.allocator);
         var triangle_vertices = std.ArrayListUnmanaged([3]u32).empty;
@@ -4404,6 +5341,7 @@ pub const Mesh = struct {
                         face,
                         source_triangle,
                         &positions,
+                        &normals,
                         &uvs,
                         &triangle_vertices,
                         &groups,
@@ -4417,17 +5355,19 @@ pub const Mesh = struct {
                 }
             } else if (face.vertices.items.len == 4) {
                 const tris = quadTriangles(mesh, face);
-                try emitLoweredTri(mesh, face, tris[0], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
-                try emitLoweredTri(mesh, face, tris[1], &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
+                try emitLoweredTri(mesh, face, tris[0], &positions, &normals, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
+                try emitLoweredTri(mesh, face, tris[1], &positions, &normals, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
             } else {
                 var corner: usize = 1;
                 while (corner + 1 < face.vertices.items.len) : (corner += 1) {
-                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
+                    try emitLoweredTri(mesh, face, .{ 0, corner, corner + 1 }, &positions, &normals, &uvs, &triangle_vertices, &groups, &sources, &face_ids, &parts, &materials, &semantic_regions, &semantic_instances);
                 }
             }
         }
         const pos_owned = try positions.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(pos_owned);
+        const normal_owned = try normals.toOwnedSlice(mesh.allocator);
+        errdefer mesh.allocator.free(normal_owned);
         const uv_owned = try uvs.toOwnedSlice(mesh.allocator);
         errdefer mesh.allocator.free(uv_owned);
         const triangle_vertices_owned = try triangle_vertices.toOwnedSlice(mesh.allocator);
@@ -4448,6 +5388,7 @@ pub const Mesh = struct {
         return .{
             .allocator = mesh.allocator,
             .positions = pos_owned,
+            .normals = normal_owned,
             .uvs = uv_owned,
             .triangle_vertices = triangle_vertices_owned,
             .groups = group_owned,
@@ -4466,6 +5407,7 @@ pub const Mesh = struct {
         face: *const Face,
         source_triangle: u32,
         positions: *std.ArrayListUnmanaged(f32),
+        normals: *std.ArrayListUnmanaged(f32),
         uvs: *std.ArrayListUnmanaged(f32),
         triangle_vertices: *std.ArrayListUnmanaged([3]u32),
         groups: *std.ArrayListUnmanaged(u32),
@@ -4476,14 +5418,18 @@ pub const Mesh = struct {
         semantic_regions: *std.ArrayListUnmanaged(u32),
         semantic_instances: *std.ArrayListUnmanaged(u32),
     ) !void {
-        if (source_triangle >= mesh.render_triangles.items.len or source_triangle >= mesh.render_uvs.items.len)
+        if (source_triangle >= mesh.render_triangles.items.len or
+            source_triangle >= mesh.render_normals.items.len or
+            source_triangle >= mesh.render_uvs.items.len)
             return error.InvalidSourceTessellation;
         const triangle = mesh.render_triangles.items[source_triangle];
+        const triangle_normals = mesh.render_normals.items[source_triangle];
         const triangle_uvs = mesh.render_uvs.items[source_triangle];
         for (triangle, 0..) |vertex_id, corner| {
             if (vertex_id >= mesh.vertices.items.len) return error.InvalidSourceTessellation;
             const position = mesh.vertices.items[vertex_id].position;
             try positions.appendSlice(mesh.allocator, position[0..]);
+            try normals.appendSlice(mesh.allocator, triangle_normals[corner][0..]);
             try uvs.appendSlice(mesh.allocator, triangle_uvs[corner][0..]);
         }
         try triangle_vertices.append(mesh.allocator, triangle);
@@ -4501,6 +5447,7 @@ pub const Mesh = struct {
         face: *const Face,
         triangle: [3]usize,
         positions: *std.ArrayListUnmanaged(f32),
+        normals: *std.ArrayListUnmanaged(f32),
         uvs: *std.ArrayListUnmanaged(f32),
         triangle_vertices: *std.ArrayListUnmanaged([3]u32),
         groups: *std.ArrayListUnmanaged(u32),
@@ -4511,9 +5458,14 @@ pub const Mesh = struct {
         semantic_regions: *std.ArrayListUnmanaged(u32),
         semantic_instances: *std.ArrayListUnmanaged(u32),
     ) !void {
+        const a = mesh.vertices.items[face.vertices.items[triangle[0]]].position;
+        const b = mesh.vertices.items[face.vertices.items[triangle[1]]].position;
+        const c = mesh.vertices.items[face.vertices.items[triangle[2]]].position;
+        const normal = installedFlatNormal(a, b, c);
         for (triangle) |corner| {
             const p = mesh.vertices.items[face.vertices.items[corner]].position;
             try positions.appendSlice(mesh.allocator, p[0..]);
+            try normals.appendSlice(mesh.allocator, normal[0..]);
             const uv = if (corner < face.uvs.items.len) face.uvs.items[corner] else Vec2{ 0.5, 0.5 };
             try uvs.appendSlice(mesh.allocator, uv[0..]);
         }
@@ -4539,13 +5491,29 @@ pub const Mesh = struct {
         // mapping intact. A missing map would make the next position-only gizmo update
         // fail (or tempt this layer to reconstruct identity from soup order again).
         mesh.render_triangles.ensureTotalCapacity(mesh.allocator, lowered.triangle_vertices.len) catch return;
+        mesh.render_normals.ensureTotalCapacity(mesh.allocator, lowered.triangle_vertices.len) catch return;
         mesh.render_uvs.ensureTotalCapacity(mesh.allocator, lowered.triangle_vertices.len) catch return;
         mesh.render_triangles.clearRetainingCapacity();
+        mesh.render_normals.clearRetainingCapacity();
         mesh.render_uvs.clearRetainingCapacity();
         mesh.render_triangles.appendSliceAssumeCapacity(lowered.triangle_vertices);
         var render_index: usize = 0;
         while (render_index < lowered.triangle_vertices.len) : (render_index += 1) {
+            const position = render_index * 9;
             const uv = render_index * 6;
+            // Every indexed install rebuilds the resident soup through
+            // appendTriWithUvs, whose render normal is the flat geometric
+            // triangle normal. Mirror that exact owner here so the next cache
+            // validation does not mistake a successful edit for stale data.
+            const a = Vec3{ lowered.positions[position], lowered.positions[position + 1], lowered.positions[position + 2] };
+            const b = Vec3{ lowered.positions[position + 3], lowered.positions[position + 4], lowered.positions[position + 5] };
+            const c = Vec3{ lowered.positions[position + 6], lowered.positions[position + 7], lowered.positions[position + 8] };
+            const render_normal = installedFlatNormal(a, b, c);
+            mesh.render_normals.appendAssumeCapacity(.{
+                render_normal,
+                render_normal,
+                render_normal,
+            });
             mesh.render_uvs.appendAssumeCapacity(.{
                 .{ lowered.uvs[uv], lowered.uvs[uv + 1] },
                 .{ lowered.uvs[uv + 2], lowered.uvs[uv + 3] },
@@ -4578,12 +5546,17 @@ pub const Mesh = struct {
     /// today's deterministic lowering here corrupts stable ids on the first gizmo move.
     pub fn updatePositionsFromInterleaved(mesh: *Mesh, interleaved: []const f32, tri_count: u32) bool {
         if (interleaved.len < @as(usize, tri_count) * 24) return false;
-        if (mesh.render_triangles.items.len != tri_count) return false;
+        if (mesh.render_triangles.items.len != tri_count or mesh.render_normals.items.len != tri_count) return false;
         for (mesh.render_triangles.items, 0..) |triangle, rendered| {
             for (triangle, 0..) |vertex_id, output_corner| {
                 if (vertex_id >= mesh.vertices.items.len) return false;
                 const base = (@as(usize, rendered) * 3 + output_corner) * 8;
                 mesh.vertices.items[vertex_id].position = .{ interleaved[base], interleaved[base + 1], interleaved[base + 2] };
+                mesh.render_normals.items[rendered][output_corner] = .{
+                    interleaved[base + 3],
+                    interleaved[base + 4],
+                    interleaved[base + 5],
+                };
             }
         }
         return true;
@@ -4629,16 +5602,20 @@ pub const Mesh = struct {
         return if (use_ac) .{ .{ 0, 1, 2 }, .{ 0, 2, 3 } } else .{ .{ 1, 2, 3 }, .{ 1, 3, 0 } };
     }
 
-    fn faceNormal(mesh: *const Mesh, face: *const Face) Vec3 {
+    fn newellNormal(mesh: *const Mesh, loop: []const u32) Vec3 {
         var normal = Vec3{ 0, 0, 0 };
-        for (face.vertices.items, 0..) |vertex_id, index| {
+        for (loop, 0..) |vertex_id, index| {
             const current = mesh.vertices.items[vertex_id].position;
-            const next = mesh.vertices.items[face.vertices.items[(index + 1) % face.vertices.items.len]].position;
+            const next = mesh.vertices.items[loop[(index + 1) % loop.len]].position;
             normal[0] += (current[1] - next[1]) * (current[2] + next[2]);
             normal[1] += (current[2] - next[2]) * (current[0] + next[0]);
             normal[2] += (current[0] - next[0]) * (current[1] + next[1]);
         }
-        return norm3(normal);
+        return normal;
+    }
+
+    fn faceNormal(mesh: *const Mesh, face: *const Face) Vec3 {
+        return norm3(newellNormal(mesh, face.vertices.items));
     }
 };
 
@@ -4775,22 +5752,29 @@ pub fn maskMalformedWeldFaceGroups(
             output_triangle += 1;
         }
 
-        var probe = Mesh.fromSoup(
+        var probe = try Mesh.fromSoup(
             allocator,
             probe_soup,
             @intCast(survivor_count),
             probe_groups,
             probe_parts,
-        ) catch |err| {
-            if (err != error.MalformedFaceBoundary) return err;
+        );
+        // fromSoup used to throw error.MalformedFaceBoundary here. It now keeps
+        // the model editable by returning typed build provenance and degrading
+        // only the malformed bucket to selectable triangle faces. Weld still
+        // needs the same canonical boundary answer: a weld that CREATED that
+        // debt must remove the touched authored face instead of committing a
+        // group which immediately degrades on the next indexed rebuild.
+        const malformed = probe.build_issues.items.len != 0;
+        probe.deinit();
+        if (malformed) {
             for (0..triangle_count) |triangle| {
                 if (groups[triangle] != group or mask[triangle]) continue;
                 mask[triangle] = true;
                 newly_masked += 1;
             }
             continue;
-        };
-        probe.deinit();
+        }
     }
     return newly_masked;
 }
@@ -4868,10 +5852,38 @@ fn cross3(a: Vec3, b: Vec3) Vec3 {
 fn length3(a: Vec3) f32 {
     return @sqrt(dot3(a, a));
 }
+fn positionFinite(position: Vec3) bool {
+    return std.math.isFinite(position[0]) and
+        std.math.isFinite(position[1]) and
+        std.math.isFinite(position[2]);
+}
 fn norm3(a: Vec3) Vec3 {
     const length = length3(a);
     return if (length > 1e-12) mul3(a, 1.0 / length) else .{ 0, 0, 0 };
 }
+
+/// Exact normal convention used by Scene3D's appendTriWithUvs install lane.
+/// Indexed metadata predicts the installed resident rows so cache validation
+/// can distinguish a real external normal edit from its own successful lower.
+fn installedFlatNormal(a: Vec3, b: Vec3, c: Vec3) Vec3 {
+    const u = sub3(b, a);
+    const v = sub3(c, a);
+    var normal = Vec3{
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    };
+    const length = @sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+    if (length > 1e-8) {
+        normal[0] /= length;
+        normal[1] /= length;
+        normal[2] /= length;
+    } else {
+        normal = .{ 0, 1, 0 };
+    }
+    return normal;
+}
+
 fn lerp3(a: Vec3, b: Vec3, ratio: f32) Vec3 {
     return .{ a[0] + (b[0] - a[0]) * ratio, a[1] + (b[1] - a[1]) * ratio, a[2] + (b[2] - a[2]) * ratio };
 }
@@ -5357,6 +6369,20 @@ test "reference multi-cut recursively spaces cuts from the amended offset" {
     }
     try std.testing.expect(saw_near);
     try std.testing.expect(saw_far);
+}
+
+test "fresh multi-cut groups remain inside their owning part partition" {
+    // Parts 0 and 1 originally own groups [0,2) and [2,3). A five-cut preview on
+    // part 0 appends groups 3..7 after part 1's range. Leaving that raw table live
+    // makes every new strip out-of-scope; partitioning must fold the strips back
+    // into part 0 and move part 1 after them without changing triangle order.
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7 };
+    const parts = [_]u32{ 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    var partition = try partitionFaceGroupsByPart(std.testing.allocator, &groups, &parts, 2);
+    defer partition.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualSlices(u32, &.{ 0, 0, 1, 1, 7, 7, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6 }, partition.groups);
+    try std.testing.expectEqualSlices(u32, &.{ 0, 7, 7, 8 }, partition.ranges);
 }
 
 test "two perpendicular two-cut loops add exactly four planes to a manifold cuboid" {

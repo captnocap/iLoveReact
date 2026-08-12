@@ -61,6 +61,19 @@ pub const ActionKind = enum(u8) {
     // Append-only ordinal 32: exact retopology teaching membership, frozen
     // source, and ghost visibility are one authored guide document.
     retopo_guide,
+    // Append-only ordinal 33: an opaque, verified historical RJMD candidate
+    // replaces the resident document as one reversible transaction.
+    historical_restore,
+    // Append-only ordinal 34: guarded metadata mutation adopts one fully
+    // encoded candidate rather than poking a field in place.
+    field_edit,
+    // Append-only ordinal 35 (req_4271): Basic Cut's own identity. Its "cut" label
+    // predates this member and mapped to NOTHING — the entry was undoable but
+    // emitted no action row and never marked the paint layout stale.
+    basic_cut,
+    // Append-only ordinal 36 (req_4271): the marquee-projected cut — a screen
+    // rectangle's four edge planes split the face under it in one transaction.
+    marquee_cut,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -167,6 +180,8 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "extrude edge", .extrude_edge },
         .{ "create face", .create_face },
         .{ "loop cut", .loop_cut },
+        .{ "cut", .basic_cut },
+        .{ "marquee cut", .marquee_cut },
         .{ "connect vertices", .connect_vertices },
         .{ "bevel edge", .bevel },
         .{ "bevel vertex", .bevel },
@@ -220,6 +235,8 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ UV_TEXTURE_RELOAD_LABEL, .uv_texture_reload },
         .{ "tris to quads", .tris_to_quads },
         .{ UV_ATLAS_RESIZE_LABEL, .uv_atlas_resize },
+        .{ "historical restore", .historical_restore },
+        .{ "guarded field edit", .field_edit },
     };
     for (labels) |row| if (std.mem.eql(u8, label, row[0])) return row[1];
     return null;
@@ -260,6 +277,10 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .bevel => "model.mesh.bevel",
         .paint_faces => "model.paint.fill-selection",
         .retopo_guide => "model.retopology.edit-guide",
+        .historical_restore => "model.recovery.restore",
+        .field_edit => "model.recovery.field-edit",
+        .basic_cut => "model.mesh.basic-cut",
+        .marquee_cut => "model.mesh.marquee-cut",
     };
 }
 
@@ -288,6 +309,9 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .tris_to_quads,
         .connect_vertices,
         .bevel,
+        .historical_restore,
+        .basic_cut,
+        .marquee_cut,
         => true,
         .hide_part,
         .show_part,
@@ -303,8 +327,38 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .integrity_alert,
         .paint_faces,
         .retopo_guide,
+        .field_edit,
         => false,
     };
+}
+
+/// Whether one accepted journal action changes any native authored-face fact.
+/// Texture pixels, UV layout, and teaching overlays are deliberately outside
+/// the face-table plane; every other journal domain can change its facts.
+pub fn actionInvalidatesFaceAnalysis(kind: ActionKind) bool {
+    return switch (kind) {
+        .uv_edit,
+        .uv_texture_import,
+        .uv_texture_reload,
+        .uv_atlas_resize,
+        .paint_faces,
+        .retopo_guide,
+        .integrity_alert,
+        => false,
+        else => true,
+    };
+}
+
+/// Topology installs may advance generation before journal commit, while
+/// transforms and metadata edits often patch in place. Unknown labels are
+/// conservative because semantic/outliner checkpoint vocabulary is extensible.
+pub fn faceAnalysisGenerationNeedsAdvance(
+    kind: ?ActionKind,
+    snapshot_generation: u32,
+    current_generation: u32,
+) bool {
+    if (snapshot_generation != current_generation) return false;
+    return if (kind) |known| actionInvalidatesFaceAnalysis(known) else true;
 }
 
 pub const RestoreDomain = enum { mesh, uv, atlas, paint, retopo_guide };

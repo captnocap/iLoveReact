@@ -3729,6 +3729,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-extrude-face') api.extrudeFace();
         else if (commandId === 'mesh-face-polygon') api.facePolygon();
         else if (commandId === 'mesh-create-face') api.createFace();
+        else if (commandId === 'mesh-invert') api.invertSelection();
         else if (commandId === 'mesh-weld') api.weld();
         else if (commandId === 'mesh-bevel') api.bevel();
         else if (commandId === 'mesh-loopcut') api.loopCut();

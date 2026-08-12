@@ -223,6 +223,10 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-vertex', menu: 'Edit', scope: 'model', name: 'Vertex Select', icon: 'Grip', key: '1', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-edge', menu: 'Edit', scope: 'model', name: 'Edge Select', icon: 'Spline', key: '2', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-face', menu: 'Edit', scope: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
+  // Invert the selection within the active scope (req_4271). Ctrl+I resolves here
+  // on the model surface (keymap MODEL_CHORDS outranks the global Import chord);
+  // with nothing selected it selects everything — the complement of the empty set.
+  { id: 'mesh-invert', menu: 'Edit', scope: 'model', name: 'Invert Selection', icon: 'Layers3', key: 'Ctrl+I', context: true, native: true, undoable: false },
   // UV direction collection (req_3388): one selected 3D face expands to every
   // atlas island projected from the same signed axis, without joining the mesh.
   { id: 'mesh-select-uv-orientation', menu: 'Edit', scope: 'model', name: 'Collect Same UV Orientation', icon: 'Layers3', key: '', context: true, native: true, undoable: false, tool: true, needsSelection: true },

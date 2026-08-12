@@ -45,6 +45,7 @@ import {
   type MeshSemanticTable as SemanticTable,
 } from '../model/meshSemantics';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
+import { hydrateModelShapeCounts } from '../model/modelShapeHydration';
 import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
 import { selectMeshFaces } from '../model/selectMeshFaces';
 import ExtrudeDialog from './ExtrudeDialog';
@@ -268,6 +269,7 @@ export type ModelFocusShape = {
   mounts: number; // honest 0 until the rig slice lands
   radius: number; // live resident edit-mesh bounding radius
   center: [number, number, number] | null; // live resident edit-mesh center
+  topologyMeasured: boolean; // distinguishes a real empty mesh from topology not built yet
   // Hard geometry facts from the host audit (req_3750), so a disaster is visible in the
   // panel instead of something to go chasing. `audited: false` means the mesh was over
   // the audit budget — UNKNOWN, never rendered as a clean zero.
@@ -362,6 +364,8 @@ export type ModelToolApi = {
   extrudeFace: () => void;
   facePolygon: () => void;
   createFace: () => void;
+  // Invert the selection within the active scope (Ctrl+I, req_4271).
+  invertSelection: () => void;
   weld: () => void;
   bevel: () => void;
   selectUvOrientation: () => number;
@@ -766,6 +770,13 @@ const readQuadifyPlan = (json: any): QuadifyPlan | null => {
 const meshExtrudeEdge = (distance: number, angleDegrees = 0) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance, angleDegrees));
 const meshExtrudeFace = (distance: number, taperDegrees = 0) => readTopoResult(host.__mesh_topo_extrude_face?.(distance, taperDegrees));
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
+// Ctrl+right-click (req_4271): extrude the selection TOWARD a viewport point.
+const meshExtrudeTo = (x: number, y: number) => readTopoResult(host.__mesh_topo_extrude_to?.(x, y));
+// Marquee-projected cut (req_4271): the ctrl+drag rectangle, as a cut.
+const meshMarqueeCut = (x0: number, y0: number, x1: number, y1: number) =>
+  readTopoResult(host.__mesh_topo_marquee_cut?.(x0, y0, x1, y1));
+// Ctrl+I (req_4271): invert the current mode's selection within the active scope.
+const meshInvertSel = () => Math.trunc(Number(host.__mesh_edit_invert?.() ?? -1));
 const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
 // Weld (req_3382): merge the selected vertices at their center (host op).
 const meshWeld = () => readTopoResult(host.__mesh_topo_weld?.());
@@ -3107,7 +3118,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     extrudeEdge: () => openExtrude('edge'),
     extrudeFace: () => openExtrude('face'),
     facePolygon: openBevel,
-    createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
+    createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges, a closed 3/4-edge loop, or two matched edge runs to bridge'),
+    // Invert the selection within the active scope (req_4271). With nothing
+    // selected this IS Select All — the complement of the empty set.
+    invertSelection: () => {
+      const inverted = meshInvertSel();
+      if (inverted >= 0) adoptHostSelection(selInfo);
+      else setError('Invert Selection needs a select mode (vertex/edge/face)');
+    },
     weld: () => applyTopo(meshWeld(), 'Select at least two vertices (or an edge) to weld'),
     bevel: openBevel,
     selectUvOrientation,
@@ -3777,13 +3795,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
-  // Only what is ALREADY real cart-side goes out: counts from the host counts door,
-  // faces from the authored grouping, uv'd derived from the whole-model atlas,
-  // mounts an honest 0 until the rig slice lands. Never invented.
+  // Only live resident facts go out: welded counts from the host counts door,
+  // faces/triangles from the native percept's current authored grouping, uv'd from a
+  // readable non-stale whole-model atlas, and mounts an honest 0 until the rig slice
+  // lands. The initial document grouping is a load seed, never a live count.
   useEffect(() => {
     const g = globalThis as any;
-    const tris = model ? Math.floor(model.count / 3) : 0;
-    const faces = authoredFaces ?? tris;
     const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
     const diskDoc = packageDir ? readMeshDoc(packageDir) : null;
     // One percept read serves both the semantics diagnosis and the geometry facts.
@@ -3819,6 +3836,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const value = JSON.parse(host.__model_atlas_read?.(0) ?? 'null');
       atlasHasUv = Number(value?.w) > 0 && Number(value?.h) > 0 && Array.isArray(value?.islands) && value.islands.length >= 4;
     } catch { /* no readable live atlas */ }
+    const shapeCounts = hydrateModelShapeCounts({
+      residentVertexRows: model?.count ?? 0,
+      semanticTriangles: percept?.faces,
+      semanticAuthoredFaces: percept?.authoredFaces,
+      liveTopology: readSelInfo(),
+      cachedTopology: selInfo,
+      atlasReadable: atlasHasUv,
+      atlasStale: paintLayoutIsStale(),
+    });
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       semantics,
@@ -3854,14 +3880,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       loadPaintVariant,
       shape: model
         ? {
-          verts: selInfo.verts,
-          edges: selInfo.edges,
-          faces,
-          tris,
-          uvd: atlasHasUv ? faces : 0,
+          verts: shapeCounts.verts,
+          edges: shapeCounts.edges,
+          faces: shapeCounts.faces,
+          tris: shapeCounts.tris,
+          uvd: shapeCounts.uvd,
           mounts: 0,
           radius: liveFrame?.radius ?? model.radius,
           center: liveFrame?.center ?? boundsCenter,
+          topologyMeasured: shapeCounts.topologyMeasured,
           audited: percept?.auditComputed === true,
           intersecting: percept?.intersectingFaces ?? 0,
           unreachable: percept?.unreachableFaces ?? 0,
@@ -4134,6 +4161,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       syncUvSelection();
     };
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
+    // Ctrl-gesture bridges (req_4271). The engine defers these to JS so each topo
+    // op's new mesh key is adopted exactly like the dialog-driven ops (the journal
+    // stamps them source=native — engine-owned input).
+    (globalThis as any).__meshEditMarqueeCut = (x0: number, y0: number, x1: number, y1: number) => {
+      applyTopo(meshMarqueeCut(x0, y0, x1, y1), 'Marquee cut rejected — sweep the rectangle over one face');
+    };
+    (globalThis as any).__meshEditExtrudeTo = (x: number, y: number) => {
+      applyTopo(meshExtrudeTo(x, y), 'Extrude-to-cursor rejected — select faces or one edge first');
+    };
     // Hot-reload/session resume (req_2898/req_3850): adopt the host's live document
     // when the doc twig matches, or when the shell just restored a resident session.
     // A fresh non-resident session still falls through to the normal cold load.
@@ -4384,10 +4420,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'sel') host.__mesh_edit_select_face?.(num(a[0]), 0);
         else if (name === 'vertex') host.__mesh_edit_select_vertex?.(num(a[0]), 0);
         else if (name === 'edge') host.__mesh_edit_select_edge?.(num(a[0]), 0);
+        else if (name === 'edgeadd') host.__mesh_edit_select_edge?.(num(a[0]), 1);
         else if (name === 'add') host.__mesh_edit_select_face?.(num(a[0]), 1);
         else if (name === 'range') host.__mesh_edit_select_group_range?.(num(a[0]), num(a[1]), 0);
         else if (name === 'pick') host.__mesh_edit_pick?.(num(a[0]), num(a[1]), 0);
         else if (name === 'pickadd') host.__mesh_edit_pick?.(num(a[0]), num(a[1]), 1);
+        // req_4271 gestures, headless: cpick = ctrl+click edge-path pick (cycles on
+        // repeat), cpickadd its shift variant; invert = ctrl+I; mcut = the marquee-
+        // projected cut; extrudeto = ctrl+right-click; createface = the C key's verb
+        // (bridges two matched edge runs).
+        else if (name === 'cpick') console.error(`[meshops] cpick → ${host.__mesh_edit_path_pick?.(num(a[0]), num(a[1]), 0) ?? 'n/a'}`);
+        else if (name === 'cpickadd') console.error(`[meshops] cpickadd → ${host.__mesh_edit_path_pick?.(num(a[0]), num(a[1]), 1) ?? 'n/a'}`);
+        else if (name === 'invert') console.error(`[meshops] invert → ${meshInvertSel()}`);
+        else if (name === 'mcut') { const r = meshMarqueeCut(num(a[0]), num(a[1]), num(a[2]), num(a[3])); adoptMesh(r); console.error(`[meshops] mcut → ${JSON.stringify(r)} refusal=${host.__mesh_topo_refusal?.() ?? ''}`); }
+        else if (name === 'extrudeto') { const r = meshExtrudeTo(num(a[0]), num(a[1])); adoptMesh(r); console.error(`[meshops] extrudeto → ${JSON.stringify(r)} refusal=${host.__mesh_topo_refusal?.() ?? ''}`); }
+        else if (name === 'createface') { const r = meshCreateFace(); adoptMesh(r); console.error(`[meshops] createface → ${JSON.stringify(r)} refusal=${host.__mesh_topo_refusal?.() ?? ''}`); }
         else if (name === 'box') host.__mesh_edit_box?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), 0);
         else if (name === 'snap') host.__mesh_edit_snapshot?.();
         else if (name === 'revert') host.__mesh_edit_revert?.();

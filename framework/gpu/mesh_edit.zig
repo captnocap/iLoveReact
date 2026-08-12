@@ -2650,6 +2650,25 @@ pub fn authoredFacesInMask(mask: []const bool) u32 {
     return n;
 }
 
+/// Count the current authored polygons from one exact displayed-triangle group
+/// snapshot. Loose triangles each remain their own authored face. This is the
+/// read-side twin of `authoredFacesInMask`, used by resident percepts that must
+/// move with topology instead of repeating the document's opening group count.
+pub fn authoredFaceCountFromGroups(groups: []const u32) ?u32 {
+    var seen = std.AutoHashMapUnmanaged(u32, void).empty;
+    defer seen.deinit(alloc);
+    var count: u32 = 0;
+    for (groups) |group| {
+        if (group == model_source.NO_FACE_GROUP) {
+            count += 1;
+            continue;
+        }
+        const gop = seen.getOrPut(alloc, group) catch return null;
+        if (!gop.found_existing) count += 1;
+    }
+    return count;
+}
+
 fn countSelectedAuthoredFaces() u32 {
     return authoredFacesInMask(g_sel_face orelse return 0);
 }
@@ -2804,6 +2823,33 @@ fn editScopeMatches(ranges: []const [2]u32) bool {
     return true;
 }
 
+/// True when every selected element (all three sets) sits inside the ACTIVE scope.
+/// The scope-change law below clears exactly the selections that would otherwise
+/// leak across an ownership boundary; a selection the new scope fully contains is
+/// not a leak — it is the same elements under a moved/renumbered range (req_4271:
+/// the first range-changing topology op used to wipe its own result selection when
+/// the outliner's follow-up push ACTIVATED the scope over the whole model).
+fn selectionInsideScope() bool {
+    if (!g_scope_active) return true;
+    ensureScopeMasks();
+    if (g_sel_face) |sel| {
+        for (sel, 0..) |on, face| {
+            if (on and !faceInScope(@intCast(face))) return false;
+        }
+    }
+    if (g_sel_vert) |sel| {
+        for (sel, 0..) |on, vertex| {
+            if (on and !vertInScopePub(@intCast(vertex))) return false;
+        }
+    }
+    if (g_sel_edge) |sel| {
+        for (sel, 0..) |on, edge| {
+            if (on and !edgeInScopePub(@intCast(edge))) return false;
+        }
+    }
+    return true;
+}
+
 /// Restrict editing to the authored group range [lo, hi). hi <= lo clears the scope (edit
 /// the whole model). The outliner sets this to the focused part's range.
 pub fn setEditScope(lo: u32, hi: u32) void {
@@ -2820,8 +2866,10 @@ pub fn setEditScope(lo: u32, hi: u32) void {
     }
     g_scope_built = 0;
     // Scope is an edit-ownership boundary, not a visual filter. A focused part must
-    // never inherit a vertex/edge/face selection from the previously focused part.
-    clearSelection();
+    // never inherit a vertex/edge/face selection from the previously focused part —
+    // but a selection the NEW scope fully contains is the same ownership, not a
+    // leak, and survives (a topology op's result selection rides the range move).
+    if (!selectionInsideScope()) clearSelection();
 }
 
 /// Restrict editing to the UNION of several group ranges — flattened [lo,hi) pairs, the
@@ -2846,7 +2894,9 @@ pub fn setEditScopeRanges(pairs: []const u32) void {
     g_scope_count = next_count;
     g_scope_active = g_scope_count > 0;
     g_scope_built = 0;
-    clearSelection();
+    // Same containment law as setEditScope: only a selection the new scope does
+    // NOT fully contain is an ownership leak worth clearing.
+    if (!selectionInsideScope()) clearSelection();
 }
 
 /// Part-range ids are compact authored metadata, so topology edits can widen or
@@ -3185,6 +3235,43 @@ pub fn selectAll() i32 {
             const n: u32 = @intCast(sel.len);
             var f: u32 = 0;
             while (f < n) : (f += 1) sel[f] = faceInScopePub(f);
+            applyFaceHighlight();
+        },
+        .none => return -1,
+    }
+    return @intCast(selCount());
+}
+
+/// Ctrl+I: invert the current mode's selection within the active edit scope (req_4271).
+/// Exactly the complement of what Select All reaches: faces invert over in-scope
+/// authored faces, edges over real boundary edges (diagonals aren't real edges),
+/// vertices over in-scope welded vertices. Out-of-scope elements never enter the
+/// selection, so an invert can't smuggle a sibling part's geometry into an edit.
+/// Returns the new selected count, -1 if there is no mesh or no select mode.
+pub fn invertSelection() i32 {
+    if (g_mode == .none) return -1;
+    const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
+    if (!ready) return -1;
+    switch (g_mode) {
+        .vertex => {
+            const sel = g_sel_vert orelse return -1;
+            const n: u32 = @intCast(sel.len);
+            var i: u32 = 0;
+            while (i < n) : (i += 1) sel[i] = vertInScopePub(i) and !sel[i];
+        },
+        .edge => {
+            const sel = g_sel_edge orelse return -1;
+            const n: u32 = @intCast(sel.len);
+            var e: u32 = 0;
+            while (e < n) : (e += 1) sel[e] = edgeIsBoundaryPub(e) and edgeInScopePub(e) and !sel[e];
+        },
+        .face => {
+            // Per-triangle complement is group-consistent because every selection
+            // path (pick, marquee, walks) already expands to whole authored faces.
+            const sel = g_sel_face orelse return -1;
+            const n: u32 = @intCast(sel.len);
+            var f: u32 = 0;
+            while (f < n) : (f += 1) sel[f] = faceInScopePub(f) and !sel[f];
             applyFaceHighlight();
         },
         .none => return -1,
@@ -5017,6 +5104,192 @@ fn pickEdge(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32
     return best;
 }
 
+// ── Interactive edge-path pick (req_4271) ────────────────────────────────────────
+// Ctrl+click on an edge selects a whole edge path; ctrl+clicking the SAME edge again
+// cycles through every path the topology offers through it, in a fixed stated order:
+// quad loop → edge ring → the single edge. Which path is "right" is the user's call,
+// so the editor shows each in turn instead of guessing. Identical sets collapse (a
+// pole-bounded loop of one edge doesn't repeat as "single edge"), and any topology
+// change or a click on a different edge starts a fresh cycle.
+var g_pathcycle_edge: i64 = -1; // seed edge of the live cycle, -1 = none
+var g_pathcycle_index: u32 = 0; // which candidate the NEXT click applies
+var g_pathcycle_built_for: u32 = 0; // facecount the cycle was computed against
+var g_pathcycle_base: ?[]bool = null; // selection the cycle unions onto (additive picks)
+
+fn pathCycleReset() void {
+    if (g_pathcycle_base) |base| alloc.free(base);
+    g_pathcycle_base = null;
+    g_pathcycle_edge = -1;
+    g_pathcycle_index = 0;
+}
+
+fn pathCandidateEqual(a: []const u32, b: []const u32) bool {
+    if (a.len != b.len) return false;
+    // Candidate runs are tiny relative to the mesh; sorted copies keep the
+    // comparison order-independent without touching the originals.
+    const sa = alloc.dupe(u32, a) catch return false;
+    defer alloc.free(sa);
+    const sb = alloc.dupe(u32, b) catch return false;
+    defer alloc.free(sb);
+    std.mem.sort(u32, sa, {}, std.sort.asc(u32));
+    std.mem.sort(u32, sb, {}, std.sort.asc(u32));
+    return std.mem.eql(u32, sa, sb);
+}
+
+/// Follow an OPEN-BOUNDARY loop: the run of naked edges (exactly one incident face)
+/// through the seed — a cylinder rim, a plane border, any hole's mouth. This is the
+/// path a quad-loop walk can never return (a rim vertex is never a clean 4-way
+/// junction), and it is exactly the run a bridge selects. Continuation at a vertex
+/// is the unique OTHER naked edge; several candidates is a pole and stops the walk.
+fn collectNakedLoopEdges(seed: u32) ?CollectedEdgeWalk {
+    if (!walkEdgeUsable(seed)) return null;
+    const incidence = g_edge_incidence orelse return null;
+    if (seed >= incidence.len or incidence[seed] >= 2) return null; // not an open-boundary edge
+    const index = buildVertexEdgeIndex() orelse return null;
+    defer index.deinit();
+    var collected = std.ArrayListUnmanaged(u32).empty;
+    defer collected.deinit(alloc);
+    const seen = alloc.alloc(bool, g_edge_count) catch return null;
+    defer alloc.free(seen);
+    @memset(seen, false);
+    collected.append(alloc, seed) catch return null;
+    seen[seed] = true;
+
+    var termination: WalkTermination = .closed;
+    var stopped_at: u32 = seed;
+    const edges = g_edges orelse return null;
+    for ([2]u32{ edges[seed * 2], edges[seed * 2 + 1] }) |start| {
+        var current_edge = seed;
+        var vertex = start;
+        while (true) {
+            var next_edge: ?u32 = null;
+            var naked_here: u32 = 0;
+            for (index.slice(vertex)) |edge| {
+                if (edge == current_edge) continue;
+                if (edge >= incidence.len or incidence[edge] >= 2) continue;
+                naked_here += 1;
+                if (next_edge == null or edge < next_edge.?) next_edge = edge;
+            }
+            if (naked_here != 1) {
+                termination = if (naked_here == 0) .boundary else .pole;
+                stopped_at = vertex;
+                break;
+            }
+            const step = next_edge.?;
+            if (seen[step]) {
+                termination = .closed;
+                stopped_at = vertex;
+                break;
+            }
+            seen[step] = true;
+            collected.append(alloc, step) catch return null;
+            vertex = walkOtherEnd(step, vertex);
+            current_edge = step;
+        }
+        if (termination == .closed) break;
+    }
+    const owned = collected.toOwnedSlice(alloc) catch return null;
+    return .{ .ids = owned, .terminated = termination, .stopped_at = stopped_at };
+}
+
+/// Every usable boundary edge of one authored face group — the loop AROUND an
+/// n-gon. On a capped cylinder this is the top/bottom loop itself: the rim vertex
+/// is never a 4-way junction (so the quad-loop walk stops immediately) and the cap
+/// is not a quad (so the ring walk refuses), but the cap's boundary IS the loop
+/// the click meant (req_4271, the pot rim). Quads are deliberately excluded — the
+/// loop and ring walks already own quad territory.
+fn collectGroupBoundaryEdges(group: u32) ?CollectedEdgeWalk {
+    if (walkGroupDistinctVertCount(group) == 4) return null;
+    var collected = std.ArrayListUnmanaged(u32).empty;
+    defer collected.deinit(alloc);
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!walkEdgeUsable(edge)) continue;
+        var groups: [8]u32 = undefined;
+        const group_count = walkEdgeGroups(edge, &groups);
+        var borders = false;
+        for (groups[0..group_count]) |have| borders = borders or have == group;
+        if (!borders) continue;
+        collected.append(alloc, edge) catch return null;
+    }
+    if (collected.items.len < 3) return null;
+    const owned = collected.toOwnedSlice(alloc) catch return null;
+    return .{ .ids = owned, .terminated = .closed, .stopped_at = owned[0] };
+}
+
+/// The ctrl+click pick. Edge mode only — other modes fall through to the plain pick.
+/// `additive` (shift held) unions the path onto the selection as it stood when THIS
+/// cycle started, so cycling a second path never accumulates its own earlier looks.
+pub fn pathPick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, additive: bool) i32 {
+    if (g_mode != .edge) return pick(cam, vp_w, vp_h, mx, my, additive);
+    if (!ensureTopology()) return -1;
+    _ = refreshCameraVisibility(cam, vp_w, vp_h);
+    const hit = pickEdge(cam, vp_w, vp_h, mx, my);
+    const sel = g_sel_edge orelse return -1;
+    if (hit < 0) {
+        pathCycleReset();
+        if (!additive) clearSelection();
+        return @intCast(selCount());
+    }
+    const seed: u32 = @intCast(hit);
+    const same_cycle = g_pathcycle_edge == @as(i64, seed) and
+        g_pathcycle_built_for == model_paint.faceCount() and
+        g_pathcycle_base != null and g_pathcycle_base.?.len == sel.len;
+    if (!same_cycle) {
+        pathCycleReset();
+        g_pathcycle_edge = @as(i64, seed);
+        g_pathcycle_built_for = model_paint.faceCount();
+        const base = alloc.alloc(bool, sel.len) catch return -1;
+        if (additive) @memcpy(base, sel) else @memset(base, false);
+        g_pathcycle_base = base;
+    }
+
+    // Build the candidate list fresh each click — the mesh is live and a stale run
+    // would select edges that no longer mean what they meant. Order is stated and
+    // fixed: open-boundary loop (a rim is what you meant when you clicked a rim),
+    // the boundary of an adjacent n-gon (a capped rim's top loop), quad loop, edge
+    // ring, the single edge; identical sets collapse so the cycle never repeats.
+    var candidates: [6][]u32 = undefined;
+    var candidate_count: u32 = 0;
+    defer for (candidates[0..candidate_count]) |ids| alloc.free(ids);
+    const addCandidate = struct {
+        fn add(list: *[6][]u32, count: *u32, ids: []u32) void {
+            var duplicate = false;
+            for (list[0..count.*]) |have| duplicate = duplicate or pathCandidateEqual(have, ids);
+            if (duplicate or count.* >= list.len) {
+                alloc.free(ids);
+            } else {
+                list[count.*] = ids;
+                count.* += 1;
+            }
+        }
+    }.add;
+    if (collectNakedLoopEdges(seed)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+    {
+        var seed_groups: [8]u32 = undefined;
+        const seed_group_count = walkEdgeGroups(seed, &seed_groups);
+        for (seed_groups[0..seed_group_count]) |group| {
+            if (collectGroupBoundaryEdges(group)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+        }
+    }
+    if (collectLoopEdges(seed)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+    if (collectRingEdges(seed)) |run| addCandidate(&candidates, &candidate_count, run.ids);
+    single: {
+        const one = alloc.alloc(u32, 1) catch break :single;
+        one[0] = seed;
+        addCandidate(&candidates, &candidate_count, one);
+    }
+    if (candidate_count == 0) return @intCast(selCount());
+
+    const chosen = candidates[g_pathcycle_index % candidate_count];
+    g_pathcycle_index +%= 1;
+    @memcpy(sel, g_pathcycle_base.?);
+    for (chosen) |edge| {
+        if (edge < sel.len) sel[edge] = true;
+    }
+    return @intCast(selCount());
+}
+
 /// Squared distance from point (px,py) to segment (ax,ay)-(bx,by), in screen space.
 fn segDist2(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
     const vx = bx - ax;
@@ -6200,9 +6473,39 @@ fn walkEdgeGroups(edge: u32, out: *[8]u32) u32 {
     return found;
 }
 
+/// Distinct logical corner vertices of an authored group, counted up to 5 — enough
+/// to answer the only question asked: is this group a QUAD (exactly 4)?
+fn walkGroupDistinctVertCount(group: u32) u32 {
+    const corners = g_corner_vert orelse return 0;
+    const face_count = model_paint.faceCount();
+    var distinct: [5]u32 = undefined;
+    var found: u32 = 0;
+    var face: u32 = 0;
+    while (face < face_count) : (face += 1) {
+        if (model_source.faceGroupOf(face) != group) continue;
+        const base = @as(usize, face) * 3;
+        if (base + 2 >= corners.len) break;
+        for (0..3) |corner| {
+            const vertex = corners[base + corner];
+            var seen = false;
+            for (distinct[0..found]) |have| seen = seen or have == vertex;
+            if (seen) continue;
+            if (found >= distinct.len) return @intCast(distinct.len + 1); // 5+ corners — not a quad
+            distinct[found] = vertex;
+            found += 1;
+        }
+    }
+    return found;
+}
+
 /// The boundary edge of `group` that shares NO vertex with `edge` — a quad's opposite
-/// side, which is the step a ring walk takes.
+/// side, which is the step a ring walk takes. A group that is NOT a quad has no
+/// single opposite side; answering "lowest edge sharing no vertex" there made a
+/// ring entering an n-gon cap hop to an arbitrary far edge and scatter across the
+/// model (req_4271) — the documented contract ("stops when a group is not a quad")
+/// now actually holds.
 fn walkOppositeEdgeInGroup(group: u32, edge: u32) ?u32 {
+    if (walkGroupDistinctVertCount(group) != 4) return null;
     const corners = g_corner_vert orelse return null;
     const edges = g_edges orelse return null;
     const a = edges[edge * 2];
@@ -6393,12 +6696,20 @@ fn walkPath(request: WalkRequest) ?WalkPlan {
     return stageWalk(chain, .vertex, .complete, request.to);
 }
 
+/// An edge run computed by a loop/ring traversal, before anyone stages or selects
+/// it. Owned ids — the caller frees (or hands them to stageWalk, which owns them).
+const CollectedEdgeWalk = struct {
+    ids: []u32,
+    terminated: WalkTermination,
+    stopped_at: u32,
+};
+
 /// Follow an edge loop from one seed. The continuation at a vertex is the edge that
 /// shares NO authored face-group with the edge we arrived on — the classic quad-loop
 /// rule. Anything other than a clean 4-way junction ends the walk and says so, because
 /// guessing at a pole is how a loop silently swallows half a model.
-fn walkLoop(request: WalkRequest) ?WalkPlan {
-    if (!walkEdgeUsable(request.edge)) return null;
+fn collectLoopEdges(seed: u32) ?CollectedEdgeWalk {
+    if (!walkEdgeUsable(seed)) return null;
     const index = buildVertexEdgeIndex() orelse return null;
     defer index.deinit();
     var collected = std.ArrayListUnmanaged(u32).empty;
@@ -6406,16 +6717,16 @@ fn walkLoop(request: WalkRequest) ?WalkPlan {
     const seen = alloc.alloc(bool, g_edge_count) catch return null;
     defer alloc.free(seen);
     @memset(seen, false);
-    collected.append(alloc, request.edge) catch return null;
-    seen[request.edge] = true;
+    collected.append(alloc, seed) catch return null;
+    seen[seed] = true;
 
     var termination: WalkTermination = .closed;
-    var stopped_at: u32 = request.edge;
+    var stopped_at: u32 = seed;
     const edges = g_edges orelse return null;
     // Walk both ways from the seed so a loop opened at a boundary still returns the
     // whole run rather than half of it.
-    for ([2]u32{ edges[request.edge * 2], edges[request.edge * 2 + 1] }) |start| {
-        var current_edge = request.edge;
+    for ([2]u32{ edges[seed * 2], edges[seed * 2 + 1] }) |start| {
+        var current_edge = seed;
         var vertex = start;
         while (true) {
             var groups: [8]u32 = undefined;
@@ -6459,27 +6770,32 @@ fn walkLoop(request: WalkRequest) ?WalkPlan {
         if (termination == .closed) break;
     }
     const owned = collected.toOwnedSlice(alloc) catch return null;
-    return stageWalk(owned, .edge, termination, stopped_at);
+    return .{ .ids = owned, .terminated = termination, .stopped_at = stopped_at };
+}
+
+fn walkLoop(request: WalkRequest) ?WalkPlan {
+    const run = collectLoopEdges(request.edge) orelse return null;
+    return stageWalk(run.ids, .edge, run.terminated, run.stopped_at);
 }
 
 /// Follow an edge ring: step across each quad to its opposite side. Stops when a group
 /// is not a quad, when the ring closes, or at an open boundary.
-fn walkRing(request: WalkRequest) ?WalkPlan {
-    if (!walkEdgeUsable(request.edge)) return null;
+fn collectRingEdges(seed: u32) ?CollectedEdgeWalk {
+    if (!walkEdgeUsable(seed)) return null;
     var collected = std.ArrayListUnmanaged(u32).empty;
     defer collected.deinit(alloc);
     const seen = alloc.alloc(bool, g_edge_count) catch return null;
     defer alloc.free(seen);
     @memset(seen, false);
-    collected.append(alloc, request.edge) catch return null;
-    seen[request.edge] = true;
+    collected.append(alloc, seed) catch return null;
+    seen[seed] = true;
 
     var termination: WalkTermination = .boundary;
     var groups: [8]u32 = undefined;
-    const seed_groups = walkEdgeGroups(request.edge, &groups);
+    const seed_groups = walkEdgeGroups(seed, &groups);
     var direction: u32 = 0;
     while (direction < seed_groups) : (direction += 1) {
-        var current_edge = request.edge;
+        var current_edge = seed;
         var current_group = groups[direction];
         while (true) {
             const opposite = walkOppositeEdgeInGroup(current_group, current_edge) orelse {
@@ -6507,7 +6823,12 @@ fn walkRing(request: WalkRequest) ?WalkPlan {
         if (termination == .closed) break;
     }
     const owned = collected.toOwnedSlice(alloc) catch return null;
-    return stageWalk(owned, .edge, termination, request.edge);
+    return .{ .ids = owned, .terminated = termination, .stopped_at = seed };
+}
+
+fn walkRing(request: WalkRequest) ?WalkPlan {
+    const run = collectRingEdges(request.edge) orelse return null;
+    return stageWalk(run.ids, .edge, run.terminated, run.stopped_at);
 }
 
 /// Expand the LIVE face selection by adjacency. The one amplifier that reads the current

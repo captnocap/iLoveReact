@@ -9,6 +9,7 @@ const wgpu = @import("wgpu");
 const build_options = @import("build_options");
 const abi = @import("dev_module_abi");
 const Node = @import("../layout.zig").Node;
+const meshdoc_format = @import("../gpu/meshdoc_format.zig");
 
 const modular_core = build_options.dev_native_modules and !build_options.dev_scene3d_module;
 const implementation = if (!modular_core) @import("../gpu/3d.zig") else struct {};
@@ -50,6 +51,448 @@ pub const CharacterRigGizmoCommit = struct {
     rot: [4]f32,
     scale: [3]f32,
 };
+
+pub const RecoveryCallResult = struct {
+    json: []u8,
+    status: abi.SceneCallStatusV1,
+
+    pub fn deinit(self: *RecoveryCallResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.json);
+        self.* = undefined;
+    }
+};
+
+pub const RecoveryCaptureResult = struct {
+    bytes: []u8,
+    meta: abi.RecoverySnapshotMetaV1,
+    status: abi.SceneCallStatusV1,
+
+    pub fn deinit(self: *RecoveryCaptureResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.bytes);
+        self.* = undefined;
+    }
+};
+
+const RecoverySink = struct {
+    allocator: std.mem.Allocator,
+    bytes: std.ArrayList(u8) = .empty,
+
+    fn write(raw: ?*anyopaque, ptr: [*]const u8, len: usize) callconv(.c) bool {
+        const self: *RecoverySink = @ptrCast(@alignCast(raw orelse return false));
+        self.bytes.appendSlice(self.allocator, ptr[0..len]) catch return false;
+        return true;
+    }
+};
+
+fn statusFromDirectJson(json: []const u8) abi.SceneCallStatusV1 {
+    var status = abi.SceneCallStatusV1{ .code = .internal_error };
+    if (std.mem.indexOf(u8, json, "\"ok\":true") != null) status.code = .ok else if (std.mem.indexOf(u8, json, "\"code\":\"released_capability\"") != null) status.code = .released_capability else if (std.mem.indexOf(u8, json, "\"code\":\"wrong_model\"") != null) status.code = .wrong_model else if (std.mem.indexOf(u8, json, "\"code\":\"no_resident_session\"") != null) status.code = .no_resident_session else if (std.mem.indexOf(u8, json, "\"code\":\"object_ids_unpublished\"") != null) status.code = .object_ids_unpublished else if (std.mem.indexOf(u8, json, "\"code\":\"stale_generation\"") != null) status.code = .stale_generation else if (std.mem.indexOf(u8, json, "\"code\":\"hash_mismatch\"") != null) status.code = .invalid_request else if (std.mem.indexOf(u8, json, "\"code\":\"lease_refused\"") != null or std.mem.indexOf(u8, json, "\"code\":\"authorization_failed\"") != null) status.code = .lease_refused else if (std.mem.indexOf(u8, json, "\"code\":\"invalid_request\"") != null) status.code = .invalid_request;
+    status.flags = @intFromBool(std.mem.indexOf(u8, json, "\"identityQuality\":\"degraded\"") != null);
+    return status;
+}
+
+fn invokeJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+    callback: abi.SceneJsonCallV1,
+) !RecoveryCallResult {
+    var collector = RecoverySink{ .allocator = allocator };
+    errdefer collector.bytes.deinit(allocator);
+    const sink = abi.SnapshotSinkV1{ .context = &collector, .write = RecoverySink.write };
+    var status = abi.SceneCallStatusV1{};
+    if (!callback(request_json.ptr, request_json.len, &sink, &status)) return error.Scene3dTransportFailed;
+    return .{ .json = try collector.bytes.toOwnedSlice(allocator), .status = status };
+}
+
+fn invokeBytesJsonAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+    bytes: []const u8,
+    callback: abi.SceneBytesJsonCallV1,
+) !RecoveryCallResult {
+    var collector = RecoverySink{ .allocator = allocator };
+    errdefer collector.bytes.deinit(allocator);
+    const sink = abi.SnapshotSinkV1{ .context = &collector, .write = RecoverySink.write };
+    var status = abi.SceneCallStatusV1{};
+    if (!callback(request_json.ptr, request_json.len, bytes.ptr, bytes.len, &sink, &status)) return error.Scene3dTransportFailed;
+    return .{ .json = try collector.bytes.toOwnedSlice(allocator), .status = status };
+}
+
+fn invokeEncodeAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    session_token: []const u8,
+    expected_generation: u64,
+    callback: abi.SceneEncodeCurrentV1,
+) !RecoveryCaptureResult {
+    var collector = RecoverySink{ .allocator = allocator };
+    errdefer collector.bytes.deinit(allocator);
+    const sink = abi.SnapshotSinkV1{ .context = &collector, .write = RecoverySink.write };
+    var meta = abi.RecoverySnapshotMetaV1{};
+    var status = abi.SceneCallStatusV1{};
+    if (!callback(
+        model_id.ptr,
+        model_id.len,
+        session_token.ptr,
+        session_token.len,
+        expected_generation,
+        &sink,
+        &meta,
+        &status,
+    )) return error.Scene3dTransportFailed;
+    if (status.code != .ok) {
+        collector.bytes.deinit(allocator);
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = meta, .status = status };
+    }
+    return .{ .bytes = try collector.bytes.toOwnedSlice(allocator), .meta = meta, .status = status };
+}
+
+fn hashCaptureIdentity(
+    meta: *abi.RecoverySnapshotMetaV1,
+    model_id: []const u8,
+    session_token: []const u8,
+) void {
+    std.crypto.hash.sha2.Sha256.hash(model_id, &meta.model_id_hash, .{});
+    std.crypto.hash.sha2.Sha256.hash(session_token, &meta.session_token_hash, .{});
+}
+
+/// Drain one completed asynchronous face analysis from the Scene3D owner.
+/// The replaceable module owns the workers and their result queues, so the
+/// modular core must cross this ABI door instead of reading a cold duplicate
+/// of `gpu/3d.zig`. `analysis_pending` is the only successful no-event state;
+/// transport and module failures remain errors.
+pub fn meshFaceAnalysisReadyJsonAlloc(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+) !?[]u8 {
+    if (!modular_core) return implementation.meshFaceAnalysisReadyJsonAlloc(io, allocator);
+
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    var response = try invokeJsonAlloc(allocator, "{}", dispatch.face_analysis_ready);
+    switch (response.status.code) {
+        .analysis_pending => {
+            response.deinit(allocator);
+            return null;
+        },
+        .ok => {
+            if (response.json.len == 0) {
+                response.deinit(allocator);
+                return error.InvalidFaceAnalysisCompletion;
+            }
+            return response.json;
+        },
+        else => {
+            response.deinit(allocator);
+            return error.FaceAnalysisDrainFailed;
+        },
+    }
+}
+
+/// Capture the live Scene3D owner's in-memory document. In modular dev builds
+/// this always crosses the active module ABI; it never imports the cold core's
+/// dead `gpu/3d.zig` state and it never reads package disk.
+pub fn captureRecoveryAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    session_token: []const u8,
+    expected_generation: u64,
+) !RecoveryCaptureResult {
+    if (modular_core) {
+        const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+        return invokeEncodeAlloc(
+            allocator,
+            model_id,
+            session_token,
+            expected_generation,
+            dispatch.capture_recovery,
+        );
+    }
+
+    var status = abi.SceneCallStatusV1{
+        .code = .internal_error,
+        .current_generation = implementation.meshEditGeneration(),
+    };
+    if (!implementation.modelSessionResident()) {
+        status.code = .no_resident_session;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+    const parsed_token = std.fmt.parseInt(u32, session_token, 10) catch {
+        status.code = .wrong_model;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    };
+    if (parsed_token != implementation.modelSessionActiveToken() or
+        parsed_token != implementation.modelDocumentTokenForId(model_id))
+    {
+        status.code = .wrong_model;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+    if (expected_generation != implementation.meshEditGeneration()) {
+        status.code = .stale_generation;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+
+    var artifact = implementation.captureRecoveryArtifactAlloc(allocator, model_id) catch |err| {
+        status.code = if (err == error.NoResidentDocument) .no_resident_session else .internal_error;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    };
+    errdefer artifact.deinit(allocator);
+    if (artifact.generation != expected_generation or implementation.meshEditGeneration() != expected_generation) {
+        artifact.deinit(allocator);
+        status = .{ .code = .stale_generation, .current_generation = implementation.meshEditGeneration() };
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+    var meta = abi.RecoverySnapshotMetaV1{
+        .rjmd_version = artifact.rjmd_version,
+        .generation = artifact.generation,
+        .byte_len = artifact.bytes.len,
+        .triangle_count = artifact.triangle_count,
+        .authored_face_count = artifact.authored_face_count,
+        .part_count = artifact.part_count,
+        .logical_vertex_count = artifact.logical_vertex_count,
+        .sha256 = artifact.sha256,
+        .object_namespace_hash = artifact.object_namespace_hash,
+        .identity_quality = artifact.identity_quality,
+        .degradation_count = artifact.degradation_count,
+    };
+    hashCaptureIdentity(&meta, model_id, session_token);
+    for (artifact.degradations[0..artifact.degradation_count], 0..) |row, index| {
+        meta.degradations[index] = .{
+            .channel = @enumFromInt(@intFromEnum(row.channel) + 1),
+            .action_bits = row.action_bits,
+            .reason_bits = row.reason_bits,
+            .affected_count = row.affected_count,
+        };
+    }
+    status = .{
+        .code = .ok,
+        .flags = @intFromBool(artifact.identity_quality == 1),
+        .current_generation = artifact.generation,
+    };
+    const bytes = artifact.bytes;
+    return .{ .bytes = bytes, .meta = meta, .status = status };
+}
+
+/// Strict current-v5 encoder used by transactional restore. Unlike panic
+/// capture it never sanitizes missing channels.
+pub fn encodeCurrentAlloc(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    session_token: []const u8,
+    expected_generation: u64,
+) !RecoveryCaptureResult {
+    if (modular_core) {
+        const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+        return invokeEncodeAlloc(
+            allocator,
+            model_id,
+            session_token,
+            expected_generation,
+            dispatch.document_encode_current,
+        );
+    }
+    var status = abi.SceneCallStatusV1{
+        .code = .internal_error,
+        .current_generation = implementation.meshEditGeneration(),
+    };
+    const parsed_token = std.fmt.parseInt(u32, session_token, 10) catch {
+        status.code = .wrong_model;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    };
+    if (!implementation.modelSessionResident()) {
+        status.code = .no_resident_session;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+    if (parsed_token != implementation.modelSessionActiveToken() or
+        parsed_token != implementation.modelDocumentTokenForId(model_id))
+    {
+        status.code = .wrong_model;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+    if (expected_generation != implementation.meshEditGeneration()) {
+        status.code = .stale_generation;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    }
+    const bytes = implementation.modelEncodeCurrentDocumentAlloc(allocator, model_id) catch {
+        status.code = .internal_error;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    };
+    var document = meshdoc_format.decodeDocument(allocator, bytes) catch {
+        allocator.free(bytes);
+        status.code = .internal_error;
+        return .{ .bytes = try allocator.alloc(u8, 0), .meta = .{}, .status = status };
+    };
+    defer document.deinit(allocator);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    status = .{ .code = .ok, .current_generation = implementation.meshEditGeneration() };
+    var meta = abi.RecoverySnapshotMetaV1{
+        .rjmd_version = document.version,
+        .generation = implementation.meshEditGeneration(),
+        .byte_len = bytes.len,
+        .triangle_count = document.verts.len / 24,
+        .authored_face_count = meshdoc_format.authoredFaceCount(document.verts.len / 24, document.groups),
+        .part_count = @intCast(document.ranges.len / 2),
+        .logical_vertex_count = document.logical_vertex_count,
+        .sha256 = digest,
+    };
+    hashCaptureIdentity(&meta, model_id, session_token);
+    const empty_ids = [_][]const u8{};
+    const object_ids: []const []const u8 = if (document.range_object_ids) |ids| ids else &empty_ids;
+    meta.object_namespace_hash = meshdoc_format.objectNamespaceDigest(model_id, object_ids, document.ranges);
+    return .{
+        .bytes = bytes,
+        .meta = meta,
+        .status = status,
+    };
+}
+
+pub fn historicalPreviewOpenAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+    bytes: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.historicalPreviewOpenJsonAlloc(allocator, request_json, bytes);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeBytesJsonAlloc(allocator, request_json, bytes, dispatch.preview_open);
+}
+
+pub fn historicalPreviewSelectAlloc(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.meshFaceSelectJsonAlloc(io, allocator, request_json);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeJsonAlloc(allocator, request_json, dispatch.preview_select);
+}
+
+pub fn historicalPreviewReleaseAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.historicalPreviewReleaseJsonAlloc(allocator, request_json);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeJsonAlloc(allocator, request_json, dispatch.preview_release);
+}
+
+pub fn modelWriteLeaseAcquireAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.modelWriteLeaseAcquireJsonAlloc(allocator, request_json);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeJsonAlloc(allocator, request_json, dispatch.lease_acquire);
+}
+
+pub fn modelWriteLeaseReleaseAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.modelWriteLeaseReleaseJsonAlloc(allocator, request_json);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeJsonAlloc(allocator, request_json, dispatch.lease_release);
+}
+
+pub fn modelFieldCandidateAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.modelFieldCandidateJsonAlloc(allocator, request_json);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeJsonAlloc(allocator, request_json, dispatch.field_candidate);
+}
+
+pub fn modelDocumentAdoptAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+    bytes: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.modelDocumentAdoptBytesJsonAlloc(allocator, request_json, bytes);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeBytesJsonAlloc(allocator, request_json, bytes, dispatch.document_adopt);
+}
+
+pub fn modelDocumentRollbackAlloc(
+    allocator: std.mem.Allocator,
+    request_json: []const u8,
+) !RecoveryCallResult {
+    if (!modular_core) {
+        const json = try implementation.modelDocumentRollbackJsonAlloc(allocator, request_json);
+        return .{ .json = json, .status = statusFromDirectJson(json) };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    return invokeJsonAlloc(allocator, request_json, dispatch.document_rollback);
+}
+
+/// Allocation-free, fixed-layout adoption commit.  Unlike the JSON recovery
+/// calls this cannot lose a success because a response collector failed to
+/// grow: the module writes directly into the caller-owned receipt.
+pub fn modelDocumentFinalize(
+    lease_receipt_id: u64,
+    adoption_receipt_id: u64,
+    target_sha256: [64]u8,
+) !abi.SceneAdoptionFinalizeReceiptV1 {
+    if (!modular_core) {
+        const finalized = try implementation.modelDocumentFinalize(
+            lease_receipt_id,
+            adoption_receipt_id,
+            target_sha256,
+        );
+        return .{
+            .finalized = @intFromBool(finalized.finalized),
+            .already_finalized = @intFromBool(finalized.already_finalized),
+            .released = @intFromBool(finalized.released),
+            .already_released = @intFromBool(finalized.already_released),
+        };
+    }
+    const dispatch = api() orelse return error.Scene3dModuleUnavailable;
+    var receipt = abi.SceneAdoptionFinalizeReceiptV1{};
+    var status = abi.SceneCallStatusV1{};
+    if (!dispatch.document_finalize(
+        lease_receipt_id,
+        adoption_receipt_id,
+        &target_sha256,
+        target_sha256.len,
+        &receipt,
+        &status,
+    )) return error.Scene3dTransportFailed;
+    if (status.code != .ok) return switch (status.code) {
+        .lease_refused => error.ModelWriteLeaseRefused,
+        .module_unavailable => error.Scene3dModuleUnavailable,
+        .invalid_request => error.InvalidFinalizeReceipt,
+        else => error.Scene3dTransactionFailed,
+    };
+    if (receipt.schema_version != 1 or receipt.finalized > 1 or
+        receipt.already_finalized > 1 or receipt.released > 1 or
+        receipt.already_released > 1 or
+        (receipt.finalized + receipt.already_finalized != 1) or
+        (receipt.released + receipt.already_released != 1))
+    {
+        return error.InvalidFinalizeReceipt;
+    }
+    return receipt;
+}
 
 pub fn render(io: std.Io, environ: *const std.process.Environ.Map, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     if (!modular_core) return implementation.render(io, environ, node, x, y, w, h, opacity);
@@ -192,6 +635,18 @@ pub fn focusAt(x: f32, y: f32) bool {
 pub fn meshEditPick(x: f32, y: f32, additive: bool) i32 {
     if (!modular_core) return implementation.meshEditPick(x, y, additive);
     return if (api()) |dispatch| dispatch.mesh_pick(x, y, additive) else -1;
+}
+
+/// Ctrl+click edge-path pick (req_4271): loop → ring → single-edge cycling.
+pub fn meshEditPathPick(x: f32, y: f32, additive: bool) i32 {
+    if (!modular_core) return implementation.meshEditPathPick(x, y, additive);
+    return if (api()) |dispatch| dispatch.mesh_path_pick(x, y, additive) else -1;
+}
+
+/// Live selection count — the engine's ctrl+right-click (extrude-to) gate.
+pub fn meshEditSelectionCount() u32 {
+    if (!modular_core) return implementation.meshEditSelectionCount();
+    return if (api()) |dispatch| dispatch.mesh_selection_count() else 0;
 }
 
 pub fn meshEditOutOfScopePartAt(x: f32, y: f32) i32 {

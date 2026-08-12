@@ -3556,6 +3556,224 @@ fn closedEdgeLoopOrder(edges: []const mesh_edit.Edge, out: *[4]u32) ?u32 {
     return unique_count;
 }
 
+// ── Bridge edge loops (req_4271): Create Face over two matched edge runs ─────────
+// Two disjoint selected runs — open chains or closed loops — bridge rung by rung
+// into a strip of authored quads (the Blender bridge-edge-loops shape: two cylinder
+// rims become one continuous tube). The classic Create Face paths (single split
+// quad, corner triangle, 3/4-edge loop fill) keep their exact meanings; this only
+// claims selections those paths never accepted.
+
+/// 64 edges per run is far beyond any authored rim in the editor; the cap bounds
+/// the stack, not the ambition.
+const BRIDGE_RUN_MAX_EDGES = 64;
+
+const BridgeRun = struct {
+    /// Ordered so (verts[i], verts[i+1]) is a selected edge; a closed run also
+    /// closes (verts[count-1], verts[0]).
+    verts: [BRIDGE_RUN_MAX_EDGES + 1]u32 = undefined,
+    count: u32 = 0,
+    edge_count: u32 = 0,
+    closed: bool = false,
+};
+
+const BridgeRunPair = struct { a: BridgeRun, b: BridgeRun };
+
+/// Decompose the selected edges into exactly two disjoint simple runs when the
+/// selection is the bridge shape: 3+ edges, every vertex degree ≤ 2, two connected
+/// components. Anything else — including two lone edges, which stay on the classic
+/// split-quad path — returns null.
+fn decomposeBridgeRunPair(edges: []const mesh_edit.Edge) ?BridgeRunPair {
+    if (edges.len < 3 or edges.len > BRIDGE_RUN_MAX_EDGES * 2) return null;
+    const Incidence = struct { e: [2]u32 = .{ 0, 0 }, degree: u8 = 0 };
+    var incident = std.AutoHashMapUnmanaged(u32, Incidence).empty;
+    defer incident.deinit(std.heap.c_allocator);
+    for (edges, 0..) |edge, index| {
+        if (edge[0] == edge[1]) return null;
+        for (edge) |vertex| {
+            const slot = incident.getOrPutValue(std.heap.c_allocator, vertex, .{}) catch return null;
+            if (slot.value_ptr.degree >= 2) return null; // a junction is not a simple run
+            slot.value_ptr.e[slot.value_ptr.degree] = @intCast(index);
+            slot.value_ptr.degree += 1;
+        }
+    }
+    var visited = [_]bool{false} ** (BRIDGE_RUN_MAX_EDGES * 2);
+    var runs: [2]BridgeRun = .{ .{}, .{} };
+    var run_count: u32 = 0;
+    for (edges, 0..) |_, seed_index| {
+        if (visited[seed_index]) continue;
+        if (run_count >= 2) return null;
+        const run = &runs[run_count];
+        run_count += 1;
+        // Walk from the seed edge to one end of its component (or all the way
+        // around a loop), then emit the ordered vertex run from there.
+        var start_vertex = edges[seed_index][0];
+        var start_edge: u32 = @intCast(seed_index);
+        var guard: u32 = 0;
+        while (guard <= edges.len) : (guard += 1) {
+            const info = incident.get(start_vertex) orelse return null;
+            if (info.degree == 1) break; // an open end
+            const other: u32 = if (info.e[0] == start_edge) info.e[1] else info.e[0];
+            if (other == seed_index) break; // came all the way around — closed
+            const e = edges[other];
+            start_vertex = if (e[0] == start_vertex) e[1] else e[0];
+            start_edge = other;
+        }
+        if (guard > edges.len) return null;
+        run.closed = (incident.get(start_vertex) orelse return null).degree == 2;
+        // Emit forward from the start, consuming component edges exactly once.
+        var vertex = start_vertex;
+        var came_from: ?u32 = null;
+        while (true) {
+            if (run.count > BRIDGE_RUN_MAX_EDGES) return null;
+            run.verts[run.count] = vertex;
+            run.count += 1;
+            const info = incident.get(vertex) orelse return null;
+            var next_edge: ?u32 = null;
+            for (info.e[0..info.degree]) |edge_index| {
+                if (came_from != null and edge_index == came_from.?) continue;
+                if (!visited[edge_index]) next_edge = edge_index;
+            }
+            const step = next_edge orelse break;
+            visited[step] = true;
+            run.edge_count += 1;
+            const e = edges[step];
+            const next_vertex = if (e[0] == vertex) e[1] else e[0];
+            if (run.closed and next_vertex == start_vertex) break; // loop closed
+            vertex = next_vertex;
+            came_from = step;
+        }
+        if (run.edge_count == 0) return null;
+        if (run.closed and run.count != run.edge_count) return null;
+        if (!run.closed and run.count != run.edge_count + 1) return null;
+    }
+    if (run_count != 2) return null;
+    if (runs[0].edge_count == 1 and runs[1].edge_count == 1) return null; // classic split-quad territory
+    return .{ .a = runs[0], .b = runs[1] };
+}
+
+/// Ctrl+right-click (req_4271): extrude the current selection TOWARD the clicked
+/// pixel. Face mode measures the click along the selection's aggregate-normal axis
+/// (closest point of the click ray to that axis) and runs the ordinary face extrude
+/// by that signed distance; edge mode decomposes the click into the selected edge's
+/// (outward, face-normal) frame as distance + departure angle. One click, one
+/// journal entry — the exact verbs the Extrude dialog applies, aimed by the mouse.
+pub fn meshTopoExtrudeToScreen(mx: f32, my: f32) bool {
+    g_topo_refusal = "";
+    if (!model_paint.hasTarget()) {
+        topoRefuse("no model is mounted for editing");
+        return false;
+    }
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const ray = model_paint.cameraRay(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
+    switch (mesh_edit.mode()) {
+        .face => {
+            const tri_count = g_edit_count / 3;
+            if (tri_count == 0) {
+                topoRefuse("the mesh has no triangles");
+                return false;
+            }
+            const pos = model_paint.positions() orelse {
+                topoRefuse("the mesh positions are unreadable");
+                return false;
+            };
+            const mask = std.heap.c_allocator.alloc(bool, @max(tri_count, model_paint.faceCount())) catch return false;
+            defer std.heap.c_allocator.free(mask);
+            if (mesh_edit.buildDeleteMask(mask) == 0) {
+                topoRefuse("select the face(s) to extrude first, then ctrl+right-click where the cap should land");
+                return false;
+            }
+            var centroid: [3]f32 = .{ 0, 0, 0 };
+            var normal: [3]f32 = .{ 0, 0, 0 };
+            var selected: f32 = 0;
+            var f: u32 = 0;
+            while (f < tri_count) : (f += 1) {
+                if (!mask[f]) continue;
+                const b = @as(usize, f) * 9;
+                if (b + 9 > pos.len) break;
+                const p0: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
+                const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
+                const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
+                centroid = vadd(centroid, vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0));
+                normal = vadd(normal, vcross(vsub(p1, p0), vsub(p2, p0)));
+                selected += 1;
+            }
+            if (selected == 0) {
+                topoRefuse("select the face(s) to extrude first, then ctrl+right-click where the cap should land");
+                return false;
+            }
+            centroid = vmul(centroid, 1.0 / selected);
+            const normal_length = @sqrt(vdot(normal, normal));
+            if (normal_length <= 1e-9) {
+                topoRefuse("the selected faces have no aggregate direction to extrude along");
+                return false;
+            }
+            normal = vmul(normal, 1.0 / normal_length);
+            // Closest point between the normal axis through the centroid and the click
+            // ray — its signed axis parameter IS the distance the user aimed for.
+            const toward = vsub(centroid, ray.o);
+            const axis_dot_ray = vdot(normal, ray.d);
+            const denom = 1.0 - axis_dot_ray * axis_dot_ray;
+            if (@abs(denom) < 1e-6) {
+                topoRefuse("the view looks straight down the extrude axis — orbit a little and click again");
+                return false;
+            }
+            const distance = (axis_dot_ray * vdot(ray.d, toward) - vdot(normal, toward)) / denom;
+            if (@abs(distance) < 1e-4) {
+                topoRefuse("the click lands on the selection itself — click where the extruded cap should end up");
+                return false;
+            }
+            return meshTopoExtrudeFace(distance, 0);
+        },
+        .edge => {
+            const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse {
+                topoRefuse("extrude-to-cursor needs exactly ONE selected edge");
+                return false;
+            };
+            const frame = mesh_edit.edgeExtrusionFramePub(edge_idx) orelse {
+                topoRefuse("the selected edge has no adjacent surface to derive an extrusion frame from");
+                return false;
+            };
+            const mid = vmul(vadd(frame.a, frame.b), 0.5);
+            const edge_dir = vsub(frame.b, frame.a);
+            const edge_length = @sqrt(vdot(edge_dir, edge_dir));
+            if (edge_length <= 1e-9) {
+                topoRefuse("the selected edge is degenerate");
+                return false;
+            }
+            // The offset lives in the (outward, face-normal) plane whose normal is the
+            // edge direction; the click ray meets that plane at the aimed target.
+            const plane_normal = vmul(edge_dir, 1.0 / edge_length);
+            const along = vdot(ray.d, plane_normal);
+            if (@abs(along) < 1e-6) {
+                topoRefuse("the view looks straight along the selected edge — orbit a little and click again");
+                return false;
+            }
+            const t = vdot(vsub(mid, ray.o), plane_normal) / along;
+            const target = vadd(ray.o, vmul(ray.d, t));
+            const rel = vsub(target, mid);
+            const u = vdot(rel, frame.outward);
+            const v = vdot(rel, frame.face_normal);
+            const distance = @sqrt(u * u + v * v);
+            if (distance < 1e-4) {
+                topoRefuse("the click lands on the edge itself — click where the new edge should end up");
+                return false;
+            }
+            // A click behind the face plane would need >89° of departure; clamp to the
+            // extrusion guard instead of refusing a forgiving one-click gesture.
+            const angle_degrees = std.math.clamp(
+                std.math.radiansToDegrees(std.math.atan2(v, u)),
+                -mesh_edit.ExtrudeTuning.maximum_absolute_angle_degrees,
+                mesh_edit.ExtrudeTuning.maximum_absolute_angle_degrees,
+            );
+            return meshTopoExtrudeEdge(distance, angle_degrees);
+        },
+        else => {
+            topoRefuse("extrude-to-cursor works in Edge or Face select mode");
+            return false;
+        },
+    }
+}
+
 /// Name a Create Face refusal and refuse (req_4205). `meshTopoCreateFaceFromEdges`
 /// answered one bool across two dozen exits, so "Create Face did nothing" was the whole
 /// diagnosis available to the person holding the mouse — and the only way to narrow it
@@ -3603,17 +3821,28 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     if (!model_paint.hasTarget()) return refuseCreateFace("no model is mounted for editing");
     const follow_before = mesh_edit.followSelectedEdgesJson(std.heap.c_allocator, 2);
     defer if (follow_before) |json| std.heap.c_allocator.free(json);
-    var selected: [16]mesh_edit.Edge = undefined;
+    var selected: [BRIDGE_RUN_MAX_EDGES * 2]mesh_edit.Edge = undefined;
     const selected_count = mesh_edit.selectedEdgesPub(selected[0..]);
     if (selected_count < 2 or selected_count > selected.len) {
         g_topo_refusal = std.fmt.bufPrint(
             &g_topo_refusal_buf,
-            "Create Face reads {d} in-scope selected edge(s); it needs 2 to bridge, 3 or 4 to fill a closed loop, and never more than {d}. A plain click REPLACES the selection — the second pick must be additive. An edge selected outside the active part scope is not counted.",
-            .{ selected_count, selected.len },
-        ) catch "Create Face needs 2 to 16 in-scope selected edges";
+            "Create Face reads {d} in-scope selected edge(s); it needs 2 to bridge, 3 or 4 to fill a closed loop, or two matched edge runs (up to {d} edges each) to bridge loop-to-loop. A plain click REPLACES the selection — the second pick must be additive. An edge selected outside the active part scope is not counted.",
+            .{ selected_count, BRIDGE_RUN_MAX_EDGES },
+        ) catch "Create Face needs 2 selected edges, a closed 3/4-edge loop, or two matched edge runs";
         return false;
     }
     const edges = selected[0..@as(usize, @intCast(selected_count))];
+    // Bridge shape (req_4271)? Two disjoint runs claim the bridge path below;
+    // everything else keeps the classic paths — including their old 16-edge ceiling.
+    const bridge_pair = decomposeBridgeRunPair(edges);
+    if (bridge_pair == null and selected_count > 16) {
+        g_topo_refusal = std.fmt.bufPrint(
+            &g_topo_refusal_buf,
+            "Create Face reads {d} in-scope selected edges, which is neither a classic fill (2 edges, or a closed 3/4-edge loop) nor two matched edge runs to bridge — deselect down to one of those shapes.",
+            .{selected_count},
+        ) catch "Create Face: too many selected edges for any fill shape";
+        return false;
+    }
     const agreed_normal = mesh_edit.selectedEdgesReferenceNormalPub();
 
     var logical = LogicalRowsBuilder.init() orelse
@@ -3632,7 +3861,116 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const appended_logical_start = logical.rows.items.len;
 
     var ok = false;
-    if (selected_count == 2) {
+    var bridge_rungs: u32 = 0;
+    if (bridge_pair) |pair| bridge: {
+        if (pair.a.closed != pair.b.closed) {
+            topoRefuse("bridge needs two edge runs of the SAME kind — one selected run is a closed loop and the other is open");
+            break :bridge;
+        }
+        if (pair.a.edge_count != pair.b.edge_count) {
+            g_topo_refusal = std.fmt.bufPrint(
+                &g_topo_refusal_buf,
+                "bridge pairs edges one-to-one: the selected runs carry {d} and {d} edges — add or remove cuts so the counts match",
+                .{ pair.a.edge_count, pair.b.edge_count },
+            ) catch "bridge needs two edge runs with MATCHING edge counts";
+            break :bridge;
+        }
+        const a_run = &pair.a;
+        const b_run = &pair.b;
+        const rungs = a_run.edge_count;
+        // Align run B to run A: the offset (closed runs rotate freely) and direction
+        // with the least total rung length is the tube the user is looking at — any
+        // other pairing is a twisted bridge nobody asked for.
+        var b_index: [BRIDGE_RUN_MAX_EDGES + 1]u32 = undefined;
+        {
+            const n = b_run.count;
+            var best_cost: f32 = std.math.inf(f32);
+            var best_offset: u32 = 0;
+            var best_reverse = false;
+            const offsets: u32 = if (a_run.closed) n else 1;
+            var offset: u32 = 0;
+            while (offset < offsets) : (offset += 1) {
+                for ([2]bool{ false, true }) |reverse| {
+                    var cost: f32 = 0;
+                    var i: u32 = 0;
+                    while (i < a_run.count) : (i += 1) {
+                        const bi = if (a_run.closed)
+                            (if (reverse) (offset + n - (i % n)) % n else (offset + i) % n)
+                        else
+                            (if (reverse) n - 1 - i else i);
+                        cost += dist2(mesh_edit.vertPosPub(a_run.verts[i]), mesh_edit.vertPosPub(b_run.verts[bi]));
+                    }
+                    if (cost < best_cost) {
+                        best_cost = cost;
+                        best_offset = offset;
+                        best_reverse = reverse;
+                    }
+                }
+            }
+            var i: u32 = 0;
+            while (i < a_run.count) : (i += 1) {
+                const bi = if (a_run.closed)
+                    (if (best_reverse) (best_offset + n - (i % n)) % n else (best_offset + i) % n)
+                else
+                    (if (best_reverse) n - 1 - i else i);
+                b_index[i] = b_run.verts[bi];
+            }
+        }
+        // ONE winding decision for the whole strip, from the first rung any authority
+        // resolves — per-rung facing flips would tear the tube at a shading seam.
+        var strip_reversed: ?bool = null;
+        var authority_rung: u32 = 0;
+        while (authority_rung < rungs and strip_reversed == null) : (authority_rung += 1) {
+            const a0 = a_run.verts[authority_rung];
+            const a1 = a_run.verts[(authority_rung + 1) % a_run.count];
+            const b0 = b_index[authority_rung];
+            const b1 = b_index[(authority_rung + 1) % a_run.count];
+            const candidate = [4]u32{ a0, a1, b1, b0 };
+            const reference = agreed_normal orelse
+                mesh_edit.bridgeBoundaryReferenceNormalPub(.{ a0, a1 }, .{ b0, b1 }, candidate) orelse
+                mesh_edit.bridgeCrossReferenceNormalPub(.{ a0, a1 }, .{ b0, b1 }, .{ a0, b0 }, .{ a1, b1 }) orelse
+                continue;
+            const pa = mesh_edit.vertPosPub(a0);
+            const pb = mesh_edit.vertPosPub(a1);
+            const pc = mesh_edit.vertPosPub(b1);
+            const pd = mesh_edit.vertPosPub(b0);
+            const area_normal = vadd(vcross(vsub(pb, pa), vsub(pc, pa)), vcross(vsub(pc, pa), vsub(pd, pa)));
+            strip_reversed = vdot(area_normal, reference) < 0;
+        }
+        const reversed = strip_reversed orelse {
+            topoRefuse("no rung of the bridge could resolve a winding: neither run's boundary circulation nor its surface normals gave an authority — one side is probably inside-out; flip it and retry");
+            break :bridge;
+        };
+        var append_ok = true;
+        var rung: u32 = 0;
+        while (rung < rungs) : (rung += 1) {
+            const a0 = a_run.verts[rung];
+            const a1 = a_run.verts[(rung + 1) % a_run.count];
+            const b0 = b_index[rung];
+            const b1 = b_index[(rung + 1) % a_run.count];
+            const corners = if (reversed) [4]u32{ a0, b0, b1, a1 } else [4]u32{ a0, a1, b1, b0 };
+            const ids = [4]u32{
+                fillCornerLogicalId(&logical, corners[0], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                fillCornerLogicalId(&logical, corners[1], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                fillCornerLogicalId(&logical, corners[2], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+                fillCornerLogicalId(&logical, corners[3], edges) orelse return refuseCreateFaceMissingLogicalRow(),
+            };
+            append_ok = appendQuadSplitLogical(
+                &verts,
+                &logical,
+                mesh_edit.vertPosPub(corners[0]),
+                mesh_edit.vertPosPub(corners[1]),
+                mesh_edit.vertPosPub(corners[2]),
+                mesh_edit.vertPosPub(corners[3]),
+                ids,
+            );
+            if (!append_ok) break;
+        }
+        if (append_ok) {
+            ok = true;
+            bridge_rungs = rungs;
+        } else topoRefuse("a bridge rung resolved its winding but its quad could not be appended");
+    } else if (selected_count == 2) {
         if (!edgeSharesVertex(edges[0], edges[1])) {
             const a = mesh_edit.vertPosPub(edges[0][0]);
             const b = mesh_edit.vertPosPub(edges[0][1]);
@@ -3745,6 +4083,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     // Triangle count of the SOURCE face alone — the twin appends below repeat it, and
     // grouping/focus must treat each copy as its own authored face (req_3804).
     const source_tris: u32 = @intCast((verts.items.len - @as(usize, g_edit_count) * 8) / 24);
+    // A bridge strip is MANY authored faces: each rung quad (2 triangles) gets its
+    // own group id in adoption, exactly as if the user had created them one by one.
+    const tris_per_authored_face: u32 = if (bridge_rungs > 0) 2 else source_tris;
     // Mirror (req_3797): bridge the twin edges too — the appended face rows reflect
     // across the plane with reversed winding, one copy per enabled subset whose twin
     // vertices and edges all exist in the same part.
@@ -3840,7 +4181,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added, logical_replacement);
     if (replaced) {
-        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part, source_tris)) {
+        if (!adoptAppendedFaces(old_groups, old_parts, old_faces, src_part, tris_per_authored_face)) {
             if (snap) |*before| _ = journalInstall(before);
             journalDiscard(&snap);
             return refuseCreateFace("the fill landed but could not be adopted into an authored face group / Outliner part, so it was rolled back");
@@ -3857,8 +4198,20 @@ pub fn meshTopoCreateFaceFromEdges() bool {
         g_retopo_pending_band_generation = 0;
         // Create Face hands the next edit to its result: Face mode + exactly the new
         // SOURCE face selected (a mirror twin is its own authored face and follows
-        // bilaterally), so X can reverse an unlucky winding immediately.
-        _ = mesh_edit.focusCreatedFace(old_faces, source_tris);
+        // bilaterally), so X can reverse an unlucky winding immediately. A bridge
+        // keeps its WHOLE strip selected — one X still flips every rung together.
+        if (bridge_rungs > 0) {
+            const fc = g_edit_count / 3;
+            const strip_mask: ?[]bool = std.heap.c_allocator.alloc(bool, fc) catch null;
+            if (strip_mask) |mask_buf| {
+                defer std.heap.c_allocator.free(mask_buf);
+                @memset(mask_buf, false);
+                var t: u32 = old_faces;
+                const strip_end = @min(fc, old_faces + source_tris);
+                while (t < strip_end) : (t += 1) mask_buf[t] = true;
+                _ = mesh_edit.selectFacesByTriangleMask(mask_buf);
+            }
+        } else _ = mesh_edit.focusCreatedFace(old_faces, source_tris);
         journalCommit(&snap);
         if (follow_before) |before| {
             if (mesh_edit.followPatchJson(std.heap.c_allocator, null, 2)) |after| {
@@ -3953,43 +4306,16 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     }
     const groups = captureFaceGroups() orelse return;
     defer std.heap.c_allocator.free(groups);
-    const new_groups = std.heap.c_allocator.alloc(u32, fc) catch return;
-    defer std.heap.c_allocator.free(new_groups);
-    // Every valid owner is rewritten below. Keeping a defined fallback makes this
-    // transaction fail closed if a future ownership class is added without a pass.
-    @memcpy(new_groups, groups);
-    var ranges: std.ArrayListUnmanaged(u32) = .empty;
-    defer ranges.deinit(std.heap.c_allocator);
-
-    var next: u32 = 0;
-    var p: u32 = 0;
-    while (p <= part_count) : (p += 1) { // the extra pass sweeps NO_PART faces
-        const want: u32 = if (p == part_count) model_source.NO_PART else p;
-        const start = next;
-        var remap = std.AutoHashMapUnmanaged(u32, u32){};
-        defer remap.deinit(std.heap.c_allocator);
-        var f: u32 = 0;
-        while (f < fc) : (f += 1) {
-            if (face_part[f] != want) continue;
-            if (groups[f] == model_source.NO_FACE_GROUP) {
-                new_groups[f] = groups[f];
-                continue;
-            }
-            const gop = remap.getOrPut(std.heap.c_allocator, groups[f]) catch return;
-            if (!gop.found_existing) {
-                gop.value_ptr.* = next;
-                next += 1;
-            }
-            new_groups[f] = gop.value_ptr.*;
-        }
-        if (p < part_count) {
-            ranges.append(std.heap.c_allocator, start) catch return;
-            ranges.append(std.heap.c_allocator, next) catch return;
-        }
-    }
-    model_source.setFaceGroups(new_groups);
-    model_source.setPartRanges(ranges.items);
-    if (old_ranges) |old| _ = mesh_edit.rebaseEditScopePartRanges(old, ranges.items);
+    var partition = indexed_edit_mesh.partitionFaceGroupsByPart(
+        std.heap.c_allocator,
+        groups,
+        face_part[0..fc],
+        part_count,
+    ) catch return;
+    defer partition.deinit(std.heap.c_allocator);
+    model_source.setFaceGroups(partition.groups);
+    model_source.setPartRanges(partition.ranges);
+    if (old_ranges) |old| _ = mesh_edit.rebaseEditScopePartRanges(old, partition.ranges);
     clearIndexedEditMesh();
     mesh_edit.reset(); // part membership moved → weld/scope masks are stale
     _ = refreshPaintLayout(); // islands key off the grouping
@@ -4316,7 +4642,7 @@ const LcSession = struct {
     lo: [2]f32, // selected-face extent along each cut direction (dot-space)
     hi: [2]f32,
     keep_group: u32, // clicked face's group id — its −side piece re-selects after commit
-    keep_part: u32, // part owning that face — a colliding group can never select a sibling
+    keep_face_id: u32, // stable indexed face id of the retained −side piece
     snap: ?JournalEntry,
     // Overlay visibility (req_2625): the selection's world centroid at begin anchors
     // the handle; last_planes is a visual guide, not the cutting algorithm.
@@ -4586,7 +4912,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
         .lo = seed.lo,
         .hi = seed.hi,
         .keep_group = seed.keep_group,
-        .keep_part = seed.part,
+        .keep_face_id = seed.face_id,
         .snap = journalSnapshotCurrent(if (basic) "cut" else "loop cut"),
         .sel_center = seed.center,
     };
@@ -4670,6 +4996,10 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     }
     const install_groups: ?[]const u32 = if (s.base_groups != null) lowered.groups else null;
     if (!lcInstallLowered(lowered.positions, lowered.uvs, lowered.tri_count, install_groups, lowered.materials, lowered.semantic_regions, lowered.semantic_instances, colors, flattenedLogicalRows(lowered.triangle_vertices), @intCast(preview.vertices.items.len))) return false;
+    // The cut mints fresh authored groups above the document's existing ids. Until
+    // commit those ids still need to belong to the source Outliner part; otherwise
+    // face/edge overlays obey the old range and show only the retained first strip.
+    if (s.last_face_part) |face_part| renormalizePartRanges(face_part, s.part_count);
     if (s.last_mesh) |*mesh| mesh.deinit();
     s.last_mesh = preview;
     preview = .{ .allocator = std.heap.c_allocator };
@@ -4698,20 +5028,21 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     if (commit and s.last_preview_ok) {
         journalCommit(&s.snap);
         // Renormalize the minted +side group ids back into their parts' contiguous
-        // ranges (req_2644) — remember a face carrying the clicked face's group FIRST
-        // so the −side re-select below survives the renumber.
+        // ranges (req_2644). The stable indexed face id, not a pre-normalization group
+        // number, identifies the retained −side piece for re-selection.
         const fp: ?[]const u32 = if (s.last_face_part) |p| p else if (s.base_face_part) |p| p else null;
         var keep_face: ?u32 = null;
-        if (s.keep_group != model_source.NO_FACE_GROUP) {
-            const fc = g_edit_count / 3;
-            var f: u32 = 0;
-            while (f < fc) : (f += 1) {
-                const part_matches = s.keep_part == model_source.NO_PART or fp == null or fp.?[f] == s.keep_part;
-                if (part_matches and model_source.faceGroupOf(f) == s.keep_group) {
-                    keep_face = f;
-                    break;
+        if (s.last_mesh) |*mesh| {
+            if (mesh.lower()) |lowered_value| {
+                var lowered = lowered_value;
+                defer lowered.deinit();
+                for (lowered.face_ids, 0..) |face_id, triangle| {
+                    if (face_id == s.keep_face_id) {
+                        keep_face = @intCast(triangle);
+                        break;
+                    }
                 }
-            }
+            } else |_| {}
         }
         if (fp) |face_part| renormalizePartRanges(face_part, s.part_count);
         if (s.last_mesh) |*mesh| {
@@ -4738,6 +5069,7 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
             ok = false;
         }
         if (ok) {
+            if (s.base_face_part) |face_part| renormalizePartRanges(face_part, s.part_count);
             if (s.base_mesh.clone()) |restored_value| {
                 var restored = restored_value;
                 defer restored.deinit();
@@ -4794,6 +5126,205 @@ pub fn meshLcState() ?LcState {
 pub fn meshLcFallbackReason() ?[]const u8 {
     const sp: *const LcSession = if (g_lc) |*p| p else return null;
     return sp.last_reason;
+}
+
+// ── Marquee-projected cut (req_4271) ─────────────────────────────────────────────
+// Ctrl+drag a screen rectangle over a face: the four marquee edges project through
+// the camera onto the face as four cut lines (screen rect → corner rays → planes →
+// intersect the face), the face splits along every line that crosses it, and the
+// cells inside the rectangle come back SELECTED — the desktop-icon sweep, as a cut.
+
+/// The plane through the camera eye containing the rays of two viewport points,
+/// oriented so the marquee interior (probed by `inside`) is the positive side.
+fn marqueePlane(
+    cam: model_paint.Camera,
+    a: [2]f32,
+    b: [2]f32,
+    inside: [2]f32,
+) ?struct { normal: [3]f32, offset: f32 } {
+    const ray_a = model_paint.cameraRay(cam, g_paint_vp_w, g_paint_vp_h, a[0], a[1]);
+    const ray_b = model_paint.cameraRay(cam, g_paint_vp_w, g_paint_vp_h, b[0], b[1]);
+    var normal = vcross(ray_a.d, ray_b.d);
+    const length = @sqrt(vdot(normal, normal));
+    if (length <= 1e-9) return null;
+    normal = vmul(normal, 1.0 / length);
+    const ray_inside = model_paint.cameraRay(cam, g_paint_vp_w, g_paint_vp_h, inside[0], inside[1]);
+    if (vdot(normal, ray_inside.d) < 0) normal = vmul(normal, -1);
+    return .{ .normal = normal, .offset = vdot(normal, cam.eye) };
+}
+
+/// One-shot verb: cut the authored face under the marquee centre by the marquee's
+/// four projected edge planes and select the inside cells. One journal entry
+/// ("marquee cut"); every refusal names itself in the topo-refusal slot.
+pub fn meshTopoMarqueeCut(x0_raw: f32, y0_raw: f32, x1_raw: f32, y1_raw: f32) bool {
+    g_topo_refusal = "";
+    if (!model_paint.hasTarget()) {
+        topoRefuse("no model is mounted for editing");
+        return false;
+    }
+    if (meshLcActive()) {
+        topoRefuse("a topology popup session is open — close it before cutting");
+        return false;
+    }
+    if (mesh_edit.mode() != .face) {
+        topoRefuse("marquee cut works in FACE select mode");
+        return false;
+    }
+    const x0 = @min(x0_raw, x1_raw);
+    const x1 = @max(x0_raw, x1_raw);
+    const y0 = @min(y0_raw, y1_raw);
+    const y1 = @max(y0_raw, y1_raw);
+    if (x1 - x0 < 3 or y1 - y0 < 3) {
+        topoRefuse("the marquee is too small to cut with — drag a real rectangle");
+        return false;
+    }
+    const verts = g_edit_verts orelse {
+        topoRefuse("no editable mesh is resident");
+        return false;
+    };
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) {
+        topoRefuse("the mesh has no triangles");
+        return false;
+    }
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const lx0 = vpLocalX(x0);
+    const lx1 = vpLocalX(x1);
+    const ly0 = vpLocalY(y0);
+    const ly1 = vpLocalY(y1);
+    const center: [2]f32 = .{ (lx0 + lx1) * 0.5, (ly0 + ly1) * 0.5 };
+    const seed_pick = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, center[0], center[1]);
+    if (seed_pick < 0) {
+        topoRefuse("the marquee centre must land on the face to cut — sweep the rectangle over one face");
+        return false;
+    }
+    const seed_tri: u32 = @intCast(seed_pick);
+    if (!mesh_edit.faceInScopePub(seed_tri)) {
+        topoRefuse("the face under the marquee centre is outside the focused part's scope");
+        return false;
+    }
+
+    // Capture the indexed base — the same boundary every cut session trusts.
+    var groups: ?[]u32 = null;
+    defer if (groups) |g| std.heap.c_allocator.free(g);
+    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
+        const g = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+        var i: u32 = 0;
+        while (i < tri_count) : (i += 1) g[i] = model_source.faceGroupOf(i);
+        groups = g;
+    }
+    const base_colors = collectCurrentFaceColors() orelse {
+        topoRefuse("per-face colour capture failed");
+        return false;
+    };
+    defer std.heap.c_allocator.free(base_colors);
+    const base_face_part = capturePartOfFaces();
+    defer if (base_face_part) |p| std.heap.c_allocator.free(p);
+    const part_count = hostPartCount();
+    const groups_arg: ?[]const u32 = if (groups) |g| g else null;
+    const parts_arg: ?[]const u32 = if (base_face_part) |p| p else null;
+    var cut_mesh = cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse {
+        topoRefuse("the resident mesh could not be indexed for cutting");
+        return false;
+    };
+    defer cut_mesh.deinit();
+
+    // The authored face under the marquee centre is the cut target; every piece a
+    // plane splits off joins the family so the next plane cuts the pieces too.
+    var family = std.ArrayListUnmanaged(u32).empty;
+    defer family.deinit(std.heap.c_allocator);
+    seed: for (cut_mesh.faces.items) |*face| {
+        if (!face.alive) continue;
+        for (face.source_triangles.items) |tri| {
+            if (tri == seed_tri) {
+                family.append(std.heap.c_allocator, face.id) catch return false;
+                break :seed;
+            }
+        }
+    }
+    if (family.items.len == 0) {
+        topoRefuse("the face under the marquee centre could not be found in the indexed mesh");
+        return false;
+    }
+
+    const edge_pairs = [4][2][2]f32{
+        .{ .{ lx0, ly0 }, .{ lx0, ly1 } }, // left
+        .{ .{ lx1, ly0 }, .{ lx1, ly1 } }, // right
+        .{ .{ lx0, ly0 }, .{ lx1, ly0 } }, // top
+        .{ .{ lx0, ly1 }, .{ lx1, ly1 } }, // bottom
+    };
+    var changed: u32 = 0;
+    for (edge_pairs) |pair| {
+        const plane = marqueePlane(cam, pair[0], pair[1], center) orelse continue;
+        var minted = std.AutoHashMapUnmanaged(u64, u32).empty;
+        defer minted.deinit(std.heap.c_allocator);
+        changed += cut_mesh.cutFamilyByPlane(&family, plane.normal, plane.offset, &minted) catch {
+            topoRefuse("the marquee cut ran out of memory mid-plane and left the resident mesh untouched");
+            return false;
+        };
+    }
+    if (changed == 0) {
+        topoRefuse("no marquee edge crosses the target face — drag the rectangle so it overlaps the face's interior");
+        return false;
+    }
+
+    var lowered = cut_mesh.lower() catch {
+        topoRefuse("the cut result could not be lowered for rendering");
+        return false;
+    };
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) {
+        topoRefuse("the cut pieces could not inherit their face colours");
+        return false;
+    }
+
+    var snap = journalSnapshotCurrent("marquee cut");
+    const install_groups: ?[]const u32 = if (groups != null) lowered.groups else null;
+    if (!lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        install_groups,
+        lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
+        colors,
+        flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(cut_mesh.vertices.items.len),
+    )) {
+        journalDiscard(&snap);
+        topoRefuse("the cut result was refused by the resident install");
+        return false;
+    }
+    journalCommit(&snap);
+    if (part_count > 0) renormalizePartRanges(lowered.parts, part_count);
+    adoptIndexedEditMesh(&cut_mesh, &lowered);
+
+    // The sweep's point: the cells INSIDE the rectangle come back selected, ready
+    // to delete (the cutout), extrude, or paint.
+    const inside_mask: ?[]bool = std.heap.c_allocator.alloc(bool, lowered.tri_count) catch null;
+    if (inside_mask) |mask_buf| {
+        defer std.heap.c_allocator.free(mask_buf);
+        @memset(mask_buf, false);
+        var tri: u32 = 0;
+        while (tri < lowered.tri_count) : (tri += 1) {
+            var in_family = false;
+            for (family.items) |face_id| in_family = in_family or lowered.face_ids[tri] == face_id;
+            if (!in_family) continue;
+            const b = @as(usize, tri) * 9;
+            const centroid: [3]f32 = .{
+                (lowered.positions[b + 0] + lowered.positions[b + 3] + lowered.positions[b + 6]) / 3.0,
+                (lowered.positions[b + 1] + lowered.positions[b + 4] + lowered.positions[b + 7]) / 3.0,
+                (lowered.positions[b + 2] + lowered.positions[b + 5] + lowered.positions[b + 8]) / 3.0,
+            };
+            const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, centroid) orelse continue;
+            if (sp[0] >= lx0 and sp[0] <= lx1 and sp[1] >= ly0 and sp[1] <= ly1) mask_buf[tri] = true;
+        }
+        _ = mesh_edit.selectFacesByTriangleMask(mask_buf);
+    }
+    return true;
 }
 
 // ── Bevel: one indexed target or one open boundary loop, host-owned session ───
@@ -11569,12 +12100,36 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
     return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my), additive);
 }
 
+/// Ctrl+click pick (req_4271): in edge mode, select the whole edge path through the
+/// clicked edge, cycling loop → ring → single edge on repeat clicks. Other modes fall
+/// through to the ordinary pick inside mesh_edit.pathPick.
+pub fn meshEditPathPick(mx: f32, my: f32, additive: bool) i32 {
+    if (g_paint_session) return -1; // paint owns the surface — no selection gestures (req_2662)
+    if (!model_paint.hasTarget()) return -1;
+    if (g_historical_preview.active != null) return meshEditPick(mx, my, additive);
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    return mesh_edit.pathPick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my), additive);
+}
+
+/// Ctrl+I (req_4271): invert the current mode's selection within the active scope.
+pub fn meshEditInvert() i32 {
+    if (g_paint_session) return -1;
+    if (!model_paint.hasTarget()) return -1;
+    return mesh_edit.invertSelection();
+}
+
+/// Live selection count in the current mode — the engine's cheap "is there anything
+/// selected" probe before it claims a ctrl+right-click for extrude-to-cursor.
+pub fn meshEditSelectionCount() u32 {
+    return mesh_edit.selCount();
+}
+
 // ── Character Rig Inspect resident presentation ───────────────────────────
 // The skeleton session publishes one ephemeral FK/weight view after each
 // revision. GPU owns the durable copies, render-corner expansion, heatmap
 // palette, native overlay, and screen-space picking. Nothing here is model data.
-pub const CHARACTER_RIG_SKIN_HOST_KEY = "__character_rig_deformed";
-const CHARACTER_RIG_BONE_COUNT = character_rig_session.canonical_humanoid.HUMANOID_V1_BONE_IDS.len;
+pub const CHARACTER_RIG_SKIN_HOST_KEY = character_specimen.RESIDENT_DEFORMED_SKIN_HOST_KEY;
+const CHARACTER_RIG_BONE_CAP = character_rig_session.MAX_BONES;
 const CHARACTER_RIG_NAME_BYTES = 64;
 const CHARACTER_RIG_PALETTE_FLOATS = 20;
 const CHARACTER_RIG_JOINT_HIT_RADIUS_PX: f32 = 14;
@@ -11610,11 +12165,12 @@ const CharacterRigGpuState = struct {
     joint_editable: bool = false,
     specimen_separation: f32 = 0,
     axis_length: f32 = 0.08,
-    bones: [CHARACTER_RIG_BONE_COUNT]CharacterRigGpuBone = @splat(.{}),
-    bind_global: [CHARACTER_RIG_BONE_COUNT][16]f32 = undefined,
-    pose_global: [CHARACTER_RIG_BONE_COUNT][16]f32 = undefined,
-    skin_matrices: [CHARACTER_RIG_BONE_COUNT][16]f32 = undefined,
-    palette: [CHARACTER_RIG_BONE_COUNT * CHARACTER_RIG_PALETTE_FLOATS]f32 = @splat(0),
+    bone_count: u16 = 0,
+    bones: [CHARACTER_RIG_BONE_CAP]CharacterRigGpuBone = @splat(.{}),
+    bind_global: [CHARACTER_RIG_BONE_CAP][16]f32 = undefined,
+    pose_global: [CHARACTER_RIG_BONE_CAP][16]f32 = undefined,
+    skin_matrices: [CHARACTER_RIG_BONE_CAP][16]f32 = undefined,
+    palette: [CHARACTER_RIG_BONE_CAP * CHARACTER_RIG_PALETTE_FLOATS]f32 = @splat(0),
 };
 
 var g_character_rig: CharacterRigGpuState = .{};
@@ -11749,10 +12305,10 @@ fn characterRigFrameSpecimens(state: *const character_rig_session.RigViewportSta
 }
 
 pub fn characterRigSyncViewport(state: *const character_rig_session.RigViewportState) void {
-    if (state.bones.len != CHARACTER_RIG_BONE_COUNT or
-        state.bind_global.len != CHARACTER_RIG_BONE_COUNT or
-        state.pose_global.len != CHARACTER_RIG_BONE_COUNT or
-        state.skin_matrices.len != CHARACTER_RIG_BONE_COUNT)
+    if (state.bones.len == 0 or state.bones.len > CHARACTER_RIG_BONE_CAP or
+        state.bind_global.len != state.bones.len or
+        state.pose_global.len != state.bones.len or
+        state.skin_matrices.len != state.bones.len)
     {
         characterRigClearViewport();
         return;
@@ -11769,6 +12325,7 @@ pub fn characterRigSyncViewport(state: *const character_rig_session.RigViewportS
     g_character_rig.heatmap = state.heatmap;
     g_character_rig.selected_bone = state.selected_bone;
     g_character_rig.joint_editable = state.joint_editable;
+    g_character_rig.bone_count = @intCast(state.bones.len);
     if (!state.joint_editable) g_character_rig_gizmo = .{};
     g_character_rig.specimen_separation = state.specimen_separation;
 
@@ -11824,14 +12381,18 @@ const CharacterRigSkinSource = struct {
 };
 
 fn characterRigSkinSource(node_key: []const u8) ?CharacterRigSkinSource {
-    if (!g_character_rig.active or !g_character_rig.has_skin or !g_character_rig.deformed_mesh or
-        !std.mem.eql(u8, node_key, CHARACTER_RIG_SKIN_HOST_KEY)) return null;
+    if (!character_specimen.ownsResidentViewportCamera(
+        node_key,
+        g_character_rig.active,
+        g_character_rig.has_skin,
+        g_character_rig.deformed_mesh,
+    )) return null;
     return .{
         .key = g_character_rig.skin_key[0..g_character_rig.skin_key_len],
         .vertices = g_character_rig.skin_vertices.?,
         .vertex_count = g_character_rig.skin_vertex_count,
-        .palette = &g_character_rig.palette,
-        .bone_count = CHARACTER_RIG_BONE_COUNT,
+        .palette = g_character_rig.palette[0 .. @as(usize, g_character_rig.bone_count) * CHARACTER_RIG_PALETTE_FLOATS],
+        .bone_count = g_character_rig.bone_count,
     };
 }
 
@@ -11998,7 +12559,7 @@ pub fn characterRigGizmoEnd() ?CharacterRigGizmoCommit {
 
 fn characterRigDrawSkeleton(
     cam: model_paint.Camera,
-    matrices: *const [CHARACTER_RIG_BONE_COUNT][16]f32,
+    matrices: *const [CHARACTER_RIG_BONE_CAP][16]f32,
     x_offset: f32,
     ox: f32,
     oy: f32,
@@ -12006,7 +12567,7 @@ fn characterRigDrawSkeleton(
 ) void {
     // Parent-child/terminal segments first, then origins, so every joint sphere
     // remains inspectable over its connected lines.
-    for (g_character_rig.bones, 0..) |bone, index| {
+    for (g_character_rig.bones[0..g_character_rig.bone_count], 0..) |bone, index| {
         const origin = characterRigOrigin(matrices[index], x_offset);
         const endpoint = if (bone.parent_index) |parent_index|
             characterRigOrigin(matrices[parent_index], x_offset)
@@ -12022,7 +12583,7 @@ fn characterRigDrawSkeleton(
             overlayLine(a[0], a[1], tip_screen[0], tip_screen[1], base_color[0], base_color[1], base_color[2], 2.2);
         }
     }
-    for (g_character_rig.bones, 0..) |_, index| {
+    for (g_character_rig.bones[0..g_character_rig.bone_count], 0..) |_, index| {
         const origin = characterRigOrigin(matrices[index], x_offset);
         const screen = ovProject(cam, origin, ox, oy) orelse continue;
         const selected = g_character_rig.selected_bone != null and g_character_rig.selected_bone.? == index;
@@ -12046,7 +12607,7 @@ fn characterRigDrawSkeleton(
 
 fn characterRigDrawHoveredName(
     cam: model_paint.Camera,
-    matrices: *const [CHARACTER_RIG_BONE_COUNT][16]f32,
+    matrices: *const [CHARACTER_RIG_BONE_CAP][16]f32,
     x_offset: f32,
     ox: f32,
     oy: f32,
@@ -12060,12 +12621,13 @@ fn characterRigDrawHoveredName(
         hovered,
     )) return;
     const index: usize = hovered.bone_index;
-    if (index >= g_character_rig.bones.len) return;
+    if (index >= g_character_rig.bone_count) return;
     const bone = g_character_rig.bones[index];
     const screen = ovProject(cam, characterRigOrigin(matrices[index], x_offset), ox, oy) orelse return;
     const status = switch (bone.fit_source) {
         .boundary => "B",
         .template => "T",
+        .external => "E",
         .manual => "M",
     };
     var label_buffer: [CHARACTER_RIG_NAME_BYTES + 6]u8 = undefined;
@@ -12136,14 +12698,14 @@ fn drawCharacterRigOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
 
 fn characterRigBoneHitInSkeleton(
     cam: model_paint.Camera,
-    matrices: *const [CHARACTER_RIG_BONE_COUNT][16]f32,
+    matrices: *const [CHARACTER_RIG_BONE_CAP][16]f32,
     x_offset: f32,
     mx: f32,
     my: f32,
     best_distance: *f32,
     best_index: *?u8,
 ) void {
-    for (g_character_rig.bones, 0..) |bone, index| {
+    for (g_character_rig.bones[0..g_character_rig.bone_count], 0..) |bone, index| {
         const origin = ovProject(cam, characterRigOrigin(matrices[index], x_offset), g_paint_vp_x, g_paint_vp_y) orelse continue;
         const dx = origin[0] - mx;
         const dy = origin[1] - my;
@@ -12169,7 +12731,7 @@ fn characterRigBoneHitInSkeleton(
 
 fn characterRigJointHoverInSkeleton(
     cam: model_paint.Camera,
-    matrices: *const [CHARACTER_RIG_BONE_COUNT][16]f32,
+    matrices: *const [CHARACTER_RIG_BONE_CAP][16]f32,
     x_offset: f32,
     specimen: character_specimen.RigSpecimen,
     mx: f32,
@@ -12177,7 +12739,7 @@ fn characterRigJointHoverInSkeleton(
     best_distance: *f32,
     best_target: *?character_specimen.HoveredJoint,
 ) void {
-    for (g_character_rig.bones, 0..) |_, index| {
+    for (g_character_rig.bones[0..g_character_rig.bone_count], 0..) |_, index| {
         const origin = ovProject(cam, characterRigOrigin(matrices[index], x_offset), g_paint_vp_x, g_paint_vp_y) orelse continue;
         const dx = origin[0] - mx;
         const dy = origin[1] - my;
@@ -14660,6 +15222,58 @@ pub fn meshSemanticNamePrimitive(
     return true;
 }
 
+/// Stamp stable anatomy regions over complete outliner part ranges in one
+/// journal transaction. `stamps` is a packed [lo, hi, region] sequence whose
+/// group intervals must be ordered and disjoint. The caller owns the semantic
+/// dictionary; native code owns face membership and refuses partial/ambiguous
+/// range input rather than selecting through the UI.
+pub fn meshSemanticStampPartRanges(stamps: []const u32, table_json: []const u8) i32 {
+    if (!residentMutationAllowed(.durable_channels)) return -1;
+    if (stamps.len == 0 or stamps.len % 3 != 0 or !model_paint.hasTarget()) return -1;
+    if (g_hidden_groups.items.len != 0) return -1;
+    const face_count: usize = @intCast(g_edit_count / 3);
+    if (face_count == 0 or model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return -1;
+    var previous_hi: u32 = 0;
+    for (0..stamps.len / 3) |index| {
+        const lo = stamps[index * 3];
+        const hi = stamps[index * 3 + 1];
+        const region = stamps[index * 3 + 2];
+        if (hi <= lo or (index != 0 and lo < previous_hi) or region == model_source.NO_SEMANTIC_ID) return -1;
+        previous_hi = hi;
+    }
+    var rows = captureFaceSemantics(@intCast(face_count)) orelse return -1;
+    defer rows.deinit();
+    var changed: u32 = 0;
+    var matched = jalloc.alloc(bool, stamps.len / 3) catch return -1;
+    defer jalloc.free(matched);
+    @memset(matched, false);
+    for (0..face_count) |face| {
+        const group = model_source.faceGroupOf(@intCast(face));
+        for (0..stamps.len / 3) |index| {
+            const lo = stamps[index * 3];
+            const hi = stamps[index * 3 + 1];
+            if (group < lo or group >= hi) continue;
+            const region = stamps[index * 3 + 2];
+            matched[index] = true;
+            if (rows.regions[face] != region or rows.instances[face] != 0) {
+                rows.regions[face] = region;
+                rows.instances[face] = 0;
+                changed += 1;
+            }
+            break;
+        }
+    }
+    for (matched) |present| if (!present) return -1;
+    var snap = journalSnapshotCurrent("stamp humanoid part roles");
+    if (!model_source.setSemanticState(rows.regions, rows.instances, table_json)) {
+        journalDiscard(&snap);
+        return -1;
+    }
+    clearIndexedEditMesh();
+    journalCommit(&snap);
+    return @intCast(changed);
+}
+
 const SemanticPerceptAggregate = struct {
     faces: u32 = 0,
     instances: u32 = 0,
@@ -14729,6 +15343,9 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
     const regions = model_source.faceSemanticRegions();
     const instances = model_source.faceSemanticInstances();
     const face_count: usize = @intCast(g_edit_count / 3);
+    const face_groups = captureFaceGroups() orelse return null;
+    defer std.heap.c_allocator.free(face_groups);
+    const authored_faces = mesh_edit.authoredFaceCountFromGroups(face_groups) orelse return null;
     var aggregates = std.AutoHashMapUnmanaged(u32, SemanticPerceptAggregate).empty;
     defer aggregates.deinit(allocator);
     var instance_keys = std.AutoHashMapUnmanaged(u64, void).empty;
@@ -14789,9 +15406,10 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var head_buf: [384]u8 = undefined;
-    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"unnamed\":{d},\"hiddenFaces\":{d},\"hiddenNamedFaces\":{d},\"hiddenRegions\":{d},\"auditComputed\":{s},\"intersectingFaces\":{d},\"unreachableFaces\":{d},\"auditDirections\":{d},\"regions\":[", .{
+    const head = std.fmt.bufPrint(&head_buf, "{{\"version\":1,\"generation\":{d},\"faces\":{d},\"authoredFaces\":{d},\"unnamed\":{d},\"hiddenFaces\":{d},\"hiddenNamedFaces\":{d},\"hiddenRegions\":{d},\"auditComputed\":{s},\"intersectingFaces\":{d},\"unreachableFaces\":{d},\"auditDirections\":{d},\"regions\":[", .{
         g_edit_generation,
         face_count,
+        authored_faces,
         unnamed,
         hidden_faces,
         hidden_named_faces,
@@ -19980,9 +20598,18 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     // never match.)
     var scene_holds_target = false;
     for (scene_node.children) |*child| {
-        const gk = child.scene3d_geom_key orelse continue;
-        const key_hash = hashKey(gk);
-        if (model_paint.isTarget(key_hash) or (g_edit_key_hash != 0 and key_hash == g_edit_key_hash)) {
+        const owns_static_target = if (child.scene3d_geom_key) |geometry_key| blk: {
+            const key_hash = hashKey(geometry_key);
+            break :blk model_paint.isTarget(key_hash) or
+                (g_edit_key_hash != 0 and key_hash == g_edit_key_hash);
+        } else false;
+        const owns_deformed_target = character_specimen.ownsResidentViewportCamera(
+            child.scene3d_skin_geom_key,
+            g_character_rig.active,
+            g_character_rig.has_skin,
+            g_character_rig.deformed_mesh,
+        );
+        if (owns_static_target or owns_deformed_target) {
             scene_holds_target = true;
             break;
         }

@@ -387,7 +387,7 @@ const effects = if (HAS_EFFECTS) @import("gpu/effects.zig") else struct {
 const paintable = if (HAS_EFFECTS) @import("gpu/paintable.zig") else struct {
     pub fn drainAll() void {}
 };
-const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
+const r3d = if (HAS_3D) @import("dev_modules/scene3d_runtime.zig") else struct {
     pub fn render(_: std.Io, _: *const std.process.Environ.Map, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
@@ -465,7 +465,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshSetMarquee(_: f32, _: f32, _: f32, _: f32) void {}
     pub fn meshClearMarquee() void {}
 };
-const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("world_loader.zig") else struct {
+const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("dev_modules/game_runtime.zig") else struct {
     pub fn renderEmbedded(_: std.Io, _: *const std.process.Environ.Map, _: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }
@@ -855,12 +855,18 @@ var me_selecting: bool = false; // left held in a select mode (pick on press, ma
 var me_panning: bool = false; // left held with the Focus tool
 var me_gizmo_dragging: bool = false; // left held on a transform gizmo handle
 var me_gizmo_axis: i32 = -1;
+var me_character_rig_gizmo_dragging: bool = false;
 var me_bd_dragging: bool = false; // left held on the backdrop move gizmo (req_3080)
 var me_lc_dragging: bool = false; // left held on the loop-cut plane handle (req_2625 DD)
 var me_marquee: bool = false; // the select press travelled → became a marquee
 var me_down_x: f32 = 0;
 var me_down_y: f32 = 0;
 var me_shift: bool = false;
+// Ctrl-qualified gestures (req_4271): ctrl+click in edge mode path-picks (loop/ring
+// cycling); ctrl+drag in face mode arms the marquee-projected CUT — the press defers
+// its pick so a cut sweep never mutates the selection first.
+var me_ctrl: bool = false;
+var me_cut_armed: bool = false; // ctrl was down on a face-mode press → a drag cuts
 
 // A hit is "chrome" (handle it normally) if it's an interactive control or
 // pointer blocker. Everything else under the cursor (Scene3D, empty space) is
@@ -4298,8 +4304,10 @@ pub fn run(config_in: AppConfig) !void {
 
     // Main loop
     var running = true;
-    var fps_frames: u32 = 0;
     var fps_last: u64 = c.SDL_GetTicks();
+    var fps_previous_frame_us: i64 = 0;
+    var fps_interval_count: u32 = 0;
+    var fps_interval_elapsed_us: u64 = 0;
     // Last time stderr telemetry was printed. Separate from fps_last so the
     // in-memory bucket still flips every second (drives per-second averages)
     // but the stderr line only actually prints every 10s.
@@ -4453,6 +4461,46 @@ pub fn run(config_in: AppConfig) !void {
                         // actually uses; check those walkers directly so a value control always
                         // wins instead of being eaten by the mesh-editor select/pan (req_2511).
                         const on_value_ctl = hitTestSlider(config.root, mx, my) != null or hitTestScrollbar(config.root, mx, my) != null;
+                        if (r3d.characterRigActive() and event.button.button == c.SDL_BUTTON_LEFT and
+                            !on_value_ctl and !meHitIsChrome(layout.hitTest(config.root, mx, my)))
+                        {
+                            input.unfocus();
+                            const rig_gizmo_hit = r3d.characterRigGizmoHit(mx, my);
+                            if (rig_gizmo_hit >= 0 and r3d.characterRigGizmoBegin(rig_gizmo_hit)) {
+                                me_character_rig_gizmo_dragging = true;
+                                state_mod.markDirty();
+                                continue;
+                            }
+                            var select_buf: [160]u8 = undefined;
+                            if (std.fmt.bufPrintZ(&select_buf, "__characterRigViewportSelect({d},{d})", .{ mx, my })) |expr| {
+                                js_vm.callGlobal(config.host, "__beginJsEvent");
+                                js_vm.evalExpr(config.host, expr);
+                                js_vm.callGlobal(config.host, "__endJsEvent");
+                                state_mod.markDirty();
+                            } else |_| {}
+                            continue;
+                        }
+                        // Ctrl+right-click (req_4271): extrude the live edge/face selection
+                        // TOWARD the clicked point. One JS round-trip (not a direct host
+                        // call) so the cart adopts the new mesh key like every topo op;
+                        // without a usable selection the press falls through to the
+                        // ordinary context-menu route below.
+                        if (event.button.button == c.SDL_BUTTON_RIGHT and
+                            !on_value_ctl and !meHitIsChrome(layout.hitTest(config.root, mx, my)) and
+                            (c.SDL_GetModState() & c.SDL_KMOD_CTRL) != 0 and !r3d.meshLcActive())
+                        {
+                            const mode_now = r3d.meshEditModeRaw();
+                            if ((mode_now == 2 or mode_now == 3) and r3d.meshEditSelectionCount() > 0) {
+                                var extrude_buf: [96]u8 = undefined;
+                                if (std.fmt.bufPrintZ(&extrude_buf, "__meshEditExtrudeTo({d},{d})", .{ mx, my })) |expr| {
+                                    js_vm.callGlobal(config.host, "__beginJsEvent");
+                                    js_vm.evalExpr(config.host, expr);
+                                    js_vm.callGlobal(config.host, "__endJsEvent");
+                                } else |_| {}
+                                state_mod.markDirty();
+                                continue;
+                            }
+                        }
                         if (event.button.button == c.SDL_BUTTON_LEFT and !on_value_ctl and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {
                             input.unfocus();
                             me_down_x = mx;
@@ -4527,9 +4575,26 @@ pub fn run(config_in: AppConfig) !void {
                                     } else |_| {}
                                 }
                                 me_selecting = true;
-                                me_shift = (c.SDL_GetModState() & c.SDL_KMOD_SHIFT) != 0;
-                                r3d.meshEditSnapshot();
-                                _ = r3d.meshEditPick(mx, my, me_shift);
+                                const me_mods = c.SDL_GetModState();
+                                me_shift = (me_mods & c.SDL_KMOD_SHIFT) != 0;
+                                me_ctrl = (me_mods & c.SDL_KMOD_CTRL) != 0;
+                                me_cut_armed = false;
+                                if (me_ctrl and m == 3) {
+                                    // Ctrl on a face-mode press arms the marquee-projected
+                                    // CUT (req_4271). The pick defers to release so a cut
+                                    // sweep never mutates the selection on the way in.
+                                    me_cut_armed = true;
+                                    r3d.meshEditSnapshot();
+                                } else if (me_ctrl and m == 2) {
+                                    // Ctrl+click in edge mode selects the edge PATH under
+                                    // the cursor, cycling loop → ring → single edge on
+                                    // repeated clicks (req_4271); shift adds a second path.
+                                    r3d.meshEditSnapshot();
+                                    _ = r3d.meshEditPathPick(mx, my, me_shift);
+                                } else {
+                                    r3d.meshEditSnapshot();
+                                    _ = r3d.meshEditPick(mx, my, me_shift);
+                                }
                                 state_mod.markDirty();
                             }
                             continue;
@@ -4960,6 +5025,16 @@ pub fn run(config_in: AppConfig) !void {
                             state_mod.markDirty();
                             continue;
                         }
+                        if (me_character_rig_gizmo_dragging) {
+                            const rig_mod = c.SDL_GetModState();
+                            _ = r3d.characterRigGizmoDrag(
+                                event.motion.xrel,
+                                event.motion.yrel,
+                                (rig_mod & c.SDL_KMOD_SHIFT) != 0,
+                            );
+                            state_mod.markDirty();
+                            continue;
+                        }
                         if (me_bd_dragging) {
                             // Backdrop move gizmo (req_3080): same stepped mapping as the
                             // mesh gizmo; the cart polls the pose back to move the quad.
@@ -5007,7 +5082,10 @@ pub fn run(config_in: AppConfig) !void {
                                 r3d.meshEditRevert();
                             }
                             if (me_marquee) {
-                                _ = r3d.meshEditBox(me_down_x, me_down_y, mx, my, me_shift);
+                                // An armed CUT sweep (ctrl+face press, req_4271) draws the
+                                // rectangle but never box-selects — the cut on release is
+                                // the gesture, not a selection.
+                                if (!me_cut_armed) _ = r3d.meshEditBox(me_down_x, me_down_y, mx, my, me_shift);
                                 r3d.meshSetMarquee(me_down_x, me_down_y, mx, my); // draw the box outline
                             }
                             state_mod.markDirty();
@@ -5232,6 +5310,35 @@ pub fn run(config_in: AppConfig) !void {
                             continue;
                         }
                         if (event.button.button == c.SDL_BUTTON_LEFT) {
+                            if (me_character_rig_gizmo_dragging) {
+                                me_character_rig_gizmo_dragging = false;
+                                if (r3d.characterRigGizmoEnd()) |result| {
+                                    var commit_buf: [512]u8 = undefined;
+                                    if (std.fmt.bufPrintZ(
+                                        &commit_buf,
+                                        "__characterRigGizmoCommit({d},{d},{d},{d},{d},{d},{d},{d},{d},{d},{d})",
+                                        .{
+                                            result.bone_index,
+                                            result.pos[0],
+                                            result.pos[1],
+                                            result.pos[2],
+                                            result.rot[0],
+                                            result.rot[1],
+                                            result.rot[2],
+                                            result.rot[3],
+                                            result.scale[0],
+                                            result.scale[1],
+                                            result.scale[2],
+                                        },
+                                    )) |expr| {
+                                        js_vm.callGlobal(config.host, "__beginJsEvent");
+                                        js_vm.evalExpr(config.host, expr);
+                                        js_vm.callGlobal(config.host, "__endJsEvent");
+                                    } else |_| {}
+                                }
+                                state_mod.markDirty();
+                                continue;
+                            }
                             if (me_panning) {
                                 me_panning = false;
                                 continue;
@@ -5268,9 +5375,24 @@ pub fn run(config_in: AppConfig) !void {
                             }
                             if (me_selecting) {
                                 me_selecting = false;
+                                const was_marquee = me_marquee;
+                                const was_cut = me_cut_armed;
                                 me_marquee = false;
+                                me_cut_armed = false;
                                 r3d.meshClearMarquee(); // drop the box outline on release
                                 js_vm.callGlobal(config.host, "__beginJsEvent");
+                                if (was_cut and was_marquee) {
+                                    // The armed sweep IS the cut (req_4271): hand the rect to
+                                    // the cart so the topo op's new mesh key gets adopted.
+                                    var cut_buf: [128]u8 = undefined;
+                                    if (std.fmt.bufPrintZ(&cut_buf, "__meshEditMarqueeCut({d},{d},{d},{d})", .{ me_down_x, me_down_y, event.button.x, event.button.y })) |expr| {
+                                        js_vm.evalExpr(config.host, expr);
+                                    } else |_| {}
+                                } else if (was_cut) {
+                                    // Armed but never dragged: a plain ctrl+click on a face
+                                    // is still a click — run the pick it deferred.
+                                    _ = r3d.meshEditPick(event.button.x, event.button.y, me_shift);
+                                }
                                 js_vm.callGlobal(config.host, "__meshEditSelChanged");
                                 js_vm.callGlobal(config.host, "__endJsEvent");
                                 state_mod.markDirty();
@@ -6079,11 +6201,17 @@ pub fn run(config_in: AppConfig) !void {
         debug_server.poll(io);
 
         // Telemetry (legacy stderr + qjs_runtime vars)
-        fps_frames += 1;
+        const fps_frame_us = std.Io.Clock.now(.awake, io).toMicroseconds();
+        if (fps_previous_frame_us != 0 and fps_frame_us > fps_previous_frame_us) {
+            fps_interval_count += 1;
+            fps_interval_elapsed_us += @intCast(fps_frame_us - fps_previous_frame_us);
+        }
+        fps_previous_frame_us = fps_frame_us;
         const now: u64 = c.SDL_GetTicks();
         if (now -% fps_last >= 1000) {
-            frame_telemetry.telemetry_fps = fps_frames;
-            luajit_runtime.telemetry_fps = fps_frames;
+            const sampled_fps = frame_telemetry.fpsFromIntervals(fps_interval_count, fps_interval_elapsed_us);
+            frame_telemetry.telemetry_fps = sampled_fps;
+            luajit_runtime.telemetry_fps = sampled_fps;
             // Use last frame's counts directly (counters reset per-frame for budget checks)
             const ppf = g_paint_count;
             const hpf = g_hidden_count;
@@ -6096,11 +6224,11 @@ pub fn run(config_in: AppConfig) !void {
             if (verbose or (now -% telemetry_stderr_last) >= 10_000) {
                 telemetry_stderr_last = now;
                 log.print("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s\n", .{
-                    fps_frames, frame_telemetry.telemetry_layout_us, frame_telemetry.telemetry_paint_us, frame_telemetry.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, frame_telemetry.bridge_calls_this_second,
+                    sampled_fps, frame_telemetry.telemetry_layout_us, frame_telemetry.telemetry_paint_us, frame_telemetry.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, frame_telemetry.bridge_calls_this_second,
                 });
             }
             log.writeLine("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s", .{
-                fps_frames, frame_telemetry.telemetry_layout_us, frame_telemetry.telemetry_paint_us, frame_telemetry.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, frame_telemetry.bridge_calls_this_second,
+                sampled_fps, frame_telemetry.telemetry_layout_us, frame_telemetry.telemetry_paint_us, frame_telemetry.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, frame_telemetry.bridge_calls_this_second,
             });
             frame_telemetry.telemetry_bridge_calls = frame_telemetry.bridge_calls_this_second;
             frame_telemetry.bridge_calls_this_second = 0;
@@ -6119,7 +6247,8 @@ pub fn run(config_in: AppConfig) !void {
             g_hover_changed = false;
             g_hidden_count = 0;
             g_zero_count = 0;
-            fps_frames = 0;
+            fps_interval_count = 0;
+            fps_interval_elapsed_us = 0;
             fps_last = now;
         }
 

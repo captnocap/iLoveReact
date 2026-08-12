@@ -1472,12 +1472,68 @@ fn hostMeshTopoExtrudeFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
 }
 
 /// __mesh_topo_create_face() → JSON {"ok","key","count"}. Fill a closed 3/4-edge
-/// loop, or bridge two disjoint selected edges as a split quad.
+/// loop, bridge two disjoint selected edges as a split quad, or — when the
+/// selection is two matched edge runs (open chains or closed loops, req_4271) —
+/// bridge them rung by rung into a strip of authored quads (bridge edge loops).
 fn hostMeshTopoCreateFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const ok = scene3d.meshTopoCreateFaceFromEdges();
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_extrude_to(x, y) → JSON {"ok","key","count"}. Ctrl+right-click
+/// (req_4271): extrude the live edge/face selection TOWARD the given viewport
+/// pixel — face mode measures the click along the selection's aggregate-normal
+/// axis; edge mode decomposes it into the edge frame's distance + angle.
+fn hostMeshTopoExtrudeTo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const ok = scene3d.meshTopoExtrudeToScreen(x, y);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_marquee_cut(x0, y0, x1, y1) → JSON {"ok","key","count"}. The
+/// marquee-projected cut (req_4271): the screen rectangle's four edges project
+/// through the camera onto the authored face under its centre as four cut lines;
+/// the face splits along every line that crosses it and the cells inside the
+/// rectangle come back SELECTED. One journal entry ("marquee cut").
+fn hostMeshTopoMarqueeCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x0: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y0: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const x1: f32 = @floatCast(argToF64(info, 2) orelse 0);
+    const y1: f32 = @floatCast(argToF64(info, 3) orelse 0);
+    const ok = scene3d.meshTopoMarqueeCut(x0, y0, x1, y1);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_edit_invert() → count. Ctrl+I (req_4271): invert the current mode's
+/// selection within the active edit scope — the exact complement of Select All.
+/// Returns the new selected count, -1 if there is no mesh or no select mode.
+fn hostMeshEditInvert(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const n = scene3d.meshEditInvert();
+    state.markDirty();
+    setReturnNumber(info, n);
+}
+
+/// __mesh_edit_path_pick(x, y, additive) → count. Ctrl+click's edge-path pick
+/// (req_4271): in edge mode, select the whole edge path through the edge under
+/// the pixel — repeated calls on the SAME edge cycle loop → ring → single edge;
+/// additive≠0 (shift) unions the path with the selection the cycle started from.
+/// Other modes fall through to the ordinary pick.
+fn hostMeshEditPathPick(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const additive = (argToI32(info, 2) orelse 0) != 0;
+    const n = scene3d.meshEditPathPick(x, y, additive);
+    state.markDirty();
+    setReturnNumber(info, n);
 }
 
 /// __mesh_topo_flip_faces() → JSON {"ok","key","count"}. Reverse the winding of
@@ -5193,6 +5249,10 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
         v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
         v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
+        v8_runtime.registerHostFn("__mesh_topo_extrude_to", hostMeshTopoExtrudeTo);
+        v8_runtime.registerHostFn("__mesh_topo_marquee_cut", hostMeshTopoMarqueeCut);
+        v8_runtime.registerHostFn("__mesh_edit_invert", hostMeshEditInvert);
+        v8_runtime.registerHostFn("__mesh_edit_path_pick", hostMeshEditPathPick);
         v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
         v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
         v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
@@ -5454,6 +5514,10 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
+    v8_runtime.registerHostFn("__mesh_topo_extrude_to", hostMeshTopoExtrudeTo);
+    v8_runtime.registerHostFn("__mesh_topo_marquee_cut", hostMeshTopoMarqueeCut);
+    v8_runtime.registerHostFn("__mesh_edit_invert", hostMeshEditInvert);
+    v8_runtime.registerHostFn("__mesh_edit_path_pick", hostMeshEditPathPick);
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
     v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);

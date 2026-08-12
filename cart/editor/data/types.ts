@@ -184,6 +184,8 @@ export type ModelToolApi = {
   extrudeFace: () => void;
   facePolygon: () => void;
   createFace: () => void;
+  // Invert the selection within the active scope (Ctrl+I, req_4271).
+  invertSelection: () => void;
   // Merge the selected vertices at their center (req_3382); edge mode collapses
   // the selected edges' endpoints. Degenerated faces leave in the same undo step.
   weld: () => void;
