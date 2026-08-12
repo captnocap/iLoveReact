@@ -148,8 +148,10 @@ pub fn ensureMaterials(self: anytype, io: std.Io, environ: *const std.process.En
 pub fn deinit(self: anytype, io: std.Io) void {
     if (self.player_target_candidate) |candidate| candidate.deinit();
     self.player_target_candidate = null;
-    if (self.player_motion) |*document| document.deinit();
-    self.player_motion = null;
+    for (&self.player_motion) |*slot| {
+        if (slot.*) |*document| document.deinit();
+        slot.* = null;
+    }
     if (self.player_bind_specimen) |*bind| bind.deinit();
     self.player_bind_specimen = null;
     self.npc_character_session.deinit(self.allocator);

@@ -142,10 +142,11 @@ pub const Runtime = struct {
     /// Aspect used by the capture-owned measured camera. Null outside capture;
     /// a changed pane aspect triggers exactly one native re-fit.
     player_target_camera_aspect: ?f32 = null,
-    /// One mounted RJAN motion document owned by this runtime; the pose state
-    /// borrows it (req_4285). Replaced through the play door and freed on
-    /// every player-character teardown.
-    player_motion: ?m_player_character_pose.motion_document.Document = null,
+    /// Mounted RJAN motion documents owned by this runtime, one per mixer
+    /// layer; the pose state borrows them (req_4285). Replaced through the
+    /// play door and freed on every player-character teardown. Stopped
+    /// layers fade from a snapshot, so freeing here is immediate and safe.
+    player_motion: [m_player_character_pose.MAX_MOTION_LAYERS]?m_player_character_pose.motion_document.Document = @splat(null),
     /// Revisioned mounted owner for strict saved-weight NPC instances. Every
     /// instance owns its own CharacterAsset, FK clock, and GPU palette.
     npc_character_session: m_npc_character_session.Session = .{},

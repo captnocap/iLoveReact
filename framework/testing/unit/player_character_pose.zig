@@ -303,10 +303,13 @@ test "the five clips migrate into documents with playback parity on both bodies"
                 try clip_state.resetRig(bones, role_ids);
                 const via_clip = try clip_state.advance(0, clip, t);
 
+                // Pin the clip floor to the same explicit seconds: the
+                // document IS the clip, so composition is weight-invariant
+                // and any value drift is the document's fault alone.
                 var doc_state: mounted_pose.State = .{};
                 try doc_state.resetRig(bones, role_ids);
                 try doc_state.playMotion(&doc, role_ids);
-                const via_doc = try doc_state.advance(t, clip, null);
+                const via_doc = try doc_state.advance(t, clip, t);
 
                 for (0..3) |axis| {
                     try std.testing.expectApproxEqAbs(
@@ -322,4 +325,78 @@ test "the five clips migrate into documents with playback parity on both bodies"
             }
         }
     }
+}
+
+test "wave over walk: a partial document owns exactly the roles it covers" {
+    const motion = mounted_pose.motion_document;
+    const bones = canonicalBones();
+
+    // A one-channel wave: the left upper arm swings while everything else
+    // belongs to whatever plays underneath.
+    const wave_keys = [_]motion.Key{
+        .{ .time_seconds = 0, .coverage = 0b1, .deltas = &.{try fk.axisAngle(.{ 0, 0, 1 }, 1.2)} },
+        .{ .time_seconds = 1.0, .coverage = 0b1, .deltas = &.{try fk.axisAngle(.{ 0, 0, 1 }, 1.2)} },
+    };
+    const wave = motion.Document{
+        .allocator = std.testing.allocator,
+        .name = "wave",
+        .looping = true,
+        .duration_seconds = 1.0,
+        .source = .hand,
+        .channel_ids = &.{"upper_arm_left"},
+        .keys = &wave_keys,
+        .runs = &.{},
+    };
+    try motion.validate(&wave);
+
+    var state: mounted_pose.State = .{};
+    try state.resetRig(&bones, clips.PALETTE_IDS[0..]);
+    try state.playMotionLayer(&wave, clips.PALETTE_IDS[0..], 1);
+
+    // Walk keeps the floor; enough dt saturates the wave's blend-in.
+    const mixed = try state.advance(0.5, .walk, 0.25);
+    const reference = try state_reference_walk(&bones);
+
+    var arm_index: usize = 0;
+    var hip_index: usize = 0;
+    for (clips.PALETTE_IDS, 0..) |id, index| {
+        if (std.mem.eql(u8, id, "upper_arm_left")) arm_index = index;
+        if (std.mem.eql(u8, id, "upper_leg_left")) hip_index = index;
+    }
+
+    // The hip is the walk's, untouched by the wave.
+    {
+        const a = mixed.local_quaternions[hip_index];
+        const b = reference.local_quaternions[hip_index];
+        const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+        try std.testing.expect(@abs(dot) > 1.0 - 1.0e-5);
+    }
+    // The arm is the wave's, not the walk's.
+    {
+        const a = mixed.local_quaternions[arm_index];
+        const b = reference.local_quaternions[arm_index];
+        const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+        try std.testing.expect(@abs(dot) < 1.0 - 1.0e-3);
+    }
+    // The walk's root bob survives — the wave carries no root channel.
+    try std.testing.expectApproxEqAbs(reference.root_translation[1], mixed.root_translation[1], 1.0e-5);
+
+    // Stopping the wave frees its document immediately (snapshot fade), and
+    // the pose returns to pure walk once the fade window elapses.
+    state.stopMotionLayer(1);
+    try std.testing.expect(!state.motionLayerMounted(1));
+    _ = try state.advance(mounted_pose.MOTION_BLEND_OUT_SECONDS + 0.1, .walk, 0.25);
+    const settled = try state.advance(0, .walk, 0.25);
+    {
+        const a = settled.local_quaternions[arm_index];
+        const b = reference.local_quaternions[arm_index];
+        const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+        try std.testing.expect(@abs(dot) > 1.0 - 1.0e-5);
+    }
+}
+
+fn state_reference_walk(bones: []const rig_pose.Bone) !pose_stream.Frame {
+    var reference_state: mounted_pose.State = .{};
+    try reference_state.resetRig(bones, clips.PALETTE_IDS[0..]);
+    return reference_state.advance(0, .walk, 0.25);
 }

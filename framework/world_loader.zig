@@ -440,8 +440,16 @@ pub const MAX_MOTION_BYTES: usize = 64 << 20;
 
 fn dropMountedPlayerMotion(runtime: *Runtime) void {
     runtime.player_character_pose.stopMotion();
-    if (runtime.player_motion) |*document| document.deinit();
-    runtime.player_motion = null;
+    for (&runtime.player_motion) |*slot| {
+        if (slot.*) |*document| document.deinit();
+        slot.* = null;
+    }
+}
+
+fn dropMountedPlayerMotionLayer(runtime: *Runtime, layer: usize) void {
+    runtime.player_character_pose.stopMotionLayer(layer);
+    if (runtime.player_motion[layer]) |*document| document.deinit();
+    runtime.player_motion[layer] = null;
 }
 
 /// Mount one RJAN motion document from disk as the mounted player's pose
@@ -454,10 +462,12 @@ pub fn playMountedPlayerMotionJsonAlloc(
     allocator: std.mem.Allocator,
     node_id: u32,
     path: []const u8,
+    layer: usize,
 ) ![]u8 {
     const runtime = try requireMountedRuntime(node_id);
+    if (layer >= player_character_pose.MAX_MOTION_LAYERS) return error.InvalidMotionLayer;
     if (path.len == 0) {
-        dropMountedPlayerMotion(runtime);
+        dropMountedPlayerMotionLayer(runtime, layer);
         return allocator.dupe(u8, "{\"ok\":true,\"playing\":false}");
     }
     const character = if (runtime.scene.player_character) |*value| value else return error.MissingMountedCharacter;
@@ -475,12 +485,12 @@ pub fn playMountedPlayerMotionJsonAlloc(
     var document = try player_character_pose.motion_document.decodeAlloc(runtime.allocator, bytes);
     errdefer document.deinit();
 
-    dropMountedPlayerMotion(runtime);
-    runtime.player_motion = document;
-    const resident = &runtime.player_motion.?;
-    runtime.player_character_pose.playMotion(resident, character.retargetBoneIds()) catch |err| {
+    dropMountedPlayerMotionLayer(runtime, layer);
+    runtime.player_motion[layer] = document;
+    const resident = &runtime.player_motion[layer].?;
+    runtime.player_character_pose.playMotionLayer(resident, character.retargetBoneIds(), layer) catch |err| {
         resident.deinit();
-        runtime.player_motion = null;
+        runtime.player_motion[layer] = null;
         return err;
     };
 

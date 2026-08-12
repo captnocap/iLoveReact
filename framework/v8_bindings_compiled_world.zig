@@ -548,10 +548,11 @@ fn hostSetPlayerPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnString(info, reply);
 }
 
-// __compiled_world_play_motion(nodeId, path) mounts one RJAN motion document
-// from disk as the mounted player's pose source (req_4285); an empty path
-// stops playback and the built-in clips resume. Content-addressed
-// motion-<sha256>.rjan takes are hash-verified on reopen.
+// __compiled_world_play_motion(nodeId, path, layer?) mounts one RJAN motion
+// document from disk on one mixer layer of the mounted player (req_4285);
+// an empty path stops that layer and whatever plays underneath resumes.
+// Layer 0 is the base override; higher layers compose by role coverage.
+// Content-addressed motion-<sha256>.rjan takes are hash-verified on reopen.
 fn hostPlayMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const node_id = argToNodeId(info, 0) orelse {
@@ -563,12 +564,18 @@ fn hostPlayMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer std.heap.c_allocator.free(path);
+    const layer_raw = argToF64(info, 2) orelse 0;
+    if (!(layer_raw >= 0 and layer_raw < @as(f64, @floatFromInt(world_loader.player_character_pose.MAX_MOTION_LAYERS)))) {
+        setReturnString(info, "error:InvalidMotionLayer");
+        return;
+    }
     const host = v8_runtime.hostContext(info.getIsolate());
     const reply = world_loader.playMountedPlayerMotionJsonAlloc(
         host.io,
         std.heap.c_allocator,
         node_id,
         path,
+        @intFromFloat(layer_raw),
     ) catch |err| {
         var buffer: [128]u8 = undefined;
         const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:MotionRejected";

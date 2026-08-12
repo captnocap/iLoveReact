@@ -35,7 +35,31 @@ pub const ActiveMotion = struct {
     document: *const motion_document.Document,
     channel_targets: [motion_document.MAX_CHANNELS]?u8,
     elapsed_seconds: f32 = 0,
+    /// Blend-in weight, ramping 0 → 1 so a mount never snaps from the pose
+    /// underneath it.
+    weight: f32 = 0,
 };
+
+/// A stopped layer's goodbye: its last composed pose, snapshotted so the
+/// document can be freed immediately, held-and-faded toward whatever plays
+/// underneath — the capture gate's dropout discipline reused as the mixer's
+/// blend-out law.
+const FadingMotion = struct {
+    channel_targets: [motion_document.MAX_CHANNELS]?u8,
+    rotations: [motion_document.MAX_CHANNELS]pose_stream.Quat,
+    coverage: u32,
+    has_root: bool,
+    root_translation: pose_stream.Vec3,
+    weight: f32,
+};
+
+/// Independent per-role layer slots, ascending priority. Slot 0 is the base
+/// override (a replayed take, a migrated clip); higher slots compose partial
+/// documents over it by role coverage — wave over walk.
+pub const MAX_MOTION_LAYERS: usize = 4;
+/// Blend windows lifted from the capture gate's hold/fade dropout law.
+pub const MOTION_BLEND_IN_SECONDS: f32 = 0.15;
+pub const MOTION_BLEND_OUT_SECONDS: f32 = 0.35;
 
 pub const OwnerId = struct {
     bytes: [MAX_OWNER_BYTES]u8 = undefined,
@@ -71,7 +95,8 @@ pub const State = struct {
     bind_local_rotations: [pose_stream.MAX_BONES]pose_stream.Quat = @splat(pose_stream.fk.IDENTITY_QUAT),
     owner: OwnerId = .{},
     interpolator: ?pose_stream.Interpolator = null,
-    motion: ?ActiveMotion = null,
+    motion_layers: [MAX_MOTION_LAYERS]?ActiveMotion = @splat(null),
+    fading_layers: [MAX_MOTION_LAYERS]?FadingMotion = @splat(null),
     last_root_translation: pose_stream.Vec3 = .{ 0, 0, 0 },
     last_external_frame_id: ?u64 = null,
     current_clip: clips.ClipId = .idle,
@@ -182,17 +207,32 @@ pub const State = struct {
         return true;
     }
 
-    /// Mount a motion document as this body's pose source. Channels resolve
-    /// against the same role-aliased palette clips use; a document whose
-    /// roles this body does not bind at all is refused rather than silently
-    /// frozen. An active external owner (capture, host stream) still wins.
+    /// Mount a motion document on layer 0 — the base override slot. Channels
+    /// resolve against the same role-aliased palette clips use; a document
+    /// whose roles this body does not bind at all is refused rather than
+    /// silently frozen. An active external owner (capture, host stream)
+    /// still wins everything.
     pub fn playMotion(
         self: *State,
         document: *const motion_document.Document,
         role_ids: []const []const u8,
     ) Error!void {
+        return self.playMotionLayer(document, role_ids, 0);
+    }
+
+    /// Mount a motion document on one mixer layer. Higher layers compose
+    /// over lower ones by role coverage — the wave-over-walk law. Replacing
+    /// a mounted layer crossfades: the old layer's pose snapshots into the
+    /// blend-out lane while the new one blends in.
+    pub fn playMotionLayer(
+        self: *State,
+        document: *const motion_document.Document,
+        role_ids: []const []const u8,
+        layer: usize,
+    ) Error!void {
         if (self.bone_count == 0) return error.RigNotInitialized;
         if (role_ids.len != self.bone_count) return error.PaletteSizeMismatch;
+        if (layer >= MAX_MOTION_LAYERS) return error.NoMotionChannels;
         var targets: [motion_document.MAX_CHANNELS]?u8 = @splat(null);
         var matched: usize = 0;
         for (document.channel_ids, 0..) |channel_id, channel| {
@@ -205,29 +245,109 @@ pub const State = struct {
             }
         }
         if (matched == 0) return error.NoMotionChannels;
-        self.motion = .{ .document = document, .channel_targets = targets };
+        self.snapshotLayerForFade(layer);
+        self.motion_layers[layer] = .{ .document = document, .channel_targets = targets };
     }
 
+    /// Stop one layer. The document may be freed immediately: the layer's
+    /// last composed pose is snapshotted and fades out on its own.
+    pub fn stopMotionLayer(self: *State, layer: usize) void {
+        if (layer >= MAX_MOTION_LAYERS) return;
+        self.snapshotLayerForFade(layer);
+        self.motion_layers[layer] = null;
+    }
+
+    /// Stop every layer (fading). Documents may be freed immediately.
     pub fn stopMotion(self: *State) void {
-        self.motion = null;
+        for (0..MAX_MOTION_LAYERS) |layer| self.stopMotionLayer(layer);
     }
 
-    fn advanceMotion(self: *State, active: *ActiveMotion, dt: f32) Error!pose_stream.Frame {
-        active.elapsed_seconds += dt;
-        const sampled = try motion_document.sample(active.document, active.elapsed_seconds);
-        var frame = self.bindFrame();
-        if (sampled.has_root) frame.root_translation = sampled.root_translation;
+    pub fn motionLayerMounted(self: *const State, layer: usize) bool {
+        return layer < MAX_MOTION_LAYERS and self.motion_layers[layer] != null;
+    }
+
+    fn snapshotLayerForFade(self: *State, layer: usize) void {
+        const active = if (self.motion_layers[layer]) |*value| value else return;
+        if (active.weight <= 0) {
+            self.motion_layers[layer] = null;
+            return;
+        }
+        const sampled = motion_document.sample(active.document, active.elapsed_seconds) catch {
+            self.motion_layers[layer] = null;
+            return;
+        };
+        var fading = FadingMotion{
+            .channel_targets = active.channel_targets,
+            .rotations = @splat(pose_stream.fk.IDENTITY_QUAT),
+            .coverage = sampled.coverage,
+            .has_root = sampled.has_root,
+            .root_translation = sampled.root_translation,
+            .weight = active.weight,
+        };
         for (0..active.document.channel_ids.len) |channel| {
             const bit = @as(u32, 1) << @intCast(channel);
             if ((sampled.coverage & bit) == 0) continue;
             const target = active.channel_targets[channel] orelse continue;
-            frame.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
+            fading.rotations[channel] = pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
+                self.bind_local_rotations[target],
+                sampled.deltas[channel],
+            )) catch pose_stream.fk.IDENTITY_QUAT;
+        }
+        self.fading_layers[layer] = fading;
+        self.motion_layers[layer] = null;
+    }
+
+    fn composeFading(frame: *pose_stream.Frame, fading: *FadingMotion, dt: f32) Error!bool {
+        fading.weight -= dt / MOTION_BLEND_OUT_SECONDS;
+        if (fading.weight <= 0) return false;
+        for (0..motion_document.MAX_CHANNELS) |channel| {
+            const bit = @as(u32, 1) << @intCast(channel);
+            if ((fading.coverage & bit) == 0) continue;
+            const target = fading.channel_targets[channel] orelse continue;
+            frame.local_quaternions[target] = try pose_stream.fk.slerpQuat(
+                frame.local_quaternions[target],
+                fading.rotations[channel],
+                fading.weight,
+            );
+        }
+        if (fading.has_root) {
+            for (&frame.root_translation, fading.root_translation) |*value, target_value| {
+                value.* += (target_value - value.*) * fading.weight;
+            }
+        }
+        return true;
+    }
+
+    fn composeActive(self: *State, frame: *pose_stream.Frame, active: *ActiveMotion, dt: f32) Error!void {
+        active.elapsed_seconds += dt;
+        active.weight = @min(1, active.weight + dt / MOTION_BLEND_IN_SECONDS);
+        if (active.weight <= 0) return;
+        const sampled = try motion_document.sample(active.document, active.elapsed_seconds);
+        for (0..active.document.channel_ids.len) |channel| {
+            const bit = @as(u32, 1) << @intCast(channel);
+            if ((sampled.coverage & bit) == 0) continue;
+            const target = active.channel_targets[channel] orelse continue;
+            const layer_rotation = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
                 self.bind_local_rotations[target],
                 sampled.deltas[channel],
             ));
+            frame.local_quaternions[target] = try pose_stream.fk.slerpQuat(
+                frame.local_quaternions[target],
+                layer_rotation,
+                active.weight,
+            );
         }
-        self.last_root_translation = frame.root_translation;
-        return frame;
+        if (sampled.has_root) {
+            for (&frame.root_translation, sampled.root_translation) |*value, target_value| {
+                value.* += (target_value - value.*) * active.weight;
+            }
+        }
+    }
+
+    fn anyMotion(self: *const State) bool {
+        for (self.motion_layers) |layer| if (layer != null) return true;
+        for (self.fading_layers) |layer| if (layer != null) return true;
+        return false;
     }
 
     fn updateClipClock(self: *State, dt: f32, clip: clips.ClipId) Error!void {
@@ -270,33 +390,36 @@ pub const State = struct {
             return sampled;
         }
 
-        // A mounted motion document outranks the built-in clips but never an
-        // explicit external owner — the priority chain the mixer generalizes.
-        if (self.motion) |*active| return self.advanceMotion(active, dt);
-
-        // Built-in clips are role-addressed: a body answers to a clip channel
-        // exactly when its rig bound that semantic role. A rig without the
-        // full clip role set remains visible in bind pose until an explicit
-        // capture/animation stream takes ownership of all its bones.
-        if (!self.clip_capable) {
-            const frame = self.bindFrame();
-            self.last_root_translation = frame.root_translation;
-            return frame;
+        // The mixer floor: built-in clips when this body binds the clip
+        // roles, its bind pose otherwise. Clips are role-addressed — a body
+        // answers to a clip channel exactly when its rig bound that role.
+        var frame = self.bindFrame();
+        if (self.clip_capable) {
+            const seconds = explicit_clip_seconds orelse self.clip_elapsed_seconds;
+            const channels = try clips.sampleChannels(fallback_clip, seconds);
+            frame.root_translation = channels.root_translation;
+            for (channels.deltas, self.clip_channel_targets) |delta, target_slot| {
+                const target = target_slot orelse continue;
+                frame.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
+                    self.bind_local_rotations[target],
+                    delta,
+                ));
+            }
         }
 
-        const seconds = explicit_clip_seconds orelse self.clip_elapsed_seconds;
-        const channels = try clips.sampleChannels(fallback_clip, seconds);
-        var sampled = self.bindFrame();
-        sampled.root_translation = channels.root_translation;
-        for (channels.deltas, self.clip_channel_targets) |delta, target_slot| {
-            const target = target_slot orelse continue;
-            sampled.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
-                self.bind_local_rotations[target],
-                delta,
-            ));
+        // Motion-document layers compose over the floor in ascending slot
+        // order, each owning exactly the roles it covers (wave over walk).
+        // A stopped layer's snapshot fades beneath its slot's live document.
+        for (0..MAX_MOTION_LAYERS) |layer| {
+            if (self.fading_layers[layer]) |*fading| {
+                if (!try composeFading(&frame, fading, dt)) self.fading_layers[layer] = null;
+            }
+            if (self.motion_layers[layer]) |*active| {
+                try self.composeActive(&frame, active, dt);
+            }
         }
-        self.last_root_translation = sampled.root_translation;
-        return sampled;
+        self.last_root_translation = frame.root_translation;
+        return frame;
     }
 
     /// Feed the constraint-clamped rotations actually written to the GPU back
