@@ -48,8 +48,10 @@ test "live pose request runs outside the submitting thread" {
     const submit_us = awakeMicros(std.testing.io) - submit_started;
     try std.testing.expect(submit_us < MAX_SUBMIT_US);
 
-    const result = try waitForResult(std.testing.io);
+    var result = try waitForResult(std.testing.io);
+    defer result.deinit();
     try std.testing.expectEqual(@as(u32, 2845), result.request_id);
+    try std.testing.expectEqual(@as(u64, 2845), result.frame_id);
     if (!result.ok) try std.testing.expect(result.errorText().len > 0);
 }
 
@@ -82,7 +84,8 @@ test "optional sustained pose spikewatch" {
         submit_max_us = @max(submit_max_us, submit_us);
         if (submit_us >= FRAME_BUDGET_US) frame_budget_spikes += 1;
 
-        const result = try waitForResult(std.testing.io);
+        var result = try waitForResult(std.testing.io);
+        defer result.deinit();
         try std.testing.expect(result.ok);
         try std.testing.expectEqual(request_id, result.request_id);
         requests += 1;
@@ -100,4 +103,42 @@ test "optional sustained pose spikewatch" {
         .{ seconds, requests, average_submit_us, submit_max_us, frame_budget_spikes },
     );
     try std.testing.expectEqual(@as(u32, 0), frame_budget_spikes);
+}
+
+test "optional raw-rgba estimate probe" {
+    // Opt-in ground-truth probe: RJIT_POSE_RGBA=/path.rgba (with RJIT_POSE_W /
+    // RJIT_POSE_H) submits that exact frame through the live mailbox path —
+    // the same enqueue → worker → estimateRgba the capture session runs — and
+    // prints the 17 per-keypoint scores.
+    var environ = try std.testing.environ.createMap(std.testing.allocator);
+    defer environ.deinit();
+    const rgba_path = environ.get("RJIT_POSE_RGBA") orelse return error.SkipZigTest;
+    const width = std.fmt.parseInt(u32, environ.get("RJIT_POSE_W") orelse return error.SkipZigTest, 10) catch return error.SkipZigTest;
+    const height = std.fmt.parseInt(u32, environ.get("RJIT_POSE_H") orelse return error.SkipZigTest, 10) catch return error.SkipZigTest;
+
+    pose.init(std.testing.io, &environ, std.testing.allocator);
+    defer pose.deinit(std.testing.io);
+
+    const rgba = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, rgba_path, std.testing.allocator, .limited(1 << 26));
+    defer std.testing.allocator.free(rgba);
+    try std.testing.expectEqual(@as(usize, width) * @as(usize, height) * 4, rgba.len);
+
+    try std.testing.expectEqual(pose.SubmitStatus.queued, pose.enqueueRgba(std.testing.io, 4261, rgba, width, height));
+    var result = try waitForResult(std.testing.io);
+    defer result.deinit();
+    if (!result.ok) {
+        std.debug.print("[pose-image-probe] inference failed: {s}\n", .{result.errorText()});
+        return error.PoseImageEstimateFailed;
+    }
+    const names = [_][]const u8{
+        "nose",       "eye_l",   "eye_r",   "ear_l",   "ear_r",   "shoulder_l",
+        "shoulder_r", "elbow_l", "elbow_r", "wrist_l", "wrist_r", "hip_l",
+        "hip_r",      "knee_l",  "knee_r",  "ankle_l", "ankle_r",
+    };
+    var confident: usize = 0;
+    for (result.keypoints, 0..) |kp, i| {
+        if (kp.score >= 0.5) confident += 1;
+        std.debug.print("[pose-image-probe] {s: <10} x={d:.4} y={d:.4} score={d:.3}\n", .{ names[i], kp.x, kp.y, kp.score });
+    }
+    std.debug.print("[pose-image-probe] {d}/17 keypoints >= 0.5\n", .{confident});
 }
