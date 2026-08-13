@@ -1,0 +1,389 @@
+<title>The Animation Roof</title>
+<style>
+  :root {
+    --ground: #F2F4F6;
+    --surface: #FFFFFF;
+    --surface-2: #E9EDF1;
+    --ink: #1A2230;
+    --muted: #5A6675;
+    --line: #D7DDE4;
+    --accent: #0E7FA6;      /* playhead cyan */
+    --key: #9A6E15;         /* keyframe amber */
+    --go: #1F7A5C;          /* take/run green */
+    --hot: #A23B35;         /* record red */
+    --code-bg: #EDF0F3;
+    --track: #DDE3E9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0B0F16;
+      --surface: #111722;
+      --surface-2: #161E2B;
+      --ink: #DEE6EF;
+      --muted: #8E9BAA;
+      --line: #27313E;
+      --accent: #7EDCF2;
+      --key: #F1C66B;
+      --go: #9BE4C9;
+      --hot: #F0938A;
+      --code-bg: #0E141D;
+      --track: #1A222E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0B0F16;
+    --surface: #111722;
+    --surface-2: #161E2B;
+    --ink: #DEE6EF;
+    --muted: #8E9BAA;
+    --line: #27313E;
+    --accent: #7EDCF2;
+    --key: #F1C66B;
+    --go: #9BE4C9;
+    --hot: #F0938A;
+    --code-bg: #0E141D;
+    --track: #1A222E;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: system-ui, "Segoe UI", Avenir, Seravek, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 96px; }
+  .mono { font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace; }
+
+  header.masthead { margin-bottom: 40px; }
+  .eyebrow {
+    font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(34px, 6vw, 52px); line-height: 1.05; letter-spacing: -0.02em;
+    font-weight: 800; margin: 0 0 14px; text-wrap: balance;
+  }
+  .thesis { font-size: 19px; color: var(--ink); max-width: 62ch; margin: 0 0 6px; text-wrap: balance; }
+  .meta { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--muted); margin: 14px 0 0; }
+
+  /* The header motif: a timeline track with keys and a playhead. */
+  .track-figure { position: relative; height: 34px; margin: 26px 0 0; }
+  .track-figure .rail { position: absolute; left: 0; right: 0; top: 15px; height: 4px; border-radius: 2px; background: var(--track); }
+  .track-figure .run { position: absolute; top: 15px; height: 4px; border-radius: 2px; background: var(--go); opacity: 0.65; }
+  .track-figure .kd {
+    position: absolute; top: 10px; width: 14px; height: 14px; border-radius: 3px;
+    background: var(--key); transform: rotate(45deg);
+  }
+  .track-figure .ph { position: absolute; top: 2px; width: 2px; height: 30px; background: var(--accent); }
+  .track-figure .ph::after {
+    content: ""; position: absolute; left: -4px; top: -2px; border: 5px solid transparent; border-top-color: var(--accent);
+  }
+
+  nav.toc {
+    margin: 36px 0 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 40px; font-size: 14.5px; }
+  nav.toc li { margin: 3px 0; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+  @media (max-width: 620px) { nav.toc ol { columns: 1; } }
+
+  section { margin-top: 56px; }
+  h2 {
+    font-size: 15px; letter-spacing: 0.13em; text-transform: uppercase;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    color: var(--accent); font-weight: 700; margin: 0 0 4px;
+    padding-top: 18px; border-top: 2px solid var(--line);
+  }
+  h2 .n { color: var(--muted); margin-right: 10px; }
+  h3 { font-size: 20px; letter-spacing: -0.01em; margin: 26px 0 8px; font-weight: 700; text-wrap: balance; }
+  p, ul.plain { max-width: 70ch; }
+  p { margin: 10px 0; }
+  li { margin: 4px 0; }
+  strong { font-weight: 650; }
+  .muted { color: var(--muted); }
+
+  .lede { font-size: 17.5px; margin-top: 14px; }
+
+  code {
+    font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.86em; background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 5px; white-space: nowrap;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 13px; line-height: 1.55; margin: 14px 0;
+  }
+  pre code { background: none; border: none; padding: 0; white-space: pre; }
+
+  .tablewrap { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th {
+    text-align: left; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2);
+  }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: normal; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .callout {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--key);
+    border-radius: 8px; padding: 14px 16px; margin: 18px 0; max-width: 76ch;
+  }
+  .callout.go { border-left-color: var(--go); }
+  .callout.hot { border-left-color: var(--hot); }
+  .callout .tag {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--key);
+    padding-top: 3px; flex-shrink: 0;
+  }
+  .callout.go .tag { color: var(--go); }
+  .callout.hot .tag { color: var(--hot); }
+  .callout p { margin: 0; }
+
+  .step { display: flex; gap: 16px; margin: 20px 0; max-width: 76ch; }
+  .step .sn {
+    flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; font-size: 13px;
+    display: flex; align-items: center; justify-content: center; color: var(--accent);
+  }
+  .step p { margin: 3px 0; }
+  .step .sh { font-weight: 700; }
+
+  /* Mixer stack diagram — pure HTML/CSS, token colors. */
+  .mixer { max-width: 620px; margin: 18px 0; }
+  .mixer .band {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+    padding: 10px 14px; margin: 6px 0; display: flex; justify-content: space-between; gap: 14px; align-items: baseline;
+  }
+  .mixer .band .bl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 700; }
+  .mixer .band .bd { font-size: 12.5px; color: var(--muted); text-align: right; }
+  .mixer .band.owner { border-left: 4px solid var(--hot); }
+  .mixer .band.layer { border-left: 4px solid var(--key); }
+  .mixer .band.floor { border-left: 4px solid var(--go); }
+  .mixer .band.bind  { border-left: 4px solid var(--line); }
+  .mixer .arrow { text-align: center; color: var(--muted); font-size: 12px; margin: 2px 0; }
+
+  .kbd-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .chip {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 700;
+    border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; padding: 4px 9px;
+  }
+  .chip.go { color: var(--go); }
+  .chip.hot { color: var(--hot); }
+  .chip.key { color: var(--key); }
+  .chip.accent { color: var(--accent); }
+
+  footer { margin-top: 72px; padding-top: 18px; border-top: 2px solid var(--line); font-size: 13px; color: var(--muted); }
+  footer .mono { font-size: 12px; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">ReactJIT · cart/editor · req_4285 · 2026-08-12</p>
+    <h1>The Animation Roof</h1>
+    <p class="thesis">All motion — hand-authored keyframes, motion capture, and the built-in clips — is now one durable, role-addressed format that plays on any body.</p>
+    <p class="meta">commits d95ba9fb6 → 532adc620 · all five steps landed the day the goal was set</p>
+    <div class="track-figure" aria-hidden="true">
+      <div class="rail"></div>
+      <div class="run" style="left: 58%; width: 26%;"></div>
+      <div class="kd" style="left: 6%;"></div>
+      <div class="kd" style="left: 21%;"></div>
+      <div class="kd" style="left: 40%;"></div>
+      <div class="ph" style="left: 33%;"></div>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#before-after">What changed, in one picture</a></li>
+      <li><a href="#steps">The five steps that landed</a></li>
+      <li><a href="#concepts">Concepts worth knowing</a></li>
+      <li><a href="#rebuild">Before anything: one rebuild</a></li>
+      <li><a href="#record">Guide · record a motion take</a></li>
+      <li><a href="#author">Guide · author keyframes by hand</a></li>
+      <li><a href="#scrub-play">Guide · scrub, re-time, play on /play</a></li>
+      <li><a href="#layers">Guide · layering (wave over walk)</a></li>
+      <li><a href="#doors">Reference · doors and verbs</a></li>
+      <li><a href="#files">Reference · where files live</a></li>
+      <li><a href="#gates">What is still gated</a></li>
+    </ol>
+  </nav>
+
+  <section id="before-after">
+    <h2>What changed, in one picture</h2>
+    <p class="lede"><strong>Before:</strong> four rooms that all spoke motion but never to each other. The five clips only played on the exact 24-bone canonical skeleton, so your SkinTokens player (M4004) stood rigid in /play. Motion capture drove a live preview and recorded <em>nothing</em> — every pose evaporated when the session closed. There was no way to author a keyframe at all.</p>
+    <p class="lede"><strong>After:</strong> a body is just something that answers to <em>roles</em> (pelvis, upper-arm-left, …). Motion — captured, hand-keyed, or migrated from the clips — is a <em>document</em> of role-addressed poses at declared times. One mixer plays documents onto bodies, layered by role. Pose what you care about, declare when, and the system fills in the rest — on any character, from any source, saved to disk forever.</p>
+
+    <div class="mixer" role="img" aria-label="The mixer: an external owner outranks motion layers, which compose over the clip floor, which falls back to bind pose.">
+      <div class="band owner"><span class="bl">EXTERNAL OWNER</span><span class="bd">live capture / host pose stream — wins everything, unchanged law</span></div>
+      <div class="arrow">▼ otherwise</div>
+      <div class="band layer"><span class="bl">MOTION LAYERS 3…1</span><span class="bd">partial documents own exactly the roles they cover (a wave owns the arm)</span></div>
+      <div class="band layer"><span class="bl">MOTION LAYER 0</span><span class="bd">base override — a replayed take or full document</span></div>
+      <div class="arrow">▼ composes over</div>
+      <div class="band floor"><span class="bl">CLIP FLOOR</span><span class="bd">idle / walk / jump / sit / lay — now role-addressed, plays on any bound rig</span></div>
+      <div class="arrow">▼ falls back to</div>
+      <div class="band bind"><span class="bl">BIND POSE</span><span class="bd">bones with no role-bound motion ride their parents, exactly as before</span></div>
+    </div>
+  </section>
+
+  <section id="steps">
+    <h2>The five steps that landed</h2>
+    <p class="muted">Numbered because the order is the dependency chain — each step assumed the one before it.</p>
+
+    <div class="step"><div class="sn">1</div><div>
+      <p class="sh">Roles became the motion vocabulary.</p>
+      <p>Clips now sample as role-addressed deltas (<code>humanoid_clips.zig</code> · <code>CHANNEL_IDS</code>, <code>sampleChannels</code>). The old gate — “exactly 24 bones, exact ID order, or you get bind pose forever” — is dead. A body answers to the clips when it binds the 12 clip roles; M4004’s 13 role-bound joints qualify. This is the change that un-freezes the rigid player (req_4279).</p>
+    </div></div>
+
+    <div class="step"><div class="sn">2</div><div>
+      <p class="sh">The motion document (RJAN v1) and the recording tap.</p>
+      <p>One durable format (<code>motion_document.zig</code>): sparse keys where you were sparse, dense runs where a take was dense. Capture sessions gained <code>record</code> / <code>recordStop</code> — a stopped take lands on disk as <code>motion-&lt;sha256&gt;.rjan</code> and is immediately replayable on a <em>different</em> body. Capture finally attributes to something.</p>
+    </div></div>
+
+    <div class="step"><div class="sn">3</div><div>
+      <p class="sh">The five clips migrated into documents.</p>
+      <p><code>clip_documents.zig</code> generates idle/walk/jump/sit/lay <em>from</em> the tuning table, so the two can never drift. Playback parity was swept in-suite: 5 clips × 25 sample times × canonical and adopted bodies. The procedural table stays the source of truth until per-clip screenshots pass on a rebuilt binary (see <a href="#gates">gates</a>).</p>
+    </div></div>
+
+    <div class="step"><div class="sn">4</div><div>
+      <p class="sh">The mixer.</p>
+      <p>Up to four motion layers compose over the clip floor by role coverage. Mounting blends in over 0.15&nbsp;s; stopping snapshots the layer’s last pose and fades it out over 0.35&nbsp;s — the same hold/fade discipline the capture gate already used for dropouts. A full-body external owner still outranks everything, so the ownership doors behave identically from the host’s view.</p>
+    </div></div>
+
+    <div class="step"><div class="sn">5</div><div>
+      <p class="sh">The workbench dock.</p>
+      <p>A <strong>MOTION</strong> strip under the animation surface’s three capture panes: record takes, open them as editable documents, add keys from the captured pose, scrub, re-time, and play the result on the /play player. Everything below walks through it.</p>
+    </div></div>
+  </section>
+
+  <section id="concepts">
+    <h2>Concepts worth knowing</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Term</th><th>What it means</th></tr>
+      <tr><td><strong>Role channel</strong></td><td>A semantic body part — <code>pelvis</code>, <code>spine_lower</code>, <code>upper_arm_left</code>, … 15 in the driven set. Motion addresses these, never a rig’s private bone names, which is why one motion fits every body.</td></tr>
+      <tr><td><strong>Motion document</strong></td><td>The saved artifact (<code>.rjan</code>). Holds keys and runs over some set of role channels, plus a name, duration, and loop flag.</td></tr>
+      <tr><td><strong>Key</strong></td><td>A pose at a declared time. Keys are <em>partial</em> by nature: a key may pose one arm and say nothing about the rest — untouched roles keep doing whatever they were doing.</td></tr>
+      <tr><td><strong>Run</strong></td><td>A dictated dense range — capture’s native tongue. Every recorded frame, with its real timing preserved. Shown as a green bar on the timeline.</td></tr>
+      <tr><td><strong>Layer</strong></td><td>A slot in the mixer (0–3). Layer 0 replaces the clip floor; higher layers compose partial documents on top by role coverage.</td></tr>
+      <tr><td><strong>Fill-in</strong></td><td>Between two keys the system interpolates (shortest-arc slerp, or <code>smooth</code>/<code>hold</code> easing per key). Joint limits are clamped every frame downstream, so an in-between can never bend an elbow backwards.</td></tr>
+    </table></div>
+  </section>
+
+  <section id="rebuild">
+    <h2>Before anything: one rebuild</h2>
+    <div class="callout hot"><span class="tag">Required</span>
+      <p>Every piece of this lives in <strong>framework/</strong> Zig, so hot reload does not carry it. One fresh build of the editor (your normal ship/dev-native loop) lights up all of it at once: the un-frozen player, the record button, the doors, the dock. Until then the dock renders but its buttons refuse with “no door” errors.</p>
+    </div>
+    <div class="callout go"><span class="tag">First proof</span>
+      <p>After the rebuild, just open <strong>/play</strong>. M4004 should walk, idle, jump, sit, and lay instead of gliding rigidly — no settings, no migration, nothing to convert. That is step 1 working.</p>
+    </div>
+  </section>
+
+  <section id="record">
+    <h2>Guide · record a motion take</h2>
+    <p>The animation surface (the capture workbench with the three panes) now has a <strong>MOTION</strong> strip along the bottom.</p>
+    <div class="step"><div class="sn">1</div><div><p>Open the animation surface with a saved character selected, camera running, and let calibration finish — same as any capture session. The character mirrors you in the target pane.</p></div></div>
+    <div class="step"><div class="sn">2</div><div><p>Press <span class="chip go">REC TAKE</span>. The button flips to <span class="chip hot">STOP REC · n</span> and counts frames as you move. Everything the capture drives is being kept now.</p></div></div>
+    <div class="step"><div class="sn">3</div><div><p>Press <span class="chip hot">STOP REC</span>. The take is written to disk (content-addressed, so re-saving the identical take is free) and opens on the timeline as a green <strong>run</strong> bar — instantly scrubbable and replayable.</p></div></div>
+    <div class="callout"><span class="tag">Note</span>
+      <p>Recalibrating or flipping the depth sign mid-take discards the recording on purpose — a take cannot span two different rest references. Dropped frames (if the machine is starved) are reported as <em>TRUNCATED</em> on the receipt, never swallowed.</p>
+    </div>
+  </section>
+
+  <section id="author">
+    <h2>Guide · author keyframes by hand</h2>
+    <p>The dream loop: strike a pose, declare when it happens, forget the rest.</p>
+    <div class="step"><div class="sn">1</div><div><p>Press <span class="chip">NEW DOC</span>. You get an empty 2-second looping document over the full role set.</p></div></div>
+    <div class="step"><div class="sn">2</div><div><p>Move the playhead: press anywhere on the <strong>SCRUB</strong> tick track, or fine-step with <span class="chip">−</span>/<span class="chip">+</span>.</p></div></div>
+    <div class="step"><div class="sn">3</div><div><p><strong>Strike the pose</strong> in front of the camera (freeze the triplet if you want to nail it precisely), then press <span class="chip go">ADD KEY @ PLAYHEAD</span>. The captured pose lands as an amber key diamond at that time. Capture is the pose input — the highest-bandwidth one we have. With no capture running, the button adds a neutral bind key instead.</p></div></div>
+    <div class="step"><div class="sn">4</div><div><p>Repeat at other times. Three keys make a motion. The keys bracketing the playhead glow green — that’s your ghosting: what you’re blending <em>from</em> and <em>to</em> at this instant.</p></div></div>
+    <div class="step"><div class="sn">5</div><div><p>Select any key to re-time it: <span class="chip">⟨ NUDGE</span> / <span class="chip">NUDGE ⟩</span> steps it 0.05&nbsp;s, <span class="chip">MOVE TO PLAYHEAD</span> plants it exactly where you’re parked, <span class="chip hot">DELETE</span> removes it. Sliding keys around never breaks anything — the in-betweens recalculate on the next sample.</p></div></div>
+    <div class="step"><div class="sn">6</div><div><p><span class="chip">SAVE</span> writes it to the motion library by name.</p></div></div>
+  </section>
+
+  <section id="scrub-play">
+    <h2>Guide · scrub, re-time, play on /play</h2>
+    <p>The timeline shows one row per role group — TORSO, ARM&nbsp;L, ARM&nbsp;R, LEG&nbsp;L, LEG&nbsp;R — so a partial key (say, arm-only) appears only on the rows it actually poses.</p>
+    <div class="step"><div class="sn">1</div><div><p>Have the <strong>/play</strong> surface open somewhere — it registers itself as the playback target. The dock’s status line tells you when no /play world is available.</p></div></div>
+    <div class="step"><div class="sn">2</div><div><p>Press <span class="chip go">PLAY on /play</span>. The document is saved to disk first (the mixer plays disk truth, never an unsaved phantom) and mounted on the embodied player. Press again — <span class="chip hot">STOP /play</span> — and the player fades back to its clips over a third of a second.</p></div></div>
+    <div class="step"><div class="sn">3</div><div><p>While mounted, pressing the scrub track <strong>parks the live player</strong> at that exact frame — authoring is owed the exact pose, so scrubbing bypasses the blend ramp. <span class="chip">RESUME</span> releases it back into playback from wherever you parked.</p></div></div>
+  </section>
+
+  <section id="layers">
+    <h2>Guide · layering — wave over walk</h2>
+    <p>Because channels are per-role, a partial document composes over whatever plays underneath. A wave document that only covers arm roles, mounted on layer 1, waves — while the walk keeps the legs, the hips, and the root bob. Whoever owns a role, owns it; everything else is untouched.</p>
+    <p>The dock plays on layer 0 (full preview). Layered playback is a door call away for carts and agents:</p>
+<pre><code>// wave (arm-only document) over whatever the world is doing:
+__compiled_world_play_motion(nodeId, "userdata/editor/motion/wave.rjan", 1);
+
+// stop just that layer — the wave fades out, the walk was never interrupted:
+__compiled_world_play_motion(nodeId, "", 1);</code></pre>
+    <div class="callout"><span class="tag">Law</span>
+      <p>A live capture session or host pose stream still owns the <em>whole body</em> and outranks every layer — exactly the ownership rule the slice always had. Nothing about the host doors changed.</p>
+    </div>
+  </section>
+
+  <section id="doors">
+    <h2>Reference · doors and verbs</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Door</th><th>Shape</th><th>Does</th></tr>
+      <tr><td><code>__compiled_world_play_motion</code></td><td class="mono num">(nodeId, path, layer=0)</td><td>Mounts an <code>.rjan</code> from disk on one mixer layer. Empty path stops that layer. Content-addressed <code>motion-&lt;sha256&gt;</code> takes are hash-verified on reopen.</td></tr>
+      <tr><td><code>__compiled_world_scrub_motion</code></td><td class="mono num">(nodeId, layer, seconds)</td><td>Parks the layer’s playhead at an exact time. Negative seconds resumes playback.</td></tr>
+      <tr><td><code>__compiled_world_motion_document</code></td><td class="mono">JSON: op save / load</td><td>The one translation between authoring JSON and RJAN bytes, both directions. Carts never hand-roll the format.</td></tr>
+      <tr><td><code>__capture_session</code> · <code>record</code></td><td class="mono">revisioned verb</td><td>Starts keeping promoted frames.</td></tr>
+      <tr><td><code>__capture_session</code> · <code>recordStop</code></td><td class="mono">{directory, name}</td><td>Persists the take; replies with path, frame count, duration, truncated flag.</td></tr>
+      <tr><td><code>__capture_session</code> · <code>poseKey</code></td><td class="mono">unpinned read</td><td>The current promoted pose as role-addressed deltas — the workbench’s add-key input.</td></tr>
+    </table></div>
+
+    <h3>Authoring JSON, by example</h3>
+    <p>What <code>op:"save"</code> accepts and <code>op:"load"</code> returns. A key’s <code>channels</code> map <em>is</em> its coverage — name only what you pose.</p>
+<pre><code>{ "name": "wave-hello", "looping": true, "durationSeconds": 1.5,
+  "channels": ["upper_arm_left", "lower_arm_left"],
+  "keys": [
+    { "timeSeconds": 0.0,
+      "channels": { "upper_arm_left": [0, 0, 0, 1] } },
+    { "timeSeconds": 0.75, "easing": "smooth",
+      "root": [0, 0.05, 0],
+      "channels": { "upper_arm_left":  [0.38, 0, 0, 0.92],
+                    "lower_arm_left":  [0, 0, 0.20, 0.98] } }
+  ] }</code></pre>
+    <p class="muted">Quaternions are bind-relative deltas (x,&nbsp;y,&nbsp;z,&nbsp;w) — “how far from rest”, which is exactly why the same file fits every body. Easing per key: <code>slerp</code> (default), <code>smooth</code>, or <code>hold</code>. A <code>planted</code> list annotates ground contact for the future contact/IK layer — recorded now, solved later.</p>
+  </section>
+
+  <section id="files">
+    <h2>Reference · where files live</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Path</th><th>What</th></tr>
+      <tr><td><code>userdata/editor/motion/</code></td><td>The motion library. Takes are immutable and content-addressed (<code>motion-&lt;sha256&gt;.rjan</code>); named documents (<code>wave-hello.rjan</code>) are editable in place. Sibling of zig-out — no build cleanup can touch it.</td></tr>
+      <tr><td><code>framework/skeleton/motion_document.zig</code></td><td>RJAN v1: format, validation, sampling.</td></tr>
+      <tr><td><code>framework/skeleton/clip_documents.zig</code></td><td>The five clips as generated documents.</td></tr>
+      <tr><td><code>framework/world_loader/player_character_pose.zig</code></td><td>The mixer: clip floor, four layers, blend law, scrub.</td></tr>
+      <tr><td><code>cart/editor/stage/MotionDock.tsx</code></td><td>The workbench strip.</td></tr>
+      <tr><td><code>docs/game/ANIMATION_ROOF.md</code> · <code>ANIMATION_SLICE.md</code></td><td>The proposal (with execution status) and the survey it grew from.</td></tr>
+    </table></div>
+  </section>
+
+  <section id="gates">
+    <h2>What is still gated</h2>
+    <ul class="plain">
+      <li><strong>Clip table retirement</strong> — the procedural clip table remains the source of truth until per-clip screenshot parity passes on the rebuilt binary (the ruling’s own gate). The documents are generated from it, so nothing can drift while we wait.</li>
+      <li><strong>Runtime proofs</strong> — M4004 walking in /play, capture driving M4004 live, and the dock end-to-end all need the rebuild; every mechanism behind them is proven in the test suites (<span class="mono">test-player-character-pose, test-humanoid-clips, test-motion-document, test-motion-document-json, test-capture-session, test-retarget</span> — all green).</li>
+      <li><strong>Deliberately out of scope</strong>, per the proposal: foot planting / IK (the <code>planted</code> annotation is recorded for it), the V6 animation language on top of documents, and the “snappy / heavy” feel-word easing vocabulary.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>The Animation Roof · req_4285 (proposal ruled in as the session goal) · follow-ups req_4287, req_4288 (build fixes).<br>
+    <span class="mono">d95ba9fb6 roles · 06b1004ff RJAN · 12aa7d9f2 recorder · 4e23627a2 playback · 11d96183e play door · ecda74aaa clip docs · 02711729b mixer · 03d2e25f6 scrub+codec · 93079268e workbench · 69f25a7cb + 532adc620 build fixes</span></p>
+  </footer>
+</div>
