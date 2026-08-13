@@ -1003,6 +1003,8 @@ declare global {
   function __compiled_world_npc_character_session(...args: unknown[]): unknown;
   function __compiled_world_set_player_pose(...args: unknown[]): unknown;
   function __compiled_world_play_motion(...args: unknown[]): unknown;
+  function __compiled_world_scrub_motion(...args: unknown[]): unknown;
+  function __compiled_world_motion_document(...args: unknown[]): unknown;
   function __compiled_world_window(...args: unknown[]): unknown;
   function __compiled_world_window_close(...args: unknown[]): unknown;
   function __compiled_world_window_status(...args: unknown[]): unknown;

@@ -8,6 +8,8 @@ const v8 = @import("v8");
 const v8_runtime = @import("dev_modules/v8_runtime_api.zig");
 const world_loader = @import("world_loader.zig");
 const world_window = @import("dev_modules/world_window_api.zig");
+const HostContext = @import("host_context.zig");
+const motion_json = @import("skeleton/motion_document_json.zig");
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
     if (idx >= info.length()) return null;
@@ -586,6 +588,131 @@ fn hostPlayMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnString(info, reply);
 }
 
+// __compiled_world_scrub_motion(nodeId, layer, seconds) parks one mixer
+// layer's playhead for the workbench scrub; negative seconds resumes
+// playback from wherever the playhead stands.
+fn hostScrubMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const layer_raw = argToF64(info, 1) orelse 0;
+    if (!(layer_raw >= 0 and layer_raw < @as(f64, @floatFromInt(world_loader.player_character_pose.MAX_MOTION_LAYERS)))) {
+        setReturnString(info, "error:InvalidMotionLayer");
+        return;
+    }
+    const seconds: f32 = if (argToF64(info, 2)) |raw| @floatCast(raw) else -1;
+    world_loader.scrubMountedPlayerMotion(node_id, @intFromFloat(layer_raw), seconds) catch |err| {
+        var buffer: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:ScrubRejected";
+        setReturnString(info, message);
+        return;
+    };
+    setReturnString(info, "{\"ok\":true}");
+}
+
+// __compiled_world_motion_document(JSON) is the authoring door for RJAN
+// documents: {"op":"save","path":...,"document":{...}} parses the authoring
+// JSON, validates, encodes, and writes tmp-then-rename; {"op":"load","path":...}
+// reopens a document (hash-verified for motion-<sha256> takes) back into the
+// authoring shape. Carts never hand-roll the format in either direction.
+fn hostMotionDocument(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const request = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "error:BadMotionRequest");
+        return;
+    };
+    defer std.heap.c_allocator.free(request);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const reply = motionDocumentReplyAlloc(host, request) catch |err| {
+        var buffer: [128]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:MotionDocument";
+        setReturnString(info, message);
+        return;
+    };
+    defer std.heap.c_allocator.free(reply);
+    setReturnString(info, reply);
+}
+
+fn motionDocumentReplyAlloc(host: *HostContext, request_json: []const u8) ![]u8 {
+    const allocator = std.heap.c_allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, request_json, .{});
+    defer parsed.deinit();
+    const request = switch (parsed.value) {
+        .object => |map| map,
+        else => return error.BadMotionRequest,
+    };
+    const op = switch (request.get("op") orelse return error.BadMotionRequest) {
+        .string => |text| text,
+        else => return error.BadMotionRequest,
+    };
+    const path = switch (request.get("path") orelse return error.BadMotionRequest) {
+        .string => |text| text,
+        else => return error.BadMotionRequest,
+    };
+    if (path.len == 0 or path.len > std.fs.max_path_bytes) return error.BadMotionRequest;
+
+    if (std.mem.eql(u8, op, "save")) {
+        const document_value = switch (request.get("document") orelse return error.BadMotionRequest) {
+            .object => |map| map,
+            else => return error.BadMotionRequest,
+        };
+        var document = try motion_json.parseObject(allocator, document_value);
+        defer document.deinit();
+        const bytes = try motion_json.motion.encodeAlloc(allocator, &document);
+        defer allocator.free(bytes);
+
+        if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| {
+            std.Io.Dir.cwd().createDirPath(host.io, path[0..slash]) catch {};
+        }
+        var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return error.BadMotionRequest;
+        {
+            var file = try std.Io.Dir.cwd().createFile(host.io, tmp_path, .{ .truncate = true });
+            errdefer std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+            defer file.close(host.io);
+            try file.writeStreamingAll(host.io, bytes);
+            try file.sync(host.io);
+        }
+        std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, host.io) catch |err| {
+            std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+            return err;
+        };
+
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.print("{{\"ok\":true,\"bytes\":{d},\"path\":", .{bytes.len});
+        try writeMotionJsonString(&output.writer, path);
+        try output.writer.writeByte('}');
+        return allocator.dupe(u8, output.written());
+    }
+    if (std.mem.eql(u8, op, "load")) {
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(host.io, path, allocator, .limited(world_loader.MAX_MOTION_BYTES));
+        defer allocator.free(bytes);
+        var document = try motion_json.motion.decodeAlloc(allocator, bytes);
+        defer document.deinit();
+        var output: std.Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"ok\":true,\"document\":");
+        try motion_json.writeJson(&output.writer, &document);
+        try output.writer.writeByte('}');
+        return allocator.dupe(u8, output.written());
+    }
+    return error.BadMotionRequest;
+}
+
+fn writeMotionJsonString(writer: *std.Io.Writer, value: []const u8) !void {
+    try writer.writeByte('"');
+    for (value) |byte| switch (byte) {
+        '"' => try writer.writeAll("\\\""),
+        '\\' => try writer.writeAll("\\\\"),
+        0...31 => try writer.print("\\u{x:0>4}", .{byte}),
+        else => try writer.writeByte(byte),
+    };
+    try writer.writeByte('"');
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -668,6 +795,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_npc_character_session", hostNpcCharacterSession);
     v8_runtime.registerHostFn("__compiled_world_set_player_pose", hostSetPlayerPose);
     v8_runtime.registerHostFn("__compiled_world_play_motion", hostPlayMotion);
+    v8_runtime.registerHostFn("__compiled_world_scrub_motion", hostScrubMotion);
+    v8_runtime.registerHostFn("__compiled_world_motion_document", hostMotionDocument);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);

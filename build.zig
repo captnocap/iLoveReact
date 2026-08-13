@@ -2946,6 +2946,21 @@ pub fn build(b: *std.Build) void {
     b.step("test-motion-document", "Run RJAN role-addressed motion document tests")
         .dependOn(&b.addRunArtifact(motion_document_test).step);
 
+    const motion_document_json_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/motion_document_json.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const motion_document_json_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/motion_document_json.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    motion_document_json_test_mod.addImport("motion_document_json", motion_document_json_mod_t);
+    const motion_document_json_test = b.addTest(.{ .name = "motion-document-json-test", .root_module = motion_document_json_test_mod });
+    b.step("test-motion-document-json", "Run motion document authoring JSON codec tests")
+        .dependOn(&b.addRunArtifact(motion_document_json_test).step);
+
     const player_character_pose_mod_t = b.createModule(.{
         .root_source_file = b.path("framework/player_character_pose_module.zig"),
         .target = target,

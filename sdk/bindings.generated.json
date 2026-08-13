@@ -4050,6 +4050,14 @@
           "zig": "hostPlayMotion"
         },
         {
+          "js": "__compiled_world_scrub_motion",
+          "zig": "hostScrubMotion"
+        },
+        {
+          "js": "__compiled_world_motion_document",
+          "zig": "hostMotionDocument"
+        },
+        {
           "js": "__compiled_world_window",
           "zig": "hostWindowOpen"
         },

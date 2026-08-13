@@ -38,6 +38,10 @@ pub const ActiveMotion = struct {
     /// Blend-in weight, ramping 0 → 1 so a mount never snaps from the pose
     /// underneath it.
     weight: f32 = 0,
+    /// Scrub state: a paused layer holds its playhead; advance() stops
+    /// accumulating dt but keeps composing, so the workbench scrubs the
+    /// exact frame the mixer would play.
+    paused: bool = false,
 };
 
 /// A stopped layer's goodbye: its last composed pose, snapshotted so the
@@ -266,6 +270,26 @@ pub const State = struct {
         return layer < MAX_MOTION_LAYERS and self.motion_layers[layer] != null;
     }
 
+    /// Park a layer's playhead at an exact time — the workbench scrub. The
+    /// blend-in ramp is bypassed: scrubbing is authoring, and the author is
+    /// owed the exact pose, not an approach to it.
+    pub fn scrubMotionLayer(self: *State, layer: usize, seconds: f32) Error!void {
+        if (layer >= MAX_MOTION_LAYERS) return error.NoMotionChannels;
+        if (!std.math.isFinite(seconds) or seconds < 0) return error.InvalidSampleTime;
+        const active = if (self.motion_layers[layer]) |*value| value else return error.NoMotionChannels;
+        active.elapsed_seconds = seconds;
+        active.paused = true;
+        active.weight = 1;
+    }
+
+    /// Release a scrubbed layer back into normal playback from wherever the
+    /// playhead stands.
+    pub fn resumeMotionLayer(self: *State, layer: usize) Error!void {
+        if (layer >= MAX_MOTION_LAYERS) return error.NoMotionChannels;
+        const active = if (self.motion_layers[layer]) |*value| value else return error.NoMotionChannels;
+        active.paused = false;
+    }
+
     fn snapshotLayerForFade(self: *State, layer: usize) void {
         const active = if (self.motion_layers[layer]) |*value| value else return;
         if (active.weight <= 0) {
@@ -319,7 +343,7 @@ pub const State = struct {
     }
 
     fn composeActive(self: *State, frame: *pose_stream.Frame, active: *ActiveMotion, dt: f32) Error!void {
-        active.elapsed_seconds += dt;
+        if (!active.paused) active.elapsed_seconds += dt;
         active.weight = @min(1, active.weight + dt / MOTION_BLEND_IN_SECONDS);
         if (active.weight <= 0) return;
         const sampled = try motion_document.sample(active.document, active.elapsed_seconds);

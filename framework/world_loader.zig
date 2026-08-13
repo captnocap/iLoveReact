@@ -514,6 +514,14 @@ pub fn playMountedPlayerMotionJsonAlloc(
     return allocator.dupe(u8, output.written());
 }
 
+/// Workbench scrub: park one mixer layer's playhead at an exact time, or
+/// release it back into playback with a negative time.
+pub fn scrubMountedPlayerMotion(node_id: u32, layer: usize, seconds: f32) !void {
+    const runtime = try requireMountedRuntime(node_id);
+    if (seconds < 0) return runtime.player_character_pose.resumeMotionLayer(layer);
+    return runtime.player_character_pose.scrubMotionLayer(layer, seconds);
+}
+
 /// Close only the candidate/active target owned by `owner_id`. A late close
 /// from a replaced session cannot tear down the newer session's character.
 pub fn closeMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) void {
