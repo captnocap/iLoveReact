@@ -545,12 +545,17 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
     // the palette only while its explicit session is active; otherwise these
     // canonical local-quaternion clips are the one runtime animation source.
     if (self.scene.player_character) |*character| {
-        const clip: m_player_character_pose.clips.ClipId = switch (self.player.posture) {
+        // RJIT_FORCE_CLIP (+ RJIT_FORCE_CLIP_SECONDS) pins clip and clock —
+        // the per-clip parity repro hook (req_4294): both clip-floor sources
+        // then render the exact same authored instant, shot after shot.
+        const clip: m_player_character_pose.clips.ClipId = self.force_clip orelse switch (self.player.posture) {
             .sit => .sit,
             .lay => .lay,
             .none => if (airborne) .jump else if (moving or run_down) .walk else .idle,
         };
-        const clip_seconds: ?f32 = switch (clip) {
+        const clip_seconds: ?f32 = if (self.force_clip != null)
+            self.force_clip_seconds orelse 0
+        else switch (clip) {
             .walk => self.player.gait_phase,
             .jump => self.player.jump_time,
             .idle, .sit, .lay => null,

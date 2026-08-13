@@ -76,7 +76,7 @@ pub fn clipDocument(allocator: std.mem.Allocator, clip: clips.ClipId) Error!moti
 
     const runs = try allocator.alloc(motion.Run, 0);
     errdefer allocator.free(runs);
-    const document = motion.Document{
+    const out = motion.Document{
         .allocator = allocator,
         .name = name,
         .looping = info.looping,
@@ -86,6 +86,44 @@ pub fn clipDocument(allocator: std.mem.Allocator, clip: clips.ClipId) Error!moti
         .keys = keys,
         .runs = runs,
     };
-    try motion.validate(&document);
-    return document;
+    try motion.validate(&out);
+    return out;
+}
+
+// ── the resident library (req_4294) ──────────────────────────────────────────
+// The five clip documents the runtime clip floor plays. Generated once from
+// the table on first use, at RUNTIME: the key values come from the very same
+// `sampleChannels` the table path calls, so the two sources hold bit-identical
+// keys and parity shots compare the samplers alone, never the generators.
+// Single-threaded like every pose advance — the world step is the caller.
+
+const CLIP_COUNT = @typeInfo(clips.ClipId).@"enum".fields.len;
+
+var library_buffer: [32 * 1024]u8 = undefined;
+var library: [CLIP_COUNT]motion.Document = undefined;
+var library_state: enum { empty, ready, failed } = .empty;
+
+/// One built-in clip as its resident, immutable motion document.
+pub fn document(clip: clips.ClipId) Error!*const motion.Document {
+    switch (library_state) {
+        .ready => {},
+        .failed => return error.EmptyDocument,
+        .empty => try initLibrary(),
+    }
+    return &library[@intFromEnum(clip)];
+}
+
+fn initLibrary() Error!void {
+    library_state = .failed;
+    var fba = std.heap.FixedBufferAllocator.init(&library_buffer);
+    for (&library, 0..) |*slot, index| {
+        slot.* = try clipDocument(fba.allocator(), @enumFromInt(index));
+        // The clip floor indexes samples by CHANNEL_IDS position; hold that
+        // ordering as a checked invariant, not a generator coincidence.
+        if (slot.channel_ids.len != clips.CHANNEL_IDS.len) return error.InvalidChannelCount;
+        for (slot.channel_ids, clips.CHANNEL_IDS) |actual, expected| {
+            if (!std.mem.eql(u8, actual, expected)) return error.InvalidChannelId;
+        }
+    }
+    library_state = .ready;
 }

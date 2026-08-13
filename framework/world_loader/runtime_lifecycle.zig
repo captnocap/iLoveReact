@@ -13,6 +13,7 @@ const m_config = @import("config.zig");
 const m_streaming_support = @import("streaming_support.zig");
 const m_game_file = @import("game_file.zig");
 const m_live_inputs = @import("live_inputs.zig");
+const m_player_pose = @import("player_character_pose.zig");
 const scene_build = @import("scene_build.zig");
 
 const MATERIAL_TILE_PX = m_config.MATERIAL_TILE_PX;
@@ -26,14 +27,49 @@ fn envFlag(environ: *const std.process.Environ.Map, name: []const u8) bool {
     return value.len == 0 or value[0] != '0';
 }
 
+// ── per-clip parity repro hooks (req_4294, the RJIT_FORCE_GAIT family) ──
+// RJIT_FORCE_CLIP=idle|walk|jump|sit|lay pins the player's clip;
+// RJIT_FORCE_CLIP_SECONDS pins its clock (default 0 when forcing);
+// RJIT_CLIP_SOURCE=table|document pins which sampler the clip floor plays.
+// Together a headless `rjit shot` renders the same authored instant every
+// run, so the two clip-floor sources byte-compare per clip.
+
+fn envForceClip(environ: *const std.process.Environ.Map) ?m_player_pose.clips.ClipId {
+    const value = environ.get("RJIT_FORCE_CLIP") orelse return null;
+    const clip = std.meta.stringToEnum(m_player_pose.clips.ClipId, value);
+    if (clip == null) log.print("[loader] RJIT_FORCE_CLIP '{s}' unknown (idle|walk|jump|sit|lay) — ignored\n", .{value});
+    return clip;
+}
+
+fn envForceClipSeconds(environ: *const std.process.Environ.Map) ?f32 {
+    const value = environ.get("RJIT_FORCE_CLIP_SECONDS") orelse return null;
+    return std.fmt.parseFloat(f32, value) catch {
+        log.print("[loader] RJIT_FORCE_CLIP_SECONDS '{s}' is not a number — ignored\n", .{value});
+        return null;
+    };
+}
+
+fn applyClipSource(environ: *const std.process.Environ.Map) void {
+    const value = environ.get("RJIT_CLIP_SOURCE") orelse return;
+    if (std.meta.stringToEnum(m_player_pose.ClipFloorSource, value)) |source| {
+        m_player_pose.setClipFloorSource(source);
+        log.print("[loader] RJIT_CLIP_SOURCE={s} — clip floor pinned (parity repro, req_4294)\n", .{value});
+    } else {
+        log.print("[loader] RJIT_CLIP_SOURCE '{s}' unknown (table|document) — ignored\n", .{value});
+    }
+}
+
 /// Construct the paint-first empty world without manufacturing a filesystem
 /// error. Modular dev calls this when the cold host has already classified the
 /// source path as absent.
 pub fn initBlankInPlace(self: anytype, io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, path: []const u8, node_id: u32) !void {
+    applyClipSource(environ);
     self.* = @TypeOf(self.*){
         .allocator = allocator,
         .node_id = node_id,
         .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
+        .force_clip = envForceClip(environ),
+        .force_clip_seconds = envForceClipSeconds(environ),
         .live_log = envFlag(environ, "RJIT_LIVELOG"),
         .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
         .scene = constructor.blankScene(),
@@ -68,10 +104,13 @@ pub fn initInPlace(self: anytype, io: std.Io, environ: *const std.process.Enviro
         log.print("[loader] construct FAILED: {any}\n", .{err});
         return err;
     };
+    applyClipSource(environ);
     self.* = @TypeOf(self.*){
         .allocator = allocator,
         .node_id = node_id,
         .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
+        .force_clip = envForceClip(environ),
+        .force_clip_seconds = envForceClipSeconds(environ),
         .live_log = envFlag(environ, "RJIT_LIVELOG"),
         .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
         .scene = scene,

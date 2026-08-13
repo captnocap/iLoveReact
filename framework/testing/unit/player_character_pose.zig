@@ -327,6 +327,82 @@ test "the five clips migrate into documents with playback parity on both bodies"
     }
 }
 
+test "the resident clip document library holds the five clips in channel order" {
+    const clip_documents = mounted_pose.clip_documents;
+    const all_clips = [_]clips.ClipId{ .idle, .walk, .jump, .sit, .lay };
+    for (all_clips) |clip| {
+        const doc = try clip_documents.document(clip);
+        const info = clips.clipInfo(clip);
+        try std.testing.expectEqualStrings(@tagName(clip), doc.name);
+        try std.testing.expectEqual(info.duration_seconds, doc.duration_seconds);
+        try std.testing.expectEqual(info.looping, doc.looping);
+        // The document clip floor indexes samples by CHANNEL_IDS position.
+        try std.testing.expectEqual(clips.CHANNEL_IDS.len, doc.channel_ids.len);
+        for (doc.channel_ids, clips.CHANNEL_IDS) |actual, expected| {
+            try std.testing.expectEqualStrings(expected, actual);
+        }
+        // Resident and stable: the same clip answers with the same document.
+        try std.testing.expectEqual(doc, try clip_documents.document(clip));
+    }
+}
+
+test "the document clip floor replays the table clip floor on both bodies (the flip, req_4294)" {
+    const canonical_bones = canonicalBones();
+    const count = 53;
+    var external_bones: [count]rig_pose.Bone = undefined;
+    var ids: [count][]const u8 = undefined;
+    var id_storage: [count][24]u8 = undefined;
+    for (&external_bones, &ids, 0..) |*bone, *id, index| {
+        bone.* = .{
+            .parent_index = if (index == 0) null else @intCast(index - 1),
+            .bind_translation = if (index == 0) .{ 0, 0, 0 } else .{ 0, 0.01, 0 },
+            .constraint = .unconstrained,
+        };
+        id.* = std.fmt.bufPrint(&id_storage[index], "external_joint_{d}", .{index}) catch unreachable;
+    }
+    for (clips.CHANNEL_IDS, 0..) |channel_id, channel| {
+        ids[3 + channel * 4] = channel_id;
+    }
+
+    defer mounted_pose.setClipFloorSource(.table);
+    const all_clips = [_]clips.ClipId{ .idle, .walk, .jump, .sit, .lay };
+    for (all_clips) |clip| {
+        const duration = clips.clipInfo(clip).duration_seconds;
+        var step: usize = 0;
+        while (step <= 24) : (step += 1) {
+            const t = duration * @as(f32, @floatFromInt(step)) / 20.0;
+
+            inline for (.{ "canonical", "external" }) |body| {
+                const is_canonical = comptime std.mem.eql(u8, body, "canonical");
+                const bones: []const rig_pose.Bone = if (is_canonical) &canonical_bones else &external_bones;
+                const role_ids: []const []const u8 = if (is_canonical) clips.PALETTE_IDS[0..] else &ids;
+
+                var table_state: mounted_pose.State = .{};
+                try table_state.resetRig(bones, role_ids);
+                mounted_pose.setClipFloorSource(.table);
+                const via_table = try table_state.advance(0, clip, t);
+
+                var document_state: mounted_pose.State = .{};
+                try document_state.resetRig(bones, role_ids);
+                mounted_pose.setClipFloorSource(.document);
+                const via_document = try document_state.advance(0, clip, t);
+
+                for (0..3) |axis| {
+                    try std.testing.expectApproxEqAbs(
+                        via_table.root_translation[axis],
+                        via_document.root_translation[axis],
+                        1.0e-4,
+                    );
+                }
+                for (via_table.rotations(), via_document.rotations()) |a, b| {
+                    const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+                    try std.testing.expect(@abs(dot) > 1.0 - 1.0e-4);
+                }
+            }
+        }
+    }
+}
+
 test "wave over walk: a partial document owns exactly the roles it covers" {
     const motion = mounted_pose.motion_document;
     const bones = canonicalBones();

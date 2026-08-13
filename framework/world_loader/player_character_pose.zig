@@ -14,6 +14,7 @@ pub const pose_stream = @import("../skeleton/pose_stream.zig");
 pub const clips = @import("../skeleton/humanoid_clips.zig");
 pub const rig_pose = @import("../skeleton/rig_pose.zig");
 pub const motion_document = @import("../skeleton/motion_document.zig");
+pub const clip_documents = @import("../skeleton/clip_documents.zig");
 
 pub const MAX_OWNER_BYTES: usize = 64;
 pub const HOST_OWNER: []const u8 = "compiled-world-host";
@@ -64,6 +65,24 @@ pub const MAX_MOTION_LAYERS: usize = 4;
 /// Blend windows lifted from the capture gate's hold/fade dropout law.
 pub const MOTION_BLEND_IN_SECONDS: f32 = 0.15;
 pub const MOTION_BLEND_OUT_SECONDS: f32 = 0.35;
+
+/// Which sampler the clip floor plays (req_4294). `.table` is the procedural
+/// reference in humanoid_clips; `.document` replays the generated RJAN clip
+/// documents through the same `motion_document.sample` the mixer's layers
+/// use. The default flips to `.document` once per-clip playback parity is
+/// shot-verified (the roof's gate, req_4285); the table then stays as the
+/// documents' generator input. `RJIT_CLIP_SOURCE=table|document` pins it —
+/// the repro hook of the `RJIT_FORCE_GAIT` family.
+pub const ClipFloorSource = enum { table, document };
+var clip_floor_source: ClipFloorSource = .table;
+
+pub fn setClipFloorSource(source: ClipFloorSource) void {
+    clip_floor_source = source;
+}
+
+pub fn clipFloorSource() ClipFloorSource {
+    return clip_floor_source;
+}
 
 pub const OwnerId = struct {
     bytes: [MAX_OWNER_BYTES]u8 = undefined,
@@ -417,17 +436,37 @@ pub const State = struct {
         // The mixer floor: built-in clips when this body binds the clip
         // roles, its bind pose otherwise. Clips are role-addressed — a body
         // answers to a clip channel exactly when its rig bound that role.
+        // Two samplers can answer (req_4294): the generated clip documents
+        // (via the same motion_document.sample every mounted layer plays)
+        // or the procedural table they were generated from.
         var frame = self.bindFrame();
         if (self.clip_capable) {
             const seconds = explicit_clip_seconds orelse self.clip_elapsed_seconds;
-            const channels = try clips.sampleChannels(fallback_clip, seconds);
-            frame.root_translation = channels.root_translation;
-            for (channels.deltas, self.clip_channel_targets) |delta, target_slot| {
-                const target = target_slot orelse continue;
-                frame.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
-                    self.bind_local_rotations[target],
-                    delta,
-                ));
+            switch (clip_floor_source) {
+                .table => {
+                    const channels = try clips.sampleChannels(fallback_clip, seconds);
+                    frame.root_translation = channels.root_translation;
+                    for (channels.deltas, self.clip_channel_targets) |delta, target_slot| {
+                        const target = target_slot orelse continue;
+                        frame.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
+                            self.bind_local_rotations[target],
+                            delta,
+                        ));
+                    }
+                },
+                .document => {
+                    const doc = try clip_documents.document(fallback_clip);
+                    const sampled = try motion_document.sample(doc, seconds);
+                    if (sampled.has_root) frame.root_translation = sampled.root_translation;
+                    for (self.clip_channel_targets, 0..) |target_slot, channel| {
+                        if ((sampled.coverage & (@as(u32, 1) << @intCast(channel))) == 0) continue;
+                        const target = target_slot orelse continue;
+                        frame.local_quaternions[target] = try pose_stream.fk.normalizeQuat(pose_stream.fk.multiplyQuat(
+                            self.bind_local_rotations[target],
+                            sampled.deltas[channel],
+                        ));
+                    }
+                },
             }
         }
 

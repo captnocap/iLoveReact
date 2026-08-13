@@ -18,3 +18,6 @@ pub const Error = implementation.Error;
 pub const OwnerId = implementation.OwnerId;
 pub const ActiveMotion = implementation.ActiveMotion;
 pub const State = implementation.State;
+pub const ClipFloorSource = implementation.ClipFloorSource;
+pub const setClipFloorSource = implementation.setClipFloorSource;
+pub const clipFloorSource = implementation.clipFloorSource;

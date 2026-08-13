@@ -69,6 +69,12 @@ pub const Runtime = struct {
     allocator: std.mem.Allocator,
     node_id: u32 = 0,
     force_gait: bool = false,
+    // RJIT_FORCE_CLIP pins the player's clip and RJIT_FORCE_CLIP_SECONDS its
+    // clock — the per-clip parity repro hooks (req_4294, FORCE_GAIT's family):
+    // a pinned clip at a pinned instant renders the same pose every run, so
+    // `rjit shot` frames of the two clip-floor sources compare pixel to pixel.
+    force_clip: ?m_player_character_pose.clips.ClipId = null,
+    force_clip_seconds: ?f32 = null,
     live_log: bool = false,
     traffic_log: bool = false,
     scene: constructor.Scene,
