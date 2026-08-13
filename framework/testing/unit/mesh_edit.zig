@@ -3579,6 +3579,115 @@ test "curve pull with zero offset leaves the run untouched" {
     }
 }
 
+test "curve pull density rises with curvature and stays inside the path budget" {
+    loadQuadStrip(4328);
+    defer mesh_edit.test_support.clear();
+    defer mesh_edit.curvePullEnd();
+
+    try testing.expectEqual(@as(u32, 5), selectTopRow());
+    try testing.expect(mesh_edit.curvePullBegin());
+    try testing.expectEqual(@as(u32, 0), mesh_edit.curvePullSuggestedCuts(.{ 0, 0, 0 }));
+    try testing.expectEqual(@as(u32, 0), mesh_edit.curvePullSuggestedCuts(.{ 0, 0, 0.1 }));
+    const deep = mesh_edit.curvePullSuggestedCuts(.{ 0, 0, 2.0 });
+    try testing.expect(deep > 0);
+    const path = mesh_edit.curvePullPath().?;
+    try testing.expect((path.ids.len - 1) * (@as(usize, deep) + 1) + 1 <= mesh_edit.curve_pull_tuning.max_path_verts);
+    // A tiny move back across the exact threshold retains the current density;
+    // a genuinely shallow return releases it.  No threshold chatter/rebuild loop.
+    var threshold_probe: f32 = 2.0;
+    while (threshold_probe > 0.1 and mesh_edit.curvePullSuggestedCutsFor(path, .{ 0, 0, threshold_probe }) >= deep) {
+        threshold_probe -= 0.01;
+    }
+    try testing.expect(threshold_probe > 0.1);
+    try testing.expectEqual(deep, mesh_edit.curvePullAdaptiveCutsFor(path, .{ 0, 0, threshold_probe }, deep));
+    try testing.expectEqual(@as(u32, 0), mesh_edit.curvePullAdaptiveCutsFor(path, .{ 0, 0, 0.1 }, deep));
+}
+
+test "curve pull densification loop-cuts the full quad strip and returns the expanded run" {
+    const quads = 4;
+    var soup: [quads * 2 * 3 * 8]f32 = undefined;
+    var groups: [quads * 2]u32 = undefined;
+    var row: usize = 0;
+    var quad: usize = 0;
+    while (quad < quads) : (quad += 1) {
+        const x0: f32 = @floatFromInt(quad);
+        const x1 = x0 + 1;
+        const corners = [6][2]f32{
+            .{ x0, 0 }, .{ x1, 0 }, .{ x1, 1 },
+            .{ x0, 0 }, .{ x1, 1 }, .{ x0, 1 },
+        };
+        for (corners) |point| {
+            soup[row * 8 + 0] = point[0];
+            soup[row * 8 + 1] = point[1];
+            soup[row * 8 + 2] = 0;
+            soup[row * 8 + 3] = 0;
+            soup[row * 8 + 4] = 0;
+            soup[row * 8 + 5] = 1;
+            soup[row * 8 + 6] = 0;
+            soup[row * 8 + 7] = 0;
+            row += 1;
+        }
+        groups[quad * 2] = @intCast(quad);
+        groups[quad * 2 + 1] = @intCast(quad);
+    }
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], quads * 2, groups[0..], null);
+    defer indexed.deinit();
+
+    var source_ids: [5]u32 = undefined;
+    var source_count: usize = 0;
+    for (indexed.vertices.items, 0..) |vertex, id| {
+        if (@abs(vertex.position[1] - 1) > 1e-6) continue;
+        source_ids[source_count] = @intCast(id);
+        source_count += 1;
+    }
+    try testing.expectEqual(@as(usize, 5), source_count);
+    var i: usize = 1;
+    while (i < source_ids.len) : (i += 1) {
+        const candidate = source_ids[i];
+        var at = i;
+        while (at > 0 and indexed.vertices.items[source_ids[at - 1]].position[0] > indexed.vertices.items[candidate].position[0]) : (at -= 1) {
+            source_ids[at] = source_ids[at - 1];
+        }
+        source_ids[at] = candidate;
+    }
+    var source_base: [5][3]f32 = undefined;
+    var source_params: [5]f32 = undefined;
+    for (source_ids, 0..) |id, station| {
+        source_base[station] = indexed.vertices.items[id].position;
+        source_params[station] = @as(f32, @floatFromInt(station)) / 4.0;
+    }
+    const source = mesh_edit.CurvePullPath{
+        .ids = source_ids[0..],
+        .base = source_base[0..],
+        .params = source_params[0..],
+        .grab = 2,
+        .mode = .vertex,
+        .part = indexed_edit_mesh.NO_PART,
+    };
+    var dense = try mesh_edit.curvePullDensifyIndexed(testing.allocator, &indexed, source, &.{}, 2);
+    defer dense.deinit();
+
+    try testing.expectEqual(@as(usize, 13), dense.ids.len);
+    for (dense.ids, 0..) |id, station| {
+        const point = indexed.vertices.items[id].position;
+        try testing.expectApproxEqAbs(@as(f32, @floatFromInt(station)) / 3.0, point[0], 1e-5);
+        try testing.expectApproxEqAbs(@as(f32, 1), point[1], 1e-5);
+    }
+    // The decisive behavior: every top-path cut propagated to the opposite row.
+    var station: usize = 0;
+    while (station < dense.ids.len) : (station += 1) {
+        const expected_x = @as(f32, @floatFromInt(station)) / 3.0;
+        var found_bottom = false;
+        for (indexed.vertices.items) |vertex| {
+            if (vertex.alive and @abs(vertex.position[0] - expected_x) < 1e-5 and @abs(vertex.position[1]) < 1e-5) {
+                found_bottom = true;
+                break;
+            }
+        }
+        try testing.expect(found_bottom);
+    }
+}
+
 test "curve pull refuses branched selections and loops" {
     loadQuadStrip(4327);
     defer mesh_edit.test_support.clear();

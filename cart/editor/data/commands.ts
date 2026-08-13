@@ -251,7 +251,8 @@ export const COMMANDS: Command[] = [
   // Pen Edges: the same pen path, committed as naked wire edges (open or closed) with NO
   // fill face — the outline's anchors become welded verts you pull with the move gizmo.
   { id: 'mesh-path-edges', menu: 'Edit', scope: 'model', name: 'Pen Edges', icon: 'Spline', key: '', context: true, native: true, undoable: true, tool: true },
-  // Curve Pull (req_4325): armed, a Move drag on a selected vertex run bends it through an arc
+  // Curve Pull (req_4325/req_4328): armed, a Move drag bends one selected run through
+  // an arc and live loop-cuts its full quad strips as curvature needs more resolution.
   { id: 'mesh-curve-pull', menu: 'Edit', scope: 'model', name: 'Curve Pull', icon: 'Magnet', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-wire', menu: 'Edit', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },

@@ -175,6 +175,10 @@ pub const ActionEvent = struct {
 };
 
 pub fn actionKindForLabel(label: []const u8) ?ActionKind {
+    // Curve Pull is a transform until curvature asks for structural rings.  The
+    // gesture relabels only that structural form, which must inherit Loop Cut's
+    // authored-atlas invalidation and exact undo/redo restoration contract.
+    if (std.mem.eql(u8, label, "curve pull")) return .loop_cut;
     const labels = [_]struct { []const u8, ActionKind }{
         .{ "extrude face", .extrude_face },
         .{ "extrude edge", .extrude_edge },
@@ -240,6 +244,12 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
     };
     for (labels) |row| if (std.mem.eql(u8, label, row[0])) return row[1];
     return null;
+}
+
+test "structural curve pull restores through the loop-cut journal domain" {
+    try std.testing.expectEqual(ActionKind.loop_cut, actionKindForLabel("curve pull").?);
+    try std.testing.expect(actionInvalidatesPaintLayout(actionKindForLabel("curve pull").?));
+    try std.testing.expectEqual(RestoreDomain.mesh, restoreDomainForLabel("curve pull"));
 }
 
 pub fn actionCommandId(kind: ActionKind) []const u8 {

@@ -4771,6 +4771,20 @@ pub const curve_pull_tuning = struct {
     pub const max_path_verts: u32 = 512;
     /// below this the three curve points are treated as collinear → tent fallback
     pub const collinear_epsilon: f32 = 1e-10;
+    /// A faceted arc turns no farther than this between adjacent path vertices.
+    /// Fifteen degrees keeps the silhouette smooth without spraying topology into
+    /// shallow pulls; deeper bends cross thresholds and ask for more full loop cuts.
+    pub const max_segment_turn_radians: f32 = std.math.pi / 12.0;
+    /// Once a ring exists, curvature must fall materially below its lower density
+    /// boundary before the gesture removes it.  This deadband prevents mouse jitter
+    /// around 15° from alternating two full topology rebuilds frame after frame.
+    pub const density_release_ratio: f32 = 0.80;
+    /// One original edge may gain at most this many cuts in a single gesture.  The
+    /// path-wide 512-vertex ceiling remains the stronger bound on long selections.
+    pub const max_cuts_per_edge: u32 = 15;
+    /// Indexed cut vertices are minted from exact lerps, but the durable soup boundary
+    /// is f32.  This is well below the indexed import weld epsilon (1/1024 m).
+    pub const topology_match_epsilon_sq: f32 = 1e-10;
 };
 
 var g_curve_ids: ?[]u32 = null; // ordered run, endpoint → endpoint
@@ -4778,6 +4792,36 @@ var g_curve_base: ?[][3]f32 = null; // grab-time positions, same order
 var g_curve_params: ?[]f32 = null; // normalized chord-length station of each vert
 var g_curve_grab: usize = 0; // index into the run of the pulled vertex
 var g_curve_mask: ?[]bool = null; // scratch affected-mask for the sync tail
+var g_curve_mode: Mode = .none;
+var g_curve_part: u32 = model_source.NO_PART;
+
+pub const CurvePullPath = struct {
+    ids: []const u32,
+    base: []const [3]f32,
+    params: []const f32,
+    grab: usize,
+    mode: Mode,
+    part: u32,
+};
+
+pub const CurvePullMirrorSeed = struct {
+    base: []const [3]f32,
+    part: u32,
+};
+
+pub const CurvePullDensifiedPath = struct {
+    allocator: std.mem.Allocator,
+    ids: []u32,
+    base: [][3]f32,
+    params: []f32,
+
+    pub fn deinit(path: *CurvePullDensifiedPath) void {
+        path.allocator.free(path.ids);
+        path.allocator.free(path.base);
+        path.allocator.free(path.params);
+        path.* = undefined;
+    }
+};
 
 pub fn curvePullEnd() void {
     if (g_curve_ids) |ids| alloc.free(ids);
@@ -4789,10 +4833,23 @@ pub fn curvePullEnd() void {
     g_curve_params = null;
     g_curve_mask = null;
     g_curve_grab = 0;
+    g_curve_mode = .none;
+    g_curve_part = model_source.NO_PART;
 }
 
 pub fn curvePullActive() bool {
     return g_curve_ids != null;
+}
+
+pub fn curvePullPath() ?CurvePullPath {
+    return .{
+        .ids = g_curve_ids orelse return null,
+        .base = g_curve_base orelse return null,
+        .params = g_curve_params orelse return null,
+        .grab = g_curve_grab,
+        .mode = g_curve_mode,
+        .part = g_curve_part,
+    };
 }
 
 /// Capture the selected run at grab time. Refuses (false) unless the selection
@@ -4864,6 +4921,22 @@ pub fn curvePullBegin() bool {
         filled += 1;
     }
 
+    const parts = g_vert_part orelse {
+        alloc.free(ids);
+        return false;
+    };
+    if (ids[0] >= parts.len) {
+        alloc.free(ids);
+        return false;
+    }
+    const part = parts[ids[0]];
+    for (ids) |id| {
+        if (id >= parts.len or parts[id] != part) {
+            alloc.free(ids);
+            return false;
+        }
+    }
+
     const base = alloc.alloc([3]f32, count) catch {
         alloc.free(ids);
         return false;
@@ -4903,6 +4976,8 @@ pub fn curvePullBegin() bool {
     g_curve_params = params;
     g_curve_grab = grab;
     g_curve_mask = scratch;
+    g_curve_mode = g_mode;
+    g_curve_part = part;
     return true;
 }
 
@@ -4915,6 +4990,114 @@ fn arcAngleAlong(rel: [3]f32, e1: [3]f32, e2: [3]f32, sweep_positive: bool) f32 
     return if (sweep_positive) ccw else @mod(two_pi - ccw, two_pi);
 }
 
+const CurvePullArc = struct {
+    center: [3]f32,
+    e1: [3]f32,
+    e2: [3]f32,
+    radius: f32,
+    span: f32,
+    positive: bool,
+    t_grab: f32,
+    frac_grab: f32,
+
+    fn fractionAt(arc: CurvePullArc, t: f32) f32 {
+        if (t <= arc.t_grab) {
+            return if (arc.t_grab > 1e-6) (t / arc.t_grab) * arc.frac_grab else 0;
+        }
+        return if (arc.t_grab < 1.0 - 1e-6)
+            arc.frac_grab + ((t - arc.t_grab) / (1.0 - arc.t_grab)) * (1.0 - arc.frac_grab)
+        else
+            1;
+    }
+
+    fn pointAt(arc: CurvePullArc, t: f32) [3]f32 {
+        const angle = arc.span * arc.fractionAt(t) * @as(f32, if (arc.positive) 1 else -1);
+        return vecAdd(arc.center, vecAdd(
+            vecMul(arc.e1, arc.radius * @cos(angle)),
+            vecMul(arc.e2, arc.radius * @sin(angle)),
+        ));
+    }
+};
+
+/// One circle solution feeds both deformation and density planning.  If this returns
+/// null the pull is collinear and Curve Pull uses its two straight tent segments,
+/// which need no extra topology to represent exactly.
+fn curvePullArc(path: CurvePullPath, offset: [3]f32) ?CurvePullArc {
+    if (path.ids.len < 3 or path.base.len != path.ids.len or path.params.len != path.ids.len or path.grab >= path.ids.len) return null;
+    const a = path.base[0];
+    const c = path.base[path.base.len - 1];
+    const b = vecAdd(path.base[path.grab], offset);
+    const ab = vecSub(b, a);
+    const ac = vecSub(c, a);
+    const nrm = vecCross(ab, ac);
+    const n2 = vecDot(nrm, nrm);
+    if (n2 < curve_pull_tuning.collinear_epsilon) return null;
+
+    const term1 = vecMul(vecCross(nrm, ab), vecDot(ac, ac));
+    const term2 = vecMul(vecCross(ac, nrm), vecDot(ab, ab));
+    const center = vecAdd(a, vecMul(vecAdd(term1, term2), 1.0 / (2.0 * n2)));
+    const radius = vecLen(vecSub(a, center));
+    if (radius < 1e-9 or !std.math.isFinite(radius)) return null;
+    const e1 = vecMul(vecSub(a, center), 1.0 / radius);
+    const plane_normal = vecMul(nrm, 1.0 / @sqrt(n2));
+    const e2 = vecCross(plane_normal, e1);
+
+    const two_pi = std.math.pi * 2.0;
+    const ccw_b = arcAngleAlong(vecSub(b, center), e1, e2, true);
+    const ccw_c = arcAngleAlong(vecSub(c, center), e1, e2, true);
+    const positive = ccw_b <= ccw_c;
+    const span = if (positive) ccw_c else @mod(two_pi - ccw_c, two_pi);
+    if (span < 1e-7 or !std.math.isFinite(span)) return null;
+    const along_b = if (positive) ccw_b else @mod(two_pi - ccw_b, two_pi);
+    return .{
+        .center = center,
+        .e1 = e1,
+        .e2 = e2,
+        .radius = radius,
+        .span = span,
+        .positive = positive,
+        .t_grab = path.params[path.grab],
+        .frac_grab = along_b / span,
+    };
+}
+
+/// Number of equal cuts needed inside EACH original selected edge for the current
+/// bend.  The host rebuilds from the grab-time indexed mesh whenever this value
+/// changes, so scrubbing back shallower removes surplus rings as well as deeper pulls
+/// adding them.  No allocation and no topology walk occur on ordinary drag frames.
+pub fn curvePullSuggestedCutsFor(path: CurvePullPath, offset: [3]f32) u32 {
+    const arc = curvePullArc(path, offset) orelse return 0;
+    var cuts: u32 = 0;
+    var i: usize = 0;
+    while (i + 1 < path.params.len) : (i += 1) {
+        const turn = arc.span * @abs(arc.fractionAt(path.params[i + 1]) - arc.fractionAt(path.params[i]));
+        const rounded_pieces: u32 = @ceil(turn / curve_pull_tuning.max_segment_turn_radians);
+        const pieces = @max(1, rounded_pieces);
+        cuts = @max(cuts, pieces - 1);
+    }
+    const original_edges: u32 = @intCast(path.ids.len - 1);
+    const max_by_path_budget = (curve_pull_tuning.max_path_verts - 1) / original_edges - 1;
+    return @min(cuts, @min(curve_pull_tuning.max_cuts_per_edge, max_by_path_budget));
+}
+
+pub fn curvePullSuggestedCuts(offset: [3]f32) u32 {
+    return curvePullSuggestedCutsFor(curvePullPath() orelse return 0, offset);
+}
+
+pub fn curvePullAdaptiveCutsFor(path: CurvePullPath, offset: [3]f32, current_cuts: u32) u32 {
+    const wanted = curvePullSuggestedCutsFor(path, offset);
+    if (wanted >= current_cuts or current_cuts == 0) return wanted;
+    const arc = curvePullArc(path, offset) orelse return 0;
+    var max_turn: f32 = 0;
+    var i: usize = 0;
+    while (i + 1 < path.params.len) : (i += 1) {
+        max_turn = @max(max_turn, arc.span * @abs(arc.fractionAt(path.params[i + 1]) - arc.fractionAt(path.params[i])));
+    }
+    const lower_piece_count: f32 = @floatFromInt(current_cuts);
+    const release_turn = lower_piece_count * curve_pull_tuning.max_segment_turn_radians * curve_pull_tuning.density_release_ratio;
+    return if (max_turn <= release_turn) wanted else current_cuts;
+}
+
 /// Re-solve the arc for the current pull offset and land every run vertex on it.
 /// The grabbed vertex sits EXACTLY at base + offset; anchors never move.
 pub fn curvePullApply(offset: [3]f32) Mutation {
@@ -4924,22 +5107,17 @@ pub fn curvePullApply(offset: [3]f32) Mutation {
     const scratch = g_curve_mask orelse return .{};
     const verts = g_verts orelse return .{};
     const n = ids.len;
-    const a = base[0];
-    const c = base[n - 1];
-    const b = vecAdd(base[g_curve_grab], offset);
     const t_grab = params[g_curve_grab];
 
     // twin table BEFORE positions move (same law as applyTransform)
     const twins_opt: ?[]u32 = if (g_mirror_mask != 0) ensureMirrorTwins() else null;
 
-    const ab = vecSub(b, a);
-    const ac = vecSub(c, a);
-    const nrm = vecCross(ab, ac);
-    const n2 = vecDot(nrm, nrm);
+    const path = curvePullPath() orelse return .{};
+    const arc = curvePullArc(path, offset);
 
     @memset(scratch, false);
     var i: usize = 0;
-    if (n2 < curve_pull_tuning.collinear_epsilon) {
+    if (arc == null) {
         // collinear (pull along the chord): tent falloff through the grab station —
         // anchors hold, the grab takes the full offset, stations blend linearly
         while (i < n) : (i += 1) {
@@ -4958,40 +5136,8 @@ pub fn curvePullApply(offset: [3]f32) Mutation {
         return syncTransformedVerts(scratch, twins_opt);
     }
 
-    // circumcenter of (a, b, c): o = a + [((ab×ac)×ab)·|ac|² + (ac×(ab×ac))·|ab|²] / (2|ab×ac|²)
-    const term1 = vecMul(vecCross(nrm, ab), vecDot(ac, ac));
-    const term2 = vecMul(vecCross(ac, nrm), vecDot(ab, ab));
-    const o = vecAdd(a, vecMul(vecAdd(term1, term2), 1.0 / (2.0 * n2)));
-    const radius = vecLen(vecSub(a, o));
-    if (radius < 1e-9) return .{};
-    const e1 = vecMul(vecSub(a, o), 1.0 / radius);
-    const plane_normal = vecMul(nrm, 1.0 / @sqrt(n2));
-    const e2 = vecCross(plane_normal, e1);
-
-    // pick the sweep direction that meets the pulled middle on the way A → C
-    const two_pi = std.math.pi * 2.0;
-    const ccw_b = arcAngleAlong(vecSub(b, o), e1, e2, true);
-    const ccw_c = arcAngleAlong(vecSub(c, o), e1, e2, true);
-    const positive = ccw_b <= ccw_c;
-    const span = if (positive) ccw_c else @mod(two_pi - ccw_c, two_pi);
-    const frac_b = blk: {
-        const along_b = if (positive) ccw_b else @mod(two_pi - ccw_b, two_pi);
-        break :blk if (span > 1e-9) along_b / span else 0.5;
-    };
-
     while (i < n) : (i += 1) {
-        // warp stations so the grabbed vertex lands exactly at the pulled point:
-        // its chord station t_grab maps onto the middle point's true angle fraction
-        const t = params[i];
-        const f = if (t <= t_grab)
-            (if (t_grab > 1e-6) (t / t_grab) * frac_b else 0)
-        else
-            (if (t_grab < 1.0 - 1e-6) frac_b + ((t - t_grab) / (1.0 - t_grab)) * (1.0 - frac_b) else 1);
-        const angle = span * f * @as(f32, if (positive) 1 else -1);
-        const np = vecAdd(o, vecAdd(
-            vecMul(e1, radius * @cos(angle)),
-            vecMul(e2, radius * @sin(angle)),
-        ));
+        const np = arc.?.pointAt(params[i]);
         const id = ids[i];
         verts[id * 3 + 0] = np[0];
         verts[id * 3 + 1] = np[1];
@@ -4999,6 +5145,204 @@ pub fn curvePullApply(offset: [3]f32) Mutation {
         scratch[id] = true;
     }
     return syncTransformedVerts(scratch, twins_opt);
+}
+
+fn curvePointNear(a: [3]f32, b: [3]f32) bool {
+    return vecDot(vecSub(a, b), vecSub(a, b)) <= curve_pull_tuning.topology_match_epsilon_sq;
+}
+
+fn indexedVertexBelongsToPart(mesh: anytype, vertex: u32, part: u32) bool {
+    for (mesh.faces.items) |*face| {
+        if (!face.alive or face.part != part) continue;
+        for (face.vertices.items) |candidate| if (candidate == vertex) return true;
+    }
+    return false;
+}
+
+fn indexedVertexAtPoint(mesh: anytype, first: usize, point: [3]f32, part: u32) ?u32 {
+    var vertex = first;
+    while (vertex < mesh.vertices.items.len) : (vertex += 1) {
+        const candidate = &mesh.vertices.items[vertex];
+        if (!candidate.alive or !curvePointNear(candidate.position, point)) continue;
+        if (!indexedVertexBelongsToPart(mesh, @intCast(vertex), part)) continue;
+        return @intCast(vertex);
+    }
+    return null;
+}
+
+fn curveCutPoint(a: [3]f32, b: [3]f32, cut: u32, cuts: u32) [3]f32 {
+    const t = @as(f32, @floatFromInt(cut)) / @as(f32, @floatFromInt(cuts + 1));
+    return vecAdd(a, vecMul(vecSub(b, a), t));
+}
+
+fn indexedSegmentAlreadyDensified(mesh: anytype, a: [3]f32, b: [3]f32, part: u32, cuts: u32) bool {
+    var cut: u32 = 1;
+    while (cut <= cuts) : (cut += 1) {
+        if (indexedVertexAtPoint(mesh, 0, curveCutPoint(a, b, cut, cuts), part) == null) return false;
+    }
+    return true;
+}
+
+/// Rebuild one selected path from its grab-time indexed mesh and propagate equal
+/// loop cuts through every crossed authored quad strip.  This helper is generic on
+/// the indexed mesh owner so the native boundary test can exercise the real topology
+/// implementation without introducing a second mesh representation here.
+pub fn curvePullDensifyIndexed(
+    allocator: std.mem.Allocator,
+    mesh: anytype,
+    source: CurvePullPath,
+    mirrors: []const CurvePullMirrorSeed,
+    cuts: u32,
+) !CurvePullDensifiedPath {
+    if (source.ids.len < 3 or source.base.len != source.ids.len or source.params.len != source.ids.len or
+        cuts > curve_pull_tuning.max_cuts_per_edge)
+    {
+        return error.InvalidCurvePullPath;
+    }
+    const edge_count = source.ids.len - 1;
+    const pieces = std.math.add(usize, @as(usize, cuts), 1) catch return error.CurvePullPathTooLarge;
+    const multiplied = std.math.mul(usize, edge_count, pieces) catch return error.CurvePullPathTooLarge;
+    const output_count = std.math.add(usize, multiplied, 1) catch return error.CurvePullPathTooLarge;
+    if (output_count > curve_pull_tuning.max_path_verts) return error.CurvePullPathTooLarge;
+
+    for (source.ids, source.base) |id, point| {
+        if (id >= mesh.vertices.items.len or !mesh.vertices.items[id].alive or
+            !curvePointNear(mesh.vertices.items[id].position, point) or
+            !indexedVertexBelongsToPart(mesh, id, source.part))
+        {
+            return error.CurvePullSourceDrift;
+        }
+    }
+
+    const ids = try allocator.alloc(u32, output_count);
+    errdefer allocator.free(ids);
+    const base = try allocator.alloc([3]f32, output_count);
+    errdefer allocator.free(base);
+    const params = try allocator.alloc(f32, output_count);
+    errdefer allocator.free(params);
+
+    var write: usize = 0;
+    var segment: usize = 0;
+    while (segment < edge_count) : (segment += 1) {
+        const a = source.base[segment];
+        const b = source.base[segment + 1];
+        const before_vertices = mesh.vertices.items.len;
+        if (cuts > 0 and !(try mesh.loopCutFromEdge(a, b, source.part, cuts, 0.5))) {
+            return error.CurvePullLoopCutRefused;
+        }
+
+        ids[write] = source.ids[segment];
+        base[write] = a;
+        params[write] = source.params[segment];
+        write += 1;
+        var cut: u32 = 1;
+        while (cut <= cuts) : (cut += 1) {
+            const point = curveCutPoint(a, b, cut, cuts);
+            ids[write] = indexedVertexAtPoint(mesh, before_vertices, point, source.part) orelse
+                return error.CurvePullCutVertexMissing;
+            base[write] = point;
+            const t = @as(f32, @floatFromInt(cut)) / @as(f32, @floatFromInt(cuts + 1));
+            params[write] = source.params[segment] + (source.params[segment + 1] - source.params[segment]) * t;
+            write += 1;
+        }
+    }
+    ids[write] = source.ids[source.ids.len - 1];
+    base[write] = source.base[source.base.len - 1];
+    params[write] = source.params[source.params.len - 1];
+    write += 1;
+    if (write != output_count) return error.CurvePullPathCountMismatch;
+
+    // A connected loop cut often reaches the mirrored side by itself.  Disconnected
+    // mirrored halves do not, so prove the reflected samples exist before deciding
+    // whether that side needs its own propagated cut.  The returned selected path is
+    // still only the user's side; ordinary mirror writeback moves the reflected rows.
+    if (cuts > 0) {
+        for (mirrors) |mirror| {
+            if (mirror.base.len != source.base.len) return error.InvalidCurvePullMirrorPath;
+            segment = 0;
+            while (segment < edge_count) : (segment += 1) {
+                const a = mirror.base[segment];
+                const b = mirror.base[segment + 1];
+                if (indexedSegmentAlreadyDensified(mesh, a, b, mirror.part, cuts)) continue;
+                if (!(try mesh.loopCutFromEdge(a, b, mirror.part, cuts, 0.5))) {
+                    return error.CurvePullMirrorLoopCutRefused;
+                }
+            }
+        }
+    }
+
+    return .{ .allocator = allocator, .ids = ids, .base = base, .params = params };
+}
+
+/// Re-arm the deformation after a topology rebuild.  `base` remains the straight,
+/// grab-time path while the resident vertices may already show the current bend; the
+/// next drag frame therefore continues absolute application with no jump or drift.
+pub fn curvePullAdoptDensified(path: *const CurvePullDensifiedPath, selection_mode: Mode, part: u32, grab_t: f32) bool {
+    if ((selection_mode != .vertex and selection_mode != .edge) or path.ids.len < 3 or
+        path.base.len != path.ids.len or path.params.len != path.ids.len or
+        path.ids.len > curve_pull_tuning.max_path_verts or !ensureTopology()) return false;
+    const parts = g_vert_part orelse return false;
+    var i: usize = 0;
+    while (i < path.ids.len) : (i += 1) {
+        const id = path.ids[i];
+        if (id >= g_vert_count or id >= parts.len or parts[id] != part or
+            !std.math.isFinite(path.params[i]) or
+            (i > 0 and path.params[i] <= path.params[i - 1])) return false;
+        if (i > 0) {
+            const edge = edgeIndexBetween(path.ids[i - 1], id) orelse return false;
+            if (!edgeIsBoundaryPub(edge) or !edgeInScopePub(edge)) return false;
+        }
+    }
+
+    const ids = alloc.dupe(u32, path.ids) catch return false;
+    const base = alloc.dupe([3]f32, path.base) catch {
+        alloc.free(ids);
+        return false;
+    };
+    const params = alloc.dupe(f32, path.params) catch {
+        alloc.free(ids);
+        alloc.free(base);
+        return false;
+    };
+    const scratch = alloc.alloc(bool, g_vert_count) catch {
+        alloc.free(ids);
+        alloc.free(base);
+        alloc.free(params);
+        return false;
+    };
+
+    var grab: usize = 0;
+    for (params, 0..) |station, index| {
+        if (@abs(station - grab_t) < @abs(params[grab] - grab_t)) grab = index;
+    }
+
+    curvePullEnd();
+    g_curve_ids = ids;
+    g_curve_base = base;
+    g_curve_params = params;
+    g_curve_grab = grab;
+    g_curve_mask = scratch;
+    g_curve_mode = selection_mode;
+    g_curve_part = part;
+    g_mode = selection_mode;
+    if (selection_mode == .vertex) {
+        const selected = g_sel_vert orelse {
+            curvePullEnd();
+            return false;
+        };
+        @memset(selected, false);
+        for (path.ids) |id| selected[id] = true;
+    } else {
+        const selected = g_sel_edge orelse {
+            curvePullEnd();
+            return false;
+        };
+        @memset(selected, false);
+        i = 1;
+        while (i < path.ids.len) : (i += 1) selected[edgeIndexBetween(path.ids[i - 1], path.ids[i]).?] = true;
+    }
+    applyFaceHighlight();
+    return true;
 }
 
 fn selectedAlignmentEdge(edge: u32, mask: []const bool) bool {

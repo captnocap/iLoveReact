@@ -1,6 +1,6 @@
 # Editor curve kit
 
-Active surface: `cart/editor/` and its `/play` route. Last verified: 2026-08-12.
+Active surface: `cart/editor/` and its `/play` route. Last verified: 2026-08-13.
 
 ## In one sentence
 
@@ -90,17 +90,34 @@ station. Host-native per the Zig-first law:
   through the same `syncTransformedVerts` tail every rigid tool uses.
   Collinear pulls degrade to a tent falloff instead of erupting.
 - `framework/gpu/3d.zig` — the arm flag + Move-drag branch (stepped readout
-  shows "bend ±N.NNu"; armed with an invalid selection the drag falls back to
-  plain move and the readout says why); release always drops the captured run;
-  one journal entry per pull like every gizmo drag.
+  shows `bend ±N.NNu · K cut/edge`; armed with an invalid selection the drag
+  falls back to plain move and the readout says why); release always drops the
+  captured run; one journal entry per pull like every gizmo drag.
 - `__mesh_curve_pull_arm(on)` door; TS toggle rides the standard tool pipeline
   (`mesh-curve-pull` command row, ModelToolApi.curvePull, snapshot flag).
 
-Auto loop-cut densification (cuts inserted when the run is too coarse to show
-the bend) is the OPEN follow-up — v1 bends the vertices you selected; loop-cut
-the band first for deeper curves.
+Adaptive loop-cut densification is live (req_4328). The circle solver is also
+the density planner: each displayed segment may turn at most 15°, so shallow
+pulls keep the authored topology and deeper pulls cross discrete density
+thresholds. At a threshold the host rebuilds from the exact grab-time indexed
+mesh, inserts equal cuts inside every original selected edge, and lets the
+existing loop-cut walker carry each cut across its full authored quad strip.
+It then restores the expanded selected run and reapplies the same absolute pull
+without a cursor jump. A 20% release deadband prevents cursor jitter at a 15°
+boundary from alternating full rebuilds. Scrubbing genuinely shallower rebuilds
+from the same preimage and removes rings that are no longer necessary; cuts
+never accumulate by accident.
+The path is bounded by 512 vertices / 15 cuts per original edge. Disconnected
+live-mirror twins receive the same propagated topology before ordinary mirror
+writeback bends them. The structural rebuild preserves face colors, materials,
+semantics, logical ids, part ranges, authored atlas UVs, and the original gizmo
+journal/guard snapshot, so bend plus densification remains one undo action.
 
 ## Tests
+
+`framework/testing/unit/mesh_edit.zig` additionally proves shallow/deep density
+planning and, on a 4-quad indexed strip, that every selected-edge cut reaches
+the opposite row while returning the correctly ordered expanded path.
 
 `data/curves.test.ts` (38 behaviors: interpolation exactness, sag accuracy,
 clothoid-at-constant-curvature-is-a-circle, frame transport, the bowl pipeline)

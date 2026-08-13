@@ -960,8 +960,13 @@ fn clearMeshGuardSnapshot() void {
     g_guard_can_split = false;
 }
 
+// Curve Pull may replace topology inside an active gizmo gesture.  Its journal and
+// concavity guard still own the ORIGINAL pre-drag mesh, so the ordinary topology
+// replacement cleanup must leave that one guard alive until mouse-up.
+var g_curve_pull_preserve_gizmo_guard: bool = false;
+
 fn clearActiveEditGeometry() void {
-    clearMeshGuardSnapshot();
+    if (!g_curve_pull_preserve_gizmo_guard) clearMeshGuardSnapshot();
     clearIndexedEditMesh();
     if (g_edit_verts) |v| std.heap.c_allocator.free(v);
     g_edit_verts = null;
@@ -8716,6 +8721,9 @@ fn journalDropLast() void {
 /// Forget all history — a fresh model load is a new document.
 pub fn meshJournalClear() void {
     semanticMintIntentClear();
+    mesh_edit.curvePullEnd();
+    curvePullAdaptiveReset();
+    g_curve_pull_preserve_gizmo_guard = false;
     g_integrity_pending = false; // an armed check must not audit the NEXT document
     g_integrity_strikes = 0;
     journalFreeStack(&g_journal_undo);
@@ -11478,10 +11486,227 @@ fn guardSplitQuads() bool {
 // the middle vertex follows the drag. Arming with an invalid selection is not
 // an error — the grab simply falls back to plain move and the readout says so.
 var g_curve_pull_armed: bool = false;
+var g_curve_pull_source_ids: ?[]u32 = null;
+var g_curve_pull_source_base: ?[][3]f32 = null;
+var g_curve_pull_source_params: ?[]f32 = null;
+var g_curve_pull_source_grab: usize = 0;
+var g_curve_pull_source_mode: mesh_edit.Mode = .none;
+var g_curve_pull_source_part: u32 = model_source.NO_PART;
+var g_curve_pull_base_colors: ?[]u8 = null;
+var g_curve_pull_had_groups: bool = false;
+var g_curve_pull_part_count: u32 = 0;
+var g_curve_pull_mirror_points: ?[][3]f32 = null;
+var g_curve_pull_mirror_count: usize = 0;
+var g_curve_pull_mirror_parts: [7]u32 = .{model_source.NO_PART} ** 7;
+var g_curve_pull_cuts: u32 = 0;
+var g_curve_pull_topology_changed: bool = false;
+
+fn curvePullAdaptiveReset() void {
+    if (g_curve_pull_source_ids) |rows| std.heap.c_allocator.free(rows);
+    if (g_curve_pull_source_base) |rows| std.heap.c_allocator.free(rows);
+    if (g_curve_pull_source_params) |rows| std.heap.c_allocator.free(rows);
+    if (g_curve_pull_base_colors) |rows| std.heap.c_allocator.free(rows);
+    if (g_curve_pull_mirror_points) |rows| std.heap.c_allocator.free(rows);
+    g_curve_pull_source_ids = null;
+    g_curve_pull_source_base = null;
+    g_curve_pull_source_params = null;
+    g_curve_pull_base_colors = null;
+    g_curve_pull_mirror_points = null;
+    g_curve_pull_source_grab = 0;
+    g_curve_pull_source_mode = .none;
+    g_curve_pull_source_part = model_source.NO_PART;
+    g_curve_pull_had_groups = false;
+    g_curve_pull_part_count = 0;
+    g_curve_pull_mirror_count = 0;
+    g_curve_pull_mirror_parts = .{model_source.NO_PART} ** 7;
+    g_curve_pull_cuts = 0;
+    g_curve_pull_topology_changed = false;
+}
+
+fn curvePullPointsSame(a: []const [3]f32, b: []const [3]f32) bool {
+    if (a.len != b.len) return false;
+    var forward = true;
+    var reverse = true;
+    for (a, 0..) |point, index| {
+        if (vdot(vsub(point, b[index]), vsub(point, b[index])) > mesh_edit.curve_pull_tuning.topology_match_epsilon_sq) forward = false;
+        const reversed = b[b.len - 1 - index];
+        if (vdot(vsub(point, reversed), vsub(point, reversed)) > mesh_edit.curve_pull_tuning.topology_match_epsilon_sq) reverse = false;
+    }
+    return forward or reverse;
+}
+
+fn curvePullAdaptiveSource() ?mesh_edit.CurvePullPath {
+    const ids = g_curve_pull_source_ids orelse return null;
+    const base = g_curve_pull_source_base orelse return null;
+    const params = g_curve_pull_source_params orelse return null;
+    return .{
+        .ids = ids,
+        .base = base,
+        .params = params,
+        .grab = g_curve_pull_source_grab,
+        .mode = g_curve_pull_source_mode,
+        .part = g_curve_pull_source_part,
+    };
+}
+
+/// Freeze the gesture's original path and every real live-mirror twin before a
+/// structural install resets selection topology.  The stored source is also what
+/// lets scrubbing shallower REMOVE rings instead of accumulating cuts forever.
+fn curvePullAdaptiveCapture() bool {
+    curvePullAdaptiveReset();
+    const path = mesh_edit.curvePullPath() orelse return false;
+    if (g_guard_indexed_before == null) return false;
+    const ids = std.heap.c_allocator.dupe(u32, path.ids) catch return false;
+    const base = std.heap.c_allocator.dupe([3]f32, path.base) catch {
+        std.heap.c_allocator.free(ids);
+        return false;
+    };
+    const params = std.heap.c_allocator.dupe(f32, path.params) catch {
+        std.heap.c_allocator.free(ids);
+        std.heap.c_allocator.free(base);
+        return false;
+    };
+    const colors = collectCurrentFaceColors() orelse {
+        std.heap.c_allocator.free(ids);
+        std.heap.c_allocator.free(base);
+        std.heap.c_allocator.free(params);
+        return false;
+    };
+
+    var mirror_points: ?[][3]f32 = null;
+    const mirror_mask = mesh_edit.mirrorMask();
+    if (mirror_mask != 0) {
+        mirror_points = std.heap.c_allocator.alloc([3]f32, path.ids.len * 7) catch {
+            std.heap.c_allocator.free(ids);
+            std.heap.c_allocator.free(base);
+            std.heap.c_allocator.free(params);
+            std.heap.c_allocator.free(colors);
+            return false;
+        };
+    }
+    var mirror_count: usize = 0;
+    if (mirror_points) |points| {
+        var subset: u8 = 1;
+        while (subset <= 7) : (subset += 1) {
+            if ((subset & mirror_mask) != subset) continue;
+            const candidate = points[mirror_count * path.ids.len .. (mirror_count + 1) * path.ids.len];
+            var candidate_part: ?u32 = null;
+            var valid = true;
+            for (path.ids, 0..) |id, index| {
+                const twin = mesh_edit.mirrorImageOfVertPub(id, subset) orelse {
+                    valid = false;
+                    break;
+                };
+                const part = mesh_edit.vertPartPub(twin) orelse {
+                    valid = false;
+                    break;
+                };
+                if (candidate_part) |owner| {
+                    if (owner != part) {
+                        valid = false;
+                        break;
+                    }
+                } else candidate_part = part;
+                candidate[index] = mesh_edit.vertPosPub(twin);
+            }
+            if (!valid or candidate_part == null or curvePullPointsSame(candidate, path.base)) continue;
+            var duplicate = false;
+            var prior: usize = 0;
+            while (prior < mirror_count) : (prior += 1) {
+                if (curvePullPointsSame(candidate, points[prior * path.ids.len .. (prior + 1) * path.ids.len])) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            g_curve_pull_mirror_parts[mirror_count] = candidate_part.?;
+            mirror_count += 1;
+        }
+    }
+
+    g_curve_pull_source_ids = ids;
+    g_curve_pull_source_base = base;
+    g_curve_pull_source_params = params;
+    g_curve_pull_source_grab = path.grab;
+    g_curve_pull_source_mode = path.mode;
+    g_curve_pull_source_part = path.part;
+    g_curve_pull_base_colors = colors;
+    g_curve_pull_had_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    g_curve_pull_part_count = currentPartCount();
+    g_curve_pull_mirror_points = mirror_points;
+    g_curve_pull_mirror_count = mirror_count;
+    return true;
+}
+
+/// Replace the current adaptive level from the exact grab-time indexed mesh, then
+/// re-arm and apply the current absolute offset.  Only threshold crossings call this;
+/// ordinary drag frames remain the same O(selected path) position mutation as v1.
+fn curvePullAdaptiveRebuild(offset: [3]f32, cuts: u32) bool {
+    const source = curvePullAdaptiveSource() orelse return false;
+    const before = if (g_guard_indexed_before) |*mesh| mesh else return false;
+    const base_colors = g_curve_pull_base_colors orelse return false;
+    var indexed = before.clone() catch return false;
+    defer indexed.deinit();
+
+    var mirrors: [7]mesh_edit.CurvePullMirrorSeed = undefined;
+    if (g_curve_pull_mirror_points) |points| {
+        var mirror: usize = 0;
+        while (mirror < g_curve_pull_mirror_count) : (mirror += 1) {
+            mirrors[mirror] = .{
+                .base = points[mirror * source.ids.len .. (mirror + 1) * source.ids.len],
+                .part = g_curve_pull_mirror_parts[mirror],
+            };
+        }
+    }
+    var dense = mesh_edit.curvePullDensifyIndexed(
+        std.heap.c_allocator,
+        &indexed,
+        source,
+        mirrors[0..g_curve_pull_mirror_count],
+        cuts,
+    ) catch |err| {
+        topoRefuse(@errorName(err));
+        return false;
+    };
+    defer dense.deinit();
+
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
+    const install_groups: ?[]const u32 = if (g_curve_pull_had_groups) lowered.groups else null;
+
+    g_curve_pull_preserve_gizmo_guard = true;
+    defer g_curve_pull_preserve_gizmo_guard = false;
+    if (!lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        install_groups,
+        lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
+        colors,
+        flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(indexed.vertices.items.len),
+    )) return false;
+    if (g_curve_pull_part_count > 0) renormalizePartRanges(lowered.parts, g_curve_pull_part_count);
+    adoptIndexedEditMesh(&indexed, &lowered);
+    const grab_t = source.params[source.grab];
+    if (!mesh_edit.curvePullAdoptDensified(&dense, source.mode, source.part, grab_t)) return false;
+    if (!applyMeshMutation(mesh_edit.curvePullApply(offset))) return false;
+    g_curve_pull_cuts = cuts;
+    g_curve_pull_topology_changed = cuts > 0;
+    return true;
+}
 
 pub fn meshCurvePullArm(on: bool) bool {
     g_curve_pull_armed = on;
-    if (!on) mesh_edit.curvePullEnd();
+    if (!on) {
+        mesh_edit.curvePullEnd();
+        curvePullAdaptiveReset();
+    }
     return g_curve_pull_armed;
 }
 
@@ -11490,10 +11715,11 @@ pub fn meshCurvePullArmed() bool {
 }
 
 pub fn meshGizmoBegin() void {
+    curvePullAdaptiveReset();
     clearMeshGuardSnapshot();
     gizmoDragReset(); // stepped drags (req_2759): fresh accumulator + frozen pivot per grab
     // Curve Pull capture happens at grab, against pre-drag positions.
-    if (g_curve_pull_armed and g_gizmo_tool == .move) _ = mesh_edit.curvePullBegin();
+    const curve_started = g_curve_pull_armed and g_gizmo_tool == .move and mesh_edit.curvePullBegin();
     // Pre-drag journal snapshot — committed at release only if the drag moved something.
     journalDiscard(&g_gizmo_snap);
     g_gizmo_snap = journalSnapshotCurrent("transform");
@@ -11502,6 +11728,7 @@ pub fn meshGizmoBegin() void {
     if (ensureIndexedEditMesh()) {
         if (g_indexed_edit_mesh) |*mesh| g_guard_indexed_before = mesh.clone() catch null;
     }
+    if (curve_started) _ = curvePullAdaptiveCapture();
     g_guard_face_count = model_paint.faceCount();
 }
 
@@ -11521,7 +11748,8 @@ pub fn meshGizmoGrabAt(mx: f32, my: f32, code: i32) void {
 }
 
 pub fn meshGizmoFinish() bool {
-    mesh_edit.curvePullEnd(); // the captured run is per-grab; release always drops it
+    defer mesh_edit.curvePullEnd(); // the captured run is per-grab; release always drops it
+    defer curvePullAdaptiveReset();
     g_gizmo_readout_len = 0; // the drag is ending — drop the live step readout
     g_gizmo_pivot0 = null;
     g_gizmo_active = -1; // release drops the gold glow
@@ -11536,13 +11764,15 @@ pub fn meshGizmoFinish() bool {
         clearMeshGuardSnapshot();
         return false;
     };
-    if (after.len != before.len) {
-        journalDiscard(&g_gizmo_snap);
-        clearMeshGuardSnapshot();
-        return false;
-    }
     // A press that moved nothing leaves no undo step.
-    if (std.mem.eql(f32, before, after)) journalDiscard(&g_gizmo_snap) else journalCommit(&g_gizmo_snap);
+    const topology_changed = after.len != before.len or g_curve_pull_topology_changed;
+    // A structural Curve Pull must restore like Loop Cut across undo/redo so its
+    // interpolated authored-atlas coordinates and raster survive exactly.  Shallow
+    // pulls that never crossed a density threshold remain ordinary transforms.
+    if (topology_changed) {
+        if (g_gizmo_snap) |*entry| entry.label = "curve pull";
+    }
+    if (!topology_changed and std.mem.eql(f32, before, after)) journalDiscard(&g_gizmo_snap) else journalCommit(&g_gizmo_snap);
     const fc: u32 = @intCast(@min(before.len / 9, after.len / 9));
     // Studio concave guard (req_0949 port): only an authored face NEWLY buckled into a
     // reflex polygon is unsafe. bad_list carries one member tri per buckled face (the
@@ -13667,8 +13897,21 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, 
             // per-frame no-op check, never compounds into the geometry.
             if (g_curve_pull_armed and mesh_edit.curvePullActive()) {
                 const units = target / GIZMO_STEP_M;
-                setGizmoReadout("bend {s}{d:.2}u", .{ if (units < 0) "-" else "+", @abs(units) });
-                const m = mesh_edit.curvePullApply(vmul(av, target));
+                const offset = vmul(av, target);
+                if (curvePullAdaptiveSource()) |source| {
+                    const wanted_cuts = mesh_edit.curvePullAdaptiveCutsFor(source, offset, g_curve_pull_cuts);
+                    if (wanted_cuts != g_curve_pull_cuts) {
+                        if (!curvePullAdaptiveRebuild(offset, wanted_cuts)) {
+                            setGizmoReadout("curve: adaptive loop cut refused", .{});
+                            return false;
+                        }
+                        setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge", .{ if (units < 0) "-" else "+", @abs(units), wanted_cuts });
+                        g_gizmo_applied = target;
+                        return true;
+                    }
+                }
+                setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge", .{ if (units < 0) "-" else "+", @abs(units), g_curve_pull_cuts });
+                const m = mesh_edit.curvePullApply(offset);
                 if (!applyMeshMutation(m)) return false;
                 g_gizmo_applied = target;
                 return true;
