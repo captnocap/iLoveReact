@@ -351,6 +351,7 @@ import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, PLAYT
 import { cancelGlobalsSave, saveGlobalsNow, scheduleGlobalsSave } from '../data/globalsStore';
 import { editorPersistenceSettings, editorSettings } from '../data/editorSettings';
 import { discardModelWorkingCopyState, upsertModelPackageProjection } from '../data/persistenceLifecycle';
+import { projectModelIntoRecentLibrary } from '../data/recentModelLifecycle';
 import { applyDevReload, devReloadRevision, devReloadWaiting, installDevReloadCheckpoint, setDevReloadPolicy } from '../../../runtime/devReload';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
 import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
@@ -2324,47 +2325,71 @@ export default function AppFrame() {
     setBlobFaceQuery((current) => ({ ...current, cursor: seek.cursor }));
   };
 
-  const restoreBlobSnapshot: BlobExplorerSurfaceProps['onRestore'] = (row) => {
-    const modelId = activeModelId;
-    if (!modelId || blobRestoreInFlightRef.current) return;
-    if (recoveryRestoreConfirmationAction(blobRestoreConfirmSnapshotId, row.snapshotId) === 'arm') {
-      setBlobRestoreConfirmSnapshotId(row.snapshotId);
-      setBlobSnapshotStatus('Restore replaces the resident mesh and saved geometry in one native transaction. It creates exactly one Ctrl-Z action; character skin binding becomes NEEDS BIND. Press CONFIRM RESTORE to continue.');
-      return;
-    }
-    setBlobRestoreConfirmSnapshotId(null);
+  // One restore authority for both the Recovery pane and Agent Seat. The seat used
+  // to expose Lore history but not the transaction that consumes an exact row,
+  // forcing recovery automation toward direct package edits. Keep every caller on
+  // the same immutable-candidate + resident/package lease path (req_4282).
+  const commitBlobSnapshotRestore = (
+    modelId: string,
+    row: BlobExplorerStableRowActionV1,
+  ): SeatShellReceipt => {
+    const refused = (reason: string, result?: unknown): SeatShellReceipt => ({
+      ok: false,
+      reason,
+      ...(result === undefined ? {} : { result }),
+    });
+    if (blobRestoreInFlightRef.current) return refused('another Lore restore is already in flight');
 
-    const historyRow = blobHistory.rows.find((entry) =>
-      !('state' in entry) && entry.snapshotId === row.snapshotId &&
-      entry.revision === row.expectedRevision && entry.sha256 === row.expectedSha256);
+    let cursor: string | undefined;
+    let exactHistoryRow = false;
+    for (let page = 0; page < 256; page += 1) {
+      const history = recoveryHistoryV1({
+        version: 1,
+        modelId,
+        ...(cursor ? { cursor } : {}),
+        limit: 100,
+      });
+      if (!history.ok) return refused(`${history.code}: ${history.detail}`, history);
+      const match = history.rows.find((entry) =>
+        !('state' in entry) && entry.snapshotId === row.snapshotId &&
+        entry.revision === row.expectedRevision && entry.sha256 === row.expectedSha256);
+      if (match && !('state' in match)) {
+        if (match.identityQuality !== 'exact' || match.recoveryDegradations.length !== 0 ||
+          match.objectNamespaceHash !== row.expectedObjectNamespaceHash)
+        {
+          return refused('exact Lore history identity differs from the requested restore row');
+        }
+        exactHistoryRow = true;
+        break;
+      }
+      if (!history.nextCursor) break;
+      cursor = history.nextCursor;
+    }
+    if (!exactHistoryRow) return refused('the requested exact Lore history row is not present');
+
+    const live = stateRef.current;
+    const pkg = effectiveModelPackage(modelId, live.modelOverrides, live.modelDupes);
+    const service = recoveryStatusV1({ version: 1 });
     const host = globalThis as any;
-    if (!historyRow || 'state' in historyRow || historyRow.identityQuality !== 'exact' ||
-      historyRow.recoveryDegradations.length !== 0 ||
-      historyRow.objectNamespaceHash !== row.expectedObjectNamespaceHash ||
-      !activeModelPkg || !activeModelOnDisk || blobService.state === 'blocked' ||
-      blobActivePreviewRef.current || blobFieldEditInFlightRef.current ||
-      typeof host.__lore_restore !== 'function' ||
+    if (!pkg || !isMaterialized(pkg.kind, pkg.id) || !service.ok || service.status.state === 'blocked' ||
+      activeSessionModelIdRef.current !== modelId || blobActivePreviewRef.current ||
+      blobFieldEditInFlightRef.current || typeof host.__lore_restore !== 'function' ||
       typeof host.__model_recovery_transaction !== 'function')
     {
-      setBlobSnapshotStatus('Restore refused: exact history identity, on-disk package, idle resident session, and native transaction coordinator are all required.');
-      return;
+      return refused('exact history identity, on-disk package, idle resident session, and native transaction coordinator are all required');
     }
 
     const published = publishBlobObjectNamespace(modelId);
     if (!published.ok || published.identityQuality !== 'exact' ||
       published.recoveryDegradations.length !== 0 || published.modelId !== modelId ||
-      activeSessionModelIdRef.current !== modelId ||
       String(activeSessionTokenRef.current) !== published.sessionToken)
     {
-      setBlobSnapshotStatus(`Restore refused: ${published.ok ? 'resident identity is not exact' : published.detail}.`);
-      return;
+      return refused(published.ok ? 'resident identity is not exact' : published.detail, published);
     }
 
     blobRestoreInFlightRef.current = true;
     setBlobRestoreInFlight(true);
-    setBlobSnapshotStatus('Opening immutable Lore candidate and acquiring the native resident/package write lease…');
     let candidateToken: string | null = null;
-    let cleanupWarning: string | null = null;
     try {
       const candidate = recoveryRestoreCandidateV1({
         version: 1,
@@ -2375,16 +2400,14 @@ export default function AppFrame() {
         expectedSha256: row.expectedSha256,
       });
       if (!candidate.ok || !('candidateToken' in candidate)) {
-        setBlobSnapshotStatus(candidate.ok ? 'Restore candidate receipt was incomplete.' : `${candidate.code}: ${candidate.detail}`);
-        return;
+        return refused(candidate.ok ? 'restore candidate receipt was incomplete' : `${candidate.code}: ${candidate.detail}`, candidate);
       }
       candidateToken = candidate.candidateToken;
       if (candidate.identityQuality !== 'exact' || candidate.recoveryDegradations.length !== 0 ||
         candidate.objectNamespaceHash !== row.expectedObjectNamespaceHash ||
         candidate.sha256 !== row.expectedSha256 || candidate.resolvedRevision !== row.expectedRevision)
       {
-        setBlobSnapshotStatus('Restore refused: immutable candidate provenance differs from the selected exact history row.');
-        return;
+        return refused('immutable candidate provenance differs from the requested exact history row', candidate);
       }
 
       const result = restoreModelTransactionV1({
@@ -2400,14 +2423,11 @@ export default function AppFrame() {
         candidateToken,
         push: false,
       });
-      if (!result.ok) {
-        setBlobSnapshotStatus(`${result.code}: ${result.detail}`);
-        return;
-      }
+      if (!result.ok) return refused(`${result.code}: ${result.detail}`, result);
 
       const history = parseModelHistory(host.__mesh_history?.());
       savedMeshDepthRef.current[modelId] = history.undo;
-      const committed = loadMaterializedPackages().find((pkg) => pkg.id === modelId) ?? null;
+      const committed = loadMaterializedPackages().find((modelPackage) => modelPackage.id === modelId) ?? null;
       blobRestoreProjectionBlockedRef.current = committed ? null : modelId;
       if (committed) upsertSavedPackage(committed);
       if (result.characterBindingInvalidated) {
@@ -2424,7 +2444,7 @@ export default function AppFrame() {
             : previous.modelDupes,
           status: committed
             ? `Restored ${row.snapshotId} · resident = target = saved ${result.sha256.slice(0, 12)} · Ctrl-Z action ${result.journalActionId}${result.characterBindingInvalidated ? ' · character bind invalidated' : ''}`
-            : `⚠ Restore committed exactly, but the editor could not re-read its package projection. Close and reopen this model before further save/export.`,
+            : '⚠ Restore committed exactly, but the editor could not re-read its package projection. Close and reopen this model before further save/export.',
         };
         stateRef.current = next;
         return next;
@@ -2434,22 +2454,52 @@ export default function AppFrame() {
       setBlobFacePage(null);
       setBlobAnalysisRevision((revision) => revision + 1);
       refreshBlobHistory(modelId);
-      setBlobSnapshotStatus(committed
-        ? `Restore verified: resident, target, and saved SHA ${result.sha256.slice(0, 12)} match; all ${result.diff.changedFieldCounts.length} native diff channels are zero. Ctrl-Z restores the prior resident mesh.`
-        : 'Restore committed, but package projection re-read failed. Close and reopen this model before any save or export; no fallback projection was synthesized.');
+
+      const released = recoveryRestoreCandidateV1({
+        version: 1,
+        operation: 'release_candidate',
+        candidateToken,
+      });
+      candidateToken = null;
+      return {
+        ok: true,
+        result: {
+          ...result,
+          packageProjectionLoaded: Boolean(committed),
+          candidateReleased: released.ok,
+          ...(released.ok ? {} : { cleanupWarning: `${released.code}: ${released.detail}` }),
+        },
+      };
     } finally {
-      if (candidateToken) {
-        const released = recoveryRestoreCandidateV1({
-          version: 1,
-          operation: 'release_candidate',
-          candidateToken,
-        });
-        if (!released.ok) cleanupWarning = `${released.code}: ${released.detail}`;
-      }
+      if (candidateToken) recoveryRestoreCandidateV1({
+        version: 1,
+        operation: 'release_candidate',
+        candidateToken,
+      });
       blobRestoreInFlightRef.current = false;
       setBlobRestoreInFlight(false);
-      if (cleanupWarning) setBlobSnapshotStatus(`Restore candidate cleanup warning: ${cleanupWarning}`);
     }
+  };
+
+  const restoreBlobSnapshot: BlobExplorerSurfaceProps['onRestore'] = (row) => {
+    const modelId = activeModelId;
+    if (!modelId || blobRestoreInFlightRef.current) return;
+    if (recoveryRestoreConfirmationAction(blobRestoreConfirmSnapshotId, row.snapshotId) === 'arm') {
+      setBlobRestoreConfirmSnapshotId(row.snapshotId);
+      setBlobSnapshotStatus('Restore replaces the resident mesh and saved geometry in one native transaction. It creates exactly one Ctrl-Z action; character skin binding becomes NEEDS BIND. Press CONFIRM RESTORE to continue.');
+      return;
+    }
+    setBlobRestoreConfirmSnapshotId(null);
+    setBlobSnapshotStatus('Opening immutable Lore candidate and acquiring the native resident/package write lease…');
+    const receipt = commitBlobSnapshotRestore(modelId, row);
+    if (!receipt.ok) {
+      setBlobSnapshotStatus(`Restore refused: ${receipt.reason ?? 'native restore transaction failed'}.`);
+      return;
+    }
+    const result = receipt.result as any;
+    setBlobSnapshotStatus(result.packageProjectionLoaded
+      ? `Restore verified: resident, target, and saved SHA ${String(result.sha256).slice(0, 12)} match; all ${result.diff.changedFieldCounts.length} native diff channels are zero. Ctrl-Z restores the prior resident mesh.${result.candidateReleased ? '' : ` Candidate cleanup warning: ${result.cleanupWarning}`}`
+      : 'Restore committed, but package projection re-read failed. Close and reopen this model before any save or export; no fallback projection was synthesized.');
   };
 
   const applyBlobGuardedField: NonNullable<BlobExplorerSurfaceProps['onGuardedFieldApply']> = (edit) => {
@@ -2776,18 +2826,22 @@ export default function AppFrame() {
           reason,
         ).statusSuffix;
       }
-      setState((prev) => ({
-        ...prev,
-        openMenu: null,
-        actionMenu: 'File',
-        modelDirty: result.ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
-        modelDupes: result.ok && committed
-          ? upsertModelPackageProjection(prev.modelDupes, committed)
-          : prev.modelDupes,
-        status: result.ok
-          ? `${reason}: character revision committed → ${result.dir}${acknowledgementWarning ? `; resident save percept needs refresh (${acknowledgementWarning})` : ''}${recoveryStatus}`
-          : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}`,
-      }));
+      setState((prev) => {
+        const projected = result.ok && committed
+          ? projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], committed)
+          : null;
+        return {
+          ...prev,
+          openMenu: null,
+          actionMenu: 'File',
+          modelDirty: result.ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
+          modelDupes: projected?.models ?? prev.modelDupes,
+          recentLibraryKeys: projected?.recentKeys ?? prev.recentLibraryKeys,
+          status: result.ok
+            ? `${reason}: character revision committed → ${result.dir}${acknowledgementWarning ? `; resident save percept needs refresh (${acknowledgementWarning})` : ''}${recoveryStatus}`
+            : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}`,
+        };
+      });
       return result.ok;
     }
 
@@ -2883,18 +2937,22 @@ export default function AppFrame() {
         reason,
       ).statusSuffix;
     }
-    setState((prev) => ({
-      ...prev,
-      openMenu: null,
-      actionMenu: 'File',
-      modelDirty: ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
-      modelDupes: ok && !alreadyOnDisk && !prev.modelDupes.some((item) => item.id === pkg.id)
-        ? [...prev.modelDupes, pkgToSave]
-        : prev.modelDupes,
-      status: ok
-        ? `${reason}: "${pkg.name}" → ${saveStage.targetDir}${recoveryStatus}`
-        : `${reason} failed: ${transactionError}`,
-    }));
+    setState((prev) => {
+      const projected = ok
+        ? projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], pkgToSave)
+        : null;
+      return {
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        modelDirty: ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
+        modelDupes: projected?.models ?? prev.modelDupes,
+        recentLibraryKeys: projected?.recentKeys ?? prev.recentLibraryKeys,
+        status: ok
+          ? `${reason}: "${pkg.name}" → ${saveStage.targetDir}${recoveryStatus}`
+          : `${reason} failed: ${transactionError}`,
+      };
+    });
     return ok;
   };
 
@@ -5055,9 +5113,12 @@ export default function AppFrame() {
     const partPath = pkg.viewerPath ?? path;
     selectNativeModelSession(doc);
     setState((prev) => {
+      const projected = projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], pkg);
       const seeded = prev.modelParts[pkg.id] ?? [filePartSeed(partPath, pkg.name)];
       return {
         ...prev,
+        modelDupes: projected.models,
+        recentLibraryKeys: projected.recentKeys,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
         activeWorkspaceDocumentId: doc.id,
         materialFocused: false,
@@ -5800,14 +5861,18 @@ export default function AppFrame() {
     // ledger is the only thing that stops the id coming back (req_3773).
     const mid = nextPrimitiveDocId(kind, stateRef.current.workspaceDocuments);
     rememberMintedModelId(mid);
-    const doc = modelDocument(primitiveModelPackage(mid));
+    const pkg = primitiveModelPackage(mid);
+    const doc = modelDocument(pkg);
     selectNativeModelSession(doc);
     setState((prev) => {
+      const projected = projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], pkg);
       const base = makePart(kind, [], prev.seq, params);
       const range = composeModelParts([base]).ranges[0];
       const part: ModelPart = { ...base, lo: range?.lo ?? 0, hi: range?.hi ?? 0 };
       return {
         ...prev, seq: prev.seq + 1,
+        modelDupes: projected.models,
+        recentLibraryKeys: projected.recentKeys,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
         activeWorkspaceDocumentId: doc.id,
         modelParts: { ...prev.modelParts, [mid]: [part] },
@@ -5841,9 +5906,11 @@ export default function AppFrame() {
     // Minted + retired before the document exists — see createNewMeshDocument.
     const mid = nextBuildStarterDocId(starterId, stateRef.current.workspaceDocuments);
     rememberMintedModelId(mid);
-    const doc = modelDocument(buildStarterModelPackage(mid));
+    const pkg = buildStarterModelPackage(mid);
+    const doc = modelDocument(pkg);
     selectNativeModelSession(doc);
     setState((prev) => {
+      const projected = projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], pkg);
       const rangeById = new Map(composeModelParts(seeded).ranges.map((range) => [range.id, range]));
       const parts = seeded.map((part) => {
         const range = rangeById.get(part.id);
@@ -5851,6 +5918,8 @@ export default function AppFrame() {
       });
       return {
         ...prev,
+        modelDupes: projected.models,
+        recentLibraryKeys: projected.recentKeys,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
         activeWorkspaceDocumentId: doc.id,
         modelParts: { ...prev.modelParts, [mid]: parts },
@@ -7481,7 +7550,22 @@ export default function AppFrame() {
           });
           return response.ok ? ok(response) : { ok: false, result: response, reason: response.detail };
         }
-        return fail('Lore operation must be snapshot, history, preview, pin, or status');
+        if (operation === 'restore') {
+          if (background) return fail('Lore restore needs this model to own the resident native session');
+          const expectedObjectNamespaceHash = typeof args.expectedObjectNamespaceHash === 'string'
+            ? args.expectedObjectNamespaceHash
+            : '';
+          if (!expectedObjectNamespaceHash) {
+            return fail('Lore restore needs expectedObjectNamespaceHash from the exact history row');
+          }
+          return commitBlobSnapshotRestore(modelId, {
+            snapshotId,
+            expectedRevision,
+            expectedSha256,
+            expectedObjectNamespaceHash,
+          });
+        }
+        return fail('Lore operation must be snapshot, history, preview, pin, restore, or status');
       }
       if (action === 'face-table') {
         if (background) return fail('face inspection belongs to the visible model document; open that model first');
@@ -8253,6 +8337,12 @@ export default function AppFrame() {
             },
           });
           const snapshot = adoptRigSnapshot(api.command({ kind: 'autoBind' }), true);
+          return ok({ status: rigStatusFromSnapshot(snapshot), saved: false });
+        }
+        if (rigAction.operation === 'prune-weights') {
+          // req_4304: re-apply the joint-span law to the resident rows in
+          // place — the repair for bindings adopted before the law existed.
+          const snapshot = adoptRigSnapshot(api.command({ kind: 'pruneWeights' }), true);
           return ok({ status: rigStatusFromSnapshot(snapshot), saved: false });
         }
         if (rigAction.operation === 'save') {
@@ -9331,6 +9421,7 @@ export default function AppFrame() {
       return {
         ...prev,
         modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], hidden: true } },
+        recentLibraryKeys: prev.recentLibraryKeys.filter((key) => key !== `model:${id}`),
         status: removed
           ? 'deleted model (package removed from disk)'
           : durable
@@ -9429,9 +9520,11 @@ export default function AppFrame() {
         favorite: false,
       };
       if (copied) registerSavedPackage(copied); // in the live roster now; next boot reads it from disk
+      const projected = projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], dupe);
       return {
         ...prev,
-        modelDupes: [...prev.modelDupes, dupe],
+        modelDupes: projected.models,
+        recentLibraryKeys: projected.recentKeys,
         seq: prev.seq + 1,
         status: copied
           ? `duplicated ${model.name} → ${dupe.path}`
