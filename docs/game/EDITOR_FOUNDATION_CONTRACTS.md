@@ -27,6 +27,12 @@ Plan of record: `~/.claude/plans/hey-i-want-you-giggly-minsky.md`.
   + `theme.ts` + `runtime/classifier.tsx`. JSX reads like a document.
 - **V20 is dead.** Do not read or build on it. History = eventbus log + autosave
   snapshots + backup; compiled-chunk history (V31) is the restore surface.
+- **Model documents save at boundaries, never per edit** (req_4344). File → Save,
+  doc switch, doc close, and editor exit are the only model commit points; each
+  committed save archives one Lore recovery revision, and a refused Save opens
+  the Lore recovery pane so the last good revision can be restored. Do not
+  reintroduce a mid-session model autosave debounce — the corruption net is the
+  save guard + Lore restore, not write frequency.
 
 ## Two distinct buses — do not conflate
 

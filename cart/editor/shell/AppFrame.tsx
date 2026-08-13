@@ -2715,8 +2715,22 @@ export default function AppFrame() {
     }, issueVerifiedSaveReceiptV1, captureVerifiedNormalSnapshotV1);
   };
 
+  /** The oh-shit route (req_4344): a refused Save cancels navigation and keeps
+   * the dirty document mounted, so open the Lore recovery pane beside it — its
+   * restore button replaces the resident mesh from the last good backup in one
+   * native transaction. Only the visible model owns the pane; a background
+   * refusal keeps its own status text instead of hijacking the active view. */
+  const saveRefusalRecoveryRoute = (modelId: string): { patch: Partial<EditorState>; suffix: string } =>
+    modelId === activeSessionModelIdRef.current
+      ? {
+        patch: { rightPane: 'recovery', rightPanelCollapsed: false },
+        suffix: ' — Lore recovery opened: restore the last good save if the document will not commit',
+      }
+      : { patch: {}, suffix: '' };
+
   /** The single model commit path used by File → Save, first-atlas gating,
-   * close/switch boundaries, and background autosave after first save. */
+   * and the close/switch/exit boundary autosaves (req_4344: those boundaries
+   * are the ONLY background saves — edits never autosave mid-session). */
   const saveModelDocumentNow = (
     modelId: string | null,
     reason = 'Save',
@@ -2830,8 +2844,10 @@ export default function AppFrame() {
         const projected = result.ok && committed
           ? projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], committed)
           : null;
+        const refusal = result.ok ? null : saveRefusalRecoveryRoute(pkg.id);
         return {
           ...prev,
+          ...(refusal?.patch ?? {}),
           openMenu: null,
           actionMenu: 'File',
           modelDirty: result.ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
@@ -2839,7 +2855,7 @@ export default function AppFrame() {
           recentLibraryKeys: projected?.recentKeys ?? prev.recentLibraryKeys,
           status: result.ok
             ? `${reason}: character revision committed → ${result.dir}${acknowledgementWarning ? `; resident save percept needs refresh (${acknowledgementWarning})` : ''}${recoveryStatus}`
-            : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}`,
+            : `${reason} failed: ${result.error ?? 'character snapshot was not committed'}${refusal?.suffix ?? ''}`,
         };
       });
       return result.ok;
@@ -2858,11 +2874,13 @@ export default function AppFrame() {
     };
     const preparedSave = prepareOrdinaryModelSaveStage(pkg);
     if (!preparedSave.ok) {
+      const refusal = saveRefusalRecoveryRoute(pkg.id);
       setState((prev) => ({
         ...prev,
+        ...refusal.patch,
         openMenu: null,
         actionMenu: 'File',
-        status: `${reason} failed: ${preparedSave.error}`,
+        status: `${reason} failed: ${preparedSave.error}${refusal.suffix}`,
       }));
       return false;
     }
@@ -2941,8 +2959,10 @@ export default function AppFrame() {
       const projected = ok
         ? projectModelIntoRecentLibrary(prev.modelDupes, prev.recentLibraryKeys ?? [], pkgToSave)
         : null;
+      const refusal = ok ? null : saveRefusalRecoveryRoute(pkg.id);
       return {
         ...prev,
+        ...(refusal?.patch ?? {}),
         openMenu: null,
         actionMenu: 'File',
         modelDirty: ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
@@ -2950,7 +2970,7 @@ export default function AppFrame() {
         recentLibraryKeys: projected?.recentKeys ?? prev.recentLibraryKeys,
         status: ok
           ? `${reason}: "${pkg.name}" → ${saveStage.targetDir}${recoveryStatus}`
-          : `${reason} failed: ${transactionError}`,
+          : `${reason} failed: ${transactionError}${refusal?.suffix ?? ''}`,
       };
     });
     return ok;
@@ -3144,22 +3164,11 @@ export default function AppFrame() {
     return ok;
   };
 
-  useEffect(() => {
-    if (!persistenceSettings.autosave || !activeModelId || !activeModelOnDisk || !state.modelDirty[activeModelId]) return;
-    const timer = setTimeout(
-      () => saveActiveModelNow('Autosaved', 'background'),
-      persistenceSettings.autosaveDelayMs,
-    );
-    return () => clearTimeout(timer);
-  }, [
-    persistenceSettings.autosave,
-    persistenceSettings.autosaveDelayMs,
-    activeModelId,
-    activeModelOnDisk,
-    state.modelDirty,
-    liveUndoDepths.undo,
-    modelMutationRevision,
-  ]);
+  // Model documents deliberately have NO per-edit autosave (req_4344). A dirty
+  // model commits only at real document boundaries: File → Save, doc switch,
+  // doc close, and editor exit. Every one of those commits archives a Lore
+  // recovery revision, so backups track saves — not the edit stream. The
+  // corruption net is the save guard plus Lore restore, not write frequency.
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
