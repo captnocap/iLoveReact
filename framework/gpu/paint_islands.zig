@@ -550,11 +550,24 @@ fn unfoldCharts(
     while (raw < raw_count) : (raw += 1) {
         const av = area_vec[raw];
         const len = @sqrt(av[0] * av[0] + av[1] * av[1] + av[2] * av[2]);
+        // A fully DEGENERATE island (zero-area authored face — wire edges are
+        // authored as degenerate triangles) cannot carry paint and must not
+        // veto the whole model's atlas (req_4320): it takes a fallback basis,
+        // projects to a point, and the packer's ≥1-texel floor gives it a
+        // slot. Every paintable island is untouched.
         normals[raw] = if (len > INTRINSIC_PROJECTION_TUNING.minimum_basis_edge_m)
             .{ av[0] / len, av[1] / len, av[2] / len }
         else
-            faceUnitNormal(positions, first_tri[raw]) orelse return null;
-        bases[raw] = intrinsicBasis(positions, first_tri[raw], av) orelse return null;
+            faceUnitNormal(positions, first_tri[raw]) orelse .{ 0, 0, 1 };
+        bases[raw] = intrinsicBasis(positions, first_tri[raw], av) orelse .{
+            .origin = .{
+                positions[@as(usize, first_tri[raw]) * 9],
+                positions[@as(usize, first_tri[raw]) * 9 + 1],
+                positions[@as(usize, first_tri[raw]) * 9 + 2],
+            },
+            .u = .{ 1, 0, 0 },
+            .v = .{ 0, 1, 0 },
+        };
     }
 
     const corner_local = arena.alloc(f32, @as(usize, fc) * 6) catch return null;

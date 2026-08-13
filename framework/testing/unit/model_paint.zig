@@ -58,6 +58,33 @@ test "face glass presentation reads authored opacity without sampling atlas colo
     try testing.expect(!model_paint.faceIsGlass(2)); // out-of-range is never glass
 }
 
+test "glass material never writes into the opaque paint atlas" {
+    var quad = QUAD_VERTS;
+    model_paint.setTarget(908, &quad, 6);
+    defer model_paint.test_support.clearTargetAndSource();
+
+    const atlas_before = model_paint.atlas().?;
+    const unchanged = try testing.allocator.dupe(u8, atlas_before.rgba);
+    defer testing.allocator.free(unchanged);
+
+    model_paint.paintFaceAlpha(0, model_paint.GLASS_ALPHA);
+    try testing.expect(model_paint.faceIsGlass(0));
+    try testing.expectEqualSlices(u8, unchanged, model_paint.atlas().?.rgba);
+
+    model_paint.paintFace(0, .{ 7, 239, 113, model_paint.GLASS_ALPHA });
+    try testing.expect(model_paint.faceIsGlass(0));
+    try testing.expectEqual(model_paint.GLASS_ALPHA, model_paint.faceColor(0).?[3]);
+    var found_painted_texel = false;
+    const painted = model_paint.atlas().?.rgba;
+    var texel: usize = 0;
+    while (texel + 3 < painted.len) : (texel += 4) {
+        if (!std.mem.eql(u8, painted[texel .. texel + 3], &[_]u8{ 7, 239, 113 })) continue;
+        try testing.expectEqual(model_paint.ATLAS_SURFACE_ALPHA, painted[texel + 3]);
+        found_painted_texel = true;
+    }
+    try testing.expect(found_painted_texel);
+}
+
 test "only authored or imported pixels make an atlas document-ready" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(906, &quad, 6);
@@ -865,7 +892,7 @@ test "workspace compile preserves alpha and translates UVs without resampling" {
     }
 }
 
-test "painting a UV over transparent atlas space reveals ink and preserves glass opacity" {
+test "painting a glass UV reveals opaque ink without losing glass metadata" {
     var quad = QUAD_VERTS;
     model_paint.setTarget(910, &quad, 6);
     model_paint.test_support.setFaceGroupsAndRebuild(&.{ 0, 0 }, &quad, 6);
@@ -884,12 +911,14 @@ test "painting a UV over transparent atlas space reveals ink and preserves glass
 
     model_paint.paintStamp(0, 0.33, 0.33, 4, .{ 7, 239, 113, 255 }, 1);
     const brushed = model_paint.sampleTexel(0, 0.33, 0.33) orelse return error.TestUnexpectedResult;
-    try testing.expectEqualSlices(u8, &[_]u8{ 7, 239, 113, 87 }, brushed[0..]);
+    try testing.expectEqualSlices(u8, &[_]u8{ 7, 239, 113, model_paint.ATLAS_SURFACE_ALPHA }, brushed[0..]);
+    try testing.expect(model_paint.faceIsGlass(0));
 
     try testing.expect(model_paint.setAtlas(transparent));
     model_paint.paintFaceRgb(0, .{ 251, 101, 17 });
     const filled = model_paint.sampleTexel(0, 0.33, 0.33) orelse return error.TestUnexpectedResult;
-    try testing.expectEqualSlices(u8, &[_]u8{ 251, 101, 17, 87 }, filled[0..]);
+    try testing.expectEqualSlices(u8, &[_]u8{ 251, 101, 17, model_paint.ATLAS_SURFACE_ALPHA }, filled[0..]);
+    try testing.expect(model_paint.faceIsGlass(0));
 }
 
 test "closed pen polygon fills one logical island across its triangle diagonal" {
@@ -911,4 +940,32 @@ test "closed pen polygon fills one logical island across its triangle diagonal" 
     const second = model_paint.faceColor(1).?;
     try testing.expect(first[0] > 220 and first[1] < 80);
     try testing.expect(second[0] > 220 and second[1] < 80);
+}
+
+test "a degenerate authored face gets a point island instead of vetoing the atlas (req_4320)" {
+    const islands = model_paint.paint_islands;
+    // Two authored faces: one real triangle, one zero-area sliver (wire-edge
+    // form — all three corners on one segment). Before the fallback basis the
+    // whole build returned null; the model could never create a paint atlas.
+    const positions = [_]f32{
+        // face 0 — a unit right triangle
+        0, 0, 0, 1, 0, 0, 0, 1, 0,
+        // face 1 — zero area: three collinear points
+        2, 0, 0, 3, 0, 0, 2.5, 0, 0,
+    };
+    const groups = [_]u32{ 7, 9 };
+    var layout = islands.buildFit(
+        testing.allocator,
+        &positions,
+        &groups,
+        256,
+        4096,
+        64 * 1024 * 1024,
+    ) orelse return error.LayoutRefusedDegenerateFace;
+    defer layout.deinit(testing.allocator);
+    try testing.expect(layout.islands.len == 2);
+    // Every island — the degenerate one included — holds at least one texel.
+    for (layout.islands) |island| {
+        try testing.expect(island.w >= 1 and island.h >= 1);
+    }
 }

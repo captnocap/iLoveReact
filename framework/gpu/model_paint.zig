@@ -24,7 +24,7 @@
 
 const std = @import("std");
 const model_source = @import("model_source.zig");
-const paint_islands = @import("paint_islands.zig");
+pub const paint_islands = @import("paint_islands.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -49,6 +49,13 @@ var g_layout: ?paint_islands.Layout = null;
 // Mesh-history snapshots use it to decide whether their stored UVs may still
 // sample the live raster byte-for-byte or need a group-keyed carry/repack first.
 var g_layout_revision: u64 = 0;
+// Monotonic identity of the CPU triangle POSITIONS, advanced whenever the array is
+// replaced, cleared, swapped by a session, or handed out for writing. Camera-derived
+// caches key on it to tell "same mesh, same camera — nothing to recompute" from "the
+// geometry moved under me" (the overlay occlusion grid, req_4198). Deliberately NOT
+// g_layout_revision: that one identifies the atlas COORDINATE SPACE and survives a
+// geometry adoption, which is exactly the case a geometry cache must not survive.
+var g_geometry_revision: u64 = 1;
 // Geometry appended after an atlas exists is deliberately kept OUTSIDE the
 // authored UV contract until Remake Atlas. Every such face may sample the same
 // neutral gutter texel; requiring a fresh unused texel per append eventually
@@ -113,6 +120,11 @@ pub const UvWorkspaceTuning = struct {
 // as opaque (or vice versa).
 pub const GLASS_ALPHA: u8 = 87; // ~0.34 of 255 — the Studio glass opacity
 pub const OPAQUE_ALPHA_MIN: u8 = 250;
+/// The opaque paint sheet is colour artwork, never the glass material channel.
+/// Every owned texel stays opaque; per-face glass lives in `g_face_alpha` and the
+/// renderer's independent auxiliary glass texture.
+pub const ATLAS_SURFACE_ALPHA: u8 = 255;
+pub const GLASS_AUX_TEXEL: [4]u8 = .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2], GLASS_ALPHA };
 
 pub fn isGlassAlpha(alpha: u8) bool {
     return alpha < OPAQUE_ALPHA_MIN;
@@ -125,6 +137,18 @@ pub fn layoutRevision() u64 {
 fn advanceLayoutRevision() void {
     g_layout_revision +%= 1;
     if (g_layout_revision == 0) g_layout_revision = 1;
+}
+
+/// Identity of the currently resident triangle positions. Two calls returning the same
+/// value promise the position array has not been written, replaced, or swapped between
+/// them — the precondition every camera-derived geometry cache needs.
+pub fn geometryRevision() u64 {
+    return g_geometry_revision;
+}
+
+fn advanceGeometryRevision() void {
+    g_geometry_revision +%= 1;
+    if (g_geometry_revision == 0) g_geometry_revision = 1;
 }
 
 fn faceAlpha(face: u32) u8 {
@@ -179,15 +203,15 @@ fn fillNeutralBackground(buf: []u8) void {
 
 /// Wipe the atlas back to the neutral background plus the default substrate INSIDE
 /// each real UV face. Unowned packing space keeps zero ALPHA (the content marker)
-/// over neutral RGB (req_3471), preserving per-face glass alpha (req_2928) across
-/// paint-program replay.
+/// over neutral RGB (req_3471). Owned paint texels are always opaque: glass opacity
+/// belongs to the independent face-material channel and auxiliary atlas.
 pub fn clearAtlas() void {
     const buf = g_rgba orelse return;
     if (g_layout == null or g_facecount == 0) return;
     fillNeutralBackground(buf);
     var face: u32 = 0;
     while (face < g_facecount) : (face += 1) {
-        paintFaceTexels(face, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, faceAlpha(face));
+        paintFaceTexels(face, .{ DEFAULT_FACE[0], DEFAULT_FACE[1], DEFAULT_FACE[2] }, ATLAS_SURFACE_ALPHA);
     }
     g_has_dirty = false;
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
@@ -458,6 +482,7 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
         }
     }
     g_positions = pos;
+    advanceGeometryRevision();
 
     rebuildLayoutInner(verts, vert_count, false);
 }
@@ -548,6 +573,7 @@ fn setTargetPreservingAtlasInner(key_hash: u64, verts: []const f32, vert_count: 
     g_isl_start = starts_new;
     g_isl_tris = triangles_new;
     g_positions = positions_new;
+    advanceGeometryRevision();
     g_key_hash = key_hash;
     if (g_face_alpha) |old| alloc.free(old);
     g_face_alpha = alpha_new;
@@ -811,6 +837,7 @@ pub fn clear() void {
     freeLayoutState();
     if (g_positions) |p| alloc.free(p);
     g_positions = null;
+    advanceGeometryRevision();
     if (g_face_alpha) |rows| alloc.free(rows);
     g_face_alpha = null;
     g_facecount = 0;
@@ -858,30 +885,28 @@ fn paintFaceTexels(face: u32, rgb: ?[3]u8, alpha: ?u8) void {
     markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
 }
 
-/// Paint one face's full RGBA — the AUTHORITATIVE fill (colour-table apply, layout
-/// carry, glass toggle). Alpha is the glass channel; user paint goes through
-/// paintFaceRgb instead so it never un-glasses a face.
+/// Paint one face's full authored colour. Alpha updates the independent glass
+/// classification; only RGB lands in the opaque paint atlas.
 pub fn paintFace(face: u32, rgba: [4]u8) void {
     if (g_face_alpha) |rows| {
         if (@as(usize, face) < rows.len) rows[@as(usize, face)] = rgba[3];
     }
-    paintFaceTexels(face, .{ rgba[0], rgba[1], rgba[2] }, rgba[3]);
+    paintFaceTexels(face, .{ rgba[0], rgba[1], rgba[2] }, ATLAS_SURFACE_ALPHA);
 }
 
-/// Paint one face's COLOUR and re-assert its separately retained opacity — the
-/// user-paint fill, part tints and atlas bases. A glass face stays glass, while a face
-/// moved over transparent packing space gains visible painted texels (req_2928).
+/// Paint one face's COLOUR in the opaque atlas. A face moved over transparent
+/// packing space gains visible painted texels without writing its glass material
+/// into pixels that another face may share.
 pub fn paintFaceRgb(face: u32, rgb: [3]u8) void {
-    paintFaceTexels(face, rgb, faceAlpha(face));
+    paintFaceTexels(face, rgb, ATLAS_SURFACE_ALPHA);
 }
 
-/// Rewrite one face's ALPHA only, preserving the painted colour — re-asserts the glass
-/// state over an atlas blit (a saved painting knows nothing about the mesh's glass).
+/// Rewrite one face's material opacity only. This deliberately cannot touch atlas
+/// pixels: overlapping or stale UVs must never transfer glass to an opaque face.
 pub fn paintFaceAlpha(face: u32, alpha: u8) void {
     if (g_face_alpha) |rows| {
         if (@as(usize, face) < rows.len) rows[@as(usize, face)] = alpha;
     }
-    paintFaceTexels(face, null, alpha);
 }
 
 /// Adopt face-level opacity identity without rewriting texture pixels. Indexed
@@ -1622,7 +1647,11 @@ pub fn positions() ?[]const f32 {
 
 /// Mutable CPU triangle positions for host-native mesh editing. This is the same array
 /// raycast/project read, so a moved vertex is immediately pickable at its new location.
+/// Handing the slice out IS the change event: the geometry revision advances here rather
+/// than at each writer, so no future edit path can forget to invalidate the caches that
+/// key on it. Read-only callers must use `positions()`.
 pub fn positionsMutable() ?[]f32 {
+    advanceGeometryRevision();
     return g_positions;
 }
 
@@ -2360,17 +2389,15 @@ fn blendChannel(base: f32, ink: f32, mode: u8) f32 {
     return target * 255.0;
 }
 
-/// Blend one texel toward `ink` by `amt`, then establish the authored face's opacity.
-/// This matters when edited UVs point at transparent packing space: colour written
-/// under alpha zero is invisible. `alpha` is face metadata, so glass remains stained
-/// glass instead of becoming opaque while newly painted blank texels become visible.
-fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32, mode: u8, alpha: u8) void {
+/// Blend one texel toward `ink` by `amt`, then mark it as owned opaque paint.
+/// Glass opacity is supplied by the auxiliary glass texture, never this sheet.
+fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32, mode: u8) void {
     inline for (0..3) |c| {
         const base: f32 = buf[d + c];
         const target = blendChannel(base, ink[c], mode);
         buf[d + c] = @intFromFloat(std.math.clamp(base + (target - base) * amt, 0.0, 255.0));
     }
-    buf[d + 3] = alpha;
+    buf[d + 3] = ATLAS_SURFACE_ALPHA;
 }
 
 fn pointInPolygon(points: []const f32, x: f32, y: f32) bool {
@@ -2404,7 +2431,6 @@ pub fn paintPolygon(face: u32, points: []const f32, rgba: [4]u8, mat: bool, flow
     if (face >= g_facecount or points.len < 6 or points.len % 2 != 0) return false;
     const island_index = lay.tri_island[face];
     const island = lay.islands[island_index];
-    const alpha = faceAlpha(face);
     if (island.w == 0 or island.h == 0) return false;
     const amount = std.math.clamp(flow, 0.0, 1.0);
     if (amount <= 0.0) return false;
@@ -2447,7 +2473,7 @@ pub fn paintPolygon(face: u32, points: []const f32, rgba: [4]u8, mat: bool, flow
             if (!pointInPolygon(points, u, v)) continue;
             if (!pointInIsland(lay, island_index, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink = if (mat) sampleMatAtTexel(island, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amount, if (blend <= 7) blend else 0, alpha);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amount, if (blend <= 7) blend else 0);
             wrote = true;
         }
     }
@@ -2469,7 +2495,6 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     if (face >= g_facecount) return;
     const isl_idx = lay.tri_island[face];
     const isl = lay.islands[isl_idx];
-    const alpha = faceAlpha(face);
     const flow_amt = std.math.clamp(flow, 0.0, 1.0);
     if (flow_amt <= 0.0) return;
 
@@ -2486,12 +2511,12 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
                 const fy: f32 = @floatFromInt(ty);
                 if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
                 const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt, spec.blend, alpha);
+                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt, spec.blend);
             }
         }
         const ct = faceCentroidTexel(lay, face);
         const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, @floatFromInt(ct[0]), @floatFromInt(ct[1])) else rgba;
-        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt, spec.blend, alpha);
+        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt, spec.blend);
         markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
         return;
     }
@@ -2549,7 +2574,7 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
             // overlaps, so the diagonal is invisible to the stroke.
             if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov, spec.blend, alpha);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov, spec.blend);
         }
     }
     markRows(y0, y1);
@@ -3367,6 +3392,9 @@ pub fn sessionSave(s: *Session) void {
 pub fn sessionLoad(s: *const Session) void {
     inline for (@typeInfo(Session).@"struct".fields) |f|
         @field(@This(), f.name) = @field(s, f.name);
+    // A different document's positions are resident now. The revision is a global
+    // counter, not a session field, precisely so a tab switch reads as a change.
+    advanceGeometryRevision();
     if (g_rgba != null and g_atlas_h > 0) {
         // The GPU atlas texture still holds the previously active document —
         // mark every row dirty so the next frame re-uploads this session's paint.
@@ -3380,6 +3408,7 @@ pub fn sessionReset() void {
     const fresh = Session{};
     inline for (@typeInfo(Session).@"struct".fields) |f|
         @field(@This(), f.name) = @field(fresh, f.name);
+    advanceGeometryRevision();
     // Deliberately frees NOTHING: ownership of the previous state lives in the
     // record the coordinator just parked.
 }
