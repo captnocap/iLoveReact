@@ -19824,10 +19824,27 @@ fn resolveDynamicHeightfield(io: std.Io, queue: *wgpu.Queue, key: []const u8, he
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn update(_: f32) void {
+pub fn update(dt: f32) void {
     // Clear scenes recorded but never flushed (e.g. a frame where gpu.frame()
     // bailed before flushPending). Runs before the paint walk each frame.
     g_pending_count = 0;
+    characterRigTickExercise(dt);
+}
+
+/// Advance a playing rig-session exercise (req_4323). The session owns the
+/// clock, the sampling, and the constraint clamp; this only lands the freshly
+/// evaluated matrices on the active rig viewport — geometry, weights, colors,
+/// and selection all stay exactly as the last full sync wrote them.
+fn characterRigTickExercise(dt: f32) void {
+    if (!g_character_rig.active) return;
+    const tick = character_rig_session.tickExercise(dt) orelse return;
+    if (tick.bone_count != g_character_rig.bone_count) return;
+    for (0..tick.bone_count) |index| {
+        g_character_rig.pose_global[index] = tick.pose_global[index];
+        g_character_rig.skin_matrices[index] = tick.skin_matrices[index];
+        const palette_at = index * CHARACTER_RIG_PALETTE_FLOATS;
+        @memcpy(g_character_rig.palette[palette_at .. palette_at + 16], &tick.skin_matrices[index]);
+    }
 }
 
 /// Render a 3D.View node: walk children for 3D.Camera/Light/Mesh, draw to offscreen, composite.

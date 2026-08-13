@@ -476,14 +476,7 @@ pub fn playMountedPlayerMotionJsonAlloc(
 
     const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, runtime.allocator, .limited(MAX_MOTION_BYTES));
     defer runtime.allocator.free(bytes);
-    const basename = std.fs.path.basename(path);
-    if (std.mem.startsWith(u8, basename, "motion-") and std.mem.endsWith(u8, basename, ".rjan")) {
-        const hash_text = basename["motion-".len .. basename.len - ".rjan".len];
-        const expected = character_hashes.parseHex(hash_text) catch return error.NonContentAddressedPath;
-        var actual: character_hashes.Hash = undefined;
-        std.crypto.hash.sha2.Sha256.hash(bytes, &actual, .{});
-        if (!std.mem.eql(u8, &expected, &actual)) return error.MotionArtifactHashMismatch;
-    }
+    try player_character_pose.motion_document.verifyContentAddressedBasename(std.fs.path.basename(path), bytes);
     var document = try player_character_pose.motion_document.decodeAlloc(runtime.allocator, bytes);
     errdefer document.deinit();
 

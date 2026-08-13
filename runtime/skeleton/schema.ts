@@ -31,29 +31,125 @@ export interface Transform {
 
 // ── bones (the formation) ─────────────────────────────────────────────────────
 
-/** Articulation at a bone. A wheel `spin`s, a door `hinge`s, a magazine `slide`s
- *  (+ ejects), a turret `pivot`s. Absent ⇒ `fixed`. Non-fixed joints carry an
- *  `axis` (and optionally `limits`); the validator rejects a non-fixed joint with
- *  a missing/zero axis or an inverted limit range. */
-export type JointKind = 'fixed' | 'hinge' | 'slide' | 'pivot' | 'spin';
+/** Articulation at a bone. Props use fixed/one-axis joints; anatomical bones can
+ *  use a three-range ball joint. Absent means fixed. */
+export type JointRange = { min: number; max: number };
 
-export interface Joint {
-  kind: JointKind;
-  /** Rotation/slide axis in the bone's local space. Required for non-`fixed`. */
-  axis?: Vec3;
-  /** Articulation limits (radians for hinge/pivot/spin, units for slide). */
-  limits?: { min: number; max: number };
-}
+export type FixedJoint = { kind: 'fixed' };
+
+/** The existing prop-oriented one-axis joint contract. Rotational limits are
+ * radians; slide limits are model-space units. */
+export type AxisJoint = {
+  kind: 'hinge' | 'slide' | 'pivot' | 'spin';
+  /** Rotation/slide axis in the bone's local space. */
+  axis: Vec3;
+  limits?: JointRange;
+};
+
+/** Three-degree-of-freedom anatomical joint. All limits are radians in the
+ * generated/runtime contract; the canonical JSON authors them in degrees. */
+export type BallJoint = {
+  kind: 'ball';
+  swingX: JointRange;
+  swingZ: JointRange;
+  twistY: JointRange;
+};
+
+export type Joint = FixedJoint | AxisJoint | BallJoint;
+export type JointKind = Joint['kind'];
 
 /** One bone in the formation. `parent` is another bone's `id`, or null/undefined
  *  for a root bone. "Any valid formation" = every parent resolves (or is root),
  *  no cycles, ids unique. A single-bone skeleton is valid (the common prop). */
 export interface Bone {
+  /** Stable serialized identity. Display labels never replace this value. */
   id: string;
+  /** User-facing label, deliberately separate from the stable bone id. */
+  displayName?: string;
   parent?: string | null;
   transform?: Transform;
+  /** Terminal segment endpoint in this bone's local frame. */
+  tip?: Vec3;
   joint?: Joint;
 }
+
+// ── humanoid semantics and saved character binding ───────────────────────────
+
+export type BoneId = string;
+export type HumanoidSide = 'left' | 'right';
+
+/** Stable anatomy vocabulary persisted on logical faces. Object names, display
+ * names, and outliner order are never part of this identity. */
+export type HumanoidSemanticRole =
+  | 'pelvis' | 'abdomen' | 'chest' | 'head'
+  | 'upper_arm' | 'lower_arm' | 'hand'
+  | 'upper_leg' | 'lower_leg' | 'foot'
+  | 'neck' | 'clavicle' | 'fingers' | 'toes';
+
+export interface HumanoidSemanticBinding {
+  role: HumanoidSemanticRole;
+  side?: HumanoidSide;
+  boneId: BoneId;
+}
+
+export type CharacterObjectBinding =
+  | { objectId: string; mode: 'body' }
+  | { objectId: string; mode: 'deformable' }
+  | { objectId: string; mode: 'rigid'; boneId: BoneId };
+
+export type BoneFitMetadata = {
+  source: 'boundary' | 'template' | 'external' | 'manual';
+  confidence: number;
+  locked: boolean;
+};
+
+export type CharacterRigDescriptor = {
+  version: 1;
+  state: 'draft' | 'needs_bind' | 'bound';
+  semanticBindings: HumanoidSemanticBinding[];
+  objectBindings: CharacterObjectBinding[];
+  fit: Record<BoneId, BoneFitMetadata>;
+  shapeHash: string;
+  externalProvenance?: {
+    provider: 'SkinTokens' | string;
+    modelClass?: string;
+    seconds?: number;
+  };
+};
+
+export type SkinBindingRef = {
+  path: string;
+  format: 'RJSK';
+  version: 1;
+  artifactHash: string;
+  topologyHash: string;
+  semanticHash: string;
+  skeletonHash: string;
+  objectBindingHash: string;
+  logicalVertexCount: number;
+  maxInfluences: 4;
+};
+
+export type HumanoidRigTuning = {
+  specimenSeparationBoundsWidth: number;
+  bendPresetsDeg: {
+    shoulderAbduction: number;
+    elbowFlex: number;
+    wristFlex: number;
+    hipFlex: number;
+    kneeFlex: number;
+  };
+};
+
+/** Generated canonical template data. It is read-only so the single generated
+ * instance cannot become accidental process-local authoring state. */
+export type HumanoidTemplate = {
+  readonly version: 1;
+  readonly id: 'humanoid-v1';
+  readonly bones: readonly Bone[];
+  readonly semanticBindings: readonly HumanoidSemanticBinding[];
+  readonly tuning: HumanoidRigTuning;
+};
 
 // ── carried data (what the bones mean) ────────────────────────────────────────
 // All carried capability is a REFERENCE to a framework capability + params, never
@@ -80,7 +176,15 @@ export interface MeshAssignment {
  *  across the whole formation. This is a data-shape choice, NOT a thing-type. */
 export type Meshes =
   | { kind: 'perBone'; items: MeshAssignment[] }
-  | { kind: 'skinned'; geometryKey: string };
+  | {
+      kind: 'skinned';
+      /** Legacy registry key retained for generic non-character formations. */
+      geometryKey?: string;
+      /** Immutable RJMD artifact path used by saved characters. */
+      geometryPath?: string;
+      /** Absent for draft/needs-bind characters; required when state is bound. */
+      binding?: SkinBindingRef;
+    };
 
 /** collision — a collider bound to a bone (or, with no boneId, the whole hull).
  *  `capability` names the collider shape/behavior; bakes into the V29 COLLIDERS
@@ -127,6 +231,9 @@ export interface Skeleton {
   id: string;
   bones: Bone[];
   meshes?: Meshes;
+  /** Present only for the character artifact path. Generic prop validation and
+   * the prop Rig inspector remain independent of this descriptor. */
+  characterRig?: CharacterRigDescriptor;
   /** Is the formation frozen (prop fast path) or articulated. */
   static?: boolean;
   collision?: Collider[];

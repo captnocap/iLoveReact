@@ -270,3 +270,22 @@ behaviors the slice already exhibits, finally pointed at the same target. Maximu
 control where the author digs in — down to dictated frames, which are just capture's
 native tongue — and everything untouched stays effortless, because untouched channels
 ride their parents, exactly as they always have.
+
+## Landed after the roof: the exercise (req_4323, stage 1 of the workshop proposal)
+
+The mixer's vocabulary reached the rig session on 2026-08-13. `mountExercise`
+(`clip:<idle|walk|jump|sit|lay>` or a motion-library path, content-address
+verified by the same `motion-<sha256>.rjan` law) plays a document on the rig
+session's working body: channels resolve through the shared role→wire alias
+(`skeleton.semanticRetargetId` — the exact table `retargetBoneIds` uses), deltas
+apply bind-relative, and the pose flows through the same `rig_pose.evaluate`
+constraint clamp as every displayed pose. `parkExercise` freezes an exact frame
+(negative seconds = park where the native clock stands) so weights, joints, and
+constraints are edited AGAINST the failing pose; `resumeExercise` releases it;
+`setTestPose` stops it — the exercise and the bend tests are two writers to one
+displayed slot, and the last writer answers. Exercise state is view-state: no
+undo units, cleared on open/close, and the per-frame clock lives natively
+(`character_rig_session.tickExercise` → `gpu/3d.zig update`), moving matrices
+only — never resident geometry. The EXERCISE section in the rig pane
+(`cart/editor/inspector/CharacterRigSection.tsx`) lists the five clips and every
+`userdata/editor/motion/*.rjan` document.

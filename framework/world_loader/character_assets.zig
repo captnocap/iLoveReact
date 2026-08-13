@@ -187,36 +187,6 @@ fn buildRigBones(allocator: std.mem.Allocator, skeleton: skeleton_model.Skeleton
     return result;
 }
 
-fn pairedRetargetId(
-    side: ?skeleton_model.HumanoidSide,
-    left: []const u8,
-    right: []const u8,
-) ![]const u8 {
-    return switch (side orelse return error.InvalidSemanticSide) {
-        .left => left,
-        .right => right,
-    };
-}
-
-fn semanticRetargetId(binding: skeleton_model.HumanoidSemanticBinding) ![]const u8 {
-    return switch (binding.role) {
-        .pelvis => "pelvis",
-        .abdomen => "spine_lower",
-        .chest => "spine_upper",
-        .head => "head",
-        .neck => "neck",
-        .clavicle => pairedRetargetId(binding.side, "clavicle_left", "clavicle_right"),
-        .upper_arm => pairedRetargetId(binding.side, "upper_arm_left", "upper_arm_right"),
-        .lower_arm => pairedRetargetId(binding.side, "lower_arm_left", "lower_arm_right"),
-        .hand => pairedRetargetId(binding.side, "hand_left", "hand_right"),
-        .fingers => pairedRetargetId(binding.side, "fingers_left", "fingers_right"),
-        .upper_leg => pairedRetargetId(binding.side, "upper_leg_left", "upper_leg_right"),
-        .lower_leg => pairedRetargetId(binding.side, "lower_leg_left", "lower_leg_right"),
-        .foot => pairedRetargetId(binding.side, "foot_left", "foot_right"),
-        .toes => pairedRetargetId(binding.side, "toes_left", "toes_right"),
-    };
-}
-
 fn buildBoneIds(
     allocator: std.mem.Allocator,
     skeleton: skeleton_model.Skeleton,
@@ -235,7 +205,7 @@ fn buildBoneIds(
                     break;
                 }
             }
-            ids[bone_index orelse return error.MissingSemanticBone] = try semanticRetargetId(binding);
+            ids[bone_index orelse return error.MissingSemanticBone] = try skeleton_model.semanticRetargetId(binding);
         }
     }
     for (ids, 0..) |id, index| {

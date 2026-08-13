@@ -30,8 +30,13 @@ pub const Transform = struct {
 };
 
 /// Articulation at a bone. A wheel `spin`s, a door `hinge`s, a magazine `slide`s,
-/// a turret `pivot`s. `fixed` ⇒ no articulation (the default when absent).
-pub const JointKind = enum { fixed, hinge, slide, pivot, spin };
+/// a turret `pivot`s, and an anatomical shoulder uses a constrained `ball`.
+pub const JointKind = enum { fixed, hinge, slide, pivot, spin, ball };
+
+pub const JointRange = struct {
+    min: f32,
+    max: f32,
+};
 
 /// A joint's articulation. Non-`fixed` joints require a non-zero `axis`; `limits`,
 /// when both present, must satisfy min <= max. The validator enforces both.
@@ -42,6 +47,10 @@ pub const Joint = struct {
     /// Articulation limits (radians for hinge/pivot/spin, units for slide).
     limit_min: ?f32 = null,
     limit_max: ?f32 = null,
+    /// Anatomical ball-joint ranges, in radians around the bone-local axes.
+    swing_x: ?JointRange = null,
+    swing_z: ?JointRange = null,
+    twist_y: ?JointRange = null,
 };
 
 /// One bone in the formation. `parent` is another bone's `id`, or null for a root
@@ -49,9 +58,156 @@ pub const Joint = struct {
 /// ids unique. A single-bone skeleton is valid (the common static prop).
 pub const Bone = struct {
     id: []const u8,
+    /// User-facing label. Stable identity remains `id` when this changes.
+    display_name: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     transform: Transform = .{},
+    /// Terminal endpoint in this bone's local frame.
+    tip: ?Vec3 = null,
     joint: ?Joint = null,
+};
+
+// ── humanoid semantics and saved character binding ───────────────────────────
+
+pub const HumanoidSide = enum { left, right };
+
+pub const HumanoidSemanticRole = enum {
+    pelvis,
+    abdomen,
+    chest,
+    head,
+    upper_arm,
+    lower_arm,
+    hand,
+    upper_leg,
+    lower_leg,
+    foot,
+    neck,
+    clavicle,
+    fingers,
+    toes,
+};
+
+pub const HumanoidSemanticBinding = struct {
+    role: HumanoidSemanticRole,
+    side: ?HumanoidSide = null,
+    bone_id: []const u8,
+};
+
+fn pairedRetargetId(
+    side: ?HumanoidSide,
+    left: []const u8,
+    right: []const u8,
+) error{InvalidSemanticSide}![]const u8 {
+    return switch (side orelse return error.InvalidSemanticSide) {
+        .left => left,
+        .right => right,
+    };
+}
+
+/// The canonical retarget wire id one bound humanoid role answers to (req_4285):
+/// the channel vocabulary motion documents and the built-in clips speak. This
+/// is the single role→channel alias table; palette builders and pose samplers
+/// share it rather than re-declaring the mapping.
+pub fn semanticRetargetId(binding: HumanoidSemanticBinding) error{InvalidSemanticSide}![]const u8 {
+    return switch (binding.role) {
+        .pelvis => "pelvis",
+        .abdomen => "spine_lower",
+        .chest => "spine_upper",
+        .head => "head",
+        .neck => "neck",
+        .clavicle => pairedRetargetId(binding.side, "clavicle_left", "clavicle_right"),
+        .upper_arm => pairedRetargetId(binding.side, "upper_arm_left", "upper_arm_right"),
+        .lower_arm => pairedRetargetId(binding.side, "lower_arm_left", "lower_arm_right"),
+        .hand => pairedRetargetId(binding.side, "hand_left", "hand_right"),
+        .fingers => pairedRetargetId(binding.side, "fingers_left", "fingers_right"),
+        .upper_leg => pairedRetargetId(binding.side, "upper_leg_left", "upper_leg_right"),
+        .lower_leg => pairedRetargetId(binding.side, "lower_leg_left", "lower_leg_right"),
+        .foot => pairedRetargetId(binding.side, "foot_left", "foot_right"),
+        .toes => pairedRetargetId(binding.side, "toes_left", "toes_right"),
+    };
+}
+
+pub const RigidObjectBinding = struct {
+    object_id: []const u8,
+    bone_id: []const u8,
+};
+
+pub const CharacterObjectBinding = union(enum) {
+    body: []const u8,
+    deformable: []const u8,
+    rigid: RigidObjectBinding,
+
+    pub fn objectId(self: CharacterObjectBinding) []const u8 {
+        return switch (self) {
+            .body => |id| id,
+            .deformable => |id| id,
+            .rigid => |binding| binding.object_id,
+        };
+    }
+};
+
+pub const FitSource = enum { boundary, template, external, manual };
+
+pub const BoneFitMetadata = struct {
+    bone_id: []const u8,
+    source: FitSource,
+    confidence: f32,
+    locked: bool,
+};
+
+pub const CharacterRigState = enum { draft, needs_bind, bound };
+
+pub const ExternalRigProvenance = struct {
+    provider: []const u8,
+    model_class: ?[]const u8 = null,
+    seconds: ?f32 = null,
+};
+
+pub const CharacterRigDescriptor = struct {
+    version: u16 = 1,
+    state: CharacterRigState = .draft,
+    semantic_bindings: []const HumanoidSemanticBinding = &.{},
+    object_bindings: []const CharacterObjectBinding = &.{},
+    fit: []const BoneFitMetadata = &.{},
+    shape_hash: []const u8 = "",
+    external_provenance: ?ExternalRigProvenance = null,
+};
+
+pub const SkinFormat = enum { RJSK };
+
+pub const SkinBindingRef = struct {
+    path: []const u8,
+    format: SkinFormat = .RJSK,
+    version: u16 = 1,
+    artifact_hash: []const u8,
+    topology_hash: []const u8,
+    semantic_hash: []const u8,
+    skeleton_hash: []const u8,
+    object_binding_hash: []const u8,
+    logical_vertex_count: u32,
+    max_influences: u8 = 4,
+};
+
+pub const HumanoidBendPresets = struct {
+    shoulder_abduction: f32,
+    elbow_flex: f32,
+    wrist_flex: f32,
+    hip_flex: f32,
+    knee_flex: f32,
+};
+
+pub const HumanoidRigTuning = struct {
+    specimen_separation_bounds_width: f32,
+    bend_presets_deg: HumanoidBendPresets,
+};
+
+pub const HumanoidTemplate = struct {
+    version: u16 = 1,
+    id: []const u8,
+    bones: []const Bone,
+    semantic_bindings: []const HumanoidSemanticBinding,
+    tuning: HumanoidRigTuning,
 };
 
 // ── carried data (what the bones mean) ────────────────────────────────────────
@@ -74,11 +230,19 @@ pub const MeshAssignment = struct {
     geometry_key: []const u8,
 };
 
+pub const SkinnedMesh = struct {
+    /// Generic non-character registry lookup retained for prop formations.
+    geometry_key: ?[]const u8 = null,
+    /// Immutable RJMD artifact path for the character loader.
+    geometry_path: ?[]const u8 = null,
+    binding: ?SkinBindingRef = null,
+};
+
 /// meshes — either per-bone geometry (meshes at positions) OR one mesh skinned
 /// across the whole formation. A data-shape choice, NOT a thing-type branch.
 pub const Meshes = union(enum) {
     per_bone: []const MeshAssignment,
-    skinned: []const u8, // geometry_key
+    skinned: SkinnedMesh,
 };
 
 /// collision — a collider bound to a bone (or, with null bone_id, the whole hull).
@@ -121,6 +285,7 @@ pub const Skeleton = struct {
     id: []const u8,
     bones: []const Bone,
     meshes: ?Meshes = null,
+    character_rig: ?CharacterRigDescriptor = null,
     /// Is the formation frozen (prop fast path) or articulated.
     static: bool = false,
     collision: []const Collider = &.{},

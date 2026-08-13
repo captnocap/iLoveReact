@@ -19,6 +19,8 @@ const character_hashes = @import("character_hashes.zig");
 const rig_pose = @import("rig_pose.zig");
 const rig_weight_diagnostics = @import("rig_weight_diagnostics.zig");
 const rig_bend_diagnostics = @import("rig_bend_diagnostics.zig");
+const motion_document = @import("motion_document.zig");
+const clip_documents = @import("clip_documents.zig");
 
 pub const schema = model;
 pub const canonical_humanoid = canonical;
@@ -341,6 +343,58 @@ var g_history_allocator: ?std.mem.Allocator = null;
 var g_undo_history: std.ArrayList(Session) = .empty;
 var g_redo_history: std.ArrayList(Session) = .empty;
 
+// ── the exercise (req_4323) ──────────────────────────────────────────────────
+// One motion document mounted on the working body inside the rig session: the
+// specimens play the document through the same role channels, bind-relative
+// deltas, and rig_pose constraint clamp the world mixer uses. Exercise state
+// is deliberately session-view state, not authored state: it lives beside the
+// session (never inside it), so history clones, undo, and save artifacts are
+// untouched by what the body happens to be rehearsing.
+
+pub const EXERCISE_CLIP_PREFIX = "clip:";
+const MAX_EXERCISE_SOURCE_BYTES: usize = 1024;
+const MAX_EXERCISE_DOCUMENT_BYTES: usize = 64 << 20;
+
+const ExerciseDoc = union(enum) {
+    /// Decoded from disk; freed when the exercise clears.
+    owned: motion_document.Document,
+    /// One of the resident built-in clip documents; never freed here.
+    resident: *const motion_document.Document,
+
+    fn get(self: *const ExerciseDoc) *const motion_document.Document {
+        return switch (self.*) {
+            .owned => |*document| document,
+            .resident => |document| document,
+        };
+    }
+
+    fn deinit(self: *ExerciseDoc) void {
+        switch (self.*) {
+            .owned => |*document| document.deinit(),
+            .resident => {},
+        }
+    }
+};
+
+const Exercise = struct {
+    doc: ExerciseDoc,
+    source_buf: [MAX_EXERCISE_SOURCE_BYTES]u8 = undefined,
+    source_len: usize = 0,
+    playhead_seconds: f32 = 0,
+    playing: bool = true,
+
+    fn source(self: *const Exercise) []const u8 {
+        return self.source_buf[0..self.source_len];
+    }
+};
+
+var g_exercise: ?Exercise = null;
+
+fn clearExercise() void {
+    if (g_exercise) |*exercise| exercise.doc.deinit();
+    g_exercise = null;
+}
+
 fn clearHistoryStack(stack: *std.ArrayList(Session), allocator: std.mem.Allocator) void {
     for (stack.items) |*snapshot| snapshot.deinit();
     stack.deinit(allocator);
@@ -359,6 +413,7 @@ fn clearHistory() void {
 
 pub fn resetForTests() void {
     clearHistory();
+    clearExercise();
     if (g_session) |*session| session.deinit();
     g_session = null;
     g_next_session_id = 1;
@@ -1575,6 +1630,138 @@ fn evaluateSessionPose(
     );
 }
 
+/// The role-aliased wire id one session bone answers to: its semantic-binding
+/// channel name when a role is bound to it, its private stable id otherwise —
+/// the same palette law as CharacterAsset.retargetBoneIds. Canonical skeletons
+/// need no bindings because their bone ids already are the channel names.
+fn exerciseWireId(session: *const Session, bone_index: usize) []const u8 {
+    for (session.semantic_bindings[0..session.semantic_count]) |binding| {
+        if (std.mem.eql(u8, binding.bone_id, session.bones[bone_index].id)) {
+            return model.semanticRetargetId(binding) catch session.bones[bone_index].id;
+        }
+    }
+    return session.bones[bone_index].id;
+}
+
+/// Resolve every document channel against the session's current bones. This
+/// re-resolves on every evaluation on purpose: undo, fitting, and external
+/// adoption may rewrite the bone table under a mounted exercise, and a stale
+/// cached index would silently pose the wrong joint.
+fn resolveExerciseChannels(
+    session: *const Session,
+    document: *const motion_document.Document,
+    targets: *[motion_document.MAX_CHANNELS]?u8,
+) usize {
+    targets.* = @splat(null);
+    var matched: usize = 0;
+    for (document.channel_ids, 0..) |channel_id, channel| {
+        for (0..session.bone_count) |bone_index| {
+            if (std.mem.eql(u8, exerciseWireId(session, bone_index), channel_id)) {
+                targets[channel] = @intCast(bone_index);
+                matched += 1;
+                break;
+            }
+        }
+    }
+    return matched;
+}
+
+/// Evaluate the mounted exercise at its playhead: sampled bind-relative deltas
+/// land on role-resolved bones exactly as the world mixer applies them, then
+/// flow through the same rig_pose constraint clamp every displayed pose obeys.
+fn evaluateSessionExercisePose(
+    session: *const Session,
+    exercise: *const Exercise,
+    bind_global: *[MAX_BONES]rig_pose.Mat4,
+    pose_global: *[MAX_BONES]rig_pose.Mat4,
+    skin_matrices: *[MAX_BONES]rig_pose.Mat4,
+) !void {
+    var rig_bones: [MAX_BONES]rig_pose.Bone = undefined;
+    try buildRigPoseBones(session, &rig_bones);
+    var inverse_bind: [MAX_BONES]rig_pose.Mat4 = undefined;
+    try rig_pose.prepareBind(rig_bones[0..session.bone_count], bind_global[0..session.bone_count], inverse_bind[0..session.bone_count]);
+    var requested: [MAX_BONES]rig_pose.Quat = undefined;
+    for (session.bones[0..session.bone_count], 0..) |bone, index| requested[index] = bone.transform.rot;
+    const document = exercise.doc.get();
+    const sampled = try motion_document.sample(document, exercise.playhead_seconds);
+    var targets: [motion_document.MAX_CHANNELS]?u8 = undefined;
+    _ = resolveExerciseChannels(session, document, &targets);
+    for (0..document.channel_ids.len) |channel| {
+        if ((sampled.coverage & (@as(u32, 1) << @intCast(channel))) == 0) continue;
+        const target = targets[channel] orelse continue;
+        requested[target] = try rig_pose.fk.normalizeQuat(rig_pose.fk.multiplyQuat(
+            session.bones[target].transform.rot,
+            sampled.deltas[channel],
+        ));
+    }
+    var local_rotations: [MAX_BONES]rig_pose.Quat = undefined;
+    try rig_pose.evaluate(
+        rig_bones[0..session.bone_count],
+        inverse_bind[0..session.bone_count],
+        requested[0..session.bone_count],
+        if (sampled.has_root) sampled.root_translation else .{ 0, 0, 0 },
+        local_rotations[0..session.bone_count],
+        pose_global[0..session.bone_count],
+        skin_matrices[0..session.bone_count],
+    );
+}
+
+fn exerciseClipFromSource(clip_name: []const u8) ?clip_documents.clips.ClipId {
+    inline for (@typeInfo(clip_documents.clips.ClipId).@"enum".fields) |field| {
+        if (std.mem.eql(u8, clip_name, field.name)) return @enumFromInt(field.value);
+    }
+    return null;
+}
+
+/// Mount one motion document on the working body (req_4323). `clip:<id>`
+/// mounts a resident built-in clip document; any other source is a motion
+/// document path, read through the resident io capability with the same
+/// content-address verification the world mixer applies. A document whose
+/// roles this body binds nowhere is refused rather than silently frozen.
+fn mountExercise(session: *Session, resident: ?*const ResidentContext, source: []const u8) !void {
+    if (source.len == 0 or source.len > MAX_EXERCISE_SOURCE_BYTES) return error.InvalidExerciseSource;
+    var doc: ExerciseDoc = undefined;
+    if (std.mem.startsWith(u8, source, EXERCISE_CLIP_PREFIX)) {
+        const clip = exerciseClipFromSource(source[EXERCISE_CLIP_PREFIX.len..]) orelse return error.UnknownExerciseClip;
+        doc = .{ .resident = try clip_documents.document(clip) };
+    } else {
+        const context = resident orelse return error.ExerciseDocumentUnreadable;
+        const bytes = std.Io.Dir.cwd().readFileAlloc(
+            context.io,
+            source,
+            session.backing_allocator,
+            .limited(MAX_EXERCISE_DOCUMENT_BYTES),
+        ) catch return error.ExerciseDocumentUnreadable;
+        defer session.backing_allocator.free(bytes);
+        try motion_document.verifyContentAddressedBasename(std.fs.path.basename(source), bytes);
+        doc = .{ .owned = try motion_document.decodeAlloc(session.backing_allocator, bytes) };
+    }
+    errdefer doc.deinit();
+    var targets: [motion_document.MAX_CHANNELS]?u8 = undefined;
+    if (resolveExerciseChannels(session, doc.get(), &targets) == 0) return error.NoMotionChannels;
+    clearExercise();
+    var next = Exercise{ .doc = doc };
+    @memcpy(next.source_buf[0..source.len], source);
+    next.source_len = source.len;
+    g_exercise = next;
+}
+
+/// What the specimens display right now: the mounted exercise when one exists,
+/// the static test pose otherwise. Bend-test inspections keep calling
+/// evaluateSessionPose directly — a diagnostic must measure its own pose, not
+/// whatever the body is rehearsing.
+fn evaluateSessionDisplayedPose(
+    session: *const Session,
+    bind_global: *[MAX_BONES]rig_pose.Mat4,
+    pose_global: *[MAX_BONES]rig_pose.Mat4,
+    skin_matrices: *[MAX_BONES]rig_pose.Mat4,
+) !void {
+    if (g_exercise) |*exercise| {
+        return evaluateSessionExercisePose(session, exercise, bind_global, pose_global, skin_matrices);
+    }
+    return evaluateSessionPose(session, session.test_pose, bind_global, pose_global, skin_matrices);
+}
+
 fn syncRigViewport(
     session: *const Session,
     resident: ?*const ResidentContext,
@@ -1607,7 +1794,7 @@ fn syncRigViewport(
     var bind_global: [MAX_BONES]rig_pose.Mat4 = undefined;
     var pose_global: [MAX_BONES]rig_pose.Mat4 = undefined;
     var skin_matrices: [MAX_BONES]rig_pose.Mat4 = undefined;
-    try evaluateSessionPose(session, session.test_pose, &bind_global, &pose_global, &skin_matrices);
+    try evaluateSessionDisplayedPose(session, &bind_global, &pose_global, &skin_matrices);
     const deformed_mesh = session.overlay.deformed_mesh and binding_current;
     const state = RigViewportState{
         .source_key = context.source_key,
@@ -1796,7 +1983,28 @@ fn writeSnapshot(
         try writeJsonString(writer, @tagName(side));
     }
     if (session.test_pose.angle_deg) |angle| try writer.print(",\"angleDeg\":{d}", .{angle});
-    try writer.writeAll("},\"bodyTopology\":");
+    try writer.writeAll("},\"exercise\":");
+    if (g_exercise) |*exercise| {
+        const document = exercise.doc.get();
+        var exercise_targets: [motion_document.MAX_CHANNELS]?u8 = undefined;
+        const matched = resolveExerciseChannels(session, document, &exercise_targets);
+        try writer.writeAll("{\"source\":");
+        try writeJsonString(writer, exercise.source());
+        try writer.writeAll(",\"name\":");
+        try writeJsonString(writer, document.name);
+        try writer.print(
+            ",\"durationSeconds\":{d},\"looping\":{s},\"playing\":{s},\"playheadSeconds\":{d},\"channelCount\":{d},\"matchedChannelCount\":{d}}}",
+            .{
+                document.duration_seconds,
+                if (document.looping) "true" else "false",
+                if (exercise.playing) "true" else "false",
+                exercise.playhead_seconds,
+                document.channel_ids.len,
+                matched,
+            },
+        );
+    } else try writer.writeAll("null");
+    try writer.writeAll(",\"bodyTopology\":");
     if (body_topology) |summary| {
         try writer.print(
             "{{\"componentCount\":{d},\"mainLogicalVertexCount\":{d},\"mainTriangleCount\":{d},\"detachedLogicalVertexCount\":{d},\"detachedTriangleCount\":{d},\"detachedFaceIndices\":[",
@@ -3504,6 +3712,31 @@ fn applyCommand(session: *Session, command_value: std.json.Value, resident: ?*co
             .side = try parseTestPoseSide(pose.get("side")),
             .angle_deg = angle_deg,
         };
+        // The exercise and the test pose are two writers to one displayed
+        // slot; the last writer answers (req_4323).
+        clearExercise();
+        return;
+    }
+    if (std.mem.eql(u8, kind, "mountExercise")) {
+        return mountExercise(session, resident, try requiredString(command, "source"));
+    }
+    if (std.mem.eql(u8, kind, "parkExercise")) {
+        const exercise = if (g_exercise) |*value| value else return error.NoMountedExercise;
+        const seconds: f32 = @floatCast(try number(try required(command, "seconds")));
+        if (!std.math.isFinite(seconds)) return error.InvalidSampleTime;
+        // A negative time parks in place: the native clock is the only party
+        // that knows where a playing exercise stands right now (req_4323).
+        if (seconds >= 0) exercise.playhead_seconds = @min(seconds, exercise.doc.get().duration_seconds);
+        exercise.playing = false;
+        return;
+    }
+    if (std.mem.eql(u8, kind, "resumeExercise")) {
+        const exercise = if (g_exercise) |*value| value else return error.NoMountedExercise;
+        exercise.playing = true;
+        return;
+    }
+    if (std.mem.eql(u8, kind, "clearExercise")) {
+        clearExercise();
         return;
     }
     return error.UnknownCommand;
@@ -3556,6 +3789,7 @@ fn handleOpen(
     }
     const reply = try snapshotReply(allocator, &candidate, resident);
     clearHistory();
+    clearExercise();
     if (g_session) |*old| old.deinit();
     g_session = candidate;
     g_history_allocator = allocator;
@@ -4481,6 +4715,7 @@ fn handleClose(
     const reply = try nullReply(allocator);
     if (resident) |context| if (context.clear_rig_viewport) |clear| clear();
     clearHistory();
+    clearExercise();
     g_session.?.deinit();
     g_session = null;
     return reply;
@@ -4557,5 +4792,51 @@ pub fn preflightOpenRangeObjectCount(
             break :blk candidate.range_object_count;
         },
         .reject => null,
+    };
+}
+
+/// One clock step of a playing exercise, evaluated into module-resident
+/// buffers. The GPU owner calls this once per rendered frame and copies the
+/// matrices it retains; a parked, cleared, or absent exercise returns null and
+/// costs nothing. Full viewport syncs still happen only on door commands —
+/// this path moves matrices, never resident geometry.
+pub const ExercisePoseTick = struct {
+    bone_count: usize,
+    pose_global: []const rig_pose.Mat4,
+    skin_matrices: []const rig_pose.Mat4,
+};
+
+var g_exercise_tick_bind_global: [MAX_BONES]rig_pose.Mat4 = undefined;
+var g_exercise_tick_pose_global: [MAX_BONES]rig_pose.Mat4 = undefined;
+var g_exercise_tick_skin_matrices: [MAX_BONES]rig_pose.Mat4 = undefined;
+
+pub fn tickExercise(dt: f32) ?ExercisePoseTick {
+    const session = if (g_session) |*value| value else return null;
+    const exercise = if (g_exercise) |*value| value else return null;
+    if (!session.viewport_active or !exercise.playing) return null;
+    if (!std.math.isFinite(dt) or dt <= 0) return null;
+    const document = exercise.doc.get();
+    var playhead = exercise.playhead_seconds + dt;
+    if (document.looping) {
+        if (document.duration_seconds > 0 and playhead >= document.duration_seconds) {
+            playhead = @mod(playhead, document.duration_seconds);
+        }
+    } else if (playhead >= document.duration_seconds) {
+        // A non-looping document parks itself on its final pose.
+        playhead = document.duration_seconds;
+        exercise.playing = false;
+    }
+    exercise.playhead_seconds = playhead;
+    evaluateSessionExercisePose(
+        session,
+        exercise,
+        &g_exercise_tick_bind_global,
+        &g_exercise_tick_pose_global,
+        &g_exercise_tick_skin_matrices,
+    ) catch return null;
+    return .{
+        .bone_count = session.bone_count,
+        .pose_global = g_exercise_tick_pose_global[0..session.bone_count],
+        .skin_matrices = g_exercise_tick_skin_matrices[0..session.bone_count],
     };
 }

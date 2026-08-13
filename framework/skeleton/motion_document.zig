@@ -28,6 +28,7 @@
 
 const std = @import("std");
 pub const fk = @import("fk_pose.zig");
+const character_hashes = @import("character_hashes.zig");
 
 pub const Vec3 = fk.Vec3;
 pub const Quat = fk.Quat;
@@ -427,6 +428,23 @@ const Cursor = struct {
         return .{ readF32(raw, 0), readF32(raw, 4), readF32(raw, 8), readF32(raw, 12) };
     }
 };
+
+pub const ContentAddressError = error{ NonContentAddressedPath, MotionArtifactHashMismatch };
+
+/// The `motion-<sha256>.rjan` basename law (req_4285): a content-addressed
+/// take verifies against its own bytes on every reopen — the saved-character
+/// law. Any other basename is the editable-library case and carries no hash
+/// contract, so it passes untouched.
+pub fn verifyContentAddressedBasename(basename: []const u8, bytes: []const u8) ContentAddressError!void {
+    const prefix = "motion-";
+    const suffix = ".rjan";
+    if (!std.mem.startsWith(u8, basename, prefix) or !std.mem.endsWith(u8, basename, suffix)) return;
+    const hash_text = basename[prefix.len .. basename.len - suffix.len];
+    const expected = character_hashes.parseHex(hash_text) catch return error.NonContentAddressedPath;
+    var actual: character_hashes.Hash = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &actual, .{});
+    if (!std.mem.eql(u8, &expected, &actual)) return error.MotionArtifactHashMismatch;
+}
 
 pub fn decodeAlloc(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
     if (bytes.len < HEADER_BYTES) return error.Truncated;
