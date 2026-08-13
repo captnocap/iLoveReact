@@ -43,10 +43,18 @@ in the rest — on any character, from any source, forever.
    annotations); capture `record`/`recordStop` persists content-addressed
    takes (`motion-<sha256>.rjan`); replay proven cross-body in-suite;
    `__compiled_world_play_motion` replays takes from disk on the mounted player.
-3. **Clips as documents — LANDED, shot gate pending.** `clip_documents.zig`
-   generates the five documents FROM ClipTuning; parity swept in-suite (5 clips
-   × 25 times × canonical + adopted). The procedural table remains source of
-   truth until per-clip repro shots pass on a rebuilt binary.
+3. **Clips as documents — LANDED, shot gate PASSED, source of truth FLIPPED
+   (req_4294).** `clip_documents.zig` generates the five documents FROM
+   ClipTuning (parity swept in-suite: 5 clips × 25 times × canonical +
+   adopted) and holds them as a resident library; the runtime clip floor now
+   plays the DOCUMENTS through the same `motion_document.sample` every mixer
+   layer uses. Gate evidence: per-clip headless shots (`RJIT_FORCE_CLIP` +
+   `RJIT_FORCE_CLIP_SECONDS` + `RJIT_CLIP_SOURCE` under `RJIT_FIXED_DT`,
+   `shots/clip-parity/`) byte-identical table-vs-document for all five clips
+   plus a mid-segment walk sample, with a byte-identical control twin. The
+   table stays as the documents' generator input and as the
+   `RJIT_CLIP_SOURCE=table` diagnostic — generated output, not the source of
+   truth. New clips become content, not code.
 4. **The mixer — LANDED.** Four per-role layers over the clip floor
    (`MAX_MOTION_LAYERS`); blend-in ramp + snapshot fade-out (the capture gate's
    hold/fade law); wave-over-walk proven in-suite; external owner still wins
@@ -58,9 +66,10 @@ in the rest — on any character, from any source, forever.
    Authoring codec: `motion_document_json.zig` behind
    `__compiled_world_motion_document`.
 
-Runtime proofs pending the next rebuild (needs the user's build loop): M4004
-walking in /play, capture driving M4004 live, per-clip parity shots, and the
-dock exercised end to end.
+Runtime proofs: M4004 walking in /play — user-confirmed. Per-clip parity
+shots — PASSED (byte-identical, see step 3). Still pending the user's eyes:
+the facing fix in /play (req_4291), capture driving M4004 live, and the dock
+exercised end to end.
 
 ## Rulings requested
 

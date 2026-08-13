@@ -66,15 +66,16 @@ pub const MAX_MOTION_LAYERS: usize = 4;
 pub const MOTION_BLEND_IN_SECONDS: f32 = 0.15;
 pub const MOTION_BLEND_OUT_SECONDS: f32 = 0.35;
 
-/// Which sampler the clip floor plays (req_4294). `.table` is the procedural
-/// reference in humanoid_clips; `.document` replays the generated RJAN clip
+/// Which sampler the clip floor plays (req_4294). `.document` — the default
+/// since the roof's shot gate passed (req_4285: all five clips byte-identical
+/// table-vs-document under RJIT_FIXED_DT) — replays the generated RJAN clip
 /// documents through the same `motion_document.sample` the mixer's layers
-/// use. The default flips to `.document` once per-clip playback parity is
-/// shot-verified (the roof's gate, req_4285); the table then stays as the
-/// documents' generator input. `RJIT_CLIP_SOURCE=table|document` pins it —
-/// the repro hook of the `RJIT_FORCE_GAIT` family.
+/// use: clips are content now, not code. `.table` keeps the procedural
+/// sampler in humanoid_clips reachable as the parity diagnostic; the table
+/// itself remains the documents' generator input.
+/// `RJIT_CLIP_SOURCE=table|document` pins it — the `RJIT_FORCE_GAIT` family.
 pub const ClipFloorSource = enum { table, document };
-var clip_floor_source: ClipFloorSource = .table;
+var clip_floor_source: ClipFloorSource = .document;
 
 pub fn setClipFloorSource(source: ClipFloorSource) void {
     clip_floor_source = source;

@@ -283,6 +283,12 @@ test "the five clips migrate into documents with playback parity on both bodies"
         ids[3 + channel * 4] = channel_id;
     }
 
+    // Pin the floor to the procedural table: this test compares the table
+    // against a MOUNTED document layer, and the flipped default (.document)
+    // would silently turn it into document-vs-document.
+    mounted_pose.setClipFloorSource(.table);
+    defer mounted_pose.setClipFloorSource(.document);
+
     const all_clips = [_]clips.ClipId{ .idle, .walk, .jump, .sit, .lay };
     for (all_clips) |clip| {
         var doc = try clip_documents.clipDocument(allocator, clip);
@@ -364,7 +370,7 @@ test "the document clip floor replays the table clip floor on both bodies (the f
         ids[3 + channel * 4] = channel_id;
     }
 
-    defer mounted_pose.setClipFloorSource(.table);
+    defer mounted_pose.setClipFloorSource(.document);
     const all_clips = [_]clips.ClipId{ .idle, .walk, .jump, .sit, .lay };
     for (all_clips) |clip| {
         const duration = clips.clipInfo(clip).duration_seconds;

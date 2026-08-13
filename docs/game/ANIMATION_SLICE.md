@@ -71,11 +71,19 @@ per foot. Compare that to what SkinTokens generates (§6).
 
 ## 2. The five clips — `framework/skeleton/humanoid_clips.zig`
 
-Clips are **procedural key blends, not data files**: each clip is 2–5 authored keys
-built as rotations off the bind pose, blended with shortest-arc slerp. Every
-behavior-affecting number lives in one authored `ClipTuning` table
-(`humanoid_clips.zig:35-79`). A comptime assert pins the palette:
-*"humanoid-v1 clips require the canonical 24-bone palette"* (`humanoid_clips.zig:18`).
+Clips are **authored as a table, played as documents** (req_4285/req_4294):
+each clip is 2–5 authored keys built as rotations off the bind pose, every
+behavior-affecting number in one authored `ClipTuning` table
+(`humanoid_clips.zig`). At runtime the clip floor no longer samples that table —
+`clip_documents.zig` generates the five clips as RJAN motion documents from it
+(a resident library), and playback goes through the same
+`motion_document.sample` every mounted motion layer uses. The flip was gated
+on per-clip headless shots: table-vs-document byte-identical for all five
+clips under `RJIT_FIXED_DT` (`RJIT_CLIP_SOURCE=table` remains the diagnostic
+to replay the procedural sampler). A comptime assert still pins the authoring
+palette: *"humanoid-v1 clips require the canonical 24-bone palette"*
+(`humanoid_clips.zig:18`) — authoring stays canonical; playback is
+role-addressed and body-agnostic.
 
 | Clip | Duration | Loops | Clock | What it keys |
 |---|---|---|---|---|
