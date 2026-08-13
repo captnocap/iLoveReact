@@ -195,8 +195,9 @@ fn clipTime(seconds: f32, info: ClipInfo) Error!f32 {
 /// then compose in the lowered frame (sagittal, as arms actually swing).
 fn restFrame(frame_id: u64) Error!pose.Frame {
     var out = try bindFrame(frame_id);
-    try rotateLocal(&out, UPPER_ARM_LEFT, .{ 0, 0, 1 }, TUNING.arm_rest_degrees);
-    try rotateLocal(&out, UPPER_ARM_RIGHT, .{ 0, 0, 1 }, -TUNING.arm_rest_degrees);
+    // Signs shot-verified (req_4300): positive Z here raises the left arm.
+    try rotateLocal(&out, UPPER_ARM_LEFT, .{ 0, 0, 1 }, -TUNING.arm_rest_degrees);
+    try rotateLocal(&out, UPPER_ARM_RIGHT, .{ 0, 0, 1 }, TUNING.arm_rest_degrees);
     return out;
 }
 
