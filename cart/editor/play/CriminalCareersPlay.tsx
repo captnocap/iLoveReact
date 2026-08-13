@@ -1,5 +1,6 @@
 import { createElement, useEffect, useReducer } from 'react';
 import { useModifiers } from '../../../runtime/hooks/useModifiers';
+import { envGet } from '../../../runtime/hooks/process';
 import { P } from './surfaces.cls';
 import { GigworkTerminal } from './GigworkTerminal';
 import { PhoneSurface } from './PhoneSurface';
@@ -11,8 +12,19 @@ interface CriminalCareersPlayProps {
   storeDir: string;
 }
 
+// RJIT_PLAY_CLEAR_UI=1 boots /play with the terminal and phone dismissed —
+// the headless parity-shot knob (req_4294, RJIT_HIDE_WALLS's family): a shot
+// of the world needs the world, not the chrome. G/P still reopen everything.
+function bootChannelState() {
+  const initial = initialPlayChannelState();
+  if (envGet('RJIT_PLAY_CLEAR_UI') === '1') {
+    return { ...initial, terminalOpen: false, phoneOpen: false };
+  }
+  return initial;
+}
+
 export default function CriminalCareersPlay({ gameFile, storeDir }: CriminalCareersPlayProps) {
-  const [state, dispatch] = useReducer(playChannelReducer, undefined, initialPlayChannelState);
+  const [state, dispatch] = useReducer(playChannelReducer, undefined, bootChannelState);
   const { onKeyDown } = useModifiers();
 
   useEffect(() => {
