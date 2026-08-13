@@ -807,6 +807,13 @@ pub const Manager = struct {
             };
             return self.openTarget(payload) catch |err| self.operationErrorReply("capture target open rejected", err);
         }
+        if (std.mem.eql(u8, op, "poseKey")) {
+            const session = self.requireRequestSession(request, false) catch |err| {
+                return self.operationErrorReply("capture pose key rejected", err);
+            };
+            return self.poseKeyReply(session) catch |err|
+                self.operationErrorReply("capture pose key rejected", err);
+        }
         if (std.mem.eql(u8, op, "snapshot")) {
             const session = self.requireRequestSession(request, false) catch |err| {
                 return self.operationErrorReply("capture snapshot rejected", err);
@@ -887,6 +894,40 @@ pub const Manager = struct {
             return error.MissingExpectedRevision;
         }
         return session;
+    }
+
+    /// The visible promoted pose as role-addressed bind-relative deltas —
+    /// the workbench's "add key from this pose" (req_4285). Deltas are the
+    /// motion-document transport currency, computed here because the bind
+    /// rotations live here; the authoring side declares time, never math.
+    fn poseKeyReply(self: *Manager, session: *Session) ![]u8 {
+        const triplet = session.triplets.visible() orelse return error.NoCompletedFrame;
+        const target = &triplet.target;
+        var output: std.Io.Writer.Allocating = .init(self.allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"ok\":true,\"value\":{\"root\":");
+        try writeVec3(&output.writer, target.root_translation);
+        try output.writer.writeAll(",\"channels\":{");
+        var first = true;
+        for (retarget.DRIVEN_CHANNEL_IDS) |channel_id| {
+            for (session.bone_ids, 0..) |bone_id, index| {
+                if (!std.mem.eql(u8, bone_id, channel_id)) continue;
+                const bind = try rig.fk.normalizeQuat(session.bones[index].bind_rotation);
+                const local = try rig.fk.normalizeQuat(target.local_rotations[index]);
+                const delta = try rig.fk.normalizeQuat(rig.fk.multiplyQuat(
+                    rig.fk.inverseUnitQuat(bind),
+                    local,
+                ));
+                if (!first) try output.writer.writeByte(',');
+                first = false;
+                try writeJsonString(&output.writer, channel_id);
+                try output.writer.writeByte(':');
+                try writeQuat(&output.writer, delta);
+                break;
+            }
+        }
+        try output.writer.writeAll("}}}");
+        return self.allocator.dupe(u8, output.written());
     }
 
     fn operationErrorReply(self: *const Manager, prefix: []const u8, err: anyerror) ![]u8 {

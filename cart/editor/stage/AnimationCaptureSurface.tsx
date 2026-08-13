@@ -29,6 +29,7 @@ import {
   createCaptureSessionApi,
 } from '../skeleton/captureSession';
 import { resolveCaptureTarget } from '../skeleton/captureTarget';
+import MotionDock from './MotionDock';
 
 const g: any = globalThis;
 
@@ -667,6 +668,8 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
             </Col>
           </Col>
         </Row>
+
+        <MotionDock api={apiRef.current!} snapshot={snapshot} />
       </Col>
     </C.HW_WorldEditorSurface>
   );

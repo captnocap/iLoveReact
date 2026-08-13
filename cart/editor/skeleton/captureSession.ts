@@ -6,6 +6,8 @@
 // publication stay behind __capture_session.
 
 import type {
+  CapturePoseKeySample,
+  CaptureRecordingResult,
   CaptureSessionApi,
   CaptureSessionReply,
   CaptureSessionRequest,
@@ -261,11 +263,50 @@ export class NativeCaptureSessionApi implements CaptureSessionApi {
     return this.command({ op: 'setDepthSign', payload: { depthSign } });
   }
 
+  /** Begin recording promoted frames into a role-addressed take (req_4285). */
+  record(): CaptureSessionSnapshot {
+    return this.command({ op: 'record' });
+  }
+
+  /** Stop recording and persist the take as a content-addressed RJAN document.
+   * The reply is a saved-take receipt, not a snapshot; the session revision
+   * advances with it. */
+  recordStop(directory: string, name: string): CaptureRecordingResult {
+    const { sessionId, revision } = this.requireOpen();
+    const result = this.call<CaptureRecordingResult>({
+      op: 'recordStop',
+      payload: { directory, name },
+      sessionId,
+      expectedRevision: revision,
+    });
+    if (!result || typeof result.path !== 'string' || result.path.length === 0 ||
+        !Number.isInteger(result.frameCount) || result.frameCount < 2 ||
+        !Number.isFinite(result.durationSeconds) || result.durationSeconds <= 0 ||
+        typeof result.truncated !== 'boolean' || !Number.isInteger(result.revision)) {
+      throw new CaptureSessionFault('capture host returned a malformed take receipt');
+    }
+    this.acceptRevision(result.revision);
+    return result;
+  }
+
   snapshot(): CaptureSessionSnapshot {
     const { sessionId } = this.requireOpen();
     // Native inference advances the revision independently. An unpinned read is
     // the only legal way to observe that completed promotion.
     return this.acceptSnapshot(this.call<CaptureSessionSnapshot>({ op: 'snapshot', sessionId }));
+  }
+
+  /** The visible promoted pose as role-addressed deltas — an unpinned read,
+   * like snapshot: the pose belongs to whatever frame native last promoted. */
+  poseKey(): CapturePoseKeySample {
+    const { sessionId } = this.requireOpen();
+    const sample = this.call<CapturePoseKeySample>({ op: 'poseKey', sessionId });
+    if (!sample || !Array.isArray(sample.root) || sample.root.length !== 3 ||
+        !sample.channels || typeof sample.channels !== 'object' ||
+        Object.keys(sample.channels).length === 0) {
+      throw new CaptureSessionFault('capture host returned a malformed pose key');
+    }
+    return sample;
   }
 
   close(): void {
@@ -281,7 +322,14 @@ export class NativeCaptureSessionApi implements CaptureSessionApi {
     return this.lastSnapshot;
   }
 
-  private command(request: Extract<CaptureSessionRequest, { op: 'calibrate' | 'freeze' | 'resume' | 'setDepthSign' }>): CaptureSessionSnapshot {
+  private acceptRevision(revision: number): void {
+    if (this.revision !== null && revision < this.revision) {
+      throw new CaptureSessionFault('capture host revision moved backwards');
+    }
+    this.revision = revision;
+  }
+
+  private command(request: Extract<CaptureSessionRequest, { op: 'calibrate' | 'freeze' | 'resume' | 'setDepthSign' | 'record' }>): CaptureSessionSnapshot {
     const { sessionId, revision } = this.requireOpen();
     return this.acceptSnapshot(this.call<CaptureSessionSnapshot>({
       ...request,
