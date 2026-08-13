@@ -32,6 +32,36 @@ Everything else in the proposal is a consequence of that sentence:
 The user-facing version: author a pose, declare when it happens, and the system fills
 in the rest — on any character, from any source, forever.
 
+## Execution status (2026-08-12, same day — user set the goal, all five steps landed)
+
+1. **Roles as the motion vocabulary — LANDED.** Clips sample as role-addressed
+   deltas (`humanoid_clips.zig CHANNEL_IDS`/`sampleChannels`); the canonical-24
+   gate is dead (`player_character_pose.zig resetRig` resolves channels against
+   `retargetBoneIds`). Capture already spoke roles through the same palette.
+2. **Motion documents + recording tap — LANDED.** RJAN v1
+   (`motion_document.zig`: keys + dictated runs, coverage masks, planted
+   annotations); capture `record`/`recordStop` persists content-addressed
+   takes (`motion-<sha256>.rjan`); replay proven cross-body in-suite;
+   `__compiled_world_play_motion` replays takes from disk on the mounted player.
+3. **Clips as documents — LANDED, shot gate pending.** `clip_documents.zig`
+   generates the five documents FROM ClipTuning; parity swept in-suite (5 clips
+   × 25 times × canonical + adopted). The procedural table remains source of
+   truth until per-clip repro shots pass on a rebuilt binary.
+4. **The mixer — LANDED.** Four per-role layers over the clip floor
+   (`MAX_MOTION_LAYERS`); blend-in ramp + snapshot fade-out (the capture gate's
+   hold/fade law); wave-over-walk proven in-suite; external owner still wins
+   everything, doors unchanged.
+5. **The workbench — LANDED.** `MotionDock` in the animation surface: REC/STOP
+   takes, ADD KEY from the captured pose (native `poseKey` verb), per-role-group
+   timeline with ghosting, nudge/move-to-playhead/delete, scrub through
+   `__compiled_world_scrub_motion`, PLAY onto the registered /play world.
+   Authoring codec: `motion_document_json.zig` behind
+   `__compiled_world_motion_document`.
+
+Runtime proofs pending the next rebuild (needs the user's build loop): M4004
+walking in /play, capture driving M4004 live, per-clip parity shots, and the
+dock exercised end to end.
+
 ## Rulings requested
 
 1. **Roles are the motion vocabulary.** All motion sources address channels by semantic
