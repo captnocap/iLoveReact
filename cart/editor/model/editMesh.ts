@@ -11,7 +11,7 @@
 // DESIGNED IN as optional fields but NOT exercised in the first slice — later
 // migrations extend this type, never fork it.
 
-import { mesh, type GeometryData, type Vec3 } from '@reactjit/geometries';
+import { mesh, type GeometryData, type HumanoidSemanticFaceRole, type Vec3 } from '@reactjit/geometries';
 
 export type V3 = [number, number, number];
 export type V2 = [number, number];
@@ -20,6 +20,9 @@ export type V2 = [number, number];
  *  fields are the convergence layers (Part 1.5 of the playbook). */
 export type EditMeshFace = {
   loop: number[];
+  /** Stable anatomical membership. Display names and Outliner order never
+   * participate in this identity. Character readiness consumes this field. */
+  semanticRole?: HumanoidSemanticFaceRole;
   /** The authored render diagonal for a quad, stored as its two stable vertex ids.
    *  Four positions do not define one surface when they are non-planar: the diagonal
    *  is topology, not a lowering preference. Mirroring carries this edge to the twin
@@ -41,6 +44,17 @@ export type EditMeshFace = {
    *  pieces (the loop-cut selection-persist of req_0989). Not persisted geometry. */
   tag?: number;
 };
+
+function semanticRolesEqual(a: HumanoidSemanticFaceRole | undefined, b: HumanoidSemanticFaceRole | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.role === b.role && ('side' in a ? a.side : undefined) === ('side' in b ? b.side : undefined);
+}
+
+function mirroredSemanticRole(role: HumanoidSemanticFaceRole | undefined, axis: 0 | 1 | 2): HumanoidSemanticFaceRole | undefined {
+  if (!role) return undefined;
+  if (axis !== 0 || !('side' in role)) return { ...role } as HumanoidSemanticFaceRole;
+  return { ...role, side: role.side === 'left' ? 'right' : 'left' };
+}
 
 /** The connector class — a STRICT, curated vocabulary if ever used (NOT a free
  *  string, USER req_1055), kept as a DORMANT field for a possible future Lego
@@ -185,6 +199,7 @@ export function cloneMesh(m: EditMesh): EditMesh {
       if (f.material != null) nf.material = f.material;
       if (f.glass != null) nf.glass = f.glass;
       if (f.tag != null) nf.tag = f.tag;
+      if (f.semanticRole) nf.semanticRole = { ...f.semanticRole } as HumanoidSemanticFaceRole;
       return nf;
     }),
   };
@@ -217,6 +232,7 @@ export function mirrorMesh(m: EditMesh, axis: 0 | 1 | 2): EditMesh {
     // Pin the source's actual physical diagonal before changing winding. Vertex ids
     // are unchanged by this in-place reflection, so the same pair is its mirror edge.
     if (source.loop.length === 4) f.diagonal = quadDiagonalVertices(m, source);
+    f.semanticRole = mirroredSemanticRole(source.semanticRole, axis);
     reverseFaceLoopKeepingAnchor(f);
   }
   if (out.mounts) for (const mt of out.mounts) {
@@ -485,6 +501,7 @@ export function symmetrize(m: EditMesh, axis: 0 | 1 | 2, keepPositive: boolean, 
         }),
         uv: f.uv ? f.uv.map((u) => [u[0], u[1]] as V2) : undefined,
         diagonal: sourceDiagonal ? [twinBySource.get(sourceDiagonal[0])!, twinBySource.get(sourceDiagonal[1])!] : undefined,
+        semanticRole: mirroredSemanticRole(f.semanticRole, axis),
       };
       reverseFaceLoopKeepingAnchor(twin);
       faces.push(twin);
@@ -674,6 +691,8 @@ function remapFaceVertices(face: EditMeshFace, remap: Map<number, number>): Edit
 // host mesh editor uses this to select/outline whole n-gons instead of fan slivers).
 export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) => boolean, faceGroupsOut?: number[]): GeometryData {
   const g = mesh();
+  const renderCornerLogicalIds: number[] = [];
+  const renderTriangleLogicalFaceIds: number[] = [];
   const flat: V2 = [0.5, 0.5];
   // per-face normals + which faces touch each vertex (for the smoothing groups).
   const faceN: Vec3[] = m.faces.map((f) => (f.loop.length >= 3 ? (faceNormal(m, f) as Vec3) : [0, 1, 0]));
@@ -712,9 +731,20 @@ export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) 
       const [pc, nc, uc] = corner(l2);
       g.tri(pa, na, ua, pb, nb, ub, pc, nc, uc);
       faceGroupsOut?.push(fi);
+      renderCornerLogicalIds.push(face.loop[l0]!, face.loop[l1]!, face.loop[l2]!);
+      renderTriangleLogicalFaceIds.push(fi);
     }
   }
-  return g.build();
+  const lowered = g.build();
+  return {
+    ...lowered,
+    logicalVertices: new Float32Array(m.verts.flat()),
+    logicalVertexCount: m.verts.length,
+    renderCornerLogicalIds: new Uint32Array(renderCornerLogicalIds),
+    logicalTriangleIndices: new Uint32Array(renderCornerLogicalIds),
+    renderTriangleLogicalFaceIds: new Uint32Array(renderTriangleLogicalFaceIds),
+    logicalFaceRoles: m.faces.map((face) => face.semanticRole ?? null),
+  };
 }
 
 // ── Shape constructors (the "Add Mesh" dialog's shapes) ───────────────────────
@@ -933,6 +963,99 @@ export function icosphere(radius: number, subdiv = 1): EditMesh {
   });
   const faces: EditMeshFace[] = tris.map((loop) => ({ loop: orientOutward(verts, loop) }));
   return fullFaceUV({ verts, faces });
+}
+
+// ── Curve-kit loft stitchers (req_4322) ──────────────────────────────────────
+// The bridge between data/curves.ts ring stacks and authored EditMesh topology:
+// ringLoft walls consecutive rings with quads (poles collapse to fans, ends cap
+// as single n-gons exactly like the cylinder, req_3763), outlinePrism extrudes a
+// closed 2D outline into a slab. Both normalize to outward winding by signed
+// volume — one global test, so concave profiles (a vase neck) orient correctly
+// where per-face center tests would not.
+
+type LoftPoint = { x: number; y: number; z: number };
+
+function meshSignedVolume(verts: V3[], faces: EditMeshFace[]): number {
+  let vol = 0;
+  for (const f of faces) {
+    const a = verts[f.loop[0]];
+    for (let i = 1; i + 1 < f.loop.length; i += 1) {
+      const b = verts[f.loop[i]], c = verts[f.loop[i + 1]];
+      vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    }
+  }
+  return vol;
+}
+
+function windOutwardByVolume(verts: V3[], faces: EditMeshFace[]): EditMeshFace[] {
+  return meshSignedVolume(verts, faces) >= 0 ? faces : faces.map((f) => ({ ...f, loop: f.loop.slice().reverse() }));
+}
+
+/** Wall a ring stack (data/curves.ts revolveRings/sweepRings output) into a closed
+ *  solid: quads between consecutive rings, degenerate rings (a lathe pole) collapse
+ *  to a single vertex with a triangle fan, open ends cap as single n-gons. Every
+ *  ring must carry the same point count — the curve kit guarantees it. */
+export function ringLoft(rings: LoftPoint[][], opts: { caps?: boolean } = {}): EditMesh {
+  const caps = opts.caps ?? true;
+  const isPole = (ring: LoftPoint[]): boolean =>
+    ring.every((p) => Math.hypot(p.x - ring[0].x, p.y - ring[0].y, p.z - ring[0].z) < 1e-6);
+  // consecutive poles add only degenerate faces — keep the first of any run
+  const stack: LoftPoint[][] = [];
+  for (const ring of rings) {
+    if (stack.length && isPole(ring) && isPole(stack[stack.length - 1])) continue;
+    stack.push(ring);
+  }
+  if (stack.length < 2) return fullFaceUV({ verts: [], faces: [] });
+  const width = stack[0].length;
+  const verts: V3[] = [];
+  // per-ring vertex index table; a pole ring is ONE shared vertex repeated
+  const index: number[][] = stack.map((ring) => {
+    if (isPole(ring)) {
+      const at = verts.length;
+      verts.push([ring[0].x, ring[0].y, ring[0].z]);
+      return ring.map(() => at);
+    }
+    const base = verts.length;
+    for (const p of ring) verts.push([p.x, p.y, p.z]);
+    return ring.map((_, i) => base + i);
+  });
+  const faces: EditMeshFace[] = [];
+  for (let r = 0; r + 1 < stack.length; r += 1) {
+    const lo = index[r], hi = index[r + 1];
+    for (let i = 0; i < width; i += 1) {
+      const j = (i + 1) % width;
+      // the cylinder's side-quad winding: lower(i) → upper(i) → upper(i+1) → lower(i+1)
+      const loop = [lo[i], hi[i], hi[j], lo[j]].filter((v, k, arr) => v !== arr[(k + 1) % arr.length]);
+      if (loop.length >= 3) faces.push({ loop });
+    }
+  }
+  if (caps) {
+    const first = index[0], last = index[index.length - 1];
+    if (first[0] !== first[1 % width]) faces.push({ loop: first.slice() });
+    if (last[0] !== last[1 % width]) faces.push({ loop: last.slice().reverse() });
+  }
+  return fullFaceUV({ verts, faces: windOutwardByVolume(verts, faces) });
+}
+
+/** Extrude a closed 2D outline (no duplicated seam point) into a slab: the outline
+ *  lives in the XY plane, `depth` thick along Z, centered like every primitive.
+ *  Front and back are single authored n-gon faces; sides are quads. Accepts either
+ *  outline direction — winding normalizes by signed volume. */
+export function outlinePrism(outline: { x: number; y: number }[], depth: number): EditMesh {
+  const n = outline.length;
+  if (n < 3) return fullFaceUV({ verts: [], faces: [] });
+  const zf = depth / 2;
+  const verts: V3[] = [];
+  for (const p of outline) verts.push([p.x, p.y, zf]);   // front ring: 0..n-1
+  for (const p of outline) verts.push([p.x, p.y, -zf]);  // back ring: n..2n-1
+  const faces: EditMeshFace[] = [];
+  faces.push({ loop: outline.map((_, i) => i) });                    // front n-gon
+  faces.push({ loop: outline.map((_, i) => n + (n - 1 - i)) });      // back n-gon, reversed
+  for (let i = 0; i < n; i += 1) {
+    const j = (i + 1) % n;
+    faces.push({ loop: [i, n + i, n + j, j] });
+  }
+  return fullFaceUV({ verts, faces: windOutwardByVolume(verts, faces) });
 }
 
 // ── Lattice / grille panel (req_1722) ─────────────────────────────────────────
@@ -1509,8 +1632,8 @@ export function cutMeshByPlane(m: EditMesh, axis: 0 | 1 | 2, c: number, eps = 1e
         if (uv) { const cuv = lerpUV(i, (i + 1) % loop.length, t); negUV!.push(cuv); posUV!.push(cuv); }
       }
     }
-    if (negLoop.length >= 3) faces.push({ loop: negLoop, uv: negUV ?? undefined, material: face.material, tag: face.tag });
-    if (posLoop.length >= 3) faces.push({ loop: posLoop, uv: posUV ?? undefined, material: face.material, tag: face.tag });
+    if (negLoop.length >= 3) faces.push({ loop: negLoop, uv: negUV ?? undefined, material: face.material, glass: face.glass, tag: face.tag, semanticRole: face.semanticRole });
+    if (posLoop.length >= 3) faces.push({ loop: posLoop, uv: posUV ?? undefined, material: face.material, glass: face.glass, tag: face.tag, semanticRole: face.semanticRole });
   }
   return { ...m, verts, faces };
 }
@@ -1810,7 +1933,7 @@ export function extrudeFace(m: EditMesh, faceIndex: number, distance: number): E
   const fc = faceCentroid(m, face);
   const faces: EditMeshFace[] = m.faces.slice();
   // CAP replaces the original at faceIndex → a selection on it follows; UV inherited.
-  faces[faceIndex] = { loop: cap.slice(), uv: face.uv ? face.uv.map((p) => [p[0], p[1]] as V2) : undefined, material: face.material, tag: face.tag };
+  faces[faceIndex] = { loop: cap.slice(), uv: face.uv ? face.uv.map((p) => [p[0], p[1]] as V2) : undefined, material: face.material, glass: face.glass, tag: face.tag, semanticRole: face.semanticRole };
   // SIDE WALLS: one quad per boundary edge, wound so its Newell normal points OUT
   // (away from the face centroid), each with the default full-square UV.
   for (let i = 0; i < L; i += 1) {
@@ -1823,7 +1946,7 @@ export function extrudeFace(m: EditMesh, faceIndex: number, distance: number): E
       (verts[a][2] + verts[b][2] + verts[a2][2] + verts[b2][2]) / 4,
     ];
     if (dot(wn, sub(qc, fc)) < 0) loop = [a2, b2, b, a]; // flip to face outward
-    faces.push({ loop, uv: faceSquareUV(verts, loop), material: face.material });
+    faces.push({ loop, uv: faceSquareUV(verts, loop), material: face.material, semanticRole: face.semanticRole });
   }
   return { ...m, verts, faces };
 }
@@ -1870,7 +1993,7 @@ export function subMeshFromFaces(m: EditMesh, faceIndices: Iterable<number>): Ed
     const f = m.faces[fi];
     const c = cleanLoop(f.loop.map((vi) => remap.get(vi)!), f.uv ? f.uv.map((p) => [p[0], p[1]] as V2) : undefined);
     if (c.loop.length < 3) continue; // a doubled-corner sliver → nothing real to keep
-    faces.push({ loop: c.loop, uv: c.uv, material: f.material, glass: f.glass });
+    faces.push({ loop: c.loop, uv: c.uv, material: f.material, glass: f.glass, semanticRole: f.semanticRole });
   }
   return { verts, faces };
 }
@@ -1913,29 +2036,30 @@ export function solidifyFaces(m: EditMesh, faceIndices: Iterable<number>, thickn
     const f = m.faces[fi];
     const loop = cleanLoop(f.loop.map((vi) => inner.get(vi)!)).loop.reverse();
     if (loop.length < 3) continue;
-    faces.push({ loop, uv: faceSquareUV(verts, loop), material: f.material, glass: f.glass });
+    faces.push({ loop, uv: faceSquareUV(verts, loop), material: f.material, glass: f.glass, semanticRole: f.semanticRole });
   }
   // SILHOUETTE walls: count each undirected edge across the selection; the ones used
   // ONCE are the boundary. Keep the owning face's DIRECTED traverse (a→b) so the wall
   // runs b→a on the outer ring — the same winding two outward faces share, so the
   // wall faces outward (the extrudeEdge rule), no centroid heuristic needed.
   const count = new Map<string, number>();
-  const dir = new Map<string, { a: number; b: number }>();
+  const dir = new Map<string, { a: number; b: number; semanticRole?: HumanoidSemanticFaceRole }>();
   for (const fi of sel) {
-    const L = m.faces[fi].loop;
+    const sourceFace = m.faces[fi];
+    const L = sourceFace.loop;
     for (let k = 0; k < L.length; k += 1) {
       const a = L[k], b = L[(k + 1) % L.length];
       if (a === b) continue; // a zero-length edge (malformed loop) is no silhouette
       const uk = edgeKey(a, b);
       count.set(uk, (count.get(uk) ?? 0) + 1);
-      if (!dir.has(uk)) dir.set(uk, { a, b });
+      if (!dir.has(uk)) dir.set(uk, { a, b, semanticRole: sourceFace.semanticRole });
     }
   }
   for (const [uk, c] of count) {
     if (c !== 1) continue;
-    const { a, b } = dir.get(uk)!;
+    const { a, b, semanticRole } = dir.get(uk)!;
     const loop = [b, a, inner.get(a)!, inner.get(b)!];
-    faces.push({ loop, uv: faceSquareUV(verts, loop) });
+    faces.push({ loop, uv: faceSquareUV(verts, loop), semanticRole });
   }
   return { ...m, verts, faces };
 }
@@ -2243,7 +2367,7 @@ export function connectVerts(m: EditMesh, vA: number, vB: number): EditMesh | nu
     const half1 = slice(ia, ib);   // vA … vB
     const half2 = slice(ib, ia);   // vB … vA (wraps)
     if (half1.loop.length < 3 || half2.loop.length < 3) continue;
-    const carry = (h: { loop: number[]; uv?: V2[] }): EditMeshFace => ({ loop: h.loop, uv: h.uv, material: f.material, glass: f.glass, tag: f.tag });
+    const carry = (h: { loop: number[]; uv?: V2[] }): EditMeshFace => ({ loop: h.loop, uv: h.uv, material: f.material, glass: f.glass, tag: f.tag, semanticRole: f.semanticRole });
     const faces = m.faces.slice();
     faces.splice(fi, 1, carry(half1), carry(half2));
     return { ...m, faces };
@@ -2902,6 +3026,7 @@ export function mergeFaces(m: EditMesh, faceIndices: Iterable<number>): EditMesh
     uv: faceSquareUV(m.verts, newLoop),
     material: base.material,
     glass: selFaces.every((f) => f.glass) ? base.glass : undefined,
+    semanticRole: selFaces.every((face) => semanticRolesEqual(face.semanticRole, base.semanticRole)) ? base.semanticRole : undefined,
   };
 
   // replace the selected faces with the one fused face, then compact the interior

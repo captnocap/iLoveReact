@@ -474,19 +474,32 @@ export function spiral(
  *  egg quantities. shift 0 is the ellipse; it is clamped inside ±0.49·length
  *  where the closed form stays real. */
 export function egg(length: number, breadth: number, shift: number, n: number = CURVE_TUNING.outlineSamples): Vec2[] {
-  const L = length, B = breadth;
-  const w = Math.min(0.49 * L, Math.max(-0.49 * L, shift));
-  const half = (x: number) => {
-    const num = L * L - 4 * x * x;
-    const den = L * L + 8 * w * x + 4 * w * w;
-    return den < EPS ? 0 : (B / 2) * Math.sqrt(Math.max(0, num / den));
-  };
+  const L = length;
   return sampleFn((t) => {
     // parameterize by angle so both tips are visited exactly once
     const x = (L / 2) * Math.cos(t);
-    const y = half(x) * (Math.sin(t) >= 0 ? 1 : -1);
+    const y = hugelschafferHalfWidth(length, breadth, shift, x) * (Math.sin(t) >= 0 ? 1 : -1);
     return { x, y };
   }, 0, Math.PI * 2, n, { closed: true }) as Vec2[];
+}
+
+/** The same egg as a lathe half-profile: (radius, height) points running fat end
+ *  at height 0 up to the narrow tip, radius 0 at both ends — feed straight to
+ *  revolveRings for the solid egg. */
+export function eggProfile(length: number, breadth: number, shift: number, n: number = CURVE_TUNING.arcSamples): Vec2[] {
+  const L = length;
+  return sampleFn((t) => {
+    const x = -L / 2 + t * L; // fat end (positive shift fattens -x) rises from height 0
+    return { x: hugelschafferHalfWidth(length, breadth, shift, x), y: x + L / 2 };
+  }, 0, 1, n) as Vec2[];
+}
+
+function hugelschafferHalfWidth(length: number, breadth: number, shift: number, x: number): number {
+  const L = length, B = breadth;
+  const w = Math.min(0.49 * L, Math.max(-0.49 * L, shift));
+  const num = L * L - 4 * x * x;
+  const den = L * L + 8 * w * x + 4 * w * w;
+  return den < EPS ? 0 : (B / 2) * Math.sqrt(Math.max(0, num / den));
 }
 
 /** Teardrop / piriform outline (closed): x = cos t, y = sin t · sin^m(t/2),

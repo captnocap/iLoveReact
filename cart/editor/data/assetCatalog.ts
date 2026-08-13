@@ -5,11 +5,12 @@ import {
   defaultShaderData,
   shaderSpec,
 } from '../textures/shaders';
-import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
+import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, ringLoft, outlinePrism, editMeshToGeometry, type EditMesh } from '../model/editMesh';
+import { vesselProfile, revolveRings, arch as archCurve, helix, sweepRings, ellipseArc, superellipse, eggProfile, type ArchFamily } from './curves';
 import type { Asset, ContentFolderId, ContentNode, ModelPackage, ModelPart, PrimitiveKind } from './types';
 import { modelFolderIdFor, modelSlug } from './modelPackage';
 import { loadMaterializedPackages, materializePackageArtifacts, resolvePackageDir } from './modelPackageStore';
-import { readMeshDoc, readMeshDocParts, type MeshDocPartMeta, type PackageMeshDoc } from './meshDoc';
+import { readCharacterMeshDoc, readMeshDoc, readMeshDocParts, type MeshDocPartMeta, type MeshSemanticTable, type PackageMeshDoc } from './meshDoc';
 
 export type CatalogDiagnostics = {
   source: string;
@@ -41,9 +42,15 @@ export function modelPackageMeshData(pkg: ModelPackage): Float32Array | null {
   return null;
 }
 
-export function packageMeshDoc(pkg: Pick<ModelPackage, 'kind' | 'id'>): PackageMeshDoc | null {
+export function packageMeshDoc(pkg: Pick<ModelPackage, 'kind' | 'id' | 'skeleton'>): PackageMeshDoc | null {
   const dir = resolvePackageDir(pkg.kind, pkg.id);
-  return dir ? readMeshDoc(dir) : null;
+  if (!dir) return null;
+  if (pkg.skeleton?.characterRig) {
+    const meshes = pkg.skeleton?.meshes;
+    const geometryPath = meshes?.kind === 'skinned' ? meshes.geometryPath : undefined;
+    return readCharacterMeshDoc(dir, geometryPath);
+  }
+  return readMeshDoc(dir);
 }
 
 export function packageMeshDocParts(pkg: Pick<ModelPackage, 'kind' | 'id'>): MeshDocPartMeta[] | null {
@@ -69,7 +76,12 @@ export function packageMeshDocParts(pkg: Pick<ModelPackage, 'kind' | 'id'>): Mes
 // and generator meters (what primitiveEditMesh/primitivePartMesh consume) — and
 // primitiveParamsFromU is the ONE conversion at the dialog boundary.
 export const U_PER_TILE = 16; // 16 u = 1 tile = 1 m
-export type PrimitiveParams = { size: number; height: number; resolution: number };
+export type PrimitiveParams = {
+  size: number; height: number; resolution: number;
+  // curve-kind knobs (req_4322) — optional so the flat bag stays one type; every
+  // generator case defaults its own missing knobs
+  belly?: number; foot?: number; depth?: number; turns?: number; wire?: number; shift?: number; roundness?: number;
+};
 export type PrimitiveField = {
   key: keyof PrimitiveParams;
   label: string;
@@ -89,6 +101,21 @@ const F = {
   height: { key: 'height', label: 'Height', min: 1, max: 800, step: 1, default: 16, unit: 'u' } as PrimitiveField,
   segments: { key: 'resolution', label: 'Segments', min: 3, max: 96, step: 1, default: 24, unit: 'count' } as PrimitiveField,
   subdiv: { key: 'resolution', label: 'Subdivisions', min: 0, max: 5, step: 1, default: 2, unit: 'count' } as PrimitiveField,
+  // curve-kind fields (req_4322) — same flat bag, per-kind vocabulary
+  mouth: { key: 'size', label: 'Mouth ⌀', min: 1, max: 800, step: 1, default: 18, unit: 'u', diameter: true } as PrimitiveField,
+  belly: { key: 'belly', label: 'Belly ⌀', min: 1, max: 800, step: 1, default: 24, unit: 'u', diameter: true } as PrimitiveField,
+  foot: { key: 'foot', label: 'Foot ⌀', min: 1, max: 800, step: 1, default: 9, unit: 'u', diameter: true } as PrimitiveField,
+  span: { key: 'size', label: 'Span', min: 1, max: 800, step: 1, default: 32, unit: 'u' } as PrimitiveField,
+  rise: { key: 'height', label: 'Rise', min: 1, max: 800, step: 1, default: 20, unit: 'u' } as PrimitiveField,
+  depth: { key: 'depth', label: 'Depth', min: 1, max: 800, step: 1, default: 8, unit: 'u' } as PrimitiveField,
+  coil: { key: 'size', label: 'Coil ⌀', min: 2, max: 800, step: 1, default: 16, unit: 'u', diameter: true } as PrimitiveField,
+  turns: { key: 'turns', label: 'Turns', min: 1, max: 12, step: 1, default: 4, unit: 'count' } as PrimitiveField,
+  wire: { key: 'wire', label: 'Wire ⌀', min: 1, max: 64, step: 1, default: 3, unit: 'u', diameter: true } as PrimitiveField,
+  length: { key: 'height', label: 'Length', min: 1, max: 800, step: 1, default: 20, unit: 'u' } as PrimitiveField,
+  breadth: { key: 'size', label: 'Breadth ⌀', min: 1, max: 800, step: 1, default: 14, unit: 'u', diameter: true } as PrimitiveField,
+  tipShift: { key: 'shift', label: 'Tip shift', min: 0, max: 800, step: 1, default: 3, unit: 'u' } as PrimitiveField,
+  thickness: { key: 'height', label: 'Thickness', min: 1, max: 800, step: 1, default: 4, unit: 'u' } as PrimitiveField,
+  roundness: { key: 'roundness', label: 'Roundness', min: 2, max: 8, step: 1, default: 3, unit: 'count' } as PrimitiveField,
 };
 
 export const PRIMITIVE_FIELDS: Record<PrimitiveKind, PrimitiveField[]> = {
@@ -99,6 +126,11 @@ export const PRIMITIVE_FIELDS: Record<PrimitiveKind, PrimitiveField[]> = {
   plane: [F.size],
   sphere: [F.diameter, F.segments],
   icosphere: [F.diameter, F.subdiv],
+  vessel: [F.mouth, F.height, F.belly, F.foot, F.segments],
+  arch: [F.span, F.rise, F.depth, F.segments],
+  spring: [F.coil, F.height, F.turns, F.wire, F.segments],
+  egg: [F.length, F.breadth, F.tipShift, F.segments],
+  tray: [F.size, F.thickness, F.roundness, F.segments],
 };
 
 /** The starting DIALOG params for a kind (u space) — each exposed field seeded from its
@@ -109,9 +141,14 @@ export function defaultPrimitiveParamsU(kind: PrimitiveKind): PrimitiveParams {
   return p;
 }
 
-/** Dialog u → generator meters: dimensions divide by 16; resolution is a count, untouched. */
+/** Dialog u → generator meters: every 'u' dimension divides by 16; counts pass
+ *  through untouched. Driven by the key list so a new u field converts without
+ *  anyone remembering to extend this function (req_4322). */
+const U_PARAM_KEYS = ['size', 'height', 'belly', 'foot', 'depth', 'wire', 'shift'] as const;
 export function primitiveParamsFromU(p: PrimitiveParams): PrimitiveParams {
-  return { size: p.size / U_PER_TILE, height: p.height / U_PER_TILE, resolution: p.resolution };
+  const out: PrimitiveParams = { ...p };
+  for (const k of U_PARAM_KEYS) if (out[k] !== undefined) out[k] = out[k]! / U_PER_TILE;
+  return out;
 }
 
 // SPAWN RESTING ON THE FLOOR (req_2643): the generators mint meshes CENTERED at the origin
@@ -139,10 +176,54 @@ function primitiveEditMesh(kind: PrimitiveKind, p: PrimitiveParams = primitivePa
       case 'plane': return plane(s, s);
       case 'sphere': return sphere(r, seg);
       case 'icosphere': return icosphere(r, Math.max(0, Math.round(p.resolution))); // resolution = subdivisions here
+      // ── curve-kit kinds (req_4322): data/curves.ts samples, the loft stitchers author ──
+      case 'vessel': {
+        // three potter's stations — foot on the ground, belly at the classic 0.42
+        // waist, mouth at the lip — splined and lathed; solid (both ends capped)
+        const profile = vesselProfile([
+          { radius: (p.foot ?? p.size * 0.5) / 2, height: 0 },
+          { radius: (p.belly ?? p.size * 1.3) / 2, height: h * 0.42 },
+          { radius: r, height: h },
+        ], { samplesPerSegment: VESSEL_SAMPLES_PER_STATION });
+        return ringLoft(revolveRings(profile, { segments: seg }));
+      }
+      case 'arch': {
+        // rise picks the mason's strike: under span/2 segmental, at span/2 the
+        // semicircle, above it the two-centered gothic point (data/curves.ts arch)
+        const half = s / 2;
+        const family: ArchFamily = h > half * 1.02 ? 'gothic' : h >= half * 0.98 ? 'semicircular' : 'segmental';
+        const outline = archCurve(family, s, h, Math.max(8, seg));
+        return outlinePrism(outline, p.depth ?? 0.5);
+      }
+      case 'spring': {
+        const turns = Math.max(1, Math.round(p.turns ?? 4));
+        const wireR = (p.wire ?? p.size * 0.2) / 2;
+        const path = helix(r, h / turns, turns, turns * seg + 1);
+        const section = ellipseArc({ x: 0, y: 0 }, wireR, wireR, {}, SPRING_SECTION_SIDES);
+        return ringLoft(sweepRings(section, path));
+      }
+      case 'egg': {
+        // length rides the height knob; the profile ends at radius 0 so the loft
+        // closes at both poles without caps
+        const profile = eggProfile(h, s, p.shift ?? 0, Math.max(8, Math.round(seg / 2)));
+        return ringLoft(revolveRings(profile, { segments: seg }));
+      }
+      case 'tray': {
+        const exp = Math.max(2, Math.round(p.roundness ?? 3));
+        const standing = outlinePrism(superellipse(r, r, exp, seg), h);
+        // outlinePrism authors in the XY plane; a tray lies FLAT — rotate -90°
+        // about x (proper rotation, winding preserved) so thickness rises along y
+        return { ...standing, verts: standing.verts.map((v) => [v[0], v[2], -v[1]] as [number, number, number]) };
+      }
     }
   })();
   return restOnGround(centered);
 }
+/** freeform density between vessel stations — 6 rings per station span keeps a
+ *  default vessel near cylinder-primitive weight while the profile stays fair */
+const VESSEL_SAMPLES_PER_STATION = 6;
+/** sides on a spring's wire cross-section — round enough to read as wire */
+const SPRING_SECTION_SIDES = 10;
 export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Array; faceGroups: Uint32Array } {
   const groups: number[] = [];
   const geo = editMeshToGeometry(primitiveEditMesh(kind), undefined, groups);
@@ -160,24 +241,75 @@ export function primitivePartMesh(kind: PrimitiveKind, params?: PrimitiveParams)
 
 export type PartGroupRange = { id: string; lo: number; hi: number };
 
+export type ComposedModelParts = {
+  positions: Float32Array;
+  faceGroups: Uint32Array;
+  ranges: PartGroupRange[];
+  logicalVertexCount: number;
+  renderCornerLogicalIds: Uint32Array;
+  semanticRegions?: Uint32Array;
+  semanticInstances?: Uint32Array;
+  semanticTable?: MeshSemanticTable;
+};
+
+const NO_SEMANTIC_ID = 0xffffffff;
+
+function semanticRoleKey(role: NonNullable<EditMesh['faces'][number]['semanticRole']>): string {
+  return 'side' in role ? `${role.role}:${role.side}` : role.role;
+}
+
+function semanticRoleDisplayName(key: string): string {
+  const [role, side] = key.split(':');
+  const words = role.split('_').map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`).join(' ');
+  return side ? `${side.slice(0, 1).toUpperCase()}${side.slice(1)} ${words}` : words;
+}
+
 // Compose a multi-part model into ONE host mesh (positions + per-triangle face groups).
 // Each visible part contributes its triangles and owns a contiguous group range
 // [lo, hi), so the outliner can select the whole part by range.
-export function composeModelParts(parts: ModelPart[]): { positions: Float32Array; faceGroups: Uint32Array; ranges: PartGroupRange[] } {
+export function composeModelParts(parts: ModelPart[]): ComposedModelParts {
   const chunks: Float32Array[] = [];
   const groupChunks: number[][] = [];
+  const logicalChunks: number[][] = [];
+  const semanticRegionChunks: number[][] = [];
+  const semanticInstanceChunks: number[][] = [];
   const ranges: PartGroupRange[] = [];
+  const semanticIds = new Map<string, number>();
   let groupBase = 0;
+  let logicalBase = 0;
   for (const part of parts) {
     if (!part.visible || !part.mesh) continue;
     const localGroups: number[] = [];
-    const positions = applyPartLift(new Float32Array(editMeshToGeometry(part.mesh, undefined, localGroups).positions), part.lift ?? 0);
+    const geometry = editMeshToGeometry(part.mesh, undefined, localGroups);
+    const positions = applyPartLift(new Float32Array(geometry.positions), part.lift ?? 0);
     if (positions.length === 0) continue;
     const faceCount = part.mesh.faces.length;
     chunks.push(positions);
     groupChunks.push(localGroups.map((fi) => groupBase + fi));
+    logicalChunks.push(Array.from(geometry.renderCornerLogicalIds ?? []).map((id) => logicalBase + id));
+    const semanticRegions: number[] = [];
+    const semanticInstances: number[] = [];
+    for (const faceId of localGroups) {
+      const role = part.mesh.faces[faceId]?.semanticRole;
+      if (!role) {
+        semanticRegions.push(NO_SEMANTIC_ID);
+        semanticInstances.push(NO_SEMANTIC_ID);
+        continue;
+      }
+      const key = semanticRoleKey(role);
+      let regionId = semanticIds.get(key);
+      if (regionId === undefined) {
+        regionId = semanticIds.size;
+        semanticIds.set(key, regionId);
+      }
+      semanticRegions.push(regionId);
+      semanticInstances.push(0);
+    }
+    semanticRegionChunks.push(semanticRegions);
+    semanticInstanceChunks.push(semanticInstances);
     ranges.push({ id: part.id, lo: groupBase, hi: groupBase + faceCount });
     groupBase += faceCount;
+    logicalBase += part.mesh.verts.length;
   }
   const positions = new Float32Array(chunks.reduce((sum, c) => sum + c.length, 0));
   let offset = 0;
@@ -185,7 +317,33 @@ export function composeModelParts(parts: ModelPart[]): { positions: Float32Array
   const faceGroups = new Uint32Array(groupChunks.reduce((sum, c) => sum + c.length, 0));
   let groupOffset = 0;
   groupChunks.forEach((c) => { faceGroups.set(c, groupOffset); groupOffset += c.length; });
-  return { positions, faceGroups, ranges };
+  const renderCornerLogicalIds = new Uint32Array(logicalChunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let logicalOffset = 0;
+  logicalChunks.forEach((chunk) => { renderCornerLogicalIds.set(chunk, logicalOffset); logicalOffset += chunk.length; });
+  if (semanticIds.size === 0) return { positions, faceGroups, ranges, logicalVertexCount: logicalBase, renderCornerLogicalIds };
+  const semanticRegions = new Uint32Array(semanticRegionChunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  const semanticInstances = new Uint32Array(semanticInstanceChunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let semanticOffset = 0;
+  semanticRegionChunks.forEach((chunk) => {
+    semanticRegions.set(chunk, semanticOffset);
+    semanticOffset += chunk.length;
+  });
+  semanticOffset = 0;
+  semanticInstanceChunks.forEach((chunk) => {
+    semanticInstances.set(chunk, semanticOffset);
+    semanticOffset += chunk.length;
+  });
+  const semanticTable: MeshSemanticTable = {
+    version: 1,
+    regions: Array.from(semanticIds.entries()).map(([role, id]) => ({
+      id,
+      name: semanticRoleDisplayName(role),
+      role,
+      createdBy: { op: 'humanoid-v1' },
+    })),
+    nextRegionId: semanticIds.size,
+  };
+  return { positions, faceGroups, ranges, logicalVertexCount: logicalBase, renderCornerLogicalIds, semanticRegions, semanticInstances, semanticTable };
 }
 
 function loadEditorAssetCatalog(): EditorAssetCatalog {
@@ -237,7 +395,9 @@ export function fileModelPackage(source: string): ModelPackage {
   const semantic = semanticKindFromText(name);
   return {
     id: `file:${source}`,
-    folderId: 'props',
+    // One id, one model (req_2523): a shared literal here gave every file-opened
+    // model the same tree node key, so two opens duplicated/ghosted rows.
+    folderId: modelFolderIdFor(`file:${source}`),
     name,
     path: source,
     kind: modelCategoryForSemantic(semantic),
@@ -279,6 +439,7 @@ export function importModelFilePackage(sourcePath: string): ModelPackage | null 
   const pkg: ModelPackage = {
     ...probe,
     id,
+    folderId: modelFolderIdFor(id),
     source: sourcePath,
     decompositions: [...probe.decompositions.filter((d) => d !== 'source:file-explorer'), `imported-from:${sourcePath}`],
   };
@@ -311,6 +472,7 @@ export function importStlModelFilePackage(sourcePath: string, convertedGlbPath: 
   const pkg: ModelPackage = {
     ...probe,
     id,
+    folderId: modelFolderIdFor(id),
     name: titleFromFilename(sourceFilename),
     source: sourcePath,
     viewerPath: convertedGlbPath,
@@ -392,18 +554,19 @@ function modelHomeNodes(models: ModelPackage[]): ContentNode[] {
 }
 
 export function modelCategoryNodes(models: ModelPackage[]): ContentNode[] {
-  const categories: Array<[ModelPackage['kind'], ContentFolderId, string]> = [
-    ['prop', 'models-props', 'Props'],
-    ['build', 'models-build', 'Build'],
-    ['character', 'models-characters', 'Characters'],
-    ['vehicle', 'models-vehicles', 'Vehicles'],
+  const isExportedCharacter = (model: ModelPackage): boolean => model.placeable?.as === 'character';
+  const categories: Array<[ContentFolderId, string, (model: ModelPackage) => boolean]> = [
+    ['models-props', 'Props', (model) => model.kind === 'prop' && !isExportedCharacter(model)],
+    ['models-build', 'Build', (model) => model.kind === 'build' && !isExportedCharacter(model)],
+    ['models-characters', 'Characters', isExportedCharacter],
+    ['models-vehicles', 'Vehicles', (model) => model.kind === 'vehicle' && !isExportedCharacter(model)],
   ];
   return categories
-    .filter(([kind]) => models.some((model) => model.kind === kind))
-    .map(([kind, id, label]) => ({
+    .filter(([, , includes]) => models.some(includes))
+    .map(([id, label, includes]) => ({
       id,
       label,
-      children: modelHomeNodes(models.filter((model) => model.kind === kind)),
+      children: modelHomeNodes(models.filter(includes)),
     }));
 }
 

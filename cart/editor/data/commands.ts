@@ -25,6 +25,12 @@ export const PRIMITIVE_MESHES: { kind: PrimitiveKind; name: string; icon: string
   { kind: 'plane', name: 'Plane', icon: 'Square' },
   { kind: 'sphere', name: 'Sphere', icon: 'Globe' },
   { kind: 'icosphere', name: 'Icosphere', icon: 'Hexagon' },
+  // curve-kit kinds (req_4322) — everyday objects by name, generated via data/curves.ts
+  { kind: 'vessel', name: 'Vessel', icon: 'Amphora' },
+  { kind: 'arch', name: 'Arch', icon: 'Landmark' },
+  { kind: 'spring', name: 'Spring', icon: 'Tornado' },
+  { kind: 'egg', name: 'Egg', icon: 'Egg' },
+  { kind: 'tray', name: 'Tray', icon: 'Squircle' },
 ];
 // New Mesh = a FRESH model document seeded with the primitive (the 'new' verb). Global scope:
 // works on any surface; picking it while a model is open opens a SECOND document, never a part.

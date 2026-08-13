@@ -37,6 +37,7 @@ import { editor_transport_paths } from './records/editor_transport_paths';
 import { game_activities } from './records/game_activities';
 import { game_build } from './records/game_build';
 import { game_animation } from './records/game_animation';
+import { editor_curve_kit } from './records/editor_curve_kit';
 import { editor_deej } from './records/editor_deej';
 import { editor_mesh_integrity } from './records/editor_mesh_integrity';
 import { editor_pen_device } from './records/editor_pen_device';
@@ -55,7 +56,7 @@ export type {
 };
 
 export const ALL_DOCS: DocIndex[] = [
-  bake_geometry, editor_color_library, editor_deej, editor_mesh_integrity, editor_pen_device, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_live_materials, editor_map_documents, editor_map_paint_history, editor_painted_placements, editor_saved_views, editor_sections, editor_spin_props, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
+  bake_geometry, editor_color_library, editor_curve_kit, editor_deej, editor_mesh_integrity, editor_pen_device, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_live_materials, editor_map_documents, editor_map_paint_history, editor_painted_placements, editor_saved_views, editor_sections, editor_spin_props, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
   game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
   world_knowledge_authoring,
 ];

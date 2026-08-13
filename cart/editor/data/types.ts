@@ -30,7 +30,9 @@ import type { WorldView } from '../world/worldViews';
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Globals' | 'Window';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
-export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
+export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere'
+  // curve-kit kinds (req_4322): generated through data/curves.ts + the loft stitchers
+  | 'vessel' | 'arch' | 'spring' | 'egg' | 'tray';
 export type ModelPartGroupRef = { id: string; name: string };
 // One sub-mesh of a multi-part model — the outliner concept ported from the Studio
 // (StudioPart). A model is a list of parts, each its own EditMesh; they compose into ONE

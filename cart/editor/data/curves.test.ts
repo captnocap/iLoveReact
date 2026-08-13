@@ -9,7 +9,7 @@
 import {
   arc3pt, arcTo, arcSag, ellipseArc, conic, superellipse,
   curveThrough, bezier, bezierQuad, polyRound, sampleFn,
-  catenary, clothoid, helix, spiral, egg, teardrop,
+  catenary, clothoid, helix, spiral, egg, eggProfile, teardrop,
   revolveRings, sweepRings, resample, polylineInfo,
   arch, vesselProfile,
   type Vec2, type Vec3,
@@ -227,6 +227,14 @@ test('egg is breadth-wide at center, closes at both tips, and shift moves the fa
   const widthAtMinus1 = Math.max(...pts.filter((p) => Math.abs(p.x + 1) < 0.1).map((p) => p.y));
   const widthAtPlus1 = Math.max(...pts.filter((p) => Math.abs(p.x - 1) < 0.1).map((p) => p.y));
   expect(widthAtMinus1 > widthAtPlus1, 'positive shift fattens the negative-x end');
+});
+
+test('eggProfile is lathe-ready: radius 0 at both ends, half-breadth at the widest', () => {
+  const prof = eggProfile(4, 2.4, 0.5, 33);
+  expect(near(prof[0].x, 0, 0.05) && near(prof[32].x, 0, 0.05), 'both poles close');
+  expect(near(prof[0].y, 0) && near(prof[32].y, 4, 1e-6), 'heights run 0 → length');
+  expect(near(Math.max(...prof.map((p) => p.x)), 1.2, 0.05), 'widest radius is half the breadth');
+  expect(prof.every((p) => p.x >= 0), 'radii never go negative');
 });
 
 test('teardrop closes and is symmetric about its axis', () => {
