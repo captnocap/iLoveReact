@@ -40,6 +40,17 @@ export const editor_curve_kit: DocIndex = {
       consumers: ['cart/editor/shell/NewMeshDialog.tsx', 'cart/editor/shell/AppFrame.tsx'],
       status: 'live',
     },
+    {
+      name: 'pen curve modes / SMOOTH · ARC · HANG',
+      purpose: ['geometry', 'interaction'],
+      kind: 'module',
+      sourceFile: 'cart/editor/stage/penCurveModes.ts',
+      description:
+        'The pen tools (Path Plane, Pen Edges, paint Pen fill) interpret clicked points through the curve kit: SMOOTH = centripetal spline through every click, ARC = a-b-c triples struck as arc3pt arcs (chained), HANG = endpoint clicks + middle-click sag solved as a catenary (above the chord = arch). The pen kit (runtime/paint/PenPathOverlay) stays curve-agnostic via the optional curveModes prop; preview and commit share one interpret; output rides the existing pen doors under the 64-point budget.',
+      dependsOn: ['curve kit / data/curves.ts'],
+      consumers: ['cart/editor/stage/ModelView.tsx', 'runtime/paint/PenPathOverlay.tsx'],
+      status: 'live',
+    },
   ],
   patterns: [
     {

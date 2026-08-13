@@ -72,6 +72,9 @@ import {
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
+// Curve interpretations for the pen tools (req_4324): clicks become control points,
+// the mode (SMOOTH / ARC / HANG) says how they connect via data/curves.ts.
+import { PEN_CURVE_MODES } from './penCurveModes';
 import {
   captureCurrentPaintLook,
   ensureImportedTexturePaintVariant,
@@ -4924,6 +4927,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       {model && paintMode && brushTool === 'pen' ? (
         <PenPathOverlay
           resetKey={`${model.key}:${penRevision}`}
+          curveModes={PEN_CURVE_MODES}
           label="Pen fill · keep every anchor on one authored face"
           onCancel={() => setPenRevision((revision) => revision + 1)}
           onConfirm={(points) => {
@@ -4946,6 +4950,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <PenPathOverlay
           resetKey={`path-plane:${model.key}:${penRevision}`}
           accent="#ad77ff"
+          curveModes={PEN_CURVE_MODES}
           label="Path Plane · draw its outline on the focus plane"
           onCancel={() => setPathPlaneMode(false)}
           onConfirm={(points) => {
@@ -4973,6 +4978,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <PenPathOverlay
           resetKey={`path-edges:${model.key}:${penRevision}`}
           accent="#58e8a6"
+          curveModes={PEN_CURVE_MODES}
           label="Pen Edges · open or closed path · commits edges only, no face"
           allowOpenConfirm
           onCancel={() => setPathEdgesMode(false)}

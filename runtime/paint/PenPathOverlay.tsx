@@ -1,13 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable, Row, Text } from '../primitives';
 import {
+  capPenPoints,
   normalizedPenPath,
+  normalizePenPoints,
   penHandleLinesD,
   penPathD,
+  penPolylineD,
   PEN_PATH_TUNING,
   type PenAnchor,
   type PenPoint,
 } from './path';
+
+/** A caller-supplied interpretation of the clicked anchors: the pen kit stays
+ * curve-agnostic, the consumer brings its own math (the editor passes its curve
+ * kit), and preview + commit run through the SAME interpret so they can never
+ * disagree. In an interpreted mode clicks place sharp control points — handle
+ * drags belong to the plain pen. */
+export type PenCurveMode = {
+  id: string;
+  label: string;
+  interpret: (anchors: readonly PenAnchor[], closed: boolean) => PenPoint[];
+};
 
 type Gesture =
   | { kind: 'new-handle'; index: number }
@@ -35,20 +49,24 @@ export function PenPathOverlay(props: {
   label?: string;
   accent?: string;
   allowOpenConfirm?: boolean;
+  curveModes?: readonly PenCurveMode[];
 }) {
   const accent = props.accent ?? '#58d8e8';
   const [anchors, setAnchors] = useState<PenAnchor[]>([]);
   const [closed, setClosed] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [modeId, setModeId] = useState('pen');
   const [rect, setRect] = useState({ x: 0, y: 0, width: 1, height: 1 });
   const gestureRef = useRef<Gesture | null>(null);
   const anchorsRef = useRef(anchors);
   anchorsRef.current = anchors;
+  const curveMode = modeId === 'pen' ? undefined : props.curveModes?.find((mode) => mode.id === modeId);
 
   useEffect(() => {
     setAnchors([]);
     setClosed(false);
     setEditing(false);
+    setModeId('pen');
     gestureRef.current = null;
   }, [props.resetKey]);
 
@@ -88,7 +106,9 @@ export function PenPathOverlay(props: {
     if (editing || closed || anchorsRef.current.length >= PEN_PATH_TUNING.maxAnchors) return;
     const index = anchorsRef.current.length;
     setAnchors((current) => [...current, { x: point.x, y: point.y }]);
-    gestureRef.current = { kind: 'new-handle', index };
+    // interpreted modes place sharp control points — dragging just repositions;
+    // handle-minting drags belong to the plain pen
+    gestureRef.current = curveMode ? { kind: 'anchor', index, dx: 0, dy: 0 } : { kind: 'new-handle', index };
   };
   const onMove = (event: any) => {
     const gesture = gestureRef.current;
@@ -120,20 +140,28 @@ export function PenPathOverlay(props: {
     setAnchors((current) => current.slice(0, -1));
   };
   const canConfirmOpen = props.allowOpenConfirm === true && !closed && anchors.length >= 2;
+  const normalize = (points: readonly PenPoint[]): Float32Array => normalizePenPoints(points, rect.width, rect.height);
   const confirm = () => {
     const current = anchorsRef.current;
     if (closed && current.length >= 3) {
-      const polygon = normalizedPenPath(current, true, rect.width, rect.height);
+      const polygon = curveMode
+        ? normalize(capPenPoints(curveMode.interpret(current, true), true))
+        : normalizedPenPath(current, true, rect.width, rect.height);
       if (polygon.length >= 6) props.onConfirm(polygon, true);
       return;
     }
     if (props.allowOpenConfirm === true && !closed && current.length >= 2) {
-      const line = normalizedPenPath(current, false, rect.width, rect.height);
+      const line = curveMode
+        ? normalize(capPenPoints(curveMode.interpret(current, false), false))
+        : normalizedPenPath(current, false, rect.width, rect.height);
       if (line.length >= 4) props.onConfirm(line, false);
     }
   };
 
-  const handlesD = penHandleLinesD(anchors);
+  const handlesD = curveMode ? '' : penHandleLinesD(anchors);
+  const previewD = curveMode && anchors.length >= 2
+    ? penPolylineD(capPenPoints(curveMode.interpret(anchors, closed), closed), closed)
+    : anchors.length > 0 ? penPathD(anchors, closed) : '';
   return (
     <Box
       onLayout={(layout: any) => setRect({ x: layout.x, y: layout.y, width: Math.max(1, layout.width), height: Math.max(1, layout.height) })}
@@ -156,7 +184,8 @@ export function PenPathOverlay(props: {
       >
         <Graph style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none' }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
           {handlesD ? <Graph.Path d={handlesD} fill="none" stroke="#8b97a8" strokeWidth={1} /> : null}
-          {anchors.length > 0 ? <Graph.Path d={penPathD(anchors, closed)} fill={closed ? `${accent}28` : 'none'} stroke={accent} strokeWidth={2} /> : null}
+          {curveMode && anchors.length > 1 ? <Graph.Path d={penPolylineD(anchors, false)} fill="none" stroke="#8b97a8" strokeWidth={1} /> : null}
+          {previewD ? <Graph.Path d={previewD} fill={closed ? `${accent}28` : 'none'} stroke={accent} strokeWidth={2} /> : null}
         </Graph>
         {anchors.map((anchor, index) => (
           <Box key={`pen-anchor-${index}`} style={{ position: 'absolute', left: anchor.x - (index === 0 ? 5 : 4), top: anchor.y - (index === 0 ? 5 : 4), width: index === 0 ? 10 : 8, height: index === 0 ? 10 : 8, borderRadius: 2, backgroundColor: index === 0 ? '#f4d35e' : '#eef3fa', borderWidth: 1, borderColor: '#12151b', pointerEvents: 'none' }} />
@@ -167,6 +196,15 @@ export function PenPathOverlay(props: {
       </Pressable>
       <Row style={{ position: 'absolute', left: 12, bottom: 12, alignItems: 'center', gap: 6, padding: 6, borderRadius: 7, backgroundColor: 'rgba(12,15,21,0.94)', borderWidth: 1, borderColor: '#313a49' }}>
         <Text style={{ color: '#aeb8c7', fontSize: 9, marginLeft: 2 }}>{closed ? `${anchors.length} anchors · edit or confirm` : editing ? 'EDIT · drag anchors and handles · no new points' : props.label ?? 'Click corners · drag for curves · click gold anchor to close'}</Text>
+        {props.curveModes?.length ? (
+          <Row style={{ alignItems: 'center', gap: 3, paddingLeft: 4, paddingRight: 2, borderLeftWidth: 1, borderColor: '#313a49' }}>
+            {[{ id: 'pen', label: 'PEN' }, ...props.curveModes].map((mode) => (
+              <Pressable key={`pen-mode-${mode.id}`} onPress={() => setModeId(mode.id)} style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: modeId === mode.id ? accent : '#202631' }}>
+                <Text style={{ color: modeId === mode.id ? '#081015' : '#d8dee9', fontSize: 9, fontWeight: '800' }}>{mode.label}</Text>
+              </Pressable>
+            ))}
+          </Row>
+        ) : null}
         <Pressable onPress={() => setEditing((mode) => !mode)} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: editing ? accent : '#202631' }}><Text style={{ color: editing ? '#081015' : '#d8dee9', fontSize: 9, fontWeight: '800' }}>{editing ? 'EDIT' : 'ADD'}</Text></Pressable>
         <Pressable onPress={undoPoint} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: '#202631' }}><Text style={{ color: '#d8dee9', fontSize: 9, fontWeight: '800' }}>{closed ? 'REOPEN' : 'UNDO POINT'}</Text></Pressable>
         {!closed ? <Pressable onPress={() => { if (anchors.length >= 3) setClosed(true); }} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 4, backgroundColor: anchors.length >= 3 ? '#263546' : '#1a1e25' }}><Text style={{ color: anchors.length >= 3 ? '#d8dee9' : '#6f7784', fontSize: 9, fontWeight: '800' }}>CLOSE</Text></Pressable> : null}

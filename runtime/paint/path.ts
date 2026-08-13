@@ -124,6 +124,10 @@ export function flattenOpenPenPath(
   return resampleOpen(dense, maxPoints);
 }
 
+export function normalizePenPoints(points: readonly PenPoint[], width: number, height: number): Float32Array {
+  return normalizePoints(points, width, height);
+}
+
 function normalizePoints(points: readonly PenPoint[], width: number, height: number): Float32Array {
   const out = new Float32Array(points.length * 2);
   const w = Math.max(1, width);
@@ -154,6 +158,28 @@ export function normalizedPenPath(
 ): Float32Array {
   const points = closed ? flattenClosedPenPath(anchors, maxPoints) : flattenOpenPenPath(anchors, maxPoints);
   return normalizePoints(points, width, height);
+}
+
+/** Cap an already-interpreted point run to the polygon budget every consumer
+ * shares. Closed runs resample around the loop (seam point stays omitted, the
+ * same contract as flattenClosedPenPath); open runs resample end-to-end. */
+export function capPenPoints(
+  points: readonly PenPoint[],
+  closed: boolean,
+  maxPoints = PEN_PATH_TUNING.maxPolygonPoints,
+): PenPoint[] {
+  if (points.length <= maxPoints) return points.map((point) => ({ ...point }));
+  if (!closed) return resampleOpen(points, maxPoints);
+  const loop = [...points, points[0]!];
+  return resampleOpen(loop, maxPoints + 1).slice(0, maxPoints);
+}
+
+/** A plain polyline d-string for interpreted (curve-mode) previews. */
+export function penPolylineD(points: readonly PenPoint[], closed: boolean): string {
+  if (!points.length) return '';
+  let d = `M ${points[0]!.x},${points[0]!.y}`;
+  for (let index = 1; index < points.length; index += 1) d += ` L ${points[index]!.x},${points[index]!.y}`;
+  return closed ? `${d} Z` : d;
 }
 
 export function penPathD(anchors: readonly PenAnchor[], closed: boolean): string {

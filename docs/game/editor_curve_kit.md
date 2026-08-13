@@ -50,6 +50,27 @@ signed volume — one global test, so concave profiles (a vase neck) orient
 correctly where per-face center tests would not. Parts are named from the
 registry at creation ("Vessel 1"), same as every primitive (V33 naming law).
 
+## The pen path (req_4324) — pick the points yourself
+
+The mesh pen tools (Path Plane, Pen Edges — and the paint Pen fill) gained
+CURVE MODES: the pen kit (runtime/paint/PenPathOverlay) stays curve-agnostic
+via an optional `curveModes` prop, and the editor passes interpretations built
+on the curve kit (`stage/penCurveModes.ts`). Your clicks become control points;
+preview and commit run the SAME interpret so they can never disagree:
+
+- **PEN** — today's behavior: sharp corners, drag for Bézier handles.
+- **SMOOTH** — centripetal spline through every click, open or closed.
+- **ARC** — clicks consumed as a-b-c triples, each struck as a circular arc
+  through all three (arc3pt, chained; three clicks IS one arc; a leftover
+  click continues straight).
+- **HANG** — first and last clicks are endpoints, a middle click sets the
+  catenary sag; a click above the chord flips it into an arch.
+
+Interpreted output flows through the existing meshAppendPathPlane /
+meshAppendPathEdges doors under the pen's shared 64-point budget
+(`capPenPoints`); in curve modes clicks place sharp control points and drags
+reposition them (handle-minting stays a plain-pen behavior).
+
 ## Tests
 
 `data/curves.test.ts` (38 behaviors: interpolation exactness, sag accuracy,
