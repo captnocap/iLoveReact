@@ -476,7 +476,12 @@ pub fn propColliderSet(self: anytype) ?PhysicsColliders {
 
 pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
     const ns = nowNs(io);
-    const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
+    // RJIT_FIXED_DT pins the world-step clock (req_4294, FORCE_GAIT's family):
+    // every dt integrator — the spring-arm camera above all — steps the same
+    // interval every frame, so a headless shot renders byte-identically run
+    // to run instead of carrying silhouette AA jitter from wall-clock dt.
+    const dt = self.fixed_dt orelse
+        clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
     self.last_ns = ns;
 
     // req_0652: cars advance FIRST so this frame's physics step (and the

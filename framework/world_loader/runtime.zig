@@ -75,6 +75,9 @@ pub const Runtime = struct {
     // `rjit shot` frames of the two clip-floor sources compare pixel to pixel.
     force_clip: ?m_player_character_pose.clips.ClipId = null,
     force_clip_seconds: ?f32 = null,
+    // RJIT_FIXED_DT pins the world-step clock so repro shots render
+    // byte-identically run to run (req_4294).
+    fixed_dt: ?f32 = null,
     live_log: bool = false,
     traffic_log: bool = false,
     scene: constructor.Scene,

@@ -49,6 +49,20 @@ fn envForceClipSeconds(environ: *const std.process.Environ.Map) ?f32 {
     };
 }
 
+fn envFixedDt(environ: *const std.process.Environ.Map) ?f32 {
+    const value = environ.get("RJIT_FIXED_DT") orelse return null;
+    const parsed = std.fmt.parseFloat(f32, value) catch {
+        log.print("[loader] RJIT_FIXED_DT '{s}' is not a number — ignored\n", .{value});
+        return null;
+    };
+    if (!std.math.isFinite(parsed) or parsed <= 0 or parsed > 0.05) {
+        log.print("[loader] RJIT_FIXED_DT '{s}' outside (0, 0.05] — ignored\n", .{value});
+        return null;
+    }
+    log.print("[loader] RJIT_FIXED_DT={d} — world-step clock pinned (parity repro, req_4294)\n", .{parsed});
+    return parsed;
+}
+
 fn applyClipSource(environ: *const std.process.Environ.Map) void {
     const value = environ.get("RJIT_CLIP_SOURCE") orelse return;
     if (std.meta.stringToEnum(m_player_pose.ClipFloorSource, value)) |source| {
@@ -70,6 +84,7 @@ pub fn initBlankInPlace(self: anytype, io: std.Io, environ: *const std.process.E
         .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
         .force_clip = envForceClip(environ),
         .force_clip_seconds = envForceClipSeconds(environ),
+        .fixed_dt = envFixedDt(environ),
         .live_log = envFlag(environ, "RJIT_LIVELOG"),
         .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
         .scene = constructor.blankScene(),
@@ -111,6 +126,7 @@ pub fn initInPlace(self: anytype, io: std.Io, environ: *const std.process.Enviro
         .force_gait = envFlag(environ, "RJIT_FORCE_GAIT"),
         .force_clip = envForceClip(environ),
         .force_clip_seconds = envForceClipSeconds(environ),
+        .fixed_dt = envFixedDt(environ),
         .live_log = envFlag(environ, "RJIT_LIVELOG"),
         .traffic_log = envFlag(environ, "RJIT_TRAFFICLOG"),
         .scene = scene,
