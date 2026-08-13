@@ -85,6 +85,11 @@ palette: *"humanoid-v1 clips require the canonical 24-bone palette"*
 (`humanoid_clips.zig:18`) — authoring stays canonical; playback is
 role-addressed and body-agnostic.
 
+Every clip key builds on the **rest stance** (`arm_rest_degrees`, req_4300):
+each upper arm drops 75° from the T-pose bind toward the body, so a standing
+body carries its arms at its sides while the bind itself stays a T for
+skinning. Clip arm swings compose in the lowered frame (sagittal).
+
 | Clip | Duration | Loops | Clock | What it keys |
 |---|---|---|---|---|
 | idle | 2.0 s | yes | continuous state clock | breath: spine_lower ±2°, head −1° |

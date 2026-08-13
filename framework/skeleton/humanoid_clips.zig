@@ -36,6 +36,12 @@ pub const ClipInfo = struct {
 
 /// Every behavior-affecting clip value lives in this authored tuning table.
 pub const ClipTuning = struct {
+    /// Arms-down rest (req_4300): degrees each upper arm drops from the
+    /// T-pose bind toward the body. 90 is straight down; a little less
+    /// reads relaxed and keeps the hands clear of the thighs. Every clip
+    /// key builds on this stance — the bind itself stays a T for skinning.
+    arm_rest_degrees: f32 = 75.0,
+
     idle_duration_seconds: f32 = 2.0,
     idle_breath_spine_degrees: f32 = 2.0,
     idle_breath_head_degrees: f32 = -1.0,
@@ -181,15 +187,28 @@ fn clipTime(seconds: f32, info: ClipInfo) Error!f32 {
     return std.math.clamp(seconds, 0, info.duration_seconds);
 }
 
-fn idleKey(frame_id: u64, breath: f32) Error!pose.Frame {
+/// Every clip key starts from the REST stance, not the raw bind: the
+/// canonical rig (and the fits transported onto it) binds a T-pose for
+/// skinning, but a standing body carries its arms at its sides (req_4300).
+/// The clavicles bind rotated ±90° about Z, so a local-Z rotation on each
+/// upper arm sweeps it down in the coronal plane; the clip's own arm swings
+/// then compose in the lowered frame (sagittal, as arms actually swing).
+fn restFrame(frame_id: u64) Error!pose.Frame {
     var out = try bindFrame(frame_id);
+    try rotateLocal(&out, UPPER_ARM_LEFT, .{ 0, 0, 1 }, TUNING.arm_rest_degrees);
+    try rotateLocal(&out, UPPER_ARM_RIGHT, .{ 0, 0, 1 }, -TUNING.arm_rest_degrees);
+    return out;
+}
+
+fn idleKey(frame_id: u64, breath: f32) Error!pose.Frame {
+    var out = try restFrame(frame_id);
     try rotateLocal(&out, SPINE_LOWER, .{ 1, 0, 0 }, TUNING.idle_breath_spine_degrees * breath);
     try rotateLocal(&out, HEAD, .{ 1, 0, 0 }, TUNING.idle_breath_head_degrees * breath);
     return out;
 }
 
 fn walkKey(frame_id: u64, stride: f32) Error!pose.Frame {
-    var out = try bindFrame(frame_id);
+    var out = try restFrame(frame_id);
     const stride_abs = @abs(stride);
     out.root_translation[1] = TUNING.walk_bob_meters * stride_abs;
     try rotateLocal(&out, PELVIS, .{ 0, 1, 0 }, TUNING.walk_pelvis_twist_degrees * stride);
@@ -206,7 +225,7 @@ fn walkKey(frame_id: u64, stride: f32) Error!pose.Frame {
 }
 
 fn jumpKey(frame_id: u64, key: enum { crouch, flight, land }) Error!pose.Frame {
-    var out = try bindFrame(frame_id);
+    var out = try restFrame(frame_id);
     const root_y: f32, const hip: f32, const knee: f32, const arm: f32 = switch (key) {
         .crouch => .{
             TUNING.jump_crouch_root_y,
@@ -236,7 +255,7 @@ fn jumpKey(frame_id: u64, key: enum { crouch, flight, land }) Error!pose.Frame {
 }
 
 fn sitKey(frame_id: u64) Error!pose.Frame {
-    var out = try bindFrame(frame_id);
+    var out = try restFrame(frame_id);
     out.root_translation[1] = TUNING.sit_root_y;
     try rotateLocal(&out, PELVIS, .{ 1, 0, 0 }, TUNING.sit_pelvis_degrees);
     for ([_]usize{ UPPER_LEG_LEFT, UPPER_LEG_RIGHT }) |index| try rotateLocal(&out, index, .{ 1, 0, 0 }, TUNING.sit_hip_degrees);
@@ -248,7 +267,7 @@ fn sitKey(frame_id: u64) Error!pose.Frame {
 }
 
 fn layKey(frame_id: u64) Error!pose.Frame {
-    var out = try bindFrame(frame_id);
+    var out = try restFrame(frame_id);
     out.root_translation[1] = TUNING.lay_root_y;
     try rotateLocal(&out, PELVIS, .{ 1, 0, 0 }, TUNING.lay_pelvis_degrees);
     for ([_]usize{ UPPER_ARM_LEFT, UPPER_ARM_RIGHT }) |index| try rotateLocal(&out, index, .{ 1, 0, 0 }, TUNING.lay_arm_degrees);
