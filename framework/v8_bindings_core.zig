@@ -1283,6 +1283,17 @@ fn hostMeshGizmoTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     state.markDirty();
 }
 
+/// __mesh_curve_pull_arm(on) → bool. Arm/disarm Curve Pull (req_4325): while armed,
+/// a MOVE drag on a selected vertex run bends it through an arc — endpoints anchor,
+/// the grabbed middle follows the cursor. Returns the armed state.
+fn hostMeshCurvePullArm(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const on = (argToI32(info, 0) orelse 0) != 0;
+    const armed = scene3d.meshCurvePullArm(on);
+    state.markDirty();
+    setReturnNumber(info, if (armed) 1 else 0);
+}
+
 /// __mesh_gizmo_nudge(axis, amount) → bool. Headless/test hook: translate the active
 /// selection along X/Y/Z without needing a mouse drag or captured camera.
 fn hostMeshGizmoNudge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -5241,6 +5252,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
         v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
         v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
+        v8_runtime.registerHostFn("__mesh_curve_pull_arm", hostMeshCurvePullArm);
         v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
         v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
         v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);
@@ -5506,6 +5518,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
+    v8_runtime.registerHostFn("__mesh_curve_pull_arm", hostMeshCurvePullArm);
     v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
     v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
     v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);

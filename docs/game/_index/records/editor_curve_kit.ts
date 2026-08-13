@@ -41,6 +41,17 @@ export const editor_curve_kit: DocIndex = {
       status: 'live',
     },
     {
+      name: 'Curve Pull / __mesh_curve_pull_arm',
+      purpose: ['geometry', 'interaction'],
+      kind: 'host_fn',
+      sourceFile: 'framework/gpu/mesh_edit.zig',
+      description:
+        'Host-native bend gesture (req_4325/req_4326): arm via the mesh-curve-pull tool, select one open vertex run, and Move-gizmo drags bend it through a 3D circular arc — endpoints anchor, the grabbed middle follows the cursor exactly, stations warp by original arc length, mirror twins + welded corners ride the shared syncTransformedVerts tail, one journal entry per pull. Applies absolutely from grab-time base so drags never compound. Loops/branched selections refuse; collinear pulls tent. Auto loop-cut densification is the open follow-up.',
+      dependsOn: [],
+      consumers: ['framework/gpu/3d.zig', 'cart/editor/stage/ModelView.tsx'],
+      status: 'live',
+    },
+    {
       name: 'pen curve modes / SMOOTH · ARC · HANG',
       purpose: ['geometry', 'interaction'],
       kind: 'module',

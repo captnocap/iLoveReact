@@ -3772,6 +3772,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-paint') api.paint();
         else if (commandId === 'mesh-path-plane') api.pathPlane();
         else if (commandId === 'mesh-path-edges') api.pathEdges();
+        else if (commandId === 'mesh-curve-pull') api.curvePull();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-measurements') api.measurements();

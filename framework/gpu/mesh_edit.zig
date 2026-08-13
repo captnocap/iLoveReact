@@ -4022,6 +4022,10 @@ fn vecAdd(a: [3]f32, b: [3]f32) [3]f32 {
 fn vecSub(a: [3]f32, b: [3]f32) [3]f32 {
     return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
 }
+fn vecLen(a: [3]f32) f32 {
+    return @sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+}
+
 fn vecMul(a: [3]f32, s: f32) [3]f32 {
     return .{ a[0] * s, a[1] * s, a[2] * s };
 }
@@ -4655,8 +4659,6 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
     const axis = vecNorm(axis_raw);
     if ((kind == .scale_axis or kind == .rotate_axis) and vecDot(axis, axis) < 0.5) return .{};
     const verts = g_verts orelse return .{};
-    const corners = g_corner_vert orelse return .{};
-    const pos = model_paint.positionsMutable() orelse return .{};
     // Twin table must exist BEFORE the move loop — it pairs by position, and a fresh
     // build against half-moved verts would find nothing on the reflected side.
     const twins_opt: ?[]u32 = if (g_mirror_mask != 0) ensureMirrorTwins() else null;
@@ -4670,6 +4672,19 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
         verts[i * 3 + 1] = np[1];
         verts[i * 3 + 2] = np[2];
     }
+    return syncTransformedVerts(mask, twins_opt);
+}
+
+/// The shared tail of every vertex-position edit: land mirror twins, then push
+/// the welded vertex table back into the per-face render positions. Callers
+/// write new positions into g_verts for their masked verts FIRST (with the twin
+/// table already built — pairing is positional) and this owns the rest. Split
+/// out of applyTransform so Curve Pull's per-vertex targets (req_4325) ride the
+/// exact mirror/writeback guarantees the rigid tools have.
+fn syncTransformedVerts(mask: []const bool, twins_opt: ?[]u32) Mutation {
+    const verts = g_verts orelse return .{};
+    const corners = g_corner_vert orelse return .{};
+    const pos = model_paint.positionsMutable() orelse return .{};
 
     // MIRROR (req_2758): land the reflected edit on every moved vertex's twin. Reflecting
     // the vertex's already-transformed NEW position IS the mirrored transform (a mirrored
@@ -4739,6 +4754,251 @@ pub fn translateSelection(delta: [3]f32) Mutation {
 pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor_raw: f32) Mutation {
     const factor = exactScaleByFactor(factor_raw) orelse return .{};
     return applyTransform(.scale_axis, .{ 0, 0, 0 }, axis, pivot, factor);
+}
+
+// ── Curve Pull (req_4325/req_4326) ───────────────────────────────────────────────
+// Select one run of vertices, grab the gizmo, and the drag bends the run through
+// a circular arc instead of rigid-translating it: the run's two endpoints hold as
+// anchors, the middle vertex follows the cursor, and every vertex in between
+// lands on the arc through (anchorA, pulled middle, anchorB) at its own original
+// arc-length station. Applies ABSOLUTELY from positions captured at grab — the
+// arc is re-solved per frame from base + offset, so a wandering drag can never
+// compound error. Mirror twins and welded-corner writeback ride the shared
+// syncTransformedVerts tail, so a mirrored half bends symmetrically for free.
+
+pub const curve_pull_tuning = struct {
+    /// a run longer than this refuses (loud) rather than silently lagging the drag
+    pub const max_path_verts: u32 = 512;
+    /// below this the three curve points are treated as collinear → tent fallback
+    pub const collinear_epsilon: f32 = 1e-10;
+};
+
+var g_curve_ids: ?[]u32 = null; // ordered run, endpoint → endpoint
+var g_curve_base: ?[][3]f32 = null; // grab-time positions, same order
+var g_curve_params: ?[]f32 = null; // normalized chord-length station of each vert
+var g_curve_grab: usize = 0; // index into the run of the pulled vertex
+var g_curve_mask: ?[]bool = null; // scratch affected-mask for the sync tail
+
+pub fn curvePullEnd() void {
+    if (g_curve_ids) |ids| alloc.free(ids);
+    if (g_curve_base) |base| alloc.free(base);
+    if (g_curve_params) |params| alloc.free(params);
+    if (g_curve_mask) |mask| alloc.free(mask);
+    g_curve_ids = null;
+    g_curve_base = null;
+    g_curve_params = null;
+    g_curve_mask = null;
+    g_curve_grab = 0;
+}
+
+pub fn curvePullActive() bool {
+    return g_curve_ids != null;
+}
+
+/// Capture the selected run at grab time. Refuses (false) unless the selection
+/// is ONE open path of 3..max_path_verts vertices — a loop has no anchors and a
+/// branched selection has no single bend direction.
+pub fn curvePullBegin() bool {
+    curvePullEnd();
+    if (g_mode != .vertex and g_mode != .edge) return false;
+    const mask = fillAffectedVerts() orelse return false;
+    var count: u32 = 0;
+    var v: u32 = 0;
+    while (v < g_vert_count) : (v += 1) {
+        if (mask[v]) count += 1;
+    }
+    if (count < 3 or count > curve_pull_tuning.max_path_verts) return false;
+    if (!selectionFormsOnePathOrLoop(mask, count)) return false;
+
+    // find an endpoint (degree 1 over the selected authored edges); none = loop → refuse
+    const degrees = alloc.alloc(u8, g_vert_count) catch return false;
+    defer alloc.free(degrees);
+    @memset(degrees, 0);
+    const edges = g_edges orelse return false;
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!selectedAlignmentEdge(edge, mask)) continue;
+        degrees[edges[edge * 2]] += 1;
+        degrees[edges[edge * 2 + 1]] += 1;
+    }
+    var start: ?u32 = null;
+    v = 0;
+    while (v < g_vert_count) : (v += 1) {
+        if (mask[v] and degrees[v] == 1) {
+            start = v;
+            break;
+        }
+    }
+    const first = start orelse return false; // closed loop — no anchors to hold
+
+    // ordered walk endpoint → endpoint along the selected edges (degree ≤ 2 proven)
+    const ids = alloc.alloc(u32, count) catch return false;
+    const seen = alloc.alloc(bool, g_vert_count) catch {
+        alloc.free(ids);
+        return false;
+    };
+    defer alloc.free(seen);
+    @memset(seen, false);
+    ids[0] = first;
+    seen[first] = true;
+    var filled: u32 = 1;
+    while (filled < count) {
+        const current = ids[filled - 1];
+        var next: ?u32 = null;
+        edge = 0;
+        while (edge < g_edge_count) : (edge += 1) {
+            if (!selectedAlignmentEdge(edge, mask)) continue;
+            const a = edges[edge * 2];
+            const b = edges[edge * 2 + 1];
+            const other = if (a == current) b else if (b == current) a else continue;
+            if (seen[other]) continue;
+            next = other;
+            break;
+        }
+        const step = next orelse {
+            alloc.free(ids);
+            return false;
+        };
+        ids[filled] = step;
+        seen[step] = true;
+        filled += 1;
+    }
+
+    const base = alloc.alloc([3]f32, count) catch {
+        alloc.free(ids);
+        return false;
+    };
+    const params = alloc.alloc(f32, count) catch {
+        alloc.free(ids);
+        alloc.free(base);
+        return false;
+    };
+    var total: f32 = 0;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        base[i] = vertPos(ids[i]);
+        if (i > 0) total += vecLen(vecSub(base[i], base[i - 1]));
+        params[i] = total;
+    }
+    if (total < 1e-9) {
+        alloc.free(ids);
+        alloc.free(base);
+        alloc.free(params);
+        return false;
+    }
+    var grab: usize = 0;
+    i = 0;
+    while (i < count) : (i += 1) {
+        params[i] /= total;
+        if (@abs(params[i] - 0.5) < @abs(params[grab] - 0.5)) grab = i;
+    }
+    const scratch = alloc.alloc(bool, g_vert_count) catch {
+        alloc.free(ids);
+        alloc.free(base);
+        alloc.free(params);
+        return false;
+    };
+    g_curve_ids = ids;
+    g_curve_base = base;
+    g_curve_params = params;
+    g_curve_grab = grab;
+    g_curve_mask = scratch;
+    return true;
+}
+
+/// Angle of `p` around center `o` in the (e1, e2) plane basis, unwound along the
+/// sweep direction so 0 → |sweep| runs A → C the way the arc actually travels.
+fn arcAngleAlong(rel: [3]f32, e1: [3]f32, e2: [3]f32, sweep_positive: bool) f32 {
+    const raw = std.math.atan2(vecDot(rel, e2), vecDot(rel, e1));
+    const two_pi = std.math.pi * 2.0;
+    const ccw = @mod(raw + two_pi, two_pi);
+    return if (sweep_positive) ccw else @mod(two_pi - ccw, two_pi);
+}
+
+/// Re-solve the arc for the current pull offset and land every run vertex on it.
+/// The grabbed vertex sits EXACTLY at base + offset; anchors never move.
+pub fn curvePullApply(offset: [3]f32) Mutation {
+    const ids = g_curve_ids orelse return .{};
+    const base = g_curve_base orelse return .{};
+    const params = g_curve_params orelse return .{};
+    const scratch = g_curve_mask orelse return .{};
+    const verts = g_verts orelse return .{};
+    const n = ids.len;
+    const a = base[0];
+    const c = base[n - 1];
+    const b = vecAdd(base[g_curve_grab], offset);
+    const t_grab = params[g_curve_grab];
+
+    // twin table BEFORE positions move (same law as applyTransform)
+    const twins_opt: ?[]u32 = if (g_mirror_mask != 0) ensureMirrorTwins() else null;
+
+    const ab = vecSub(b, a);
+    const ac = vecSub(c, a);
+    const nrm = vecCross(ab, ac);
+    const n2 = vecDot(nrm, nrm);
+
+    @memset(scratch, false);
+    var i: usize = 0;
+    if (n2 < curve_pull_tuning.collinear_epsilon) {
+        // collinear (pull along the chord): tent falloff through the grab station —
+        // anchors hold, the grab takes the full offset, stations blend linearly
+        while (i < n) : (i += 1) {
+            const t = params[i];
+            const w = if (t <= t_grab)
+                (if (t_grab > 1e-6) t / t_grab else 0)
+            else
+                (if (t_grab < 1.0 - 1e-6) (1.0 - t) / (1.0 - t_grab) else 0);
+            const np = vecAdd(base[i], vecMul(offset, w));
+            const id = ids[i];
+            verts[id * 3 + 0] = np[0];
+            verts[id * 3 + 1] = np[1];
+            verts[id * 3 + 2] = np[2];
+            scratch[id] = true;
+        }
+        return syncTransformedVerts(scratch, twins_opt);
+    }
+
+    // circumcenter of (a, b, c): o = a + [((ab×ac)×ab)·|ac|² + (ac×(ab×ac))·|ab|²] / (2|ab×ac|²)
+    const term1 = vecMul(vecCross(nrm, ab), vecDot(ac, ac));
+    const term2 = vecMul(vecCross(ac, nrm), vecDot(ab, ab));
+    const o = vecAdd(a, vecMul(vecAdd(term1, term2), 1.0 / (2.0 * n2)));
+    const radius = vecLen(vecSub(a, o));
+    if (radius < 1e-9) return .{};
+    const e1 = vecMul(vecSub(a, o), 1.0 / radius);
+    const plane_normal = vecMul(nrm, 1.0 / @sqrt(n2));
+    const e2 = vecCross(plane_normal, e1);
+
+    // pick the sweep direction that meets the pulled middle on the way A → C
+    const two_pi = std.math.pi * 2.0;
+    const ccw_b = arcAngleAlong(vecSub(b, o), e1, e2, true);
+    const ccw_c = arcAngleAlong(vecSub(c, o), e1, e2, true);
+    const positive = ccw_b <= ccw_c;
+    const span = if (positive) ccw_c else @mod(two_pi - ccw_c, two_pi);
+    const frac_b = blk: {
+        const along_b = if (positive) ccw_b else @mod(two_pi - ccw_b, two_pi);
+        break :blk if (span > 1e-9) along_b / span else 0.5;
+    };
+
+    while (i < n) : (i += 1) {
+        // warp stations so the grabbed vertex lands exactly at the pulled point:
+        // its chord station t_grab maps onto the middle point's true angle fraction
+        const t = params[i];
+        const f = if (t <= t_grab)
+            (if (t_grab > 1e-6) (t / t_grab) * frac_b else 0)
+        else
+            (if (t_grab < 1.0 - 1e-6) frac_b + ((t - t_grab) / (1.0 - t_grab)) * (1.0 - frac_b) else 1);
+        const angle = span * f * @as(f32, if (positive) 1 else -1);
+        const np = vecAdd(o, vecAdd(
+            vecMul(e1, radius * @cos(angle)),
+            vecMul(e2, radius * @sin(angle)),
+        ));
+        const id = ids[i];
+        verts[id * 3 + 0] = np[0];
+        verts[id * 3 + 1] = np[1];
+        verts[id * 3 + 2] = np[2];
+        scratch[id] = true;
+    }
+    return syncTransformedVerts(scratch, twins_opt);
 }
 
 fn selectedAlignmentEdge(edge: u32, mask: []const bool) bool {

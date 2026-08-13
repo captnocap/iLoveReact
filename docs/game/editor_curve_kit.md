@@ -71,6 +71,35 @@ meshAppendPathEdges doors under the pen's shared 64-point budget
 (`capPenPoints`); in curve modes clicks place sharp control points and drags
 reposition them (handle-minting stays a plain-pen behavior).
 
+## Curve Pull (req_4325/req_4326) — bend live topology by dragging
+
+The native answer to "select 3 vertices and pull": arm **Curve Pull** (Edit menu
+/ model context menu, a Move-gizmo modifier, not a modal session), select one
+run of vertices (two anchors and everything between — 3 selected verts is the
+minimal case), and drag the move gizmo. The run bends through a circular arc:
+endpoints hold as anchors, the grabbed middle vertex follows the drag exactly,
+and every vertex between lands on the arc at its own original arc-length
+station. Host-native per the Zig-first law:
+
+- `framework/gpu/mesh_edit.zig` — `curvePullBegin/Apply/End`: validates the
+  selection is ONE open path (the Align Loop path law; loops and branches
+  refuse), orders it by walking the selected authored edges, solves the 3D
+  circumcircle per frame from grab-time base + offset (ABSOLUTE application —
+  a wandering drag can never compound), warps stations so the grabbed vertex
+  sits exactly under the cursor, and lands mirror twins + welded corners
+  through the same `syncTransformedVerts` tail every rigid tool uses.
+  Collinear pulls degrade to a tent falloff instead of erupting.
+- `framework/gpu/3d.zig` — the arm flag + Move-drag branch (stepped readout
+  shows "bend ±N.NNu"; armed with an invalid selection the drag falls back to
+  plain move and the readout says why); release always drops the captured run;
+  one journal entry per pull like every gizmo drag.
+- `__mesh_curve_pull_arm(on)` door; TS toggle rides the standard tool pipeline
+  (`mesh-curve-pull` command row, ModelToolApi.curvePull, snapshot flag).
+
+Auto loop-cut densification (cuts inserted when the run is too coarse to show
+the bend) is the OPEN follow-up — v1 bends the vertices you selected; loop-cut
+the band first for deeper curves.
+
 ## Tests
 
 `data/curves.test.ts` (38 behaviors: interpolation exactness, sag accuracy,

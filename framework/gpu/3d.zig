@@ -11472,9 +11472,28 @@ fn guardSplitQuads() bool {
     return true;
 }
 
+// ── Curve Pull arming (req_4325/req_4326) ────────────────────────────────────
+// When armed, a MOVE drag on a selected vertex run bends it through an arc
+// (mesh_edit.curvePullApply) instead of rigid-translating: endpoints anchor,
+// the middle vertex follows the drag. Arming with an invalid selection is not
+// an error — the grab simply falls back to plain move and the readout says so.
+var g_curve_pull_armed: bool = false;
+
+pub fn meshCurvePullArm(on: bool) bool {
+    g_curve_pull_armed = on;
+    if (!on) mesh_edit.curvePullEnd();
+    return g_curve_pull_armed;
+}
+
+pub fn meshCurvePullArmed() bool {
+    return g_curve_pull_armed;
+}
+
 pub fn meshGizmoBegin() void {
     clearMeshGuardSnapshot();
     gizmoDragReset(); // stepped drags (req_2759): fresh accumulator + frozen pivot per grab
+    // Curve Pull capture happens at grab, against pre-drag positions.
+    if (g_curve_pull_armed and g_gizmo_tool == .move) _ = mesh_edit.curvePullBegin();
     // Pre-drag journal snapshot — committed at release only if the drag moved something.
     journalDiscard(&g_gizmo_snap);
     g_gizmo_snap = journalSnapshotCurrent("transform");
@@ -11502,6 +11521,7 @@ pub fn meshGizmoGrabAt(mx: f32, my: f32, code: i32) void {
 }
 
 pub fn meshGizmoFinish() bool {
+    mesh_edit.curvePullEnd(); // the captured run is per-grab; release always drops it
     g_gizmo_readout_len = 0; // the drag is ending — drop the live step readout
     g_gizmo_pivot0 = null;
     g_gizmo_active = -1; // release drops the gold glow
@@ -13641,6 +13661,19 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, 
             }
             const d = target - g_gizmo_applied;
             if (@abs(d) < 1e-7) return false;
+            // Curve Pull (req_4325): armed + a captured run → the drag bends
+            // instead of translating. ABSOLUTE application from grab-time base
+            // (the arc re-solves per frame), so g_gizmo_applied only gates the
+            // per-frame no-op check, never compounds into the geometry.
+            if (g_curve_pull_armed and mesh_edit.curvePullActive()) {
+                const units = target / GIZMO_STEP_M;
+                setGizmoReadout("bend {s}{d:.2}u", .{ if (units < 0) "-" else "+", @abs(units) });
+                const m = mesh_edit.curvePullApply(vmul(av, target));
+                if (!applyMeshMutation(m)) return false;
+                g_gizmo_applied = target;
+                return true;
+            }
+            if (g_curve_pull_armed) setGizmoReadout("curve: select one vertex run", .{});
             const m = mesh_edit.translateSelection(vmul(av, d));
             if (!applyMeshMutation(m)) return false;
             g_gizmo_applied = target;

@@ -225,7 +225,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -350,6 +350,7 @@ export type ModelToolApi = {
   paint: () => void;
   pathPlane: () => void;
   pathEdges: () => void;
+  curvePull: () => void;
   focus: () => void;
   wire: () => void;
   measurements: () => void;
@@ -1152,6 +1153,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
+  const [curvePullMode, setCurvePullMode] = useState(false); // Curve Pull (req_4325): Move drags bend a selected vertex run
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [retopoGhostVisible, setRetopoGhostVisible] = useState(false);
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
@@ -2850,6 +2852,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPathPlaneMode(false);
     setPathEdgesMode((active) => !active);
   };
+  // Curve Pull (req_4325): a host-armed MODIFIER on the Move gizmo, not a modal
+  // session — while armed, dragging a selected vertex run bends it through an arc
+  // (endpoints anchor, middle follows). Arming lands you in vertex mode with the
+  // move gizmo so the very next drag pulls.
+  const toggleCurvePull = () => {
+    if (!model) return;
+    setCurvePullMode((active) => {
+      const next = !active;
+      host.__mesh_curve_pull_arm?.(next ? 1 : 0);
+      if (next) {
+        setPaintMode(false);
+        setPathPlaneMode(false);
+        setPathEdgesMode(false);
+        if (selMode === 0) { setSelMode(1); meshSetMode(1); }
+        chooseGizmoTool(0);
+      }
+      return next;
+    });
+  };
   // Both pen commits land their anchors as welded verts; dropping straight into vertex
   // mode makes every pen point immediately draggable with the move gizmo (the depth
   // story: lay the outline flat, then pull real depth vertex by vertex).
@@ -3102,6 +3123,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     paint: togglePaint,
     pathPlane: togglePathPlane,
     pathEdges: togglePathEdges,
+    curvePull: toggleCurvePull,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
     measurements: () => setMeasurements((v) => !v),
@@ -3464,7 +3486,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         return ok({
           pose: readPose(), locked: camLock, wire, xray, selectionMode: selMode,
           gizmoTool, mirrorMask, bookmarks: camMarks, paint: paintMode,
-          focusTool: focusMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode,
+          focusTool: focusMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode,
           selection: readSelInfo(),
           partRanges: livePartRanges,
           ownedFaces: livePartRanges?.reduce((sum, range) => sum + Number(host.__mesh_group_face_count?.(range.lo, range.hi) ?? 0), 0) ?? null,
@@ -3793,8 +3815,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = extrude ? 'extrude' : bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, focusMode, wire, measurements, playerScale, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, curvePullMode, focusMode, wire, measurements, playerScale, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.

@@ -6,6 +6,23 @@ const testing = std.testing;
 const mesh_edit = @import("mesh_edit");
 const indexed_edit_mesh = @import("indexed_edit_mesh");
 
+test "authored face count follows large live group additions and empty deletion" {
+    try testing.expectEqual(@as(?u32, 0), mesh_edit.authoredFaceCountFromGroups(&.{}));
+    try testing.expectEqual(@as(?u32, 6), mesh_edit.authoredFaceCountFromGroups(&.{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 }));
+
+    const authored_faces: usize = 10_006;
+    const groups = try testing.allocator.alloc(u32, authored_faces * 2);
+    defer testing.allocator.free(groups);
+    for (0..authored_faces) |face| {
+        groups[face * 2] = @intCast(face);
+        groups[face * 2 + 1] = @intCast(face);
+    }
+    try testing.expectEqual(@as(?u32, 10_006), mesh_edit.authoredFaceCountFromGroups(groups));
+
+    const no_group = std.math.maxInt(u32);
+    try testing.expectEqual(@as(?u32, 3), mesh_edit.authoredFaceCountFromGroups(&.{ no_group, no_group, 7 }));
+}
+
 test "indexed mesh checked teardown preserves valid owned storage" {
     var mesh = indexed_edit_mesh.Mesh{ .allocator = testing.allocator };
     try mesh.vertices.append(testing.allocator, .{ .position = .{ 1, 2, 3 } });
@@ -1129,19 +1146,19 @@ test "a side the quad already shares decides the bridge the selected pair cannot
     //   v0 ─── v1      present:  (v3,v0), carrying one face
     var soup = [_]f32{
         // face 0 — carries (v0,v1), running v0 → v1
-        0,   0,    0, 0, 0, -1, 0, 0,
-        1,   0,    0, 0, 0, -1, 0, 0,
-        0.5, -1,   0, 0, 0, -1, 0, 0,
+        0,   0,   0, 0, 0, -1, 0, 0,
+        1,   0,   0, 0, 0, -1, 0, 0,
+        0.5, -1,  0, 0, 0, -1, 0, 0,
 
         // face 1 — carries (v2,v3), running v3 → v2: wound AGAINST face 0
-        0,   1,    0, 0, 0, 1,  0, 0,
-        1,   1,    0, 0, 0, 1,  0, 0,
-        0.5, 2,    0, 0, 0, 1,  0, 0,
+        0,   1,   0, 0, 0, 1,  0, 0,
+        1,   1,   0, 0, 0, 1,  0, 0,
+        0.5, 2,   0, 0, 0, 1,  0, 0,
 
         // face 2 — the connecting side, carrying (v3,v0) and running v3 → v0
-        0,   1,    0, 0, 0, -1, 0, 0,
-        0,   0,    0, 0, 0, -1, 0, 0,
-        -1,  0.5,  0, 0, 0, -1, 0, 0,
+        0,   1,   0, 0, 0, -1, 0, 0,
+        0,   0,   0, 0, 0, -1, 0, 0,
+        -1,  0.5, 0, 0, 0, -1, 0, 0,
     };
     mesh_edit.test_support.loadGroupedSoup(4204, soup[0..], 9, &.{ 0, 1, 2 });
     defer mesh_edit.test_support.clear();
@@ -3182,6 +3199,57 @@ test "one selected quad becomes a welded eight-sided extrusion center without n-
     for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
 }
 
+test "face polygon 4 to 20 keeps every transition spoke in its source-corner sector" {
+    const corners = [4][3]f32{
+        .{ -1, -1, 0 },
+        .{ 1, -1, 0 },
+        .{ 1, 1, 0 },
+        .{ -1, 1, 0 },
+    };
+    var soup = [_]f32{0} ** (2 * 3 * 8);
+    for ([2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }, 0..) |triangle, face| {
+        for (triangle, 0..) |corner, slot| {
+            const at = (face * 3 + slot) * 8;
+            @memcpy(soup[at .. at + 3], corners[corner][0..]);
+        }
+    }
+    const groups = [_]u32{ 9, 9 };
+    const parts = [_]u32{ 3, 3 };
+    var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 2, groups[0..], parts[0..]);
+    defer indexed.deinit();
+
+    const selection = indexed.resolveFacePolygon(&.{ true, true }) orelse
+        return error.ExpectedFacePolygonSelection;
+    const source = &indexed.faces.items[selection.face_id];
+    const outer_ids = source.vertices.items[0..source.vertices.items.len];
+    const first_generated_vertex = indexed.vertices.items.len;
+    const center_id = (try indexed.polygonizeFace(selection.face_id, 0.25, 20)) orelse
+        return error.ExpectedFacePolygon;
+
+    var transition_spokes: u32 = 0;
+    for (indexed.faces.items) |face| {
+        if (!face.alive or face.id == center_id) continue;
+        for (face.vertices.items, 0..) |a_id, edge| {
+            const b_id = face.vertices.items[(edge + 1) % face.vertices.items.len];
+            const a_outer = std.mem.indexOfScalar(u32, outer_ids, a_id) != null;
+            const b_outer = std.mem.indexOfScalar(u32, outer_ids, b_id) != null;
+            const a_inner = a_id >= first_generated_vertex;
+            const b_inner = b_id >= first_generated_vertex;
+            if (!((a_outer and b_inner) or (b_outer and a_inner))) continue;
+            const outer = indexed.vertices.items[if (a_outer) a_id else b_id].position;
+            const inner = indexed.vertices.items[if (a_inner) a_id else b_id].position;
+            // A local transition edge stays within the same radial half-plane.
+            // A non-positive dot means the zipper connected a source corner to
+            // the far side of the generated N-gon, crossing its center exactly
+            // like the broken 4 → 20 output reported in req_4286.
+            const radial_dot = outer[0] * inner[0] + outer[1] * inner[1] + outer[2] * inner[2];
+            try testing.expect(radial_dot > 0);
+            transition_spokes += 1;
+        }
+    }
+    try testing.expectEqual(@as(u32, 40), transition_spokes);
+}
+
 test "face polygon keeps its first edge aligned while the side count changes" {
     const corners = [4][3]f32{
         .{ -1, -1, 0 },
@@ -3396,6 +3464,145 @@ test "adjacent-corner weld keeps the valid triangle left by a collapsed quad" {
 }
 
 // Keep the mesh module's co-located lower-level tests in this unit target too.
+// ── Curve Pull (req_4325/req_4326) ───────────────────────────────────────────────
+// A 4-quad strip in the z=0 plane, columns x = 0..4, rows y = 0/1. Each quad is one
+// authored face (two tris per group), so the visible edges are quad perimeters and
+// the top row (y=1) is one clean 5-vertex run.
+
+fn loadQuadStrip(key: u64) void {
+    const quads = 4;
+    var soup: [quads * 2 * 3 * 8]f32 = undefined;
+    var row: usize = 0;
+    var groups: [quads * 2]u32 = undefined;
+    var q: usize = 0;
+    while (q < quads) : (q += 1) {
+        const x0: f32 = @floatFromInt(q);
+        const x1 = x0 + 1;
+        const tri_rows = [6][2]f32{
+            .{ x0, 0 }, .{ x1, 0 }, .{ x1, 1 }, // tri A
+            .{ x0, 0 }, .{ x1, 1 }, .{ x0, 1 }, // tri B
+        };
+        for (tri_rows) |p| {
+            soup[row * 8 + 0] = p[0];
+            soup[row * 8 + 1] = p[1];
+            soup[row * 8 + 2] = 0;
+            soup[row * 8 + 3] = 0;
+            soup[row * 8 + 4] = 0;
+            soup[row * 8 + 5] = 0;
+            soup[row * 8 + 6] = 1;
+            soup[row * 8 + 7] = 0;
+            row += 1;
+        }
+        groups[q * 2] = @intCast(q);
+        groups[q * 2 + 1] = @intCast(q);
+    }
+    mesh_edit.test_support.loadGroupedSoup(key, soup[0..], quads * 2 * 3, groups[0..]);
+    mesh_edit.setMode(.vertex);
+    mesh_edit.setEditScope(0, 4);
+    _ = mesh_edit.ensureTopologyPub(); // vertCount/vertPosPub scans below need the welded table
+}
+
+fn selectTopRow() u32 {
+    var picked: u32 = 0;
+    var v: u32 = 0;
+    while (v < mesh_edit.vertCount()) : (v += 1) {
+        const p = mesh_edit.vertPosPub(v);
+        if (p[1] > 0.5) {
+            _ = mesh_edit.selectVertexByIndex(v, picked > 0);
+            picked += 1;
+        }
+    }
+    return picked;
+}
+
+fn topVertAtX(x: f32) ?u32 {
+    var v: u32 = 0;
+    while (v < mesh_edit.vertCount()) : (v += 1) {
+        const p = mesh_edit.vertPosPub(v);
+        if (p[1] > 0.5 and @abs(p[0] - x) < 1e-4) return v;
+    }
+    return null;
+}
+
+test "curve pull bends the selected run through the arc, anchors held, grab exact" {
+    loadQuadStrip(4325);
+    defer mesh_edit.test_support.clear();
+    defer mesh_edit.curvePullEnd();
+
+    try testing.expectEqual(@as(u32, 5), selectTopRow());
+    try testing.expect(mesh_edit.curvePullBegin());
+
+    const pull = [3]f32{ 0, 0, 0.8 };
+    const m = mesh_edit.curvePullApply(pull);
+    try testing.expect(m.changed);
+
+    // anchors never move; the grabbed middle sits exactly at base + offset
+    const a = mesh_edit.vertPosPub(topVertAtX(0).?);
+    const g = mesh_edit.vertPosPub(topVertAtX(2).?);
+    const c = mesh_edit.vertPosPub(topVertAtX(4).?);
+    try testing.expectApproxEqAbs(@as(f32, 0), a[2], 1e-5);
+    try testing.expectApproxEqAbs(@as(f32, 0), c[2], 1e-5);
+    try testing.expectApproxEqAbs(@as(f32, 0.8), g[2], 1e-4);
+
+    // independent 2D circumcircle through the three control points in the (x, z)
+    // plane — every run vertex must land on it (the y=1 plane is the arc plane)
+    const bx: f32 = 2;
+    const bz: f32 = 0.8;
+    const ox: f32 = 2; // symmetric span ⇒ center on x = 2
+    const oz = (bz * bz + (bx - 0) * (bx - 4) + bx * 0 - 0) / (2 * bz) + 0; // solve |O-A|²=|O-B|² with Ox=2
+    const r = @sqrt((0 - ox) * (0 - ox) + oz * oz);
+    var v: u32 = 0;
+    var on_arc: u32 = 0;
+    while (v < mesh_edit.vertCount()) : (v += 1) {
+        const p = mesh_edit.vertPosPub(v);
+        if (p[1] < 0.5) continue;
+        try testing.expectApproxEqAbs(@as(f32, 1), p[1], 1e-5);
+        const d = @sqrt((p[0] - ox) * (p[0] - ox) + (p[2] - oz) * (p[2] - oz));
+        try testing.expectApproxEqAbs(r, d, 1e-3);
+        on_arc += 1;
+    }
+    try testing.expectEqual(@as(u32, 5), on_arc);
+}
+
+test "curve pull with zero offset leaves the run untouched" {
+    loadQuadStrip(4326);
+    defer mesh_edit.test_support.clear();
+    defer mesh_edit.curvePullEnd();
+
+    try testing.expectEqual(@as(u32, 5), selectTopRow());
+    try testing.expect(mesh_edit.curvePullBegin());
+    _ = mesh_edit.curvePullApply(.{ 0, 0, 0 });
+    var v: u32 = 0;
+    while (v < mesh_edit.vertCount()) : (v += 1) {
+        const p = mesh_edit.vertPosPub(v);
+        try testing.expectApproxEqAbs(@as(f32, 0), p[2], 1e-6);
+    }
+}
+
+test "curve pull refuses branched selections and loops" {
+    loadQuadStrip(4327);
+    defer mesh_edit.test_support.clear();
+    defer mesh_edit.curvePullEnd();
+
+    // the whole strip selected is branched — every interior vertex has degree 3
+    _ = mesh_edit.selectAll();
+    try testing.expect(!mesh_edit.curvePullBegin());
+
+    // one quad's four corners form a closed loop — no anchors to hold
+    mesh_edit.clearSelection();
+    var v: u32 = 0;
+    var picked: u32 = 0;
+    while (v < mesh_edit.vertCount()) : (v += 1) {
+        const p = mesh_edit.vertPosPub(v);
+        if (p[0] < 1.5) {
+            _ = mesh_edit.selectVertexByIndex(v, picked > 0);
+            picked += 1;
+        }
+    }
+    try testing.expectEqual(@as(u32, 4), picked);
+    try testing.expect(!mesh_edit.curvePullBegin());
+}
+
 test {
     std.testing.refAllDecls(mesh_edit);
 }
