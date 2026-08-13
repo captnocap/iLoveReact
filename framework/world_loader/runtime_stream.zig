@@ -463,6 +463,17 @@ pub fn cameraColliderSet(self: anytype) ?PhysicsColliders {
     return null;
 }
 
+/// The live physics set as the spring-arm's SECOND input (req_4292): it alone
+/// carries mesh-prop coarse boxes (baked AND live-pushed placements), live
+/// pieces, door panels, and elevator cars — none of which reach the dedicated
+/// authored camera buffer, so a spring-arm reading only that buffer passed
+/// through every placed prop's walls. springArmEye skips the duplicate scan by
+/// buffer identity when this IS the camera set (pre-lump fallback).
+pub fn propColliderSet(self: anytype) ?PhysicsColliders {
+    if (self.has_physics_colliders) return self.physics_colliders;
+    return null;
+}
+
 pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Map) void {
     const ns = nowNs(io);
     const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
@@ -573,7 +584,7 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
     stepInteract(self, dt);
     stepCookedDoors(self, dt); // req_1908: swing custom doors toward their target
 
-    updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), dt);
+    updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), propColliderSet(self), dt);
     if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
     if (self.scene.player_character) |*resident_character| {
         const facing_yaw = resident_character.facing_yaw_offset_degrees;

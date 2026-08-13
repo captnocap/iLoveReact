@@ -26,6 +26,8 @@ const AIM_FOV_DEGREES = config.AIM_FOV_DEGREES;
 const CAMERA_SPRING_MIN_DISTANCE_METERS = config.CAMERA_SPRING_MIN_DISTANCE_METERS;
 const CAMERA_SPRING_SKIN_METERS = config.CAMERA_SPRING_SKIN_METERS;
 const CAMERA_SPRING_SWEEP_RADIUS_METERS = config.CAMERA_SPRING_SWEEP_RADIUS_METERS;
+const CHARACTER_DIAGNOSTIC_CAMERA_PADDING_RATIO = config.CHARACTER_DIAGNOSTIC_CAMERA_PADDING_RATIO;
+const CHARACTER_DIAGNOSTIC_CAMERA_MIN_ASPECT = config.CHARACTER_DIAGNOSTIC_CAMERA_MIN_ASPECT;
 const Vec3 = state.Vec3;
 const PlayerState = state.PlayerState;
 const CameraState = state.CameraState;
@@ -59,6 +61,61 @@ pub const PitchLimits = struct {
     min: f32,
     max: f32,
 };
+
+/// Give the capture target its own measured native camera (USER ASK req_4254).
+///
+/// Character nodes face 180 degrees in the runtime, so local X/Z bounds are
+/// mirrored into world space. The two copies are separated on world X. This
+/// solves one front-on pose that contains their complete union at the pane's
+/// actual aspect ratio; no gameplay player/collider state participates.
+pub fn frameCharacterDiagnostic(
+    cam: *CameraState,
+    bounds_min: [3]f32,
+    bounds_max: [3]f32,
+    separation_x: f32,
+    aspect: f32,
+) bool {
+    for (bounds_min) |component| {
+        if (!std.math.isFinite(component)) return false;
+    }
+    for (bounds_max) |component| {
+        if (!std.math.isFinite(component)) return false;
+    }
+    if (!std.math.isFinite(separation_x) or separation_x < 0) return false;
+    for (0..3) |axis| {
+        if (bounds_max[axis] < bounds_min[axis]) return false;
+    }
+
+    const safe_aspect = if (std.math.isFinite(aspect) and aspect > 0)
+        @max(aspect, CHARACTER_DIAGNOSTIC_CAMERA_MIN_ASPECT)
+    else
+        CHARACTER_DIAGNOSTIC_CAMERA_MIN_ASPECT;
+    const half_vertical_fov = CAMERA_FOV_DEGREES * std.math.pi / 360.0;
+    const tan_half_vertical_fov = @tan(half_vertical_fov);
+    if (!std.math.isFinite(tan_half_vertical_fov) or tan_half_vertical_fov <= 0) return false;
+
+    const half_width = (bounds_max[0] - bounds_min[0] + separation_x) * 0.5;
+    const half_height = (bounds_max[1] - bounds_min[1]) * 0.5;
+    const half_depth = (bounds_max[2] - bounds_min[2]) * 0.5;
+    const vertical_distance = half_height / tan_half_vertical_fov;
+    const horizontal_distance = half_width / (tan_half_vertical_fov * safe_aspect);
+    const distance = @max(vertical_distance, horizontal_distance) *
+        CHARACTER_DIAGNOSTIC_CAMERA_PADDING_RATIO + half_depth;
+    if (!std.math.isFinite(distance) or distance <= 0) return false;
+
+    // Rotation Y=180 maps local (x,z) to (-x,-z).
+    const target = Vec3{
+        .x = -(bounds_min[0] + bounds_max[0]) * 0.5,
+        .y = (bounds_min[1] + bounds_max[1]) * 0.5,
+        .z = -(bounds_min[2] + bounds_max[2]) * 0.5,
+    };
+    cam.external = true;
+    cam.ext_pos = .{ .x = target.x, .y = target.y, .z = target.z - distance };
+    cam.ext_look = target;
+    cam.ext_fov = CAMERA_FOV_DEGREES;
+    cam.initialized = false;
+    return true;
+}
 
 pub fn solveAimCamera(player: PlayerState, yaw_degrees: f32, orbit_pitch_degrees: f32) CameraSolve {
     const yaw = yaw_degrees * std.math.pi / 180.0;
@@ -111,35 +168,53 @@ pub fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
     };
 }
 
+/// One collider set's spring-arm cap: the farthest pivot→eye distance still
+/// clear of every camera-blocking band in the set (0 = clear).
+fn stepColliderCap(colliders: PhysicsColliders, want: CameraSolve) f32 {
+    if (colliders.rect_count == 0 and colliders.oriented_count == 0) return 0;
+    // cameraOcclusionStepColliders assumes rects at INPUT_HEADER_FLOATS
+    // (no entity section) — skip past the body slots when present.
+    return game_physics.cameraOcclusionStepColliders(
+        colliders.values[colliders.entity_capacity * game_physics.ENTITY_FLOATS ..],
+        colliders.rect_count,
+        colliders.oriented_count,
+        want.pos.x,
+        want.pos.y,
+        want.pos.z,
+        want.pivot.x,
+        want.pivot.y,
+        want.pivot.z,
+        CAMERA_SPRING_SWEEP_RADIUS_METERS,
+    );
+}
+
 /// Pull the desired eye in to the near side of any wall, roof, or elevated floor
 /// between it and the pivot (the compiled-game spring-arm — parity with the
-/// editor's JS one).
-pub fn springArmEye(want: CameraSolve, maybe_colliders: ?PhysicsColliders) Vec3 {
+/// editor's JS one). TWO collider sets participate (req_4292): the dedicated
+/// full-authored camera buffer (walls the physics windowing may drop), and the
+/// live physics set — the ONLY carrier of mesh-prop coarse boxes (baked and
+/// live-pushed placements), live pieces, door panels, and elevator cars. A
+/// spring-arm reading just the authored buffer sailed straight through every
+/// placed prop's walls. When both names resolve to the same buffer (pre-lump
+/// bakes fall back to the physics set) the duplicate scan is skipped.
+pub fn springArmEye(want: CameraSolve, maybe_walls: ?PhysicsColliders, maybe_props: ?PhysicsColliders) Vec3 {
     const dxp = want.pos.x - want.pivot.x;
     const dyp = want.pos.y - want.pivot.y;
     const dzp = want.pos.z - want.pivot.z;
     const base = @sqrt(dxp * dxp + dyp * dyp + dzp * dzp);
     if (base <= 0.0001) return want.pos;
-    // The eye must clear BOTH authored collider bands AND the terrain/ramp
-    // heightfields (a separate collider type) — take the most restrictive cap.
+    // The eye must clear authored collider bands, placed-prop bands, AND the
+    // terrain/ramp heightfields — take the most restrictive cap.
     var cap: f32 = -1;
-    if (maybe_colliders) |colliders| {
-        if (colliders.rect_count != 0 or colliders.oriented_count != 0) {
-            // cameraOcclusionStepColliders assumes rects at INPUT_HEADER_FLOATS
-            // (no entity section) — skip past the body slots when present.
-            const geometry = game_physics.cameraOcclusionStepColliders(
-                colliders.values[colliders.entity_capacity * game_physics.ENTITY_FLOATS ..],
-                colliders.rect_count,
-                colliders.oriented_count,
-                want.pos.x,
-                want.pos.y,
-                want.pos.z,
-                want.pivot.x,
-                want.pivot.y,
-                want.pivot.z,
-                CAMERA_SPRING_SWEEP_RADIUS_METERS,
-            );
-            if (geometry > 0) cap = geometry;
+    if (maybe_walls) |walls| {
+        const geometry = stepColliderCap(walls, want);
+        if (geometry > 0) cap = geometry;
+    }
+    if (maybe_props) |props| {
+        const duplicate = if (maybe_walls) |walls| walls.values.ptr == props.values.ptr else false;
+        if (!duplicate) {
+            const geometry = stepColliderCap(props, want);
+            if (geometry > 0 and (cap < 0 or geometry < cap)) cap = geometry;
         }
     }
     const terrain = game_physics.cameraOcclusionHeightfields(
@@ -205,7 +280,7 @@ pub fn updateFogNode(fog_node: *Node, cam: CameraState) void {
     fog_node.scene3d_fog_far = if (cam.external) config.AUTHOR_FOG_FAR_METERS else 0;
 }
 
-pub fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, colliders: ?PhysicsColliders, dt: f32) void {
+pub fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, colliders: ?PhysicsColliders, prop_colliders: ?PhysicsColliders, dt: f32) void {
     var want = desiredCamera(cam.*, player);
     // External-orbit (editor iso view): no spring-arm (the iso eye must stay at its
     // full authoring distance, never pulled in through a roof) and no smoothing (it
@@ -225,7 +300,7 @@ pub fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerSta
         camera_node.scene3d_far = authoringFar(cam.*);
         return;
     }
-    want.pos = springArmEye(want, colliders);
+    want.pos = springArmEye(want, colliders, prop_colliders);
     if (!cam.initialized or dt <= 0 or CAMERA_SMOOTHING_PER_SECOND <= 0) {
         cam.current_pos = want.pos;
         cam.current_target = want.target;

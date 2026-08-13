@@ -58,6 +58,7 @@ const sampleRoute = m_state.sampleRoute;
 const nowNs = m_state.nowNs;
 const appendMeshPropNode = runtime_live_scene.appendMeshPropNode;
 const cameraColliderSet = runtime_stream.cameraColliderSet;
+const propColliderSet = runtime_stream.propColliderSet;
 const rebuildWindow = runtime_stream.rebuildWindow;
 const refreshStreamNodes = runtime_stream.refreshStreamNodes;
 const setupStreaming = runtime_stream.setupStreaming;
@@ -219,7 +220,10 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     // unclamped, packed in cameraOcclusionStepColliders wire order. Built once
     // and queried every frame by springArmEye regardless of physics windowing,
     // so a yawed building wall the windowed physics set drops is still seen by
-    // the spring-arm and the eye is pushed to the player's side of it.
+    // the spring-arm and the eye is pushed to the player's side of it. This
+    // buffer is authored PIECES only — mesh-prop coarse boxes, live placements,
+    // doors, and cars reach the spring-arm through its second input, the live
+    // physics set (propColliderSet, req_4292).
     if (self.scene.baked_colliders) |bc| {
         const rect_floats = bc.rects.len;
         const oriented_floats = bc.oriented.len;
@@ -1390,7 +1394,7 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
 
     self.perm_node_count = self.kid_list.items.len; // before any streamed tail / live-mesh nodes
     self.root = .{ .children = self.kid_list.items };
-    updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), 0);
+    updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), propColliderSet(self), 0);
     if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
     if (self.scene.player_character) |*resident_character| {
         const facing_yaw = resident_character.facing_yaw_offset_degrees;

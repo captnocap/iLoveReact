@@ -1214,6 +1214,25 @@ pub fn build(b: *std.Build) void {
     const author_draw_distance_test_step = b.step("test-author-draw-distance", "Run the editor authoring draw-distance tests");
     author_draw_distance_test_step.dependOn(&run_author_draw_distance_test.step);
 
+    // ── Spring-arm vs placed-prop camera collision tests ───────────
+    // req_4292: the /play spring-arm steps against the live physics set as a
+    // SECOND input — the only carrier of mesh-prop coarse boxes — so the eye
+    // stays inside a placed container instead of passing through its walls.
+    // Its own file is the test ROOT — inline tests in an imported module never run.
+    const spring_arm_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader_spring_arm_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const spring_arm_test = b.addTest(.{
+        .name = "world-loader-spring-arm-test",
+        .root_module = spring_arm_test_mod,
+    });
+    const run_spring_arm_test = b.addRunArtifact(spring_arm_test);
+    const spring_arm_test_step = b.step("test-world-loader-spring-arm", "Run the spring-arm camera vs placed-prop collision tests");
+    spring_arm_test_step.dependOn(&run_spring_arm_test.step);
+
     // ── Process-lifetime tests ─────────────────────────────────────
     // proc_lifetime.zig is what stops a dev host outliving its supervisor, and
     // its entry point takes `anytype` — nothing in the body is compiled until

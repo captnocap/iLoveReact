@@ -257,6 +257,10 @@ pub const AIM_FOV_DEGREES: f32 = 47.0;
 pub const CAMERA_SPRING_MIN_DISTANCE_METERS: f32 = 0.7;
 pub const CAMERA_SPRING_SKIN_METERS: f32 = 0.14;
 pub const CAMERA_SPRING_SWEEP_RADIUS_METERS: f32 = 0.08;
+// The capture target is a native diagnostic stage, not a gameplay camera.
+// Fit both side-by-side specimens even when the pane is tall and narrow.
+pub const CHARACTER_DIAGNOSTIC_CAMERA_PADDING_RATIO: f32 = 1.18;
+pub const CHARACTER_DIAGNOSTIC_CAMERA_MIN_ASPECT: f32 = 0.5;
 // Authoring (external iso) draw distance, req_4167. The baked `far` is solved ONCE
 // at load from the world's INSTANCE extent — right for the player-trailing game
 // camera, which never leaves the ground, and wrong twice over for the editor

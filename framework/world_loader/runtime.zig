@@ -505,6 +505,7 @@ pub const Runtime = struct {
     const emitMeshPropColliders = runtime_stream.emitMeshPropColliders;
     const rebuildWindow = runtime_stream.rebuildWindow;
     const cameraColliderSet = runtime_stream.cameraColliderSet;
+    const propColliderSet = runtime_stream.propColliderSet;
     pub const stepNow = runtime_stream.stepNow;
 
     const runtime_dynamics = @import("runtime_dynamics.zig");

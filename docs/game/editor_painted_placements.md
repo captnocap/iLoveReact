@@ -497,6 +497,19 @@ and semantic door exports have no exact payload and retain their established box
 path. Doors intentionally keep authored jamb/header/leaf collision rather than
 treating their movable leaf as a static triangle soup.
 
+Req_4292 made "the spring-arm camera consumes those bounded rows" actually true
+in /play. The loader's spring-arm stepped only against its dedicated camera
+buffer — the FULL authored piece rects/oriented, built once from the baked
+colliders — and prop coarse boxes never enter that buffer: they ride the live
+physics set (baked instances in `buildPhysicsColliders`, live placements in the
+req_2832 fold). Standing inside a placed container, the player held against the
+exact triangles while the orbiting eye sailed straight through the wall boxes.
+`springArmEye` (framework/world_loader/camera.zig) now takes the physics set as
+a SECOND input (`runtime_stream.zig propColliderSet`) and keeps the most
+restrictive cap across both scans, skipping the duplicate scan by buffer
+identity on pre-lump maps where the camera set already IS the physics set.
+Regression tests: `tools/zig/zig build test-world-loader-spring-arm`.
+
 ## The package carries its own bake: mesh/collision.blob (req_3431)
 
 FLOCKBOOK_DESIGN §10's quick win: every exported model persists its collision
