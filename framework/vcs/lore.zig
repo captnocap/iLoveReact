@@ -53,6 +53,150 @@ pub const c = @cImport({
     @cInclude("lore.h");
 });
 
+// liblore owns process-global runtime state. The editor can ask for history while the
+// status monitor and retention executor are active, so every foreign entry point must
+// share one gate. Keeping the gate here makes it impossible for a new caller above this
+// binding to accidentally bypass it.
+//
+// This boundary deliberately uses pthread_mutex_t instead of std.Io.Mutex: the generated
+// C ABI functions and their callbacks do not carry an std.Io value, and the synchronous
+// calls below may block while liblore delivers callbacks from its worker threads.
+var lore_call_mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER;
+
+// Busy-gate diagnostics: which liblore verb holds the gate and since when
+// (monotonic ms). Written only by the gate owner right after acquire / right
+// before release; read WITHOUT the gate by busy-receipt builders, so both
+// fields are atomics. Verb strings are static literals and never freed.
+var gate_holder_verb: std.atomic.Value(?[*:0]const u8) = .init(null);
+var gate_holder_since_ms: std.atomic.Value(i64) = .init(0);
+
+/// Interactive callers (V8 doors on the frame thread) declare a bounded wait so
+/// a long-running background call — a retention prune, a slow network push —
+/// can never freeze the UI: past the budget they get `error.LoreGateBusy` and
+/// answer with a busy receipt naming the holder. Background workers never set a
+/// budget and keep the original blocking behavior. Thread-local because the
+/// budget is a property of the calling context, not of the gate.
+threadlocal var interactive_gate_budget_ms: ?u32 = null;
+
+pub fn beginInteractiveGateBudget(budget_ms: u32) void {
+    interactive_gate_budget_ms = budget_ms;
+}
+
+pub fn endInteractiveGateBudget() void {
+    interactive_gate_budget_ms = null;
+}
+
+pub fn interactiveGateBudgetMs() ?u32 {
+    return interactive_gate_budget_ms;
+}
+
+pub const GateHolderView = struct { verb: []const u8, held_ms: i64 };
+
+/// Best-effort snapshot of the current gate holder for busy diagnostics. The
+/// holder may release between the two loads; a null verb simply reports no
+/// holder detail.
+pub fn gateHolderView() ?GateHolderView {
+    const verb = gate_holder_verb.load(.acquire) orelse return null;
+    const since = gate_holder_since_ms.load(.acquire);
+    return .{ .verb = std.mem.span(verb), .held_ms = @max(0, monotonicMs() - since) };
+}
+
+fn monotonicMs() i64 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return @as(i64, @intCast(ts.sec)) * 1000 + @divTrunc(@as(i64, @intCast(ts.nsec)), 1_000_000);
+}
+
+// Narrow platform boundary: glibc's pthread_mutex_timedlock is not declared by
+// std.c in Zig 0.16, the gate is already a documented pthread boundary, and one
+// bounded lock call is the alternative to a trylock/sleep readiness loop.
+// POSIX defines the timeout against CLOCK_REALTIME.
+extern "c" fn pthread_mutex_timedlock(
+    mutex: *std.c.pthread_mutex_t,
+    abstime: *const std.c.timespec,
+) std.c.E;
+
+const LoreCallGuard = struct {
+    fn acquire(comptime verb: [:0]const u8) LoreCallGuard {
+        if (std.c.pthread_mutex_lock(&lore_call_mutex) != .SUCCESS)
+            @panic("failed to lock the process-wide liblore call gate");
+        stampHolder(verb);
+        return .{};
+    }
+
+    fn acquireBounded(comptime verb: [:0]const u8, budget_ms: u32) error{LoreGateBusy}!LoreCallGuard {
+        var deadline: std.c.timespec = undefined;
+        if (std.c.clock_gettime(.REALTIME, &deadline) != 0) return acquire(verb);
+        const extra_ns: i64 = @as(i64, @intCast(deadline.nsec)) +
+            @as(i64, budget_ms % 1000) * 1_000_000;
+        deadline.sec += @intCast(@as(i64, budget_ms / 1000) + @divTrunc(extra_ns, 1_000_000_000));
+        deadline.nsec = @intCast(@mod(extra_ns, 1_000_000_000));
+        switch (pthread_mutex_timedlock(&lore_call_mutex, &deadline)) {
+            .SUCCESS => {
+                stampHolder(verb);
+                return .{};
+            },
+            .TIMEDOUT => return error.LoreGateBusy,
+            else => @panic("failed timed lock of the process-wide liblore call gate"),
+        }
+    }
+
+    fn stampHolder(comptime verb: [:0]const u8) void {
+        gate_holder_since_ms.store(monotonicMs(), .release);
+        gate_holder_verb.store(verb.ptr, .release);
+    }
+
+    fn release(_: *LoreCallGuard) void {
+        gate_holder_verb.store(null, .release);
+        if (std.c.pthread_mutex_unlock(&lore_call_mutex) != .SUCCESS)
+            @panic("failed to unlock the process-wide liblore call gate");
+    }
+};
+
+fn serializedCall(
+    comptime verb: [:0]const u8,
+    function: anytype,
+    args: anytype,
+) error{LoreGateBusy}!(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    var guard = if (interactive_gate_budget_ms) |budget|
+        try LoreCallGuard.acquireBounded(verb, budget)
+    else
+        LoreCallGuard.acquire(verb);
+    defer guard.release();
+    return @call(.auto, function, args);
+}
+
+/// For instant static calls (version, shutdown) reached from contexts that
+/// cannot answer with a busy receipt; always takes the blocking path.
+fn serializedCallBlocking(
+    comptime verb: [:0]const u8,
+    function: anytype,
+    args: anytype,
+) @typeInfo(@TypeOf(function)).@"fn".return_type.? {
+    var guard = LoreCallGuard.acquire(verb);
+    defer guard.release();
+    return @call(.auto, function, args);
+}
+
+/// Test seam for proving that unrelated native workers cannot overlap inside liblore.
+/// Production code reaches the same gate only through `serializedCall` above.
+pub fn withCallGateForTesting(context: ?*anyopaque, callback: *const fn (?*anyopaque) void) void {
+    var guard = LoreCallGuard.acquire("test_gate");
+    defer guard.release();
+    callback(context);
+}
+
+/// Test seam for the bounded interactive acquire: takes and immediately
+/// releases the gate exactly the way `serializedCall` does, honoring any
+/// declared interactive budget.
+pub fn acquireGateRespectingBudgetForTesting() error{LoreGateBusy}!void {
+    var guard = if (interactive_gate_budget_ms) |budget|
+        try LoreCallGuard.acquireBounded("test_probe", budget)
+    else
+        LoreCallGuard.acquire("test_probe");
+    guard.release();
+}
+
 // ── string helpers ───────────────────────────────────────────────────────────────────
 
 /// `lore_string_t` is (ptr, len) and is NOT null-terminated, so Zig slices map onto it
@@ -167,7 +311,7 @@ pub const StatusCollector = struct {
 
 // ── public surface ───────────────────────────────────────────────────────────────────
 
-pub const Error = error{ LoreCallFailed, LoreIncomplete, LoreUnavailable, MissingResult, RepositoryPathNotAbsolute, UnsupportedMetadataType } || std.mem.Allocator.Error;
+pub const Error = error{ LoreCallFailed, LoreGateBusy, LoreIncomplete, LoreUnavailable, MissingResult, RepositoryPathNotAbsolute, UnsupportedMetadataType } || std.mem.Allocator.Error;
 
 pub const Hash = [32]u8;
 pub const Identifier = [16]u8;
@@ -481,7 +625,7 @@ pub fn repositoryInfo(allocator: std.mem.Allocator, repository_path: []const u8,
     args.repository_url = empty_str;
     var collector = RepositoryInfoCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_repository_info(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_repository_info", c.lore_repository_info, .{ &g, &args, collector.callback() });
     try finishCall("repository info", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const value = collector.value orelse return error.MissingResult;
@@ -586,7 +730,7 @@ pub fn fileInfo(
     args.revision = if (revision.len == 0) empty_str else str(revision);
     var collector = FileInfoCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_file_info(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_info", c.lore_file_info, .{ &g, &args, collector.callback() });
     try finishCall("file info", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const entries = try collector.entries.toOwnedSlice(allocator);
@@ -792,7 +936,7 @@ pub fn repositoryStatus(
     args.paths = stringArray(c_paths);
     var collector = RepositoryStatusCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_repository_status(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_repository_status", c.lore_repository_status, .{ &g, &args, collector.callback() });
     try finishCall("repository status", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const files = try collector.files.toOwnedSlice(allocator);
@@ -804,6 +948,19 @@ pub fn repositoryStatus(
     };
     collector.revision = null;
     return result;
+}
+
+/// Run Lore's local immutable-store garbage collector after historical paths
+/// have been obliterated and their staged deletions committed. GC has no
+/// operation-specific events in v0.8.6; success is the standard COMPLETE/END
+/// contract and byte reclamation is measured by the caller around this call.
+pub fn repositoryGc(repository_path: []const u8, identity: []const u8) Error!void {
+    if (!available()) return error.LoreUnavailable;
+    var g = try globals(repository_path, identity);
+    var args = std.mem.zeroes(c.lore_repository_gc_args_t);
+    var status = StatusCollector{};
+    const return_status = try serializedCall("lore_repository_gc", c.lore_repository_gc, .{ &g, &args, status.callback() });
+    try finishCall("repository gc", &status, return_status);
 }
 
 pub const StageCounts = struct {
@@ -947,7 +1104,7 @@ pub fn fileStage(
     args.scan = @intFromBool(options.scan);
     var collector = FileStageCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_file_stage(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_stage", c.lore_file_stage, .{ &g, &args, collector.callback() });
     try finishCall("file stage", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const files = try collector.files.toOwnedSlice(allocator);
@@ -1001,9 +1158,93 @@ pub fn fileDump(repository_path: []const u8, identity: []const u8, path: []const
     args.address = if (address.len == 0) empty_str else str(address);
     args.path = if (path.len == 0) empty_str else str(path);
     var collector = FileDumpCollector{};
-    const return_status = c.lore_file_dump(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_dump", c.lore_file_dump, .{ &g, &args, collector.callback() });
     try finishCall("file dump", &collector.status, return_status);
     return collector.value orelse error.MissingResult;
+}
+
+/// One content address removed by `lore_file_obliterate`. The C event does not
+/// report byte counts, so callers must account logical bytes from the verified
+/// snapshot metadata and physical store bytes around the later GC pass.
+pub const ObliteratedContent = struct {
+    address: Address,
+    fragments: usize,
+    payloads: usize,
+};
+
+pub const FileObliterateResult = struct {
+    entries: []ObliteratedContent,
+    fragments: usize,
+    payloads: usize,
+
+    pub fn deinit(self: *FileObliterateResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.entries);
+        self.* = undefined;
+    }
+};
+
+const FileObliterateCollector = struct {
+    allocator: std.mem.Allocator,
+    status: StatusCollector = .{},
+    entries: std.ArrayList(ObliteratedContent) = .empty,
+    fragments: usize = 0,
+    payloads: usize = 0,
+    copy_error: ?Error = null,
+
+    fn callback(self: *FileObliterateCollector) c.lore_event_callback_config_t {
+        return .{ .user_context = @intFromPtr(self), .func = trampoline };
+    }
+
+    fn deinit(self: *FileObliterateCollector) void {
+        self.entries.deinit(self.allocator);
+    }
+
+    fn trampoline(event: [*c]const c.lore_event_t, user_context: u64) callconv(.c) void {
+        const self: *FileObliterateCollector = @ptrFromInt(user_context);
+        const ev = event orelse return;
+        self.status.observe(ev);
+        if (self.copy_error != null or ev.*.tag != c.LORE_EVENT_FILE_OBLITERATE) return;
+        const payload = ev.*.unnamed_0.file_obliterate;
+        self.entries.append(self.allocator, .{
+            .address = addressValue(payload.address),
+            .fragments = payload.num_fragments,
+            .payloads = payload.num_payloads,
+        }) catch |err| {
+            self.copy_error = err;
+            return;
+        };
+        self.fragments +|= payload.num_fragments;
+        self.payloads +|= payload.num_payloads;
+    }
+};
+
+/// Permanently remove every historical address referenced by one repository
+/// path (or one explicit address). Retention calls this only for immutable,
+/// snapshot-ID-qualified paths; shared legacy paths are never passed here.
+pub fn fileObliterate(
+    allocator: std.mem.Allocator,
+    repository_path: []const u8,
+    identity: []const u8,
+    path: []const u8,
+    address: []const u8,
+) Error!FileObliterateResult {
+    if (!available()) return error.LoreUnavailable;
+    if ((path.len == 0) == (address.len == 0)) return error.MissingResult;
+    var g = try globals(repository_path, identity);
+    var args = std.mem.zeroes(c.lore_file_obliterate_args_t);
+    args.address = if (address.len == 0) empty_str else str(address);
+    args.path = if (path.len == 0) empty_str else str(path);
+    var collector = FileObliterateCollector{ .allocator = allocator };
+    defer collector.deinit();
+    const return_status = try serializedCall("lore_file_obliterate", c.lore_file_obliterate, .{ &g, &args, collector.callback() });
+    try finishCall("file obliterate", &collector.status, return_status);
+    if (collector.copy_error) |err| return err;
+    const entries = try collector.entries.toOwnedSlice(allocator);
+    return .{
+        .entries = entries,
+        .fragments = collector.fragments,
+        .payloads = collector.payloads,
+    };
 }
 
 pub const FileHistoryEntry = struct {
@@ -1099,7 +1340,7 @@ pub fn fileHistory(
     args.depth = options.depth;
     var collector = FileHistoryCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_file_history(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_history", c.lore_file_history, .{ &g, &args, collector.callback() });
     try finishCall("file history", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     return .{ .entries = try collector.entries.toOwnedSlice(allocator) };
@@ -1170,7 +1411,7 @@ pub fn fileWrite(
     args.output = str(output);
     var collector = FileWriteCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_file_write(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_write", c.lore_file_write, .{ &g, &args, collector.callback() });
     try finishCall("file write", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const written_path = collector.written_path orelse return error.MissingResult;
@@ -1292,7 +1533,7 @@ pub fn revisionCommit(
     args.stats = @intFromBool(stats);
     var collector = RevisionCommitCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_revision_commit(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_revision_commit", c.lore_revision_commit, .{ &g, &args, collector.callback() });
     try finishCall("revision commit", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const revision = collector.revision orelse return error.MissingResult;
@@ -1387,7 +1628,7 @@ pub fn revisionHistory(
     args.only_branch = @intFromBool(options.only_branch);
     var collector = RevisionHistoryCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_revision_history(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_revision_history", c.lore_revision_history, .{ &g, &args, collector.callback() });
     try finishCall("revision history", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const entries = try collector.entries.toOwnedSlice(allocator);
@@ -1421,7 +1662,7 @@ pub fn revisionMetadataGet(
     args.revision = if (revision.len == 0) empty_str else str(revision);
     var collector = MetadataCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_revision_metadata_get(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_revision_metadata_get", c.lore_revision_metadata_get, .{ &g, &args, collector.callback() });
     var list = try collector.finish("revision metadata get", return_status);
     return takeFirstMetadata(allocator, &list);
 }
@@ -1438,7 +1679,7 @@ pub fn revisionMetadataList(
     args.revision = if (revision.len == 0) empty_str else str(revision);
     var collector = MetadataCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_revision_metadata_list(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_revision_metadata_list", c.lore_revision_metadata_list, .{ &g, &args, collector.callback() });
     return collector.finish("revision metadata list", return_status);
 }
 
@@ -1460,7 +1701,7 @@ pub fn revisionMetadataSet(
     args.values = stringArray(encoded.values);
     args.formats = metadataFormatArray(encoded.formats);
     var status = StatusCollector{};
-    const return_status = c.lore_revision_metadata_set(&g, &args, status.callback());
+    const return_status = try serializedCall("lore_revision_metadata_set", c.lore_revision_metadata_set, .{ &g, &args, status.callback() });
     try finishCall("revision metadata set", &status, return_status);
 }
 
@@ -1480,7 +1721,7 @@ pub fn fileMetadataGet(
     args.key = str(key);
     var collector = MetadataCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_file_metadata_get(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_metadata_get", c.lore_file_metadata_get, .{ &g, &args, collector.callback() });
     var list = try collector.finish("file metadata get", return_status);
     return takeFirstMetadata(allocator, &list);
 }
@@ -1499,7 +1740,7 @@ pub fn fileMetadataList(
     args.revision = if (revision.len == 0) empty_str else str(revision);
     var collector = MetadataCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_file_metadata_list(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_file_metadata_list", c.lore_file_metadata_list, .{ &g, &args, collector.callback() });
     return collector.finish("file metadata list", return_status);
 }
 
@@ -1526,7 +1767,7 @@ pub fn fileMetadataSet(
     args.formats = metadataFormatArray(encoded.formats);
     args.entries = uint32Array(&entry_counts);
     var status = StatusCollector{};
-    const return_status = c.lore_file_metadata_set(&g, &args, status.callback());
+    const return_status = try serializedCall("lore_file_metadata_set", c.lore_file_metadata_set, .{ &g, &args, status.callback() });
     try finishCall("file metadata set", &status, return_status);
 }
 
@@ -1678,7 +1919,7 @@ pub fn revisionRestore(
     args.message = str(message);
     var collector = RevisionRestoreCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_revision_restore(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_revision_restore", c.lore_revision_restore, .{ &g, &args, collector.callback() });
     try finishCall("revision restore", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const files = try collector.files.toOwnedSlice(allocator);
@@ -1898,7 +2139,7 @@ pub fn branchPush(
     args.fast_forward_merge = @intFromBool(options.fast_forward_merge);
     var collector = BranchPushCollector{ .allocator = allocator };
     defer collector.deinit();
-    const return_status = c.lore_branch_push(&g, &args, collector.callback());
+    const return_status = try serializedCall("lore_branch_push", c.lore_branch_push, .{ &g, &args, collector.callback() });
     try finishCall("branch push", &collector.status, return_status);
     if (collector.copy_error) |err| return err;
     const revision_updates = try collector.revision_updates.toOwnedSlice(allocator);
@@ -1923,13 +2164,13 @@ pub fn branchPush(
 /// `const char *lore_version(void)`, NUL-terminated and owned by the library. Verified
 /// against the real signature after an earlier version of this file assumed otherwise.
 pub fn version() []const u8 {
-    const ptr = c.lore_version() orelse return &.{};
+    const ptr = serializedCallBlocking("lore_version", c.lore_version, .{}) orelse return &.{};
     return std.mem.span(ptr);
 }
 
 /// Release liblore's global state. Safe to call once at host shutdown.
 pub fn shutdown() void {
-    c.lore_shutdown();
+    serializedCallBlocking("lore_shutdown", c.lore_shutdown, .{});
 }
 
 /// Is liblore present and callable? Callers must degrade rather than crash when Lore is

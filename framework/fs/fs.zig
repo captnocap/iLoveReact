@@ -11,6 +11,7 @@
 // - Operations take a Dir handle so callers can scope to different roots
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const MAX_PATH = std.fs.max_path_bytes;
 pub const MAX_NAME = 255;
@@ -158,7 +159,10 @@ pub fn writeAtomic(io: std.Io, dir: std.Io.Dir, path: []const u8, content: []con
         return error.NameTooLong;
 
     // Write to temp file
-    const file = try dir.createFile(io, tmp_path, .{ .truncate = true });
+    const file = try dir.createFile(io, tmp_path, .{
+        .truncate = true,
+        .permissions = replacementPermissions(io, dir, path, .default_file),
+    });
     file.writeStreamingAll(io, content) catch |err| {
         file.close(io);
         dir.deleteFile(io, tmp_path) catch {};
@@ -210,6 +214,38 @@ pub fn acquireTargetWriteLock(io: std.Io, dir: std.Io.Dir, path: []const u8) !Ta
         .truncate = false,
         .lock = .exclusive,
     });
+    return .{ .file = file, .io = io };
+}
+
+/// Non-blocking sibling of `acquireTargetWriteLock`: returns `error.WouldBlock`
+/// while another holder keeps the lock, so an interactive caller can bound its
+/// wait instead of freezing behind a long-running maintenance transaction.
+pub fn tryAcquireTargetWriteLock(io: std.Io, dir: std.Io.Dir, path: []const u8) !TargetWriteLock {
+    try checkPath(path);
+    var lock_buf: [MAX_PATH]u8 = undefined;
+    const lock_path = std.fmt.bufPrint(&lock_buf, "{s}.write-lock", .{path}) catch return error.NameTooLong;
+    const file = try dir.createFile(io, lock_path, .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+        .lock_nonblocking = true,
+    });
+    return .{ .file = file, .io = io };
+}
+
+/// Serialize atomic directory publication on the containing directory inode.
+/// Unlike per-file conditional writes this creates no durable lock artifact,
+/// so package catalogs and their safety backups never inventory coordination
+/// files. Iteration capability forces a real directory fd rather than O_PATH.
+pub fn acquireDirectoryPublishLock(io: std.Io, dir: std.Io.Dir, path: []const u8) !TargetWriteLock {
+    try checkPath(path);
+    var opened = try dir.openDir(io, path, .{ .iterate = true });
+    const file: std.Io.File = .{ .handle = opened.handle, .flags = .{ .nonblocking = false } };
+    file.lock(io, .exclusive) catch |err| {
+        opened.close(io);
+        return err;
+    };
+    // Ownership of the handle moves to TargetWriteLock; do not close `opened`.
     return .{ .file = file, .io = io };
 }
 
@@ -514,6 +550,272 @@ pub fn pathExists(io: std.Io, dir: std.Io.Dir, path: []const u8) bool {
     if (!isConfined(path)) return false;
     _ = dir.statFile(io, path, .{}) catch return false;
     return true;
+}
+
+/// Preserve the permission mode of a file replaced through temp+rename. A new
+/// path uses the caller's ordinary creation mode.
+pub fn replacementPermissions(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    default_permissions: std.Io.File.Permissions,
+) std.Io.File.Permissions {
+    const facts = dir.statFile(io, path, .{}) catch return default_permissions;
+    return if (facts.kind == .file) facts.permissions else default_permissions;
+}
+
+pub const DirectoryFingerprint = [std.crypto.hash.sha2.Sha256.digest_length]u8;
+
+fn collectDirectoryPaths(
+    io: std.Io,
+    root: std.Io.Dir,
+    allocator: std.mem.Allocator,
+) !std.ArrayList([]u8) {
+    var paths: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (paths.items) |path| allocator.free(path);
+        paths.deinit(allocator);
+    }
+    var walker = try root.walk(allocator);
+    defer walker.deinit();
+    while (try walker.next(io)) |entry| {
+        try paths.append(allocator, try allocator.dupe(u8, entry.path));
+    }
+    std.mem.sort([]u8, paths.items, {}, struct {
+        fn lessThan(_: void, lhs: []u8, rhs: []u8) bool {
+            return std.mem.lessThan(u8, lhs, rhs);
+        }
+    }.lessThan);
+    return paths;
+}
+
+fn hashTreeField(hasher: *std.crypto.hash.sha2.Sha256, value: []const u8) void {
+    var length: [8]u8 = undefined;
+    std.mem.writeInt(u64, &length, value.len, .little);
+    hasher.update(&length);
+    hasher.update(value);
+}
+
+fn hashTreeU64(hasher: *std.crypto.hash.sha2.Sha256, value: u64) void {
+    var encoded: [8]u8 = undefined;
+    std.mem.writeInt(u64, &encoded, value, .little);
+    hasher.update(&encoded);
+}
+
+fn hashTreeMode(hasher: *std.crypto.hash.sha2.Sha256, permissions: std.Io.File.Permissions) void {
+    var mode: [8]u8 = undefined;
+    std.mem.writeInt(u64, &mode, @intFromEnum(permissions), .little);
+    hasher.update(&mode);
+}
+
+/// Hash every relative path, entry kind, permission mode and file byte. This is
+/// the optimistic-concurrency identity checked under the package target lock
+/// immediately before EXCHANGE; mtimes/inodes are intentionally excluded.
+pub fn directoryFingerprint(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    allocator: std.mem.Allocator,
+) !DirectoryFingerprint {
+    try checkPath(path);
+    const root_stat = try dir.statFile(io, path, .{});
+    if (root_stat.kind != .directory) return error.NotDir;
+    var root = try dir.openDir(io, path, .{ .iterate = true });
+    defer root.close(io);
+    var paths = try collectDirectoryPaths(io, root, allocator);
+    defer {
+        for (paths.items) |entry_path| allocator.free(entry_path);
+        paths.deinit(allocator);
+    }
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update("RJDIR1");
+    hashTreeMode(&hasher, root_stat.permissions);
+    var buffer: [64 * 1024]u8 = undefined;
+    for (paths.items) |entry_path| {
+        const entry_stat = try root.statFile(io, entry_path, .{});
+        hashTreeField(&hasher, entry_path);
+        hashTreeMode(&hasher, entry_stat.permissions);
+        switch (entry_stat.kind) {
+            .directory => hasher.update("D"),
+            .file => {
+                hasher.update("F");
+                hashTreeU64(&hasher, entry_stat.size);
+                var file = try root.openFile(io, entry_path, .{});
+                defer file.close(io);
+                var offset: u64 = 0;
+                while (true) {
+                    const count = try file.readPositional(io, &.{&buffer}, offset);
+                    if (count == 0) break;
+                    hasher.update(buffer[0..count]);
+                    offset += count;
+                }
+            },
+            else => return error.OperationUnsupported,
+        }
+    }
+    var digest: DirectoryFingerprint = undefined;
+    hasher.final(&digest);
+    return digest;
+}
+
+fn syncDirectoryPath(io: std.Io, dir: std.Io.Dir, path: []const u8) !void {
+    var opened = try dir.openDir(io, path, .{ .iterate = true });
+    defer opened.close(io);
+    const file: std.Io.File = .{ .handle = opened.handle, .flags = .{ .nonblocking = false } };
+    try file.sync(io);
+}
+
+/// Clone one package tree without translating its bytes or permission modes.
+/// Files also retain timestamps through updateFile. The target must not exist.
+pub fn cloneDirectoryExact(
+    io: std.Io,
+    dir: std.Io.Dir,
+    source_path: []const u8,
+    target_path: []const u8,
+    allocator: std.mem.Allocator,
+) !void {
+    try checkPath(source_path);
+    try checkPath(target_path);
+    if (pathExists(io, dir, target_path)) return error.PathAlreadyExists;
+    const root_stat = try dir.statFile(io, source_path, .{});
+    if (root_stat.kind != .directory) return error.NotDir;
+    var source = try dir.openDir(io, source_path, .{ .iterate = true });
+    defer source.close(io);
+    var paths = try collectDirectoryPaths(io, source, allocator);
+    defer {
+        for (paths.items) |entry_path| allocator.free(entry_path);
+        paths.deinit(allocator);
+    }
+
+    try dir.createDir(io, target_path, .default_dir);
+    errdefer dir.deleteTree(io, target_path) catch {};
+    for (paths.items) |entry_path| {
+        const entry_stat = try source.statFile(io, entry_path, .{});
+        const target_entry = try std.fs.path.join(allocator, &.{ target_path, entry_path });
+        defer allocator.free(target_entry);
+        switch (entry_stat.kind) {
+            .directory => try dir.createDir(io, target_entry, .default_dir),
+            .file => {
+                _ = try std.Io.Dir.updateFile(source, io, entry_path, dir, target_entry, .{});
+                var copied = try dir.openFile(io, target_entry, .{});
+                defer copied.close(io);
+                try copied.sync(io);
+            },
+            else => return error.OperationUnsupported,
+        }
+    }
+    // Children were created while directories were writable. Apply authored
+    // modes deepest-first only after their contents and directory entries sync.
+    var index = paths.items.len;
+    while (index > 0) {
+        index -= 1;
+        const entry_path = paths.items[index];
+        const entry_stat = try source.statFile(io, entry_path, .{});
+        if (entry_stat.kind != .directory) continue;
+        const target_entry = try std.fs.path.join(allocator, &.{ target_path, entry_path });
+        defer allocator.free(target_entry);
+        try syncDirectoryPath(io, dir, target_entry);
+        try dir.setFilePermissions(io, target_entry, entry_stat.permissions, .{});
+    }
+    try syncDirectoryPath(io, dir, target_path);
+    try dir.setFilePermissions(io, target_path, root_stat.permissions, .{});
+    try syncContainingDir(io, dir, target_path);
+}
+
+pub const InstallPreparedDirectoryError = error{
+    PathNotConfined,
+    FileNotFound,
+    PathAlreadyExists,
+    NotDir,
+    CrossDevice,
+    OperationUnsupported,
+    NameTooLong,
+    TargetChanged,
+    Unexpected,
+};
+
+/// Publish one fully prepared directory tree without exposing a mixed revision.
+///
+/// A first install uses a no-replace rename, so a manifestless recovery/orphan
+/// directory that appeared after planning is never overwritten. Replacing an
+/// existing tree uses Linux renameat2(RENAME_EXCHANGE): after the single syscall
+/// `target_path` is the complete prepared revision and `prepared_path` owns the
+/// complete predecessor. The caller deliberately keeps that predecessor until
+/// it has read back and validated the installed tree; calling this function a
+/// second time exchanges the two complete trees back for deterministic rollback.
+pub fn installPreparedDirectoryAtomic(
+    io: std.Io,
+    dir: std.Io.Dir,
+    prepared_path: []const u8,
+    target_path: []const u8,
+    replace_existing: bool,
+) InstallPreparedDirectoryError!void {
+    return installPreparedDirectoryAtomicIfMatches(io, dir, prepared_path, target_path, replace_existing, null);
+}
+
+pub fn installPreparedDirectoryAtomicIfMatches(
+    io: std.Io,
+    dir: std.Io.Dir,
+    prepared_path: []const u8,
+    target_path: []const u8,
+    replace_existing: bool,
+    expected_target: ?DirectoryFingerprint,
+) InstallPreparedDirectoryError!void {
+    try checkPath(prepared_path);
+    try checkPath(target_path);
+
+    const target_parent = std.fs.path.dirname(target_path) orelse ".";
+    var target_lock = acquireDirectoryPublishLock(io, dir, target_parent) catch return error.Unexpected;
+    defer target_lock.release();
+
+    const prepared_stat = dir.statFile(io, prepared_path, .{}) catch return error.FileNotFound;
+    if (prepared_stat.kind != .directory) return error.NotDir;
+
+    if (!replace_existing) {
+        if (pathExists(io, dir, target_path)) return error.PathAlreadyExists;
+        std.Io.Dir.renamePreserve(dir, prepared_path, dir, target_path, io) catch |err| switch (err) {
+            error.FileNotFound => return error.FileNotFound,
+            error.PathAlreadyExists, error.DirNotEmpty => return error.PathAlreadyExists,
+            error.NotDir, error.IsDir => return error.NotDir,
+            error.CrossDevice => return error.CrossDevice,
+            error.NameTooLong => return error.NameTooLong,
+            else => return error.Unexpected,
+        };
+        syncContainingDir(io, dir, target_path) catch return error.Unexpected;
+        return;
+    }
+
+    const target_stat = dir.statFile(io, target_path, .{}) catch return error.FileNotFound;
+    if (target_stat.kind != .directory) return error.NotDir;
+    if (expected_target) |expected| {
+        const current = directoryFingerprint(io, dir, target_path, std.heap.page_allocator) catch return error.Unexpected;
+        if (!std.mem.eql(u8, &expected, &current)) return error.TargetChanged;
+    }
+    if (builtin.os.tag != .linux) return error.OperationUnsupported;
+
+    const linux = std.os.linux;
+    const prepared_z = std.posix.toPosixPath(prepared_path) catch return error.NameTooLong;
+    const target_z = std.posix.toPosixPath(target_path) catch return error.NameTooLong;
+    switch (linux.errno(linux.renameat2(
+        dir.handle,
+        &prepared_z,
+        dir.handle,
+        &target_z,
+        .{ .EXCHANGE = true },
+    ))) {
+        .SUCCESS => {},
+        .NOENT => return error.FileNotFound,
+        .EXIST, .NOTEMPTY => return error.PathAlreadyExists,
+        .NOTDIR, .ISDIR => return error.NotDir,
+        .XDEV => return error.CrossDevice,
+        .NOSYS, .OPNOTSUPP => return error.OperationUnsupported,
+        else => return error.Unexpected,
+    }
+    syncContainingDir(io, dir, target_path) catch return error.Unexpected;
+    if (!std.mem.eql(u8, std.fs.path.dirname(prepared_path) orelse ".", std.fs.path.dirname(target_path) orelse ".")) {
+        syncContainingDir(io, dir, prepared_path) catch return error.Unexpected;
+    }
 }
 
 // -- Directory operations --
