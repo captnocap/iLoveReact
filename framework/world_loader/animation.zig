@@ -1,241 +1,147 @@
-//! Baked clip sampling and player/NPC scene-node posing.
-//!
-//! Animation transforms are sampled without owning clocks, models, or scene nodes.
+//! Saved-character scene-node placement and animation clocks.
 
 const std = @import("std");
 const layout = @import("../layout.zig");
-const pose = @import("../skeleton/pose.zig");
-const constructor = @import("../world/constructor.zig");
 const config = @import("config.zig");
 const state = @import("state.zig");
 const Node = layout.Node;
 const PLAYER_WALK_CYCLES_PER_SECOND = config.PLAYER_WALK_CYCLES_PER_SECOND;
 const PLAYER_RUN_CYCLES_PER_SECOND = config.PLAYER_RUN_CYCLES_PER_SECOND;
-const PLAYER_CLIP_IDLE = config.PLAYER_CLIP_IDLE;
-const PLAYER_CLIP_WALK = config.PLAYER_CLIP_WALK;
-const PLAYER_CLIP_JUMP = config.PLAYER_CLIP_JUMP;
-const PLAYER_CLIP_SIT = config.PLAYER_CLIP_SIT;
-const PLAYER_CLIP_LAY = config.PLAYER_CLIP_LAY;
 const PlayerState = state.PlayerState;
-const NpcRuntime = state.NpcRuntime;
-const clamp = state.clamp;
-const lerp = state.lerp;
-const rotateYLocal = state.rotateYLocal;
 
-pub fn findPlayerClip(animation: constructor.PlayerAnimationSet, clip_id: u32) ?constructor.PlayerAnimationClip {
-    for (animation.clips) |clip| {
-        if (clip.id == clip_id) return clip;
-    }
-    return null;
+pub const SpecimenNodeError = error{
+    NodeUnavailable,
+    AliasedSpecimenNodes,
+};
+
+pub const SkinnedSpecimenView = struct {
+    geometry_key: []const u8,
+    vertices: []const f32,
+    vertex_count: u32,
+    palette: []const f32,
+    bone_count: u32,
+};
+
+pub const StaticSpecimenView = struct {
+    geometry_key: []const u8,
+    vertices: []const f32,
+    vertex_count: u32,
+};
+
+fn validateSpecimenNodes(kids: []const Node, deformed_child: usize, bind_child: usize) SpecimenNodeError!void {
+    if (deformed_child >= kids.len or bind_child >= kids.len) return error.NodeUnavailable;
+    if (deformed_child == bind_child) return error.AliasedSpecimenNodes;
 }
 
-pub fn sampleClipTransform(clip: constructor.PlayerAnimationClip, node_index: usize, t_raw: f32) ?constructor.PlayerTransform {
-    if (clip.keyframes.len == 0) return null;
-    if (node_index >= clip.keyframes[0].transforms.len) return null;
-    const duration = if (clip.duration > 0) clip.duration else 1.0;
-    var t = t_raw;
-    if (clip.looping) {
-        t = @mod(t, duration);
-        if (t < 0) t += duration;
-    } else {
-        t = clamp(t, 0, duration);
-    }
-    if (clip.keyframes.len == 1) return clip.keyframes[0].transforms[node_index];
-
-    var prev = clip.keyframes[0];
-    var next = clip.keyframes[clip.keyframes.len - 1];
-    var i: usize = 1;
-    while (i < clip.keyframes.len) : (i += 1) {
-        if (t <= clip.keyframes[i].time) {
-            next = clip.keyframes[i];
-            break;
-        }
-        prev = clip.keyframes[i];
-    }
-    const span = @max(@as(f32, 0.000001), next.time - prev.time);
-    const k = clamp((t - prev.time) / span, 0, 1);
-    const a = prev.transforms[node_index];
-    const b = next.transforms[node_index];
+fn skinnedNode(view: SkinnedSpecimenView) Node {
     return .{
-        .position = .{ lerp(a.position[0], b.position[0], k), lerp(a.position[1], b.position[1], k), lerp(a.position[2], b.position[2], k) },
-        .rotation = .{ lerp(a.rotation[0], b.rotation[0], k), lerp(a.rotation[1], b.rotation[1], k), lerp(a.rotation[2], b.rotation[2], k) },
-        .scale = .{ lerp(a.scale[0], b.scale[0], k), lerp(a.scale[1], b.scale[1], k), lerp(a.scale[2], b.scale[2], k) },
+        .scene3d_skin_geom_key = view.geometry_key,
+        .scene3d_skin_vertices = view.vertices,
+        .scene3d_skin_vert_count = view.vertex_count,
+        .scene3d_skin_palette = view.palette,
+        .scene3d_skin_bone_count = view.bone_count,
+        .scene3d_color_r = 1,
+        .scene3d_color_g = 1,
+        .scene3d_color_b = 1,
+        .scene3d_color_a = 1,
     };
 }
 
-pub fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constructor.PlayerModelGroup, animation: constructor.PlayerAnimationSet, player: PlayerState, moving: bool, running: bool, airborne: bool) void {
-    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
-    const clip_id: u32 = switch (player.posture) {
-        .sit => PLAYER_CLIP_SIT,
-        .lay => PLAYER_CLIP_LAY,
-        .none => if (airborne) PLAYER_CLIP_JUMP else if (moving or running) PLAYER_CLIP_WALK else PLAYER_CLIP_IDLE,
+fn staticNode(view: StaticSpecimenView) Node {
+    return .{
+        .scene3d_mesh = true,
+        .scene3d_geom_key = view.geometry_key,
+        .scene3d_vertices = view.vertices,
+        .scene3d_vert_count = view.vertex_count,
+        .scene3d_color_r = 1,
+        .scene3d_color_g = 1,
+        .scene3d_color_b = 1,
+        .scene3d_color_a = 1,
     };
-    const clip_time: f32 = if (clip_id == PLAYER_CLIP_WALK) player.gait_phase else if (clip_id == PLAYER_CLIP_JUMP) player.jump_time else 0;
-    const clip = if (animation.node_count == groups.len) findPlayerClip(animation, clip_id) else null;
-    var i: usize = 0;
-    while (i < groups.len) : (i += 1) {
-        const base = groups[i];
-        const base_transform = constructor.PlayerTransform{
-            .position = base.position,
-            .rotation = base.rotation,
-            .scale = base.scale,
-        };
-        const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse base_transform else base_transform;
-        const local = rotateYLocal(t.position, model_yaw_degrees);
-        const node = &kids[first + i];
-        node.scene3d_pos_x = player.x + local.x;
-        node.scene3d_pos_y = player.y + local.y;
-        node.scene3d_pos_z = player.z + local.z;
-        node.scene3d_rot_x = t.rotation[0];
-        node.scene3d_rot_y = t.rotation[1] + model_yaw_degrees;
-        node.scene3d_rot_z = t.rotation[2];
-        node.scene3d_scale_x = t.scale[0];
-        node.scene3d_scale_y = t.scale[1];
-        node.scene3d_scale_z = t.scale[2];
-    }
 }
 
-/// The SKINNED figure updater (SKIN-3499): the same clip selection and
-/// sampling as updatePlayerModelNodes, but instead of writing N part-node
-/// transforms it rewrites the bone PALETTE (model-space matrices with the
-/// inverse-bind folded in — skeleton/pose.zig) and sets the ONE node's root
-/// TRS to the figure's world placement. Clip transforms stay model-local, so
-/// root = T(player) · Ry(yaw) reproduces the legacy per-part composition
-/// exactly under rigid weights.
-pub fn updatePlayerSkinnedNode(
+/// Normal `/play` owns one centered deformed player. The second reserved node
+/// remains empty until an explicit capture target activation.
+pub fn configureSinglePlayerCharacter(
     kids: []Node,
-    first: usize,
-    marker_first: ?usize,
-    skin: constructor.PlayerSkin,
-    palette: []f32,
-    animation: constructor.PlayerAnimationSet,
-    player: PlayerState,
-    moving: bool,
-    running: bool,
-    airborne: bool,
-) void {
-    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
-    const clip_id: u32 = switch (player.posture) {
-        .sit => PLAYER_CLIP_SIT,
-        .lay => PLAYER_CLIP_LAY,
-        .none => if (airborne) PLAYER_CLIP_JUMP else if (moving or running) PLAYER_CLIP_WALK else PLAYER_CLIP_IDLE,
-    };
-    const clip_time: f32 = if (clip_id == PLAYER_CLIP_WALK) player.gait_phase else if (clip_id == PLAYER_CLIP_JUMP) player.jump_time else 0;
-    const clip = if (animation.node_count == skin.bones.len) findPlayerClip(animation, clip_id) else null;
-    for (skin.bones, 0..) |bone, i| {
-        const rest = constructor.PlayerTransform{ .position = bone.center, .rotation = .{ 0, 0, 0 }, .scale = .{ 1, 1, 1 } };
-        const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse rest else rest;
-        pose.writeBonePalette(palette, i, t.position, t.rotation, t.scale, bone.center, bone.color);
-        updatePoseMarker(kids, marker_first, i, t.position, player, model_yaw_degrees);
-    }
-    setSkinnedRoot(&kids[first], player.x, player.y, player.z, model_yaw_degrees);
+    deformed_child: usize,
+    skinned: SkinnedSpecimenView,
+) SpecimenNodeError!void {
+    if (deformed_child >= kids.len) return error.NodeUnavailable;
+    kids[deformed_child] = skinnedNode(skinned);
 }
 
-/// The skinned LIVE-POSE twin: per-bone transforms come straight from the
-/// capture push (n × 9, model-local like clip keys) instead of a clip.
-pub fn updatePlayerSkinnedNodeLive(
+/// Replace both reserved character nodes as one non-fallible-after-validation
+/// operation. The bind specimen is deliberately an ordinary stride-8 mesh and
+/// receives no skin palette, joints, or weights.
+pub fn configurePlayerCharacterSpecimens(
     kids: []Node,
-    first: usize,
-    marker_first: ?usize,
-    skin: constructor.PlayerSkin,
-    palette: []f32,
-    transforms: []const f32,
-    player: PlayerState,
-) void {
-    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
-    const count = @min(skin.bones.len, transforms.len / 9);
-    for (skin.bones[0..count], 0..) |bone, i| {
-        const t = transforms[i * 9 ..][0..9];
-        pose.writeBonePalette(palette, i, .{ t[0], t[1], t[2] }, .{ t[3], t[4], t[5] }, .{ t[6], t[7], t[8] }, bone.center, bone.color);
-        updatePoseMarker(kids, marker_first, i, .{ t[0], t[1], t[2] }, player, model_yaw_degrees);
-    }
-    setSkinnedRoot(&kids[first], player.x, player.y, player.z, model_yaw_degrees);
+    deformed_child: usize,
+    bind_child: usize,
+    skinned: SkinnedSpecimenView,
+    bind: StaticSpecimenView,
+) SpecimenNodeError!void {
+    try validateSpecimenNodes(kids, deformed_child, bind_child);
+
+    kids[deformed_child] = skinnedNode(skinned);
+    kids[bind_child] = staticNode(bind);
 }
 
-/// Put one diagnostic sphere at the same posed bone origin used by the palette.
-/// A bone matrix maps its bind center exactly to `position`; applying the
-/// skinned root's player translation/yaw here therefore shows the renderer's
-/// actual applied joint, not a second camera-space approximation.
-fn updatePoseMarker(
-    kids: []Node,
-    marker_first: ?usize,
-    bone_index: usize,
-    position: [3]f32,
-    player: PlayerState,
-    model_yaw_degrees: f32,
-) void {
-    const first = marker_first orelse return;
-    if (first + bone_index >= kids.len) return;
-    const local = rotateYLocal(position, model_yaw_degrees);
-    const marker = &kids[first + bone_index];
-    marker.scene3d_pos_x = player.x + local.x;
-    marker.scene3d_pos_y = player.y + local.y;
-    marker.scene3d_pos_z = player.z + local.z;
+/// Clear both borrowed node views before either owned artifact is released.
+pub fn disablePlayerCharacterSpecimens(kids: []Node, deformed_child: usize, bind_child: usize) bool {
+    validateSpecimenNodes(kids, deformed_child, bind_child) catch return false;
+    kids[deformed_child] = .{};
+    kids[bind_child] = .{};
+    return true;
 }
 
-fn setSkinnedRoot(node: *Node, x: f32, y: f32, z: f32, yaw_degrees: f32) void {
-    node.scene3d_pos_x = x;
-    node.scene3d_pos_y = y;
-    node.scene3d_pos_z = z;
+fn placeSpecimenNode(node: *Node, player: PlayerState, x_offset: f32, facing_yaw_degrees: f32) void {
+    node.scene3d_pos_x = player.x + x_offset;
+    node.scene3d_pos_y = player.y;
+    node.scene3d_pos_z = player.z;
     node.scene3d_rot_x = 0;
-    node.scene3d_rot_y = yaw_degrees;
+    // +180 is the canonical convention (the authored rig faces -Z); the
+    // asset's own solved facing offset rides on top so any rig stands the
+    // way the world expects (req_4291 — the skeleton owns facing).
+    node.scene3d_rot_y = player.yaw * 180.0 / std.math.pi + 180.0 + facing_yaw_degrees;
     node.scene3d_rot_z = 0;
     node.scene3d_scale_x = 1;
     node.scene3d_scale_y = 1;
     node.scene3d_scale_z = 1;
 }
 
-/// The LIVE-POSE twin (req_2786): identical node math, but the per-node
-/// transforms come straight from the capture push instead of a clip — the
-/// figure mirrors the camera. Transforms are model-local like clip keys.
-pub fn updatePlayerModelNodesLive(kids: []Node, first: usize, groups: []const constructor.PlayerModelGroup, transforms: []const f32, player: PlayerState) void {
-    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
-    var i: usize = 0;
-    while (i < groups.len) : (i += 1) {
-        const t = transforms[i * 9 ..][0..9];
-        const local = rotateYLocal(.{ t[0], t[1], t[2] }, model_yaw_degrees);
-        const node = &kids[first + i];
-        node.scene3d_pos_x = player.x + local.x;
-        node.scene3d_pos_y = player.y + local.y;
-        node.scene3d_pos_z = player.z + local.z;
-        node.scene3d_rot_x = t[3];
-        node.scene3d_rot_y = t[4] + model_yaw_degrees;
-        node.scene3d_rot_z = t[5];
-        node.scene3d_scale_x = t[6];
-        node.scene3d_scale_y = t[7];
-        node.scene3d_scale_z = t[8];
-    }
+pub fn placeSinglePlayerCharacter(kids: []Node, deformed_child: usize, player: PlayerState, facing_yaw_degrees: f32) void {
+    if (deformed_child >= kids.len) return;
+    placeSpecimenNode(&kids[deformed_child], player, 0, facing_yaw_degrees);
 }
 
-/// The NPC twin of updatePlayerModelNodes (req_0935): pose one NPC's child
-/// nodes from its own transform + clip, reusing the SAME findPlayerClip /
-/// sampleClipTransform / rotateYLocal the player figure uses (NPCs share the
-/// PLAYER_ANIMATION clips). Stage 1 leaves clip = IDLE so figures stand.
-pub fn updateNpcModelNodes(kids: []Node, npc: NpcRuntime, groups: []const constructor.PlayerModelGroup, animation: constructor.PlayerAnimationSet) void {
-    const model_yaw_degrees = npc.yaw * 180.0 / std.math.pi + 180.0;
-    const clip_time: f32 = if (npc.clip == PLAYER_CLIP_WALK) npc.gait_phase else 0;
-    const clip = if (animation.node_count == groups.len) findPlayerClip(animation, npc.clip) else null;
-    var i: usize = 0;
-    while (i < groups.len) : (i += 1) {
-        const base = groups[i];
-        const base_transform = constructor.PlayerTransform{
-            .position = base.position,
-            .rotation = base.rotation,
-            .scale = base.scale,
-        };
-        const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse base_transform else base_transform;
-        const local = rotateYLocal(t.position, model_yaw_degrees);
-        const node = &kids[npc.first_child + i];
-        node.scene3d_pos_x = npc.x + local.x;
-        node.scene3d_pos_y = npc.y + local.y;
-        node.scene3d_pos_z = npc.z + local.z;
-        node.scene3d_rot_x = t.rotation[0];
-        node.scene3d_rot_y = t.rotation[1] + model_yaw_degrees;
-        node.scene3d_rot_z = t.rotation[2];
-        node.scene3d_scale_x = t.scale[0];
-        node.scene3d_scale_y = t.scale[1];
-        node.scene3d_scale_z = t.scale[2];
-    }
+/// Capture diagnostics are stage specimens, not the simulated blank-world
+/// player. Keeping this anchor explicit prevents gravity, spawn placement, or
+/// input from carrying the bind/deformed pair out of its measured camera.
+pub fn characterDiagnosticAnchor() PlayerState {
+    return .{ .x = 0, .y = 0, .z = 0, .yaw = 0 };
+}
+
+/// Place intact bind on the left and current deformation on the right around
+/// the player's unchanged camera/physics midpoint. This performs arithmetic
+/// only; the owned static vertex copy is never rebuilt per frame.
+pub fn placePlayerCharacterSpecimens(
+    kids: []Node,
+    deformed_child: usize,
+    bind_child: usize,
+    player: PlayerState,
+    separation_x: f32,
+    facing_yaw_degrees: f32,
+) void {
+    validateSpecimenNodes(kids, deformed_child, bind_child) catch return;
+    if (!std.math.isFinite(separation_x) or separation_x < 0) return;
+    const half_separation = separation_x * 0.5;
+    if (!std.math.isFinite(half_separation) or
+        !std.math.isFinite(player.x - half_separation) or
+        !std.math.isFinite(player.x + half_separation)) return;
+
+    placeSpecimenNode(&kids[bind_child], player, -half_separation, facing_yaw_degrees);
+    placeSpecimenNode(&kids[deformed_child], player, half_separation, facing_yaw_degrees);
 }
 
 pub fn updatePlayerAnimationClock(player: *PlayerState, dt: f32, moving: bool, running: bool, airborne: bool) void {

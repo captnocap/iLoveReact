@@ -279,7 +279,8 @@ fn syncMountedNpcCharacterNodes(runtime: *Runtime) void {
         node.scene3d_pos_x = instance.placement.position[0];
         node.scene3d_pos_y = instance.placement.position[1];
         node.scene3d_pos_z = instance.placement.position[2];
-        node.scene3d_rot_y = instance.placement.yaw_radians * 180.0 / std.math.pi + 180.0;
+        node.scene3d_rot_y = instance.placement.yaw_radians * 180.0 / std.math.pi + 180.0 +
+            instance.asset.facing_yaw_offset_degrees;
         node.scene3d_scale_x = 1;
         node.scene3d_scale_y = 1;
         node.scene3d_scale_z = 1;
@@ -409,6 +410,7 @@ pub fn activateMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) 
         runtime.player_bind_child,
         character_animation.characterDiagnosticAnchor(),
         next_bind.separation_x,
+        runtime.scene.player_character.?.facing_yaw_offset_degrees,
     );
     if (previous) |old| old.deinit();
     if (previous_bind) |*old_bind| old_bind.deinit();

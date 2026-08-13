@@ -68,6 +68,7 @@ const aimPitchLimitsInOrbitSpace = m_camera.aimPitchLimitsInOrbitSpace;
 const setAimMode = m_camera.setAimMode;
 const placeSinglePlayerCharacter = m_animation.placeSinglePlayerCharacter;
 const placePlayerCharacterSpecimens = m_animation.placePlayerCharacterSpecimens;
+const characterDiagnosticAnchor = m_animation.characterDiagnosticAnchor;
 const updatePlayerAnimationClock = m_animation.updatePlayerAnimationClock;
 const STREAM_CELL_METERS = m_streaming_support.STREAM_CELL_METERS;
 const StreamProto = m_streaming_support.StreamProto;
@@ -574,20 +575,27 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
 
     updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), dt);
     if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
-    if (self.scene.player_character != null) {
+    if (self.scene.player_character) |*resident_character| {
+        const facing_yaw = resident_character.facing_yaw_offset_degrees;
         if (self.player_bind_specimen) |*bind| {
+            const specimen_anchor = if (self.player_target_active_owner.value() != null)
+                characterDiagnosticAnchor()
+            else
+                self.player;
             placePlayerCharacterSpecimens(
                 self.kid_list.items,
                 self.player_first_child,
                 self.player_bind_child,
-                self.player,
+                specimen_anchor,
                 bind.separation_x,
+                facing_yaw,
             );
         } else {
             placeSinglePlayerCharacter(
                 self.kid_list.items,
                 self.player_first_child,
                 self.player,
+                facing_yaw,
             );
         }
     }

@@ -1392,7 +1392,8 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     self.root = .{ .children = self.kid_list.items };
     updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), 0);
     if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
-    if (self.scene.player_character != null) {
+    if (self.scene.player_character) |*resident_character| {
+        const facing_yaw = resident_character.facing_yaw_offset_degrees;
         if (self.player_bind_specimen) |*bind| {
             m_animation.placePlayerCharacterSpecimens(
                 self.kid_list.items,
@@ -1400,12 +1401,14 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
                 self.player_bind_child,
                 self.player,
                 bind.separation_x,
+                facing_yaw,
             );
         } else {
             m_animation.placeSinglePlayerCharacter(
                 self.kid_list.items,
                 self.player_first_child,
                 self.player,
+                facing_yaw,
             );
         }
     }
