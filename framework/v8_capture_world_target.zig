@@ -103,7 +103,7 @@ fn closeTarget(
 fn saveMotion(context: ?*anyopaque, directory: []const u8, encoded: []const u8) anyerror!capture.SavedMotion {
     const host = try hostFromContext(context);
     if (directory.len == 0) return error.InvalidMotionDirectory;
-    const trimmed = std.mem.trimRight(u8, directory, "/");
+    const trimmed = std.mem.trimEnd(u8, directory, "/");
 
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(encoded, &hash, .{});
