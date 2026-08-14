@@ -1,32 +1,44 @@
-// runtime/capture/pose.ts — 2D pose estimation over the __pose_* doors.
+// runtime/capture/pose.ts — camera discovery + pose probe over the __pose_* doors.
 //
-// The CAPTURE pipeline's live tracker (req_2786, req_2845): MoveNet
-// SinglePose through the host ONNX worker, reading an OWNED snapshot of a
-// live cam:N render surface. Results return on the FFI bus; inference never
-// occupies the V8/UI thread. Keypoints are source-normalized (0..1, y-down)
-// in COCO order.
+// Live capture inference has NO raw JS door: the native capture session owns
+// the camera lane end to end (req_4390 — the MoveNet-era __pose_estimate_async
+// door is gone, and the capture snapshot's `preview` layer carries live
+// detection dots during calibration). What remains here:
+//   __pose_camera_devices  → validated V4L2 discovery for camera pickers
+//   __pose_estimate_image  → single-image BlazePose solve (33 landmarks +
+//                            metric world positions) for headless verification
+//   __pose_smoothing       → live One Euro tuning (the stability sliders)
 //
 // Importing this file is what gates the `has-onnx` build flag for pose
 // consumers (sdk/dependency-registry.json onnx.triggers) — carts that don't
 // capture pay zero.
 
-import { subscribe } from '../ffi';
-
 const g: any = globalThis;
 
-/** COCO-17 keypoint order — MoveNet's output rows. */
-export const POSE_KEYPOINT_NAMES = [
-  'nose', 'eye_left', 'eye_right', 'ear_left', 'ear_right',
+/** MediaPipe's canonical 33 body landmarks — BlazePose output order. */
+export const POSE_LANDMARK_NAMES = [
+  'nose',
+  'eye_inner_left', 'eye_left', 'eye_outer_left',
+  'eye_inner_right', 'eye_right', 'eye_outer_right',
+  'ear_left', 'ear_right',
+  'mouth_left', 'mouth_right',
   'shoulder_left', 'shoulder_right', 'elbow_left', 'elbow_right',
-  'wrist_left', 'wrist_right', 'hip_left', 'hip_right',
-  'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'wrist_left', 'wrist_right',
+  'pinky_left', 'pinky_right', 'index_left', 'index_right', 'thumb_left', 'thumb_right',
+  'hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'heel_left', 'heel_right', 'foot_index_left', 'foot_index_right',
 ] as const;
-export type PoseKeypointName = typeof POSE_KEYPOINT_NAMES[number];
+export type PoseLandmarkName = typeof POSE_LANDMARK_NAMES[number];
 
-export type PoseKeypoint = { name: PoseKeypointName; x: number; y: number; score: number };
-/** width/height are the inference frame the keypoints are normalized to;
- * hosts older than the dimension-carrying reply omit them. */
-export type PoseFrame = { keypoints: PoseKeypoint[]; elapsedMs: number; width?: number; height?: number };
+export type PoseLandmark = {
+  name: PoseLandmarkName;
+  x: number;
+  y: number;
+  visibility: number;
+  /** Metres, hip-centred (MediaPipe world convention). */
+  world: [number, number, number];
+};
+export type PoseFrame = { presence: number; landmarks: PoseLandmark[] };
 export type PoseResult = PoseFrame | { error: string };
 export type PoseCameraDevice = {
   index: number;
@@ -35,40 +47,6 @@ export type PoseCameraDevice = {
   driver: string;
   bus: string;
 };
-
-/** Live-capture cadence belongs here, beside the transport that enforces one
- * in-flight inference. `targetIntervalMs` is start-to-start, not an extra
- * delay after a slow estimate. */
-export const POSE_CAPTURE_TUNING = Object.freeze({
-  // Start-to-start pacing FLOOR (~30 Hz), not the achieved rate — the loop is
-  // inference-bound and pipelined (req_3542): the next frame submits the
-  // moment a result lands, so the real rate is what the tuned ONNX session
-  // sustains. Render-side interpolation still supplies visual 60 Hz motion.
-  targetIntervalMs: 33,
-  startupDelayMs: 400,
-});
-
-const REQUEST_STATUS_ERROR: Record<number, string> = {
-  1: 'pose tracker busy',
-  2: 'pose worker unavailable',
-  3: 'invalid camera frame',
-  4: 'pose snapshot allocation failed',
-  5: 'pose sources are cam:N / /dev/video only',
-  6: 'no live frame',
-  7: 'bad pose request',
-};
-
-let nextRequestId = 1;
-
-function allocateRequestId(): number {
-  const id = nextRequestId;
-  nextRequestId = nextRequestId >= 0x7ffffffe ? 1 : nextRequestId + 1;
-  return id;
-}
-
-export function poseDoorsAvailable(): boolean {
-  return typeof g.__pose_estimate_async === 'function';
-}
 
 /** Validate the host's V4L2 discovery reply at the bridge. Invalid or
  * duplicate rows never become selectable render sources. */
@@ -112,58 +90,76 @@ export function parsePoseReply(reply: unknown): PoseResult {
     const o = JSON.parse(reply);
     if (!o.ok) return { error: String(o.error ?? 'unknown') };
     const kp: number[] = o.kp ?? [];
-    const keypoints: PoseKeypoint[] = POSE_KEYPOINT_NAMES.map((name, i) => ({
-      name, x: kp[i * 3] ?? 0, y: kp[i * 3 + 1] ?? 0, score: kp[i * 3 + 2] ?? 0,
+    const world: number[] = o.world ?? [];
+    const landmarks: PoseLandmark[] = POSE_LANDMARK_NAMES.map((name, i) => ({
+      name,
+      x: kp[i * 3] ?? 0,
+      y: kp[i * 3 + 1] ?? 0,
+      visibility: kp[i * 3 + 2] ?? 0,
+      world: [world[i * 3] ?? 0, world[i * 3 + 1] ?? 0, world[i * 3 + 2] ?? 0],
     }));
-    const frame: PoseFrame = { keypoints, elapsedMs: Math.max(0, Number(o.elapsed_ms) || 0) };
-    if (Number.isFinite(o.w) && o.w > 0 && Number.isFinite(o.h) && o.h > 0) {
-      frame.width = Number(o.w);
-      frame.height = Number(o.h);
-    }
-    return frame;
+    return { presence: Math.max(0, Math.min(1, Number(o.presence) || 0)), landmarks };
   } catch {
     return { error: 'bad reply' };
   }
 }
 
-/** Queue one live estimate. Returns a cancellation function that detaches the
- * correlated result listener; cancellation never waits for the worker. */
-export function requestPose(src: string, onResult: (result: PoseResult) => void): () => void {
-  if (!poseDoorsAvailable()) {
-    const timer = setTimeout(() => onResult({ error: 'host build has no __pose_estimate_async door' }), 0);
-    return () => clearTimeout(timer);
-  }
-
-  const requestId = allocateRequestId();
-  let cancelled = false;
-  let settled = false;
-  const off = subscribe(`pose:${requestId}`, (payload) => {
-    if (settled) return;
-    settled = true;
-    off();
-    if (!cancelled) onResult(parsePoseReply(payload));
-  });
-
-  let status = 7;
-  try { status = Number(g.__pose_estimate_async(src, requestId)); } catch { status = 2; }
-  let errorTimer: any = null;
-  if (status !== 0) {
-    settled = true;
-    off();
-    errorTimer = setTimeout(() => {
-      if (!cancelled) onResult({ error: REQUEST_STATUS_ERROR[status] ?? `pose request failed (${status})` });
-    }, 0);
-  }
-
-  return () => {
-    cancelled = true;
-    off();
-    if (errorTimer) clearTimeout(errorTimer);
-  };
-}
-
 /** One estimate off an image file — the headless verification path. */
-export function estimatePoseImage(path: string): PoseFrame | { error: string } {
+export function estimatePoseImage(path: string): PoseResult {
   if (typeof g.__pose_estimate_image !== 'function') return { error: 'host build has no __pose_estimate_image door' };
   return parsePoseReply(g.__pose_estimate_image(path));
+}
+
+/** The live-tunable smoothing surface (req_4391). min cutoffs — LOWER is
+ * calmer when still; betas — HIGHER follows fast motion sooner;
+ * visibilityAlpha — LOWER means steadier confidence gates. */
+export type PoseSmoothingTuning = {
+  screenMinCutoff: number;
+  screenBeta: number;
+  worldMinCutoff: number;
+  worldBeta: number;
+  auxMinCutoff: number;
+  auxBeta: number;
+  visibilityAlpha: number;
+};
+
+export const POSE_SMOOTHING_DEFAULTS: PoseSmoothingTuning = Object.freeze({
+  screenMinCutoff: 0.05,
+  screenBeta: 80,
+  worldMinCutoff: 0.1,
+  worldBeta: 40,
+  auxMinCutoff: 0.01,
+  auxBeta: 10,
+  visibilityAlpha: 0.1,
+});
+
+function parseSmoothingReply(reply: unknown): PoseSmoothingTuning | null {
+  if (typeof reply !== 'string') return null;
+  try {
+    const o = JSON.parse(reply);
+    const fields = Object.keys(POSE_SMOOTHING_DEFAULTS) as (keyof PoseSmoothingTuning)[];
+    const out = {} as PoseSmoothingTuning;
+    for (const field of fields) {
+      const value = Number(o[field]);
+      if (!Number.isFinite(value)) return null;
+      out[field] = value;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the host's current smoothing tuning, or null without the door. */
+export function getPoseSmoothing(): PoseSmoothingTuning | null {
+  if (typeof g.__pose_smoothing !== 'function') return null;
+  try { return parseSmoothingReply(g.__pose_smoothing()); } catch { return null; }
+}
+
+/** Apply partial smoothing tuning over the host's current values; returns
+ * the full applied tuning (the host rejects out-of-range values wholesale,
+ * in which case the returned tuning is the unchanged current one). */
+export function setPoseSmoothing(partial: Partial<PoseSmoothingTuning>): PoseSmoothingTuning | null {
+  if (typeof g.__pose_smoothing !== 'function') return null;
+  try { return parseSmoothingReply(g.__pose_smoothing(JSON.stringify(partial))); } catch { return null; }
 }

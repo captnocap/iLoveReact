@@ -154,8 +154,8 @@ targets 90 ms between ingested frames. Bone-local translations never cross this 
 | `__compiled_world_set_player_character` | stages one already-bound saved character (RJMD/RJSK reopened + hash-checked natively); returns the bone-ID palette |
 | `__compiled_world_set_player_pose` | publishes one complete v1 frame as owner `compiled-world-host`; empty bytes release the override so clips resume; refused with `CharacterPoseOwnedByCapture` while a capture session owns the target |
 | `__compiled_world_npc_character_session` | explicit NPC instances over the same CharacterAsset path |
-| `__capture_session` | the native capture/retarget session (openTarget / calibrate / freeze / resume / record / recordStop / poseKey / snapshot / close) |
-| `__pose_estimate_async` / `__pose_camera_devices` | legacy MoveNet inference over a cam:N surface (ground-truth probe + pre-calibration preview); capture itself runs the BlazePose lane (req_4387) |
+| `__capture_session` | the native capture/retarget session (openTarget / calibrate / freeze / resume / record / recordStop / poseKey / snapshot / close); its snapshot carries a pre-triplet `preview` layer so detection dots are live during calibration |
+| `__pose_camera_devices` / `__pose_estimate_image` / `__pose_smoothing` | V4L2 discovery, single-image 33-pt BlazePose probe, and the live One Euro tuning door behind the workbench's stability sliders. There is NO raw live-inference JS door — the MoveNet lane was deleted (req_4390) |
 
 Ownership law: pose ownership is a single named owner (`OwnerId`, 64 bytes). Capture
 activation and the direct host door cannot fight — whoever owns, owns all bones, and a

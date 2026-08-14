@@ -1452,26 +1452,26 @@ pub fn build(b: *std.Build) void {
     // Pins the live-inference boundary: camera bytes are copied before the
     // render thread mutates them, only one frame may occupy the pipeline, and
     // shutdown/result backpressure never grows a latent frame queue.
-    const pose_mailbox_mod_for_tests = b.createModule(.{
-        .root_source_file = b.path("framework/ml/pose_mailbox.zig"),
+    const inference_mailbox_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/ml/inference_mailbox.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    const pose_mailbox_test_mod = b.createModule(.{
-        .root_source_file = b.path("framework/testing/unit/pose_mailbox.zig"),
+    const inference_mailbox_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/inference_mailbox.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    pose_mailbox_test_mod.addImport("pose_mailbox", pose_mailbox_mod_for_tests);
-    const pose_mailbox_test = b.addTest(.{
-        .name = "pose-mailbox-test",
-        .root_module = pose_mailbox_test_mod,
+    inference_mailbox_test_mod.addImport("inference_mailbox", inference_mailbox_mod_for_tests);
+    const inference_mailbox_test = b.addTest(.{
+        .name = "inference-mailbox-test",
+        .root_module = inference_mailbox_test_mod,
     });
-    const run_pose_mailbox_test = b.addRunArtifact(pose_mailbox_test);
-    const pose_mailbox_test_step = b.step("test-pose-mailbox", "Run live pose worker mailbox tests");
-    pose_mailbox_test_step.dependOn(&run_pose_mailbox_test.step);
+    const run_inference_mailbox_test = b.addRunArtifact(inference_mailbox_test);
+    const inference_mailbox_test_step = b.step("test-inference-mailbox", "Run live inference worker mailbox tests");
+    inference_mailbox_test_step.dependOn(&run_inference_mailbox_test.step);
 
     // V4L2 camera discovery (req_2846): querycap filtering must never expose
     // a camera's metadata companion as if it were a usable image source.
@@ -1549,35 +1549,8 @@ pub fn build(b: *std.Build) void {
 
     // ONNX-backed worker integration: explicit (not part of lean test steps),
     // because it links the vendored runtime and optionally loads the user's
-    // MoveNet model. A missing model is a valid surfaced worker result.
+    // vendored models. A missing model is a valid surfaced worker result.
     if (os_tag == .linux) {
-        const pose_mod_for_tests = b.createModule(.{
-            .root_source_file = b.path("framework/ml/pose.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        });
-        pose_mod_for_tests.addIncludePath(b.path("deps/onnxruntime/include"));
-        pose_mod_for_tests.addIncludePath(b.path("."));
-        const pose_async_test_mod = b.createModule(.{
-            .root_source_file = b.path("framework/testing/unit/pose_async.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        });
-        pose_async_test_mod.addImport("pose", pose_mod_for_tests);
-        const pose_async_test = b.addTest(.{
-            .name = "pose-async-test",
-            .root_module = pose_async_test_mod,
-        });
-        pose_async_test.root_module.addLibraryPath(b.path("deps/onnxruntime/lib"));
-        pose_async_test.root_module.linkSystemLibrary("onnxruntime", .{});
-        pose_async_test.root_module.addRPath(b.path("deps/onnxruntime/lib"));
-        const run_pose_async_test = b.addRunArtifact(pose_async_test);
-        run_pose_async_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/onnxruntime/lib"));
-        const pose_async_test_step = b.step("test-pose-async", "Run ONNX-backed live pose worker integration test");
-        pose_async_test_step.dependOn(&run_pose_async_test.step);
-
         // BlazePose lane (req_4387): contract checks run model-free; the
         // lifecycle test additionally proves output-shape resolution when the
         // vendored models are installed. RJIT_BLAZEPOSE_IMAGE=/path.jpg is the

@@ -12,10 +12,6 @@
 #   blazepose_landmarks.onnx  input f32[1,256,256,3] in [0,1]
 #                             → [1,195] screen landmarks, [1,1] presence,
 #                               [1,117] WORLD landmarks (metres, hip-centred)
-#
-# MoveNet SinglePose Lightning (req_2786, framework/ml/pose.zig) — the legacy
-# lane, kept only while the __pose_estimate_async door still serves as a
-# ground-truth probe. Signature: input i32[1,192,192,3], output f32[1,1,17,3].
 set -e
 DIR="$HOME/.reactjit/models"
 mkdir -p "$DIR"
@@ -34,4 +30,3 @@ fetch() {
 
 fetch blazepose_detector.onnx "https://huggingface.co/fernandotonon/QtMeshEditor-blazepose-onnx/resolve/main/pose_detector.onnx"
 fetch blazepose_landmarks.onnx "https://huggingface.co/fernandotonon/QtMeshEditor-poselandmarks-onnx/resolve/main/pose_landmarks.onnx"
-fetch movenet_lightning.onnx "https://huggingface.co/Xenova/movenet-singlepose-lightning/resolve/main/onnx/model.onnx"

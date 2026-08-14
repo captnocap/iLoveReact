@@ -50,6 +50,7 @@ declare global {
   function __model_focus_at(...args: unknown[]): unknown;
   function __mesh_edit_mode(...args: unknown[]): unknown;
   function __mesh_edit_xray(...args: unknown[]): unknown;
+  function __mesh_edit_persistent_additive(...args: unknown[]): unknown;
   function __mesh_edit_mirror(...args: unknown[]): unknown;
   function __mesh_edit_pick(...args: unknown[]): unknown;
   function __mesh_edit_clear(...args: unknown[]): unknown;
@@ -58,6 +59,7 @@ declare global {
   function __mesh_edit_focus(...args: unknown[]): unknown;
   function __mesh_gizmo_tool(...args: unknown[]): unknown;
   function __mesh_gizmo_nudge(...args: unknown[]): unknown;
+  function __mesh_curve_pull_arm(...args: unknown[]): unknown;
   function __mesh_gizmo_scale_by(...args: unknown[]): unknown;
   function __mesh_align_loop(...args: unknown[]): unknown;
   function __mesh_transform_translate(...args: unknown[]): unknown;
@@ -634,9 +636,9 @@ declare global {
   function __segment_open(...args: unknown[]): unknown;
   function __segment_close(...args: unknown[]): unknown;
   function __segment_refine(...args: unknown[]): unknown;
-  function __pose_estimate_async(...args: unknown[]): unknown;
   function __pose_estimate_image(...args: unknown[]): unknown;
   function __pose_camera_devices(...args: unknown[]): unknown;
+  function __pose_smoothing(...args: unknown[]): unknown;
   function __capture_session(...args: unknown[]): unknown;
 
   // pg (framework/v8_bindings_pg.zig)

@@ -197,6 +197,10 @@
           "zig": "hostMeshEditXray"
         },
         {
+          "js": "__mesh_edit_persistent_additive",
+          "zig": "hostMeshEditPersistentAdditive"
+        },
+        {
           "js": "__mesh_edit_mirror",
           "zig": "hostMeshEditMirror"
         },
@@ -227,6 +231,10 @@
         {
           "js": "__mesh_gizmo_nudge",
           "zig": "hostMeshGizmoNudge"
+        },
+        {
+          "js": "__mesh_curve_pull_arm",
+          "zig": "hostMeshCurvePullArm"
         },
         {
           "js": "__mesh_gizmo_scale_by",
@@ -2558,16 +2566,16 @@
           "zig": "hostSegmentRefine"
         },
         {
-          "js": "__pose_estimate_async",
-          "zig": "hostPoseEstimateAsync"
-        },
-        {
           "js": "__pose_estimate_image",
           "zig": "hostPoseEstimateImage"
         },
         {
           "js": "__pose_camera_devices",
           "zig": "hostPoseCameraDevices"
+        },
+        {
+          "js": "__pose_smoothing",
+          "zig": "hostPoseSmoothing"
         },
         {
           "js": "__capture_session",

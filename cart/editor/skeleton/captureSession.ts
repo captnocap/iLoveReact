@@ -42,6 +42,30 @@ function finiteVec3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((component) => Number.isFinite(component));
 }
 
+function requireLandmarkFrame(frame: {
+  timestampMs: number;
+  presence: number;
+  landmarks: { name: string; x: number; y: number; visibility: number }[];
+}): void {
+  if (!Number.isFinite(frame.timestampMs) || !Number.isFinite(frame.presence) ||
+      frame.presence < 0 || frame.presence > 1 ||
+      !Array.isArray(frame.landmarks) || frame.landmarks.length !== WORLD_LANDMARK_IDS.length) {
+    throw new CaptureSessionFault('capture host returned malformed detected landmarks');
+  }
+  const names = new Set<string>();
+  for (const point of frame.landmarks) {
+    if (!point || typeof point.name !== 'string' || point.name.length === 0 || names.has(point.name) ||
+        !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.visibility) ||
+        point.visibility < 0 || point.visibility > 1) {
+      throw new CaptureSessionFault('capture host returned malformed detected landmarks');
+    }
+    names.add(point.name);
+  }
+  if (!exactIdSet(names, WORLD_LANDMARK_IDS)) {
+    throw new CaptureSessionFault('capture host returned an unstable landmark vocabulary');
+  }
+}
+
 export type CaptureSessionDoor = (requestJson: string) => unknown;
 
 export class CaptureSessionFault extends Error {
@@ -105,25 +129,16 @@ function requireSnapshot(
     throw new CaptureSessionFault('capture host returned malformed calibration state');
   }
   const promotedFrameId = captureSnapshotFrameId(value);
-  if (value.detected) {
-    if (!Number.isFinite(value.detected.timestampMs) || !Number.isFinite(value.detected.presence) ||
-        value.detected.presence < 0 || value.detected.presence > 1 ||
-        !Array.isArray(value.detected.landmarks) ||
-        value.detected.landmarks.length !== WORLD_LANDMARK_IDS.length) {
-      throw new CaptureSessionFault('capture host returned malformed detected landmarks');
+  if (value.detected) requireLandmarkFrame(value.detected);
+  if (value.preview) {
+    if (value.detected) {
+      throw new CaptureSessionFault('capture host served a preview beside a promoted triplet');
     }
-    const names = new Set<string>();
-    for (const point of value.detected.landmarks) {
-      if (!point || typeof point.name !== 'string' || point.name.length === 0 || names.has(point.name) ||
-          !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.visibility) ||
-          point.visibility < 0 || point.visibility > 1) {
-        throw new CaptureSessionFault('capture host returned malformed detected landmarks');
-      }
-      names.add(point.name);
+    if (!Number.isFinite(value.preview.frameWidth) || value.preview.frameWidth <= 0 ||
+        !Number.isFinite(value.preview.frameHeight) || value.preview.frameHeight <= 0) {
+      throw new CaptureSessionFault('capture host returned malformed preview dimensions');
     }
-    if (!exactIdSet(names, WORLD_LANDMARK_IDS)) {
-      throw new CaptureSessionFault('capture host returned an unstable landmark vocabulary');
-    }
+    requireLandmarkFrame(value.preview.detected);
   }
   if (value.source) {
     if (!Array.isArray(value.source.joints) || value.source.joints.length !== SOURCE_JOINT_IDS.length) {

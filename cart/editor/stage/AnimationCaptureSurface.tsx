@@ -10,7 +10,7 @@
 
 import { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Graph, Pressable, Row, Text } from '@reactjit/primitives';
-import { RenderTarget } from '../../../runtime/primitives';
+import { RenderTarget, Slider } from '../../../runtime/primitives';
 import type {
   CaptureSessionSnapshot,
   SourceJoint3D,
@@ -18,7 +18,12 @@ import type {
   TargetSkeletonBoneDiagnostic,
 } from '../../../runtime/skeleton';
 import type { ModelPackage } from '../data/types';
-import { listPoseCameraDevices, requestPose, type PoseCameraDevice } from '../../../runtime/capture/pose';
+import {
+  POSE_SMOOTHING_DEFAULTS,
+  listPoseCameraDevices,
+  setPoseSmoothing,
+  type PoseCameraDevice,
+} from '../../../runtime/capture/pose';
 import { C } from '../workspace.cls';
 import { EDITOR_GAME_FILE, EDITOR_STORE_DIR } from './WorldEditorSurface';
 import {
@@ -55,6 +60,54 @@ const CAPTURE_UI_TUNING = Object.freeze({
 
 const DEFAULT_CAMERA_SOURCE = 'cam:0';
 const CAMERA_SOURCE_STORE_KEY = 'editor.animation.cameraSource';
+const SMOOTHING_STORE_KEY = 'editor.animation.smoothing';
+
+// The stability dials (req_4391): three hand-tunable factors over the native
+// One Euro stack, each a 0.1×..10× log scale centred on MediaPipe's proven
+// defaults (slider middle = 1×). SMOOTHING divides the min cutoffs (right =
+// calmer when still), RESPONSE multiplies the betas (right = follows fast
+// motion sooner), GATE divides the visibility low-pass alpha (right =
+// steadier confidence gates, slower limb appear/vanish).
+type SmoothingFactors = { smooth: number; response: number; gate: number };
+const DEFAULT_SMOOTHING_FACTORS: SmoothingFactors = Object.freeze({ smooth: 0.5, response: 0.5, gate: 0.5 });
+const factorScale = (t: number): number => Math.pow(10, (t - 0.5) * 2);
+
+function applySmoothingFactors(factors: SmoothingFactors): void {
+  const smooth = factorScale(factors.smooth);
+  const response = factorScale(factors.response);
+  const gate = factorScale(factors.gate);
+  setPoseSmoothing({
+    screenMinCutoff: POSE_SMOOTHING_DEFAULTS.screenMinCutoff / smooth,
+    worldMinCutoff: POSE_SMOOTHING_DEFAULTS.worldMinCutoff / smooth,
+    auxMinCutoff: POSE_SMOOTHING_DEFAULTS.auxMinCutoff / smooth,
+    screenBeta: POSE_SMOOTHING_DEFAULTS.screenBeta * response,
+    worldBeta: POSE_SMOOTHING_DEFAULTS.worldBeta * response,
+    auxBeta: POSE_SMOOTHING_DEFAULTS.auxBeta * response,
+    visibilityAlpha: Math.min(1, POSE_SMOOTHING_DEFAULTS.visibilityAlpha / gate),
+  });
+}
+
+function readStoredSmoothingFactors(): SmoothingFactors {
+  try {
+    const raw = typeof g.__store_get === 'function' ? g.__store_get(SMOOTHING_STORE_KEY) : null;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+    const clamp01 = (value: unknown, fallback: number) =>
+      Number.isFinite(Number(value)) ? Math.max(0, Math.min(1, Number(value))) : fallback;
+    return {
+      smooth: clamp01(parsed?.smooth, DEFAULT_SMOOTHING_FACTORS.smooth),
+      response: clamp01(parsed?.response, DEFAULT_SMOOTHING_FACTORS.response),
+      gate: clamp01(parsed?.gate, DEFAULT_SMOOTHING_FACTORS.gate),
+    };
+  } catch {
+    return { ...DEFAULT_SMOOTHING_FACTORS };
+  }
+}
+
+function persistSmoothingFactors(factors: SmoothingFactors): void {
+  try {
+    if (typeof g.__store_set === 'function') g.__store_set(SMOOTHING_STORE_KEY, JSON.stringify(factors));
+  } catch { /* tuning stays live for this session either way */ }
+}
 const DEFAULT_CAMERA: PoseCameraDevice = {
   index: 0,
   source: DEFAULT_CAMERA_SOURCE,
@@ -318,6 +371,26 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   const [viewportNodeId, setViewportNodeId] = useState(0);
   const [snapshot, setSnapshot] = useState<CaptureSessionSnapshot | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [smoothingFactors, setSmoothingFactors] = useState<SmoothingFactors>(readStoredSmoothingFactors);
+  // The tuning is host-process-global: re-apply the saved dials on every
+  // mount so a rebuilt/hot-reloaded host starts where the hand left off.
+  useEffect(() => {
+    applySmoothingFactors(smoothingFactors);
+  }, []);
+  const adjustSmoothing = (key: keyof SmoothingFactors) => (value: number) => {
+    setSmoothingFactors((current) => {
+      const next = { ...current, [key]: Math.max(0, Math.min(1, value)) };
+      applySmoothingFactors(next);
+      persistSmoothingFactors(next);
+      return next;
+    });
+  };
+  const resetSmoothing = () => {
+    const next = { ...DEFAULT_SMOOTHING_FACTORS };
+    applySmoothingFactors(next);
+    persistSmoothingFactors(next);
+    setSmoothingFactors(next);
+  };
 
   const discoveredChoices = cameras.length > 0 ? cameras : [DEFAULT_CAMERA];
   // A selected source the scan missed stays pickable/visible instead of
@@ -457,35 +530,23 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
     confidence: landmark.visibility,
   }));
 
-  // Pre-calibration live preview (req_4263): until the native session promotes
-  // its first completed triplet, the camera pane shows raw MoveNet detections
-  // through the legacy async door so detection is visible the moment the feed
-  // opens. Native triplet keypoints replace the preview the instant they exist;
-  // the preview never feeds calibration, reconstruction, or the target rig.
+  // Pre-triplet live preview (req_4390): during calibration the native
+  // session already runs the full pipeline every frame — the snapshot's
+  // `preview` layer carries those landmarks, so detection is visible the
+  // moment the session opens with ZERO extra inference. Promoted triplet
+  // landmarks supersede it natively.
   const nativeDetected = detectedKeypoints.length > 0;
-  const [previewKeypoints, setPreviewKeypoints] = useState<{ name: string; x: number; y: number; confidence: number }[]>([]);
+  const preview = snapshot?.preview ?? null;
+  const previewKeypoints = useMemo(() => (preview?.detected.landmarks ?? []).map((landmark) => ({
+    name: landmark.name,
+    x: landmark.x,
+    y: landmark.y,
+    confidence: landmark.visibility,
+  })), [preview]);
   const [feedFrameAspect, setFeedFrameAspect] = useState<number | null>(null);
   useEffect(() => {
-    if (nativeDetected) {
-      setPreviewKeypoints([]);
-      return;
-    }
-    let cancelRequest: (() => void) | null = null;
-    const timer = setInterval(() => {
-      cancelRequest?.();
-      cancelRequest = requestPose(cameraSrc, (result) => {
-        if ('error' in result) return; // transient busy/no-frame; next tick retries
-        if (result.width && result.height) setFeedFrameAspect(result.width / result.height);
-        setPreviewKeypoints(result.keypoints.map((keypoint) => ({
-          name: keypoint.name,
-          x: keypoint.x,
-          y: keypoint.y,
-          confidence: keypoint.score,
-        })));
-      });
-    }, 200);
-    return () => { clearInterval(timer); cancelRequest?.(); };
-  }, [cameraSrc, nativeDetected]);
+    if (preview && preview.frameHeight > 0) setFeedFrameAspect(preview.frameWidth / preview.frameHeight);
+  }, [preview]);
 
   // Landmark x/y are normalized to the camera frame, but RenderTarget paints
   // that frame contain-fit inside the 4:3 feed box (render_surfaces aspect
@@ -627,9 +688,37 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
                 <Text style={{ color: '#8e9baa', fontSize: 9, fontFamily: 'monospace' }}>{`${confidentKeypoints.length}/${displayKeypoints.length || 33} landmarks ≥ 0.5`}</Text>
                 <Text style={{ color: '#8e9baa', fontSize: 9, fontFamily: 'monospace' }}>{`mean confidence ${meanConfidence.toFixed(2)}`}</Text>
                 {!nativeDetected && displayKeypoints.length > 0 ? (
-                  <Text style={{ color: '#d6ad61', fontSize: 9, fontFamily: 'monospace' }}>live preview · calibrate to track</Text>
+                  <Text style={{ color: '#d6ad61', fontSize: 9, fontFamily: 'monospace' }}>live detection · calibrating</Text>
                 ) : null}
               </Row>
+              <Col style={{ width: CAPTURE_UI_TUNING.feedWidth, marginTop: 10, paddingLeft: 2, paddingRight: 2, gap: 5 }}>
+                <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ color: '#758090', fontSize: 9, fontFamily: 'monospace', fontWeight: '700' }}>STABILITY</Text>
+                  <Pressable onPress={resetSmoothing} style={{ height: 20, paddingLeft: 7, paddingRight: 7, justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#343943', backgroundColor: '#11151c' }}>
+                    <Text style={{ color: '#8b949e', fontSize: 8, fontFamily: 'monospace' }}>RESET</Text>
+                  </Pressable>
+                </Row>
+                {([
+                  ['smooth', 'SMOOTHING'],
+                  ['response', 'RESPONSE'],
+                  ['gate', 'GATE'],
+                ] as const).map(([key, label]) => (
+                  <Row key={key} style={{ alignItems: 'center', gap: 8 }}>
+                    <Text style={{ width: 74, color: '#8e9baa', fontSize: 9, fontFamily: 'monospace' }}>{label}</Text>
+                    <Slider
+                      value={smoothingFactors[key]}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      onChange={adjustSmoothing(key)}
+                      style={{ flexGrow: 1, height: 18 }}
+                    />
+                    <Text style={{ width: 42, color: '#9fb2c5', fontSize: 9, fontFamily: 'monospace', textAlign: 'right' }}>
+                      {`×${factorScale(smoothingFactors[key]).toFixed(1)}`}
+                    </Text>
+                  </Row>
+                ))}
+              </Col>
             </Col>
           </Col>
 

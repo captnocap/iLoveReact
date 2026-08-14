@@ -17,8 +17,9 @@
 //!   __segment_close(handle)                         → void
 //!
 //! Segmentation remains synchronous (one-shot image/refine interactions).
-//! Live pose inference is different: __pose_estimate_async snapshots a camera
-//! frame into pose.zig's bounded worker and tickDrain emits the result.
+//! Live pose inference runs on the BlazePose lane: the capture session
+//! submits camera frames into blazepose.zig's bounded worker and tickDrain
+//! routes completions back (req_4387; the MoveNet lane died in req_4390).
 
 const std = @import("std");
 const v8 = @import("v8");
@@ -26,7 +27,6 @@ const v8_runtime = @import("v8_runtime.zig");
 const HostContext = @import("host_context.zig");
 const onnx = @import("ml/onnx.zig");
 const segment = @import("ml/segment.zig");
-const pose = @import("ml/pose.zig");
 const blazepose = @import("ml/blazepose.zig");
 const render_surfaces = @import("render/render_surfaces.zig");
 const video_devices = @import("render/video_devices.zig");
@@ -266,83 +266,14 @@ fn hostSegmentRefine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnString(info, reply);
 }
 
-// ── Pose host fns (req_2786 — the CAPTURE pipeline's per-frame tracker) ──────
-// __pose_estimate_async(src, requestId) → immediate numeric enqueue status;
-//                               result emits on `pose:<requestId>` as JSON
-//                               {ok, kp:[x,y,s ×17], elapsed_ms}. The frame is
-//                               copied from a LIVE cam:N / /dev/video surface
-//                               (SELFSHOT: never screen:/window: sources).
-// __pose_estimate_image(path) → same, from an image file (headless verify).
+// ── Pose host fns (req_4387/req_4390 — BlazePose only) ──────────────────────
+// __pose_estimate_image(path) → single-image BlazePose solve (headless
+//                               verify / agent probe): {ok, presence,
+//                               kp:[x,y,visibility ×33], world:[x,y,z ×33 m]}.
 // __pose_camera_devices()     → named V4L2 image-capture nodes (metadata-only
 //                               companions are filtered by VIDIOC_QUERYCAP).
-// Keypoints are source-normalized 0..1, COCO order (nose, eyes, ears,
-// shoulders, elbows, wrists, hips, knees, ankles — L before R).
-
-fn poseReply(info: v8.FunctionCallbackInfo, alloc: std.mem.Allocator, kps: ?[pose.KEYPOINTS]pose.Keypoint) void {
-    const points = kps orelse {
-        const msg = pose.initError() orelse "no frame";
-        const escaped = jsonEscape(alloc, msg) catch msg;
-        const payload = std.fmt.allocPrint(alloc, "{{\"ok\":false,\"error\":\"{s}\"}}", .{escaped}) catch {
-            setReturnString(info, "{\"ok\":false,\"error\":\"alloc failure\"}");
-            return;
-        };
-        setReturnString(info, payload);
-        return;
-    };
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(alloc);
-    out.appendSlice(alloc, "{\"ok\":true,\"kp\":[") catch return;
-    for (points, 0..) |kp, i| {
-        const chunk = std.fmt.allocPrint(alloc, "{s}{d:.4},{d:.4},{d:.3}", .{ if (i == 0) "" else ",", kp.x, kp.y, kp.score }) catch return;
-        out.appendSlice(alloc, chunk) catch return;
-    }
-    out.appendSlice(alloc, "]}") catch return;
-    setReturnString(info, out.items);
-}
-
-const PoseRequestStatus = enum(i32) {
-    queued = @intFromEnum(pose.SubmitStatus.queued),
-    busy = @intFromEnum(pose.SubmitStatus.busy),
-    worker_stopped = @intFromEnum(pose.SubmitStatus.stopped),
-    invalid_frame = @intFromEnum(pose.SubmitStatus.invalid_frame),
-    out_of_memory = @intFromEnum(pose.SubmitStatus.out_of_memory),
-    invalid_source = 5,
-    no_live_frame = 6,
-    bad_request = 7,
-};
-
-fn setPoseRequestStatus(info: v8.FunctionCallbackInfo, status: PoseRequestStatus) void {
-    info.getReturnValue().set(v8.Integer.initI32(info.getIsolate(), @intFromEnum(status)));
-}
-
-fn hostPoseEstimateAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const host = v8_runtime.hostContext(info.getIsolate());
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-    const src = argString(info, 0, alloc) orelse {
-        setPoseRequestStatus(info, .bad_request);
-        return;
-    };
-    const request_i32 = argI32(info, 1, -1);
-    if (request_i32 < 0) {
-        setPoseRequestStatus(info, .bad_request);
-        return;
-    }
-    // The camera-only law (SELFSHOT): the pose tracker reads the USER's cam
-    // feed, never a desktop surface.
-    if (!std.mem.startsWith(u8, src, "cam:") and !std.mem.startsWith(u8, src, "/dev/video")) {
-        setPoseRequestStatus(info, .invalid_source);
-        return;
-    }
-    const frame = render_surfaces.latestCpuFrame(src) orelse {
-        setPoseRequestStatus(info, .no_live_frame);
-        return;
-    };
-    const status = pose.enqueueRgba(host.io, @intCast(request_i32), frame.rgba, frame.width, frame.height);
-    setPoseRequestStatus(info, @enumFromInt(@intFromEnum(status)));
-}
+// Live inference has NO raw JS door: the capture session owns the camera
+// lane end to end (framework/v8_bindings_capture_session.zig).
 
 fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -358,7 +289,39 @@ fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setReturnString(info, "{\"ok\":false,\"error\":\"alloc failure\"}");
         return;
     };
-    poseReply(info, alloc, pose.estimateImage(host.io, host.environ, path_z.ptr));
+    const frame = blazepose.estimateImage(host.io, host.environ, path_z.ptr) orelse {
+        const msg = blazepose.initError() orelse "no frame";
+        const escaped = jsonEscape(alloc, msg) catch msg;
+        const payload = std.fmt.allocPrint(alloc, "{{\"ok\":false,\"error\":\"{s}\"}}", .{escaped}) catch {
+            setReturnString(info, "{\"ok\":false,\"error\":\"alloc failure\"}");
+            return;
+        };
+        setReturnString(info, payload);
+        return;
+    };
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(alloc);
+    const header = std.fmt.allocPrint(alloc, "{{\"ok\":true,\"presence\":{d:.3},\"kp\":[", .{frame.presence}) catch return;
+    out.appendSlice(alloc, header) catch return;
+    for (frame.landmarks, 0..) |landmark, i| {
+        const chunk = std.fmt.allocPrint(
+            alloc,
+            "{s}{d:.4},{d:.4},{d:.3}",
+            .{ if (i == 0) "" else ",", landmark.x, landmark.y, landmark.visibility },
+        ) catch return;
+        out.appendSlice(alloc, chunk) catch return;
+    }
+    out.appendSlice(alloc, "],\"world\":[") catch return;
+    for (frame.landmarks, 0..) |landmark, i| {
+        const chunk = std.fmt.allocPrint(
+            alloc,
+            "{s}{d:.4},{d:.4},{d:.4}",
+            .{ if (i == 0) "" else ",", landmark.world[0], landmark.world[1], landmark.world[2] },
+        ) catch return;
+        out.appendSlice(alloc, chunk) catch return;
+    }
+    out.appendSlice(alloc, "]}") catch return;
+    setReturnString(info, out.items);
 }
 
 fn hostPoseCameraDevices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -393,6 +356,67 @@ fn hostPoseCameraDevices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, out.items);
 }
 
+// __pose_smoothing(json?) → read/write the live BlazePose smoothing tuning
+// (req_4391 — the capture workbench's stability sliders). With no argument
+// it reports current values; with a JSON object it applies the given fields
+// over the current tuning (rejected wholesale when out of range). Reply is
+// always the full current tuning.
+fn hostPoseSmoothing(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var accepted = true;
+    if (argString(info, 0, alloc)) |raw| {
+        if (raw.len > 0) {
+            accepted = false;
+            if (std.json.parseFromSlice(std.json.Value, alloc, raw, .{}) catch null) |parsed| {
+                if (parsed.value == .object) {
+                    var tuning = blazepose.smoothing(host.io);
+                    applySmoothingField(parsed.value.object, "screenMinCutoff", &tuning.screen_min_cutoff);
+                    applySmoothingField(parsed.value.object, "screenBeta", &tuning.screen_beta);
+                    applySmoothingField(parsed.value.object, "worldMinCutoff", &tuning.world_min_cutoff);
+                    applySmoothingField(parsed.value.object, "worldBeta", &tuning.world_beta);
+                    applySmoothingField(parsed.value.object, "auxMinCutoff", &tuning.aux_min_cutoff);
+                    applySmoothingField(parsed.value.object, "auxBeta", &tuning.aux_beta);
+                    applySmoothingField(parsed.value.object, "visibilityAlpha", &tuning.visibility_alpha);
+                    accepted = blazepose.setSmoothing(host.io, tuning);
+                }
+            }
+        }
+    }
+    const current = blazepose.smoothing(host.io);
+    const payload = std.fmt.allocPrint(
+        alloc,
+        "{{\"ok\":{s},\"screenMinCutoff\":{d},\"screenBeta\":{d},\"worldMinCutoff\":{d},\"worldBeta\":{d},\"auxMinCutoff\":{d},\"auxBeta\":{d},\"visibilityAlpha\":{d}}}",
+        .{
+            if (accepted) "true" else "false",
+            current.screen_min_cutoff,
+            current.screen_beta,
+            current.world_min_cutoff,
+            current.world_beta,
+            current.aux_min_cutoff,
+            current.aux_beta,
+            current.visibility_alpha,
+        },
+    ) catch {
+        setReturnString(info, "{\"ok\":false}");
+        return;
+    };
+    setReturnString(info, payload);
+}
+
+fn applySmoothingField(map: std.json.ObjectMap, key: []const u8, out: *f32) void {
+    const value = map.get(key) orelse return;
+    out.* = switch (value) {
+        .float => |number| @floatCast(number),
+        .integer => |number| @floatFromInt(number),
+        else => return,
+    };
+}
+
 fn hostCharacterCaptureSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     capture_session.hostCaptureSession(info_c);
 }
@@ -402,68 +426,16 @@ pub fn registerOnnx(host: *HostContext) void {
     v8_runtime.registerHostFn("__segment_open", hostSegmentOpen);
     v8_runtime.registerHostFn("__segment_close", hostSegmentClose);
     v8_runtime.registerHostFn("__segment_refine", hostSegmentRefine);
-    v8_runtime.registerHostFn("__pose_estimate_async", hostPoseEstimateAsync);
     v8_runtime.registerHostFn("__pose_estimate_image", hostPoseEstimateImage);
     v8_runtime.registerHostFn("__pose_camera_devices", hostPoseCameraDevices);
+    v8_runtime.registerHostFn("__pose_smoothing", hostPoseSmoothing);
     capture_session.register(host);
     capture_world_target.register(host);
     v8_runtime.registerHostFn("__capture_session", hostCharacterCaptureSession);
 }
 
-fn emitPoseResult(host: *HostContext, result: *const pose.AsyncResult) void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const payload = if (!result.ok) blk: {
-        const message = if (result.errorText().len > 0) result.errorText() else "pose inference failed";
-        const escaped = jsonEscape(alloc, message) catch message;
-        break :blk std.fmt.allocPrint(
-            alloc,
-            "{{\"ok\":false,\"frameId\":{d},\"timestampMs\":{d},\"error\":\"{s}\",\"elapsed_ms\":{d}}}",
-            .{ result.frame_id, result.timestamp_ms, escaped, result.elapsed_ms },
-        ) catch return;
-    } else blk: {
-        var out: std.ArrayList(u8) = .empty;
-        // Keypoints are normalized to the inference frame; name that space so
-        // display-side projection can contain-fit without guessing the aspect.
-        const frame_w: u32 = if (result.frame) |frame| frame.width else 0;
-        const frame_h: u32 = if (result.frame) |frame| frame.height else 0;
-        const header = std.fmt.allocPrint(
-            alloc,
-            "{{\"ok\":true,\"frameId\":{d},\"timestampMs\":{d},\"w\":{d},\"h\":{d},\"kp\":[",
-            .{ result.frame_id, result.timestamp_ms, frame_w, frame_h },
-        ) catch return;
-        out.appendSlice(alloc, header) catch return;
-        for (result.keypoints, 0..) |kp, i| {
-            const chunk = std.fmt.allocPrint(
-                alloc,
-                "{s}{d:.4},{d:.4},{d:.3}",
-                .{ if (i == 0) "" else ",", kp.x, kp.y, kp.score },
-            ) catch return;
-            out.appendSlice(alloc, chunk) catch return;
-        }
-        const tail = std.fmt.allocPrint(alloc, "],\"elapsed_ms\":{d}}}", .{result.elapsed_ms}) catch return;
-        out.appendSlice(alloc, tail) catch return;
-        break :blk out.toOwnedSlice(alloc) catch return;
-    };
-
-    var channel_buf: [64]u8 = undefined;
-    const channel = std.fmt.bufPrintZ(&channel_buf, "pose:{d}", .{result.request_id}) catch return;
-    const payload_z = alloc.dupeZ(u8, payload) catch return;
-    v8_runtime.callGlobal2Str(host, "__ffiEmit", channel, payload_z);
-}
-
 pub fn tickDrain(host: *HostContext) void {
     capture_session.tickSubmit(host);
-    // Legacy MoveNet lane: every completion belongs to the JS
-    // __pose_estimate_async door now — capture runs on its own BlazePose
-    // lane below (req_4387).
-    while (pose.pollAsync(host.io)) |result_value| {
-        var result = result_value;
-        defer result.deinit();
-        emitPoseResult(host, &result);
-    }
     while (blazepose.pollAsync(host.io)) |result_value| {
         var result = result_value;
         defer result.deinit();

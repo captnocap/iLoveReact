@@ -96,11 +96,22 @@ export type CaptureRecordingResult = {
   revision: number;
 };
 
+/** Pre-triplet live detection (req_4390): the latest completed landmark
+ * frame while calibration is still collecting, with the camera frame
+ * dimensions the landmarks are normalized against. Display-only — it never
+ * enters the triplet contract, and it is null the moment triplets exist. */
+export type CapturePreviewFrame = {
+  frameWidth: number;
+  frameHeight: number;
+  detected: WorldLandmarkFrame;
+};
+
 export type CaptureSessionSnapshot = {
   sessionId: string;
   revision: number;
   frozen: boolean;
   calibration: CaptureCalibrationStatus;
+  preview: CapturePreviewFrame | null;
   detected: WorldLandmarkFrame | null;
   source: SourceSkeletonFrame | null;
   target: TargetPoseFrame | null;

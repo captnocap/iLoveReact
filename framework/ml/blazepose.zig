@@ -584,11 +584,52 @@ fn sigmoid(x: f32) f32 {
 // Same filter family and constants here.
 
 pub const OneEuroConfig = struct { min_cutoff: f32, beta: f32, derivate_cutoff: f32 };
-const SCREEN_FILTER = OneEuroConfig{ .min_cutoff = 0.05, .beta = 80.0, .derivate_cutoff = 1.0 };
-const WORLD_FILTER = OneEuroConfig{ .min_cutoff = 0.1, .beta = 40.0, .derivate_cutoff = 1.0 };
-const AUX_FILTER = OneEuroConfig{ .min_cutoff = 0.01, .beta = 10.0, .derivate_cutoff = 1.0 };
-const VISIBILITY_LOWPASS_ALPHA: f32 = 0.1;
 const DEFAULT_FRAME_DT: f32 = 1.0 / 30.0;
+
+/// The live-tunable smoothing surface (req_4391): the capture workbench
+/// exposes these as sliders so stability is found by hand on real footage,
+/// not guessed in code. min_cutoff — LOWER is calmer when still; beta —
+/// HIGHER follows fast motion sooner; visibility_alpha — LOWER means
+/// steadier confidence gates. Defaults are MediaPipe's own constants.
+pub const SmoothingTuning = struct {
+    screen_min_cutoff: f32 = 0.05,
+    screen_beta: f32 = 80.0,
+    world_min_cutoff: f32 = 0.1,
+    world_beta: f32 = 40.0,
+    aux_min_cutoff: f32 = 0.01,
+    aux_beta: f32 = 10.0,
+    visibility_alpha: f32 = 0.1,
+
+    pub fn valid(self: SmoothingTuning) bool {
+        inline for ([_]f32{ self.screen_min_cutoff, self.world_min_cutoff, self.aux_min_cutoff }) |cutoff| {
+            if (!std.math.isFinite(cutoff) or cutoff < 0.0001 or cutoff > 10.0) return false;
+        }
+        inline for ([_]f32{ self.screen_beta, self.world_beta, self.aux_beta }) |beta| {
+            if (!std.math.isFinite(beta) or beta < 0 or beta > 1000.0) return false;
+        }
+        return std.math.isFinite(self.visibility_alpha) and
+            self.visibility_alpha > 0.001 and self.visibility_alpha <= 1.0;
+    }
+};
+
+/// Guarded by g_inference_mutex; the worker reads it once per solve.
+var g_smoothing: SmoothingTuning = .{};
+
+/// Replace the smoothing tuning for all subsequent solves. Rejects invalid
+/// values wholesale — a half-applied tuning is worse than the old one.
+pub fn setSmoothing(io: std.Io, tuning: SmoothingTuning) bool {
+    if (!tuning.valid()) return false;
+    g_inference_mutex.lockUncancelable(io);
+    defer g_inference_mutex.unlock(io);
+    g_smoothing = tuning;
+    return true;
+}
+
+pub fn smoothing(io: std.Io) SmoothingTuning {
+    g_inference_mutex.lockUncancelable(io);
+    defer g_inference_mutex.unlock(io);
+    return g_smoothing;
+}
 
 /// One Euro: a low-pass whose cutoff rises with speed — still signals get
 /// heavy smoothing (jitter dies), fast motion gets light smoothing (no lag).
@@ -963,6 +1004,10 @@ fn solveLandmarks(
     // camera resolution and subject distance (the MediaPipe object-scale
     // convention).
     const roi_scale = @max(roi.side, 1.0);
+    const screen_filter = OneEuroConfig{ .min_cutoff = g_smoothing.screen_min_cutoff, .beta = g_smoothing.screen_beta, .derivate_cutoff = 1.0 };
+    const world_filter = OneEuroConfig{ .min_cutoff = g_smoothing.world_min_cutoff, .beta = g_smoothing.world_beta, .derivate_cutoff = 1.0 };
+    const aux_filter = OneEuroConfig{ .min_cutoff = g_smoothing.aux_min_cutoff, .beta = g_smoothing.aux_beta, .derivate_cutoff = 1.0 };
+    const visibility_alpha = g_smoothing.visibility_alpha;
 
     var solve = RawSolve{
         .frame = .{
@@ -982,8 +1027,8 @@ fn solveLandmarks(
             roi.center_y + roi.sin_t * dx + roi.cos_t * dy,
         };
         if (index >= LANDMARK_COUNT) continue;
-        const filtered_x = g_filters.screen[index][0].filter(source_px[index][0] / roi_scale, dt, SCREEN_FILTER) * roi_scale;
-        const filtered_y = g_filters.screen[index][1].filter(source_px[index][1] / roi_scale, dt, SCREEN_FILTER) * roi_scale;
+        const filtered_x = g_filters.screen[index][0].filter(source_px[index][0] / roi_scale, dt, screen_filter) * roi_scale;
+        const filtered_y = g_filters.screen[index][1].filter(source_px[index][1] / roi_scale, dt, screen_filter) * roi_scale;
         const raw_world = world[index * 3 ..][0..3];
         // World landmarks rotate by the ROI rotation ONLY (no
         // scale/translate) — they are already metric and hip-centred.
@@ -996,21 +1041,21 @@ fn solveLandmarks(
             .x = filtered_x / width_f,
             .y = filtered_y / height_f,
             .z = (raw[2] / crop_f) * roi.side / height_f,
-            .visibility = g_filters.visibility[index].filter(sigmoid(raw[3]), VISIBILITY_LOWPASS_ALPHA),
-            .presence = g_filters.landmark_presence[index].filter(sigmoid(raw[4]), VISIBILITY_LOWPASS_ALPHA),
+            .visibility = g_filters.visibility[index].filter(sigmoid(raw[3]), visibility_alpha),
+            .presence = g_filters.landmark_presence[index].filter(sigmoid(raw[4]), visibility_alpha),
             .world = .{
-                g_filters.world[index][0].filter(rotated_world[0], dt, WORLD_FILTER),
-                g_filters.world[index][1].filter(rotated_world[1], dt, WORLD_FILTER),
-                g_filters.world[index][2].filter(rotated_world[2], dt, WORLD_FILTER),
+                g_filters.world[index][0].filter(rotated_world[0], dt, world_filter),
+                g_filters.world[index][1].filter(rotated_world[1], dt, world_filter),
+                g_filters.world[index][2].filter(rotated_world[2], dt, world_filter),
             },
         };
     }
     // The next tracking window derives from HEAVILY smoothed aux landmarks —
     // this is what breaks the crop→landmarks→crop oscillation.
-    const aux_center_x = g_filters.aux[0][0].filter(source_px[AUX_ROI_CENTER][0] / roi_scale, dt, AUX_FILTER) * roi_scale;
-    const aux_center_y = g_filters.aux[0][1].filter(source_px[AUX_ROI_CENTER][1] / roi_scale, dt, AUX_FILTER) * roi_scale;
-    const aux_scale_x = g_filters.aux[1][0].filter(source_px[AUX_ROI_SCALE][0] / roi_scale, dt, AUX_FILTER) * roi_scale;
-    const aux_scale_y = g_filters.aux[1][1].filter(source_px[AUX_ROI_SCALE][1] / roi_scale, dt, AUX_FILTER) * roi_scale;
+    const aux_center_x = g_filters.aux[0][0].filter(source_px[AUX_ROI_CENTER][0] / roi_scale, dt, aux_filter) * roi_scale;
+    const aux_center_y = g_filters.aux[0][1].filter(source_px[AUX_ROI_CENTER][1] / roi_scale, dt, aux_filter) * roi_scale;
+    const aux_scale_x = g_filters.aux[1][0].filter(source_px[AUX_ROI_SCALE][0] / roi_scale, dt, aux_filter) * roi_scale;
+    const aux_scale_y = g_filters.aux[1][1].filter(source_px[AUX_ROI_SCALE][1] / roi_scale, dt, aux_filter) * roi_scale;
     solve.next_roi = roiFromPoints(aux_center_x, aux_center_y, aux_scale_x, aux_scale_y);
     return solve;
 }

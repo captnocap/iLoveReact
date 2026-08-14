@@ -10,9 +10,8 @@
 //! - the worker transfers that exact snapshot into its fixed result.
 //! - the engine tick polls the result without waiting and releases ownership.
 //!
-//! This is the canonical home of the pattern. `pose_mailbox.zig` predates it
-//! and keeps its own copy only because the MoveNet lane it serves is legacy
-//! slated for deletion with the BlazePose cutover (req_4387).
+//! This is the canonical home of the pattern (its pose_mailbox ancestor died
+//! with the MoveNet lane, req_4390).
 
 const std = @import("std");
 

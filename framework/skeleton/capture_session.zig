@@ -188,6 +188,15 @@ const PendingFrame = struct {
     inference_generation: u64,
 };
 
+/// Pre-triplet detection display data: the landmarks plus the camera frame
+/// dimensions they are normalized against (the UI's contain-fit projection
+/// needs the true aspect).
+const PreviewFrame = struct {
+    detected: source.WorldLandmarkFrame,
+    width: u32,
+    height: u32,
+};
+
 const MAX_RECORD_CHANNELS: usize = retarget.DRIVEN_CHANNEL_IDS.len;
 
 /// The capture recording tap (req_4285). Promoted target frames accumulate as
@@ -233,6 +242,12 @@ const Session = struct {
     bones: []const rig.Bone = &.{},
     mapper: ?retarget.Retargeter = null,
     calibrator: source.Calibrator,
+    /// The latest completed landmark frame from BEFORE the first promoted
+    /// triplet (req_4390): the surface's live-detection preview during
+    /// calibration. Pure display data — it never feeds reconstruction, is
+    /// not identity-checked into the triplet contract, and does not bump
+    /// the revision (snapshot reads are unpinned polls anyway).
+    preview: ?PreviewFrame = null,
     triplets: retarget.TripletState = .{},
     latest_frame: ?ImmutableCameraFrame = null,
     pinned_frame: ?ImmutableCameraFrame = null,
@@ -545,6 +560,15 @@ pub const Manager = struct {
         if (pending.frame.identity.timestamp_ms != detected.timestamp_ms) return error.FrameIdentityMismatch;
         if (pending.inference_generation != session.inference_generation) return error.StaleInferenceConfiguration;
 
+        // Every completed frame that does not become a triplet still updates
+        // the detection preview — the surface shows live landmarks from the
+        // one real pipeline the moment the session opens (req_4390).
+        session.preview = .{
+            .detected = detected,
+            .width = pending.frame.width,
+            .height = pending.frame.height,
+        };
+
         if (session.calibrator.state == .uncalibrated or session.calibrator.state == .failed) {
             return .awaiting_calibration;
         }
@@ -578,6 +602,9 @@ pub const Manager = struct {
             .target = target,
         };
         try session.triplets.promote(triplet);
+        // Promoted triplets carry the detected layer themselves; the
+        // pre-triplet preview retires the moment the real thing exists.
+        session.preview = null;
         const target_globals = session.mapper.?.globalMatrices();
         if (target_globals.len > session.latest_target_globals.len) return error.InvalidTargetBoneCount;
         @memcpy(session.latest_target_globals[0..target_globals.len], target_globals);
@@ -1131,8 +1158,16 @@ fn writeSnapshot(writer: *std.Io.Writer, session: *const Session) !void {
         try writeSource(writer, triplet.reconstructed);
         try writer.writeAll(",\"target\":");
         try writeTarget(writer, session, triplet.target);
+        try writer.writeAll(",\"preview\":null");
     } else {
-        try writer.writeAll("null,\"source\":null,\"target\":null");
+        try writer.writeAll("null,\"source\":null,\"target\":null,\"preview\":");
+        if (session.preview) |preview| {
+            try writer.print("{{\"frameWidth\":{d},\"frameHeight\":{d},\"detected\":", .{ preview.width, preview.height });
+            try writeDetected(writer, preview.detected);
+            try writer.writeByte('}');
+        } else {
+            try writer.writeAll("null");
+        }
     }
     try writer.writeAll(",\"recording\":");
     if (session.recording) |*recording| {

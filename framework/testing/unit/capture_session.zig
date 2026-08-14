@@ -461,6 +461,25 @@ test "30 valid frames within ten seconds promote one atomic triplet and freeze p
     try testing.expectEqual(@as(u8, 0), manager.session.?.calibrator.valid_frame_count);
     try testing.expectEqual(@as(isize, 0), state.live_leases);
 
+    // Even a calibration-rejected frame feeds the live-detection preview
+    // (req_4390): the surface shows what the pipeline sees the moment the
+    // session opens, with no separate inference lane.
+    {
+        const preview_reply = try snapshotRequest(&manager, session_id);
+        defer testing.allocator.free(preview_reply);
+        var preview_parsed = try expectReplyOk(preview_reply);
+        defer preview_parsed.deinit();
+        const preview_value = preview_parsed.value.object.get("value").?.object;
+        try testing.expect(preview_value.get("detected").? == .null);
+        const preview = preview_value.get("preview").?.object;
+        try testing.expectEqual(@as(i64, 640), preview.get("frameWidth").?.integer);
+        try testing.expectEqual(@as(i64, 480), preview.get("frameHeight").?.integer);
+        try testing.expectEqual(
+            @as(usize, 33),
+            preview.get("detected").?.object.get("landmarks").?.array.items.len,
+        );
+    }
+
     try calibrateThirty(&manager, 2, 1_200);
     try testing.expectEqual(source.CalibrationState.calibrated, manager.session.?.calibrator.state);
     try testing.expectEqual(@as(u8, 30), manager.session.?.calibrator.valid_frame_count);

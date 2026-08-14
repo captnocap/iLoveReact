@@ -51,6 +51,7 @@ function snapshot(revision: number, frameId: number | null = null): CaptureSessi
     revision,
     frozen: false,
     calibration: { state: 'calibrated', validFrameCount: 30, requiredFrameCount: 30 },
+    preview: null,
     detected: frameId === null ? null : {
       frameId,
       timestampMs: 1000,
@@ -236,6 +237,31 @@ test('stale mutations fail visibly and are never retried', () => {
   try { api.calibrate(); } catch (error) { fault = error as CaptureSessionFault; }
   assert(fault?.message === 'stale revision' && fault.currentRevision === 4, 'stale detail was hidden');
   assert(calls === 2, `stale command was retried ${calls - 1} times`);
+});
+
+test('a pre-triplet preview is accepted and a preview beside a triplet is rejected', () => {
+  const collecting = snapshot(1);
+  collecting.calibration = { state: 'collecting', validFrameCount: 4, requiredFrameCount: 30 };
+  collecting.preview = {
+    frameWidth: 1280,
+    frameHeight: 720,
+    detected: {
+      frameId: 6,
+      timestampMs: 900,
+      presence: 0.97,
+      landmarks: WORLD_LANDMARK_IDS.map((name) => ({ name, x: 0.4, y: 0.6, visibility: 0.8 })),
+    },
+  };
+  const api = createCaptureSessionApi(() => () => ({ ok: true, value: collecting }));
+  const opened = api.openTarget(target);
+  assert(opened.preview?.detected.landmarks.length === 33, 'pre-triplet preview was dropped at the boundary');
+
+  const contradictory = snapshot(2, 11);
+  contradictory.preview = collecting.preview;
+  const contradictoryApi = createCaptureSessionApi(() => () => ({ ok: true, value: contradictory }));
+  let rejected = false;
+  try { contradictoryApi.openTarget(target); } catch { rejected = true; }
+  assert(rejected, 'preview beside a promoted triplet crossed the boundary');
 });
 
 test('only camera sources and a mounted native viewport can open', () => {

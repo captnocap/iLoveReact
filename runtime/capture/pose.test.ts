@@ -1,20 +1,22 @@
-import { POSE_KEYPOINT_NAMES, parsePoseCameraDevicesReply, parsePoseReply } from './pose';
+import { POSE_LANDMARK_NAMES, parsePoseCameraDevicesReply, parsePoseReply } from './pose';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const triples = POSE_KEYPOINT_NAMES.flatMap((_, i) => [i / 20, i / 25, 0.9]);
-const parsed = parsePoseReply(JSON.stringify({ ok: true, kp: triples, elapsed_ms: 63 }));
-assert(!('error' in parsed), 'successful worker payload parses');
-assert(parsed.keypoints.length === 17, 'all COCO keypoints cross the bridge');
-assert(parsed.keypoints[0]!.name === 'nose', 'COCO order is stable');
-assert(parsed.keypoints[16]!.name === 'ankle_right', 'COCO tail is stable');
-assert(parsed.keypoints[10]!.x === 0.5, 'worker triples map to the matching keypoint');
-assert(parsed.elapsedMs === 63, 'worker timing survives the bridge');
+const triples = POSE_LANDMARK_NAMES.flatMap((_, i) => [i / 40, i / 50, 0.9]);
+const world = POSE_LANDMARK_NAMES.flatMap((_, i) => [i / 100, -i / 100, 0.01 * i]);
+const parsed = parsePoseReply(JSON.stringify({ ok: true, presence: 0.98, kp: triples, world }));
+assert(!('error' in parsed), 'successful solve payload parses');
+assert(parsed.landmarks.length === 33, 'all 33 BlazePose landmarks cross the bridge');
+assert(parsed.landmarks[0]!.name === 'nose', 'landmark order is stable');
+assert(parsed.landmarks[32]!.name === 'foot_index_right', 'landmark tail is stable');
+assert(parsed.landmarks[10]!.x === 0.25, 'triples map to the matching landmark');
+assert(parsed.landmarks[10]!.world[1] === -0.1, 'metric world positions survive the bridge');
+assert(parsed.presence === 0.98, 'pose presence survives the bridge');
 
 const failed = parsePoseReply('{"ok":false,"error":"model unavailable"}');
-assert('error' in failed && failed.error === 'model unavailable', 'worker errors stay explicit');
+assert('error' in failed && failed.error === 'model unavailable', 'solve errors stay explicit');
 assert('error' in parsePoseReply('not-json'), 'malformed payload fails closed');
 
 const cameras = parsePoseCameraDevicesReply(JSON.stringify({
@@ -33,4 +35,4 @@ assert(cameras[1]!.name === 'OBSBOT Tiny 2', 'hardware card name survives the br
 assert(parsePoseCameraDevicesReply('not-json').length === 0, 'malformed discovery fails closed');
 assert(parsePoseCameraDevicesReply('{"ok":false,"devices":[]}').length === 0, 'host discovery error fails closed');
 
-console.log('pose bridge: 14 assertions passed');
+console.log('pose bridge: 15 assertions passed');
