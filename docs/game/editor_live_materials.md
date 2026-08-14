@@ -85,3 +85,32 @@ as a catalog fill with 3 palette slots (primary/secondary/tertiary).
 - REGION_POOL = 16 simultaneous regions; REGION_DATA_FLOATS = 256 (overflow is
   loud, truncation logged).
 - Framework changes require a host rebuild; the JS side hot-reloads.
+
+## The Material Lab (req_4395)
+
+The Color Studio bench is replaced by the **Material Lab** for catalog
+materials: any of the 410 fill materials opens as the BASE of a stackable
+recipe — surface layers through `surface_blend` kinds, field-atom masks,
+warp-atom domain distortions, colormod filters — compiled deterministically to
+ONE standard-signature fn (`render3d/shaders/recipe.ts`; architecture doc:
+`render3d/shaders/LAB.md`, atom authoring: `render3d/shaders/ATOM_CONTRACT.md`).
+
+- **Two-speed law**: the shader string is a function of TOPOLOGY only
+  (`recipeTopologyKey`); every number — opacities, thresholds, warp amounts,
+  atom `@param` knobs, palette colors — rides the D[] palette/param sections
+  (`mat_pal` / `mat_param` with call-site offsets), zero recompiles.
+- **Atoms** live in `render3d/shaders/atoms/` (field/warp/colormod, exact
+  per-kind signatures, prefix-enforced), swept by the same build-shaders run,
+  shaken into composed modules only when called.
+- **Save to catalog** (`catalogPromotion.ts`) emits a real materials/*.wgsl
+  with the recipe JSON embedded (`@recipe-json` → `RegistryMaterial.recipe`),
+  runs the generator through the host exec door, and the material joins every
+  picker with a stable id; reopening it in the Lab is editable.
+- **The color library is REAL end to end** (req_3097 + req_4395): SAVED +
+  RECENTS + named SETS persist in `userdata/editor/color-library.json`; the
+  hardcoded SPINE_LIBRARY sets and PIGMENTS dabs live on only as deletable
+  starter sets. Lab recipes persist per-concern in
+  `userdata/editor/lab-recipes.json`.
+- The D[] param section rides AFTER the palette section; the region harness
+  packs it explicitly before `domainScale`, and the painted-ground harness
+  neutralizes `mat_param` exactly like `mat_pal`.

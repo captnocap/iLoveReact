@@ -51,6 +51,17 @@ export const editor_live_materials: DocIndex = {
       consumers: ['cart/editor/render3d/regionFormula.ts'],
       status: 'live',
     },
+    {
+      name: 'Material Lab (recipe composer + bench + save-to-catalog)',
+      purpose: ['rendering', 'shader', 'asset_pipeline'],
+      kind: 'module',
+      sourceFile: 'cart/editor/render3d/shaders/recipe.ts',
+      description:
+        'req_4395: the Color Studio bench replaced by a stackable/blendable material workbench. A MaterialRecipe (base + layers with surface_blend, field-atom masks, warp-atom domain distortions, colormod filters) compiles deterministically to ONE standard-signature fn; the shader string depends on TOPOLOGY only (recipeTopologyKey) while every number rides the D[] palette/param sections (mat_pal/mat_param with call-site offsets) — zero recompiles on slider drags, sub-second recompose on stack edits through the compose.ts per-set machinery. Atoms (field/warp/colormod, exact per-kind signatures, prefix law) live in shaders/atoms/, swept by build-shaders.ts, shaken into modules only when called. catalogPromotion.ts emits a recipe as a real materials/*.wgsl (@params in session-table order, dummy slot lets, @recipe-json lifted into RegistryMaterial.recipe) and the save verb runs the ONE generator through the host exec door — the promoted material gets a stable id and reopens EDITABLE. Recipes persist per-concern (userdata/editor/lab-recipes.json); named color sets joined SAVED+RECENTS in color-library.json (starter sets deletable — the SPINE_LIBRARY/PIGMENTS facade is dead). Architecture: shaders/LAB.md; atom authoring contract: shaders/ATOM_CONTRACT.md.',
+      dependsOn: ['compose.ts per-set composition (req_3473)', 'build-shaders.ts generator', 'helpers.wgsl surface_blend'],
+      consumers: ['cart/editor/stage/MaterialLabSurface.tsx', 'cart/editor/stage/LabLibraryView.tsx', 'cart/editor/shell/AppFrame.tsx'],
+      status: 'live',
+    },
   ],
   patterns: [
     {
