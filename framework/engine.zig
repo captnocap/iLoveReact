@@ -5588,7 +5588,12 @@ pub fn run(config_in: AppConfig) !void {
                         // keymap (W wireframe, A align, S scale, D detach). Text inputs still
                         // win above, and the shell owns Tab so modal discipline stays intact.
                         const studio_navigation_consumed = !input_consumed and r3d.meshEditCapturing() and
-                            r3d.orbitNavigationKey(sym, true);
+                            r3d.orbitNavigationKey(
+                                sym,
+                                true,
+                                (mod & c.SDL_KMOD_SHIFT) != 0,
+                                (mod & c.SDL_KMOD_CTRL) != 0,
+                            );
                         if (studio_navigation_consumed) {
                             state_mod.markDirty();
                             continue;
@@ -5605,7 +5610,12 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_KEY_UP => {
                     // Same full-width packing as KEY_DOWN (key_pack.zig).
                     const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(event.key.mod));
-                    if (r3d.orbitNavigationKey(@intCast(event.key.key), false)) {
+                    if (r3d.orbitNavigationKey(
+                        @intCast(event.key.key),
+                        false,
+                        (event.key.mod & c.SDL_KMOD_SHIFT) != 0,
+                        (event.key.mod & c.SDL_KMOD_CTRL) != 0,
+                    )) {
                         state_mod.markDirty();
                         continue;
                     }
@@ -5769,10 +5779,10 @@ pub fn run(config_in: AppConfig) !void {
                     // SDL may not deliver key-up after focus leaves the window.
                     // Clear every Studio navigation axis without changing the Tab
                     // toggle, so returning to the editor cannot inherit a stuck walk.
-                    _ = r3d.orbitNavigationKey('w', false);
-                    _ = r3d.orbitNavigationKey('a', false);
-                    _ = r3d.orbitNavigationKey('s', false);
-                    _ = r3d.orbitNavigationKey('d', false);
+                    _ = r3d.orbitNavigationKey('w', false, false, false);
+                    _ = r3d.orbitNavigationKey('a', false, false, false);
+                    _ = r3d.orbitNavigationKey('s', false, false, false);
+                    _ = r3d.orbitNavigationKey('d', false, false, false);
                     if (world_loader_paint_node_id != 0) {
                         world_loader.paintPointer(io, world_loader_paint_node_id, .up, 0, 0);
                         world_loader_paint_node_id = 0;

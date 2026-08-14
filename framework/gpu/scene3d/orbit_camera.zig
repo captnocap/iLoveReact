@@ -76,6 +76,8 @@ pub const Orbit = struct {
     locked: bool = false,
     navigation_enabled: bool = false,
     navigation_keys: u8 = 0,
+    navigation_shift: bool = false,
+    navigation_ctrl: bool = false,
 };
 
 pub const ORBIT_NAVIGATION_TUNING = struct {
@@ -83,8 +85,17 @@ pub const ORBIT_NAVIGATION_TUNING = struct {
     /// precise while a framed large model remains quick to cross.
     pub const distance_per_second: f32 = 0.7;
     pub const radius_floor_per_second: f32 = 0.08;
+    pub const fast_multiplier: f32 = 4.0;
+    pub const precision_multiplier: f32 = 0.15;
     /// A debugger pause or window hitch must not teleport the camera on resume.
     pub const maximum_step_seconds: f32 = 0.05;
+};
+
+pub const ORBIT_CLIP_TUNING = struct {
+    /// Keep the far plane clear of the estimated mesh sphere instead of placing
+    /// it exactly on the last surface, where float and bound error can flicker.
+    pub const surface_padding_radii: f32 = 0.25;
+    pub const minimum_surface_padding: f32 = 1.0;
 };
 
 const NAV_FORWARD: u8 = 1 << 0;
@@ -101,6 +112,8 @@ pub fn orbitNavigationEnabled() bool {
 pub fn orbitNavigationSet(enabled: bool) bool {
     z3d.g_orbit.navigation_enabled = enabled;
     z3d.g_orbit.navigation_keys = 0;
+    z3d.g_orbit.navigation_shift = false;
+    z3d.g_orbit.navigation_ctrl = false;
     return enabled;
 }
 
@@ -116,8 +129,10 @@ fn navigationKeyMask(sym: i32) u8 {
 
 /// Capture one physical WASD edge while navigation is enabled. Returning true is
 /// the engine's instruction not to forward that edge to Studio's command keymap.
-pub fn orbitNavigationKey(sym: i32, down: bool) bool {
+pub fn orbitNavigationKey(sym: i32, down: bool, shift: bool, ctrl: bool) bool {
     if (!z3d.g_orbit.navigation_enabled) return false;
+    z3d.g_orbit.navigation_shift = shift;
+    z3d.g_orbit.navigation_ctrl = ctrl;
     const mask = navigationKeyMask(sym);
     if (mask == 0) return false;
     if (down) z3d.g_orbit.navigation_keys |= mask else z3d.g_orbit.navigation_keys &= ~mask;
@@ -145,10 +160,19 @@ pub fn orbitNavigationTick(dt_raw: f32) bool {
     const yaw = z3d.g_orbit.yaw;
     const view_forward = [3]f32{ -@sin(yaw), 0, -@cos(yaw) };
     const view_right = [3]f32{ @cos(yaw), 0, -@sin(yaw) };
-    const speed = @max(
+    const base_speed = @max(
         z3d.g_orbit.dist * ORBIT_NAVIGATION_TUNING.distance_per_second,
         z3d.g_orbit.radius * ORBIT_NAVIGATION_TUNING.radius_floor_per_second,
     );
+    // Precision wins if both modifiers are held: an accidental Shift must never
+    // defeat the user's explicit fine-positioning chord.
+    const speed_multiplier = if (z3d.g_orbit.navigation_ctrl)
+        ORBIT_NAVIGATION_TUNING.precision_multiplier
+    else if (z3d.g_orbit.navigation_shift)
+        ORBIT_NAVIGATION_TUNING.fast_multiplier
+    else
+        1.0;
+    const speed = base_speed * speed_multiplier;
     const step = speed * @min(dt_raw, ORBIT_NAVIGATION_TUNING.maximum_step_seconds);
     for (0..3) |axis| {
         z3d.g_orbit.target[axis] += (view_forward[axis] * forward + view_right[axis] * strafe) * step;
@@ -236,6 +260,18 @@ pub fn orbitCamPos() math.Vec3 {
         .z = z3d.g_orbit.target[2] + z3d.g_orbit.dist * cp * @cos(z3d.g_orbit.yaw),
     };
 }
+
+/// Extend an automatic Studio far plane to contain one mesh bounding sphere.
+/// WASD translates the orbit eye and target together, so `orbit.dist` alone no
+/// longer describes how far resident geometry is from the camera.
+pub fn orbitFarCoverSphere(current_far: f32, eye: math.Vec3, center: math.Vec3, radius_raw: f32) f32 {
+    const radius = @max(0.0, radius_raw);
+    const padding = @max(
+        ORBIT_CLIP_TUNING.minimum_surface_padding,
+        radius * ORBIT_CLIP_TUNING.surface_padding_radii,
+    );
+    return @max(current_far, math.v3distance(eye, center) + radius + padding);
+}
 /// Pan the orbit PIVOT in the screen plane by a drag delta (pixels). The orbit point was
 /// nailed to the model centre, which fights you the moment a model is large — you'd
 /// orbit a far edge around a centre half a model away. Moving the focus (not the eye)
@@ -287,19 +323,19 @@ test "Studio orbit navigation exclusively captures held WASD and moves camera-re
     z3d.g_me_capture = true;
 
     try std.testing.expect(orbitNavigationSet(true));
-    try std.testing.expect(orbitNavigationKey('w', true));
-    try std.testing.expect(!orbitNavigationKey('x', true));
+    try std.testing.expect(orbitNavigationKey('w', true, false, false));
+    try std.testing.expect(!orbitNavigationKey('x', true, false, false));
     try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
     try std.testing.expectApproxEqAbs(@as(f32, 0), z3d.g_orbit.target[0], 0.00001);
     try std.testing.expectApproxEqAbs(@as(f32, -0.35), z3d.g_orbit.target[2], 0.00001);
 
-    try std.testing.expect(orbitNavigationKey('w', false));
+    try std.testing.expect(orbitNavigationKey('w', false, false, false));
     const stopped = z3d.g_orbit.target;
     try std.testing.expect(!orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
     try std.testing.expectEqual(stopped, z3d.g_orbit.target);
 
     try std.testing.expect(!orbitNavigationSet(false));
-    try std.testing.expect(!orbitNavigationKey('w', true));
+    try std.testing.expect(!orbitNavigationKey('w', true, false, false));
 }
 
 test "Studio orbit navigation normalizes diagonals and respects camera lock" {
@@ -312,8 +348,8 @@ test "Studio orbit navigation normalizes diagonals and respects camera lock" {
     z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
     z3d.g_me_capture = true;
     _ = orbitNavigationSet(true);
-    _ = orbitNavigationKey('w', true);
-    _ = orbitNavigationKey('d', true);
+    _ = orbitNavigationKey('w', true, false, false);
+    _ = orbitNavigationKey('d', true, false, false);
     try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
     const traveled = @sqrt(z3d.g_orbit.target[0] * z3d.g_orbit.target[0] + z3d.g_orbit.target[2] * z3d.g_orbit.target[2]);
     try std.testing.expectApproxEqAbs(@as(f32, 0.35), traveled, 0.00001);
@@ -323,5 +359,46 @@ test "Studio orbit navigation normalizes diagonals and respects camera lock" {
     try std.testing.expect(!orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
     try std.testing.expectEqual(locked, z3d.g_orbit.target);
     // Lock freezes camera motion, not the exclusive input contract.
-    try std.testing.expect(orbitNavigationKey('d', false));
+    try std.testing.expect(orbitNavigationKey('d', false, false, false));
+}
+
+test "Studio orbit navigation modifiers provide traverse and precision speeds" {
+    const saved_orbit = z3d.g_orbit;
+    const saved_capture = z3d.g_me_capture;
+    defer {
+        z3d.g_orbit = saved_orbit;
+        z3d.g_me_capture = saved_capture;
+    }
+    z3d.g_me_capture = true;
+
+    z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
+    _ = orbitNavigationSet(true);
+    _ = orbitNavigationKey('w', true, true, false);
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    const fast_distance = -z3d.g_orbit.target[2];
+
+    z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
+    _ = orbitNavigationSet(true);
+    _ = orbitNavigationKey('w', true, false, true);
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    const precision_distance = -z3d.g_orbit.target[2];
+
+    try std.testing.expectApproxEqAbs(@as(f32, 1.4), fast_distance, 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0525), precision_distance, 0.00001);
+    try std.testing.expect(fast_distance > precision_distance);
+}
+
+test "Studio automatic far plane follows translated camera distance from mesh" {
+    const model_center = math.Vec3{ .x = 0, .y = 0.5, .z = 0 };
+    const model_radius: f32 = 0.75;
+    const near_eye = math.Vec3{ .x = 0, .y = 0.5, .z = 3 };
+    const walked_eye = math.Vec3{ .x = 0, .y = 0.5, .z = 40 };
+
+    const initial_far = orbitFarCoverSphere(6, near_eye, model_center, model_radius);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), initial_far, 0.00001);
+
+    const walked_far = orbitFarCoverSphere(initial_far, walked_eye, model_center, model_radius);
+    const farthest_surface = math.v3distance(walked_eye, model_center) + model_radius;
+    try std.testing.expect(walked_far > farthest_surface);
+    try std.testing.expect(walked_far > initial_far);
 }

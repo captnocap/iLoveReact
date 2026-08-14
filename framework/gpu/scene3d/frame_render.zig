@@ -644,6 +644,7 @@ pub fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node
     var cam_fov: f32 = 60;
     var cam_far: f32 = 0; // explicit draw radius; 0 = auto-derive from scene extent
     var cam_near: f32 = 0; // explicit near clip; 0 = auto
+    var orbit_auto_far = false;
     var ambient_color: [3]f32 = .{ 0.15, 0.15, 0.2 };
     var light_dir: [3]f32 = .{ 0.577, 0.577, 0.577 };
     var light_color: [3]f32 = .{ 1.0, 0.95, 0.9 };
@@ -689,9 +690,16 @@ pub fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node
                 cam_fov = if (child.scene3d_fov > 0) child.scene3d_fov else 50;
                 // Auto near/far bracketing the orbit so an arbitrary-scale model never
                 // clips, unless the cart pins them explicitly.
-                cam_far = if (child.scene3d_far > 0) child.scene3d_far else (z3d.g_orbit.dist + z3d.g_orbit.radius * 4.0);
+                if (child.scene3d_far > 0) {
+                    cam_far = child.scene3d_far;
+                    orbit_auto_far = false;
+                } else {
+                    cam_far = z3d.g_orbit.dist + z3d.g_orbit.radius * 4.0;
+                    orbit_auto_far = true;
+                }
                 cam_near = if (child.scene3d_near > 0) child.scene3d_near else @max(0.01, z3d.g_orbit.radius * 0.01);
             } else {
+                orbit_auto_far = false;
                 cam_pos = .{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
                 cam_look = .{ .x = child.scene3d_look_x, .y = child.scene3d_look_y, .z = child.scene3d_look_z };
                 cam_fov = child.scene3d_fov;
@@ -770,7 +778,9 @@ pub fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node
         if (!child.scene3d_mesh) continue;
         scene_mesh_children += if (child.scene3d_instance_count > 0) child.scene3d_instance_count else 1;
         const center = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
-        scene_extent = @max(scene_extent, math.v3distance(center, cam_look) + z3d.estimateMeshRadius(child));
+        const mesh_radius = z3d.estimateMeshRadius(child);
+        scene_extent = @max(scene_extent, math.v3distance(center, cam_look) + mesh_radius);
+        if (orbit_auto_far) cam_far = z3d.orbitFarCoverSphere(cam_far, cam_pos, center, mesh_radius);
     }
     z3d.g_telemetry.mesh_children += scene_mesh_children;
 

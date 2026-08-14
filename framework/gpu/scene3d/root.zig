@@ -675,6 +675,7 @@ pub const ORBIT_PITCH_LIM = @import("orbit_camera.zig").ORBIT_PITCH_LIM;
 pub const orbitDrag = @import("orbit_camera.zig").orbitDrag;
 pub const orbitZoom = @import("orbit_camera.zig").orbitZoom;
 pub const orbitCamPos = @import("orbit_camera.zig").orbitCamPos;
+pub const orbitFarCoverSphere = @import("orbit_camera.zig").orbitFarCoverSphere;
 pub const orbitPan = @import("orbit_camera.zig").orbitPan;
 pub const orbitNavigationEnabled = @import("orbit_camera.zig").orbitNavigationEnabled;
 pub const orbitNavigationSet = @import("orbit_camera.zig").orbitNavigationSet;

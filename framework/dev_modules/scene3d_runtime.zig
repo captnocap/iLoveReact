@@ -637,9 +637,9 @@ pub fn orbitNavigationSet(enabled: bool) bool {
     return if (api()) |dispatch| dispatch.orbit_navigation_set(enabled) else false;
 }
 
-pub fn orbitNavigationKey(sym: i32, down: bool) bool {
-    if (!modular_core) return implementation.orbitNavigationKey(sym, down);
-    return if (api()) |dispatch| dispatch.orbit_navigation_key(sym, down) else false;
+pub fn orbitNavigationKey(sym: i32, down: bool, shift: bool, ctrl: bool) bool {
+    if (!modular_core) return implementation.orbitNavigationKey(sym, down, shift, ctrl);
+    return if (api()) |dispatch| dispatch.orbit_navigation_key(sym, down, shift, ctrl) else false;
 }
 
 pub fn focusAt(x: f32, y: f32) bool {

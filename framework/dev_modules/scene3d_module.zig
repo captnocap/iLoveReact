@@ -166,8 +166,8 @@ fn orbitNavigationEnabled() callconv(.c) bool {
 fn orbitNavigationSet(enabled: bool) callconv(.c) bool {
     return scene3d.orbitNavigationSet(enabled);
 }
-fn orbitNavigationKey(sym: i32, down: bool) callconv(.c) bool {
-    return scene3d.orbitNavigationKey(sym, down);
+fn orbitNavigationKey(sym: i32, down: bool, shift: bool, ctrl: bool) callconv(.c) bool {
+    return scene3d.orbitNavigationKey(sym, down, shift, ctrl);
 }
 fn focusAt(x: f32, y: f32) callconv(.c) bool {
     return scene3d.focusAt(x, y);

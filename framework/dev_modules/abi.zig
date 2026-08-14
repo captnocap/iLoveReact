@@ -343,7 +343,7 @@ pub const Scene3dApiV1 = extern struct {
     orbit_zoom: *const fn (delta: f32) callconv(.c) void,
     orbit_navigation_enabled: BoolFn,
     orbit_navigation_set: *const fn (enabled: bool) callconv(.c) bool,
-    orbit_navigation_key: *const fn (sym: i32, down: bool) callconv(.c) bool,
+    orbit_navigation_key: *const fn (sym: i32, down: bool, shift: bool, ctrl: bool) callconv(.c) bool,
     focus_at: F32x2BoolFn,
     mesh_pick: *const fn (x: f32, y: f32, additive: bool) callconv(.c) i32,
     mesh_out_of_scope_part_at: F32x2I32Fn,
