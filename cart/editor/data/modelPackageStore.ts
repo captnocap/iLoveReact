@@ -12,7 +12,7 @@
 // manifest.json — so the store resolves id → dir by scanning manifests (the
 // same walk loadMaterializedPackages already does), cached in a module map.
 // Renaming a model MOVES its folder to match; a name collision suffixes _2/_3.
-import { exists, listDir, mkdir, readFile, readFileBase64, remove, stat, writeFile, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { cloneDirectoryExact, directoryFingerprint, exists, installDirectoryAtomic, listDir, mkdir, readFile, readFileBase64, remove, stat, writeFile, writeFileBase64Atomic, writeFileBytesAtomic, type AtomicDirectoryInstallResult } from '../../../runtime/hooks/fs';
 import {
   MODELS_HOME,
   MODEL_PACKAGE_SUBDIRS,
@@ -39,6 +39,7 @@ import { groundRebase } from '../model/groundRebase';
 import { hasUvCoverageRasterWriter, writeUvCoverageRasters } from './uvCoverageRaster';
 import { readUvTextureWorkspace } from './uvTextureWorkspaceStore';
 import { validateSkinBindingRef, type CharacterSaveSnapshot } from '../../../runtime/skeleton';
+import { repairedPackageViewerPath, type DurableMeshDocState } from './modelPackageViewerPath';
 
 const host = globalThis as any;
 export const MODEL_RETOPO_GUIDE_FILE = 'mesh/retopo-guide.blob';
@@ -74,6 +75,11 @@ function ensureDirIndex(): void {
   for (const category of listDir(MODELS_HOME)) {
     const categoryPath = `${MODELS_HOME}/${category}`;
     for (const leaf of listDir(categoryPath)) {
+      // Interrupted save stages deliberately remain hidden until the next
+      // explicit cleanup/recovery decision. They carry a readable copy of the
+      // prior manifest, so indexing dot-directories would let one stale stage
+      // shadow the atomically installed package after a crash.
+      if (!leaf || leaf.startsWith('.')) continue;
       const dir = `${categoryPath}/${leaf}`;
       const text = readFile(`${dir}/manifest.json`);
       if (!text) continue;
@@ -111,18 +117,22 @@ export function resolvePackageDir(kind: ModelPackageKind, id: string): string | 
 }
 
 // The name-slug home this model may WRITE into: its own dir when it already
-// owns one under that name, otherwise the first free _2/_3-suffixed slot —
-// a different model squatting the name never gets clobbered.
+// owns one under that name, otherwise the first wholly unoccupied
+// _2/_3-suffixed slot. A manifestless directory is recovery/orphan material,
+// not a free package slot, and must never be populated by a first save.
 function nameDirFor(kind: ModelPackageKind, id: string, name: string): string {
   // An empty/symbol-only name slugs to '' — packageDirForName would then claim the
   // CATEGORY ROOT itself (the stray props/manifest.json bug). Fall back to the
   // id-slug home so a nameless save still gets its own directory.
   const base = modelSlug(name) ? packageDirForName(kind, name) : packageDir(kind, id);
   let dir = base;
-  for (let n = 2; exists(`${dir}/manifest.json`); n += 1) {
-    try {
-      if (parseManifest(readFile(`${dir}/manifest.json`) ?? '').id === id) return dir;
-    } catch { /* unreadable squatter — step past it */ }
+  for (let n = 2; exists(dir); n += 1) {
+    const text = readFile(`${dir}/manifest.json`);
+    if (text) {
+      try {
+        if (parseManifest(text).id === id) return dir;
+      } catch { /* unreadable squatter — step past it */ }
+    }
     dir = `${base}_${n}`;
   }
   return dir;
@@ -152,16 +162,19 @@ function ensurePackageDirs(dir: string): boolean {
 // ── Writers ──────────────────────────────────────────────────────────────────
 
 // Write one model's package directory: the home dir, the four blob subdirs, and
-// manifest.json. Idempotent — mkdir/writeFile overwrite in place. The EXPORT
+// manifest.json. Idempotent. The EXPORT
 // declaration (placeable/skeleton, req_2718 disk truth) is preserved from the
 // existing manifest when the incoming package doesn't carry it — a plain
 // re-save from a session that never saw the export must not undo it.
-export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
-  const dir = claimPackageDir(pkg);
+export function materializeModelPackageAtDirectory(pkg: ModelPackage, dir: string): MaterializeResult {
   if (!ensurePackageDirs(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dirs failed' };
   const manifest = packageToManifest(pkg);
   if (manifest.placeable === undefined || manifest.skeleton === undefined || manifest.textureSlots === undefined || manifest.lights === undefined) {
-    const prior = readManifest(pkg.kind, pkg.id);
+    let prior: ModelManifest | null = null;
+    const priorText = readFile(`${dir}/manifest.json`);
+    if (priorText) {
+      try { prior = parseManifest(priorText); } catch { /* unreadable prior is never merged */ }
+    }
     if (prior) {
       manifest.placeable = manifest.placeable ?? prior.placeable;
       manifest.skeleton = manifest.skeleton ?? prior.skeleton;
@@ -169,9 +182,168 @@ export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
       manifest.lights = manifest.lights ?? prior.lights;
     }
   }
-  const wrote = writeFile(`${dir}/manifest.json`, serializeManifest(manifest));
-  if (!wrote) return { ok: false, id: pkg.id, dir, error: 'write manifest failed' };
+  const wrote = writeFileBytesAtomic(`${dir}/manifest.json`, textBytes(serializeManifest(manifest)));
+  if (!wrote) return { ok: false, id: pkg.id, dir, error: 'atomic manifest write failed' };
   return { ok: true, id: pkg.id, dir };
+}
+
+export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
+  const result = materializeModelPackageAtDirectory(pkg, claimPackageDir(pkg));
+  if (result.ok) indexPackageDir(pkg.kind, pkg.id, result.dir);
+  return result;
+}
+
+export type OrdinaryModelSaveStage = {
+  readonly kind: ModelPackageKind;
+  readonly id: string;
+  readonly targetDir: string;
+  readonly stagingDir: string;
+  readonly alreadyOnDisk: boolean;
+  readonly previousFingerprint: string | null;
+  preparedFingerprint: string | null;
+};
+
+export type PrepareOrdinaryModelSaveStageResult =
+  | { ok: true; stage: OrdinaryModelSaveStage }
+  | { ok: false; dir: string; error: string };
+
+let ordinarySaveStageSerial = 0;
+
+function readableOwnedManifestAt(
+  dir: string | null,
+  pkg: Pick<ModelPackage, 'kind' | 'id'>,
+): ModelManifest | null {
+  if (!dir) return null;
+  const text = readFile(`${dir}/manifest.json`);
+  if (!text) return null;
+  try {
+    const manifest = parseManifest(text);
+    return manifest.kind === pkg.kind && manifest.id === pkg.id ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
+function uniqueOrdinarySaveStageDir(targetDir: string): string {
+  const slash = targetDir.lastIndexOf('/');
+  const parent = slash >= 0 ? targetDir.slice(0, slash) : '.';
+  const leaf = slash >= 0 ? targetDir.slice(slash + 1) : targetDir;
+  for (;;) {
+    ordinarySaveStageSerial += 1;
+    const candidate = `${parent}/.${leaf}.save-stage-${Date.now()}-${ordinarySaveStageSerial}`;
+    if (!exists(candidate)) return candidate;
+  }
+}
+
+/** Clone the currently advertised package into a hidden sibling tree. All
+ * mutable ordinary-save artifacts and the new manifest are written there; the
+ * live package remains byte-for-byte untouched until atomic directory install. */
+export function prepareOrdinaryModelSaveStage(
+  pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>,
+): PrepareOrdinaryModelSaveStageResult {
+  const resolved = resolvePackageDir(pkg.kind, pkg.id);
+  const priorManifest = readableOwnedManifestAt(resolved, pkg);
+  const alreadyOnDisk = priorManifest !== null;
+  const targetDir = alreadyOnDisk ? resolved! : nameDirFor(pkg.kind, pkg.id, pkg.name);
+  // nameDirFor must choose an absent first-save target. Recheck immediately so
+  // even an in-process stale claim cannot authorize writing into orphan data.
+  if (!alreadyOnDisk && exists(targetDir)) {
+    return { ok: false, dir: targetDir, error: 'first-save target is occupied by manifestless or foreign recovery data' };
+  }
+  const stagingDir = uniqueOrdinarySaveStageDir(targetDir);
+  let previousFingerprint: string | null = null;
+  if (alreadyOnDisk) {
+    previousFingerprint = directoryFingerprint(targetDir);
+    if (!previousFingerprint || !cloneDirectoryExact(targetDir, stagingDir)
+      || directoryFingerprint(stagingDir) !== previousFingerprint) {
+      remove(stagingDir);
+      return { ok: false, dir: targetDir, error: 'could not clone the complete durable package into its save stage' };
+    }
+  } else if (!mkdir(stagingDir)) {
+    return { ok: false, dir: targetDir, error: 'could not create hidden save stage' };
+  }
+  if (!ensurePackageDirs(stagingDir)) {
+    remove(stagingDir);
+    return { ok: false, dir: targetDir, error: 'could not prepare package artifact directories' };
+  }
+  return {
+    ok: true,
+    stage: {
+      kind: pkg.kind,
+      id: pkg.id,
+      targetDir,
+      stagingDir,
+      alreadyOnDisk,
+      previousFingerprint,
+      preparedFingerprint: null,
+    },
+  };
+}
+
+function stagedRevisionIsReadable(stage: OrdinaryModelSaveStage, parts: readonly MeshDocPartMeta[]): boolean {
+  const manifest = readableOwnedManifestAt(stage.stagingDir, stage);
+  const doc = readMeshDoc(stage.stagingDir);
+  const savedParts = readMeshDocParts(stage.stagingDir);
+  return manifest !== null && doc !== null && savedParts !== null
+    && JSON.stringify(savedParts) === JSON.stringify(parts);
+}
+
+/** Seal and atomically publish a complete staged package. The previous package
+ * remains at stagingDir after an exchange and is not retired here. */
+export function installOrdinaryModelSaveStage(
+  stage: OrdinaryModelSaveStage,
+  parts: readonly MeshDocPartMeta[],
+): AtomicDirectoryInstallResult {
+  if (!stagedRevisionIsReadable(stage, parts)) return 'failed';
+  stage.preparedFingerprint = directoryFingerprint(stage.stagingDir);
+  if (!stage.preparedFingerprint) return 'failed';
+  const installed = installDirectoryAtomic(
+    stage.stagingDir,
+    stage.targetDir,
+    stage.alreadyOnDisk,
+    stage.previousFingerprint ?? undefined,
+  );
+  invalidateMeshDoc(stage.stagingDir);
+  invalidateMeshDoc(stage.targetDir);
+  return installed;
+}
+
+export function validateInstalledOrdinaryModelSaveStage(
+  stage: OrdinaryModelSaveStage,
+  parts: readonly MeshDocPartMeta[],
+): boolean {
+  if (!stage.preparedFingerprint || directoryFingerprint(stage.targetDir) !== stage.preparedFingerprint) return false;
+  const manifest = readableOwnedManifestAt(stage.targetDir, stage);
+  const doc = readMeshDoc(stage.targetDir);
+  const savedParts = readMeshDocParts(stage.targetDir);
+  return manifest !== null && doc !== null && savedParts !== null
+    && JSON.stringify(savedParts) === JSON.stringify(parts);
+}
+
+/** Restore the complete predecessor after post-install validation fails. */
+export function rollbackOrdinaryModelSaveStage(stage: OrdinaryModelSaveStage): boolean {
+  const result = stage.alreadyOnDisk
+    ? installDirectoryAtomic(stage.stagingDir, stage.targetDir, true, stage.preparedFingerprint ?? undefined)
+    : installDirectoryAtomic(stage.targetDir, stage.stagingDir, false);
+  invalidateMeshDoc(stage.stagingDir);
+  invalidateMeshDoc(stage.targetDir);
+  if (result !== 'installed') return false;
+  return stage.alreadyOnDisk
+    ? directoryFingerprint(stage.targetDir) === stage.previousFingerprint
+    : !exists(stage.targetDir);
+}
+
+/** Retire only the hidden non-live side of a completed or rolled-back save. */
+export function discardOrdinaryModelSaveStage(stage: OrdinaryModelSaveStage): void {
+  if (exists(stage.stagingDir) && !remove(stage.stagingDir)) {
+    console.error(`[model-packages] complete save recovery tree remains at '${stage.stagingDir}'`);
+  }
+}
+
+export function acceptInstalledOrdinaryModelSaveStage(stage: OrdinaryModelSaveStage): void {
+  indexPackageDir(stage.kind, stage.id, stage.targetDir);
+  invalidateMeshDoc(stage.targetDir);
+  discardOrdinaryModelSaveStage(stage);
 }
 
 // Binary/source artifacts copied beside a manifest to make a package complete.
@@ -708,7 +880,22 @@ export function settleRenamedPackageDir(kind: ModelPackageKind, id: string): boo
   const text = dir ? readFile(`${dir}/manifest.json`) : null;
   if (!dir || !text) return false;
   try {
-    const manifest = parseManifest(text);
+    let manifest = parseManifest(text);
+    const docBlobExists = exists(`${dir}/mesh/doc.blob`);
+    const durableMeshDoc: DurableMeshDocState = docBlobExists
+      ? (readMeshDoc(dir) ? 'readable' : 'unreadable')
+      : 'absent';
+    const repairedViewerPath = repairedPackageViewerPath({
+      packageDir: dir,
+      viewerPath: manifest.mesh.viewerPath,
+      viewerPathExists: !!manifest.mesh.viewerPath && exists(manifest.mesh.viewerPath),
+      meshEntries: listDir(`${dir}/mesh`),
+      durableMeshDoc,
+    });
+    if (repairedViewerPath) {
+      manifest = { ...manifest, mesh: { ...manifest.mesh, viewerPath: repairedViewerPath } };
+      if (!writeFileBytesAtomic(`${dir}/manifest.json`, textBytes(serializeManifest(manifest)))) return false;
+    }
     const want = nameDirFor(kind, id, manifest.name);
     if (want === dir) return true;
     if (!movePackageDir(manifest, dir, want)) {
@@ -744,7 +931,7 @@ function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelM
   if (!text) return false;
   try {
     const manifest = { ...parseManifest(text), ...patch };
-    if (!writeFile(`${dir}/manifest.json`, serializeManifest(manifest))) return false;
+    if (!writeFileBytesAtomic(`${dir}/manifest.json`, textBytes(serializeManifest(manifest)))) return false;
     if (typeof patch.name === 'string' && !options.deferRenameFollow) {
       const want = nameDirFor(kind, id, manifest.name);
       if (want !== dir && !movePackageDir(manifest, dir, want)) {
@@ -779,7 +966,7 @@ function movePackageDir(manifest: ModelManifest, fromDir: string, toDir: string)
   if (!copyLeaves(fromDir, toDir)) return false;
   if (manifest.mesh.viewerPath?.startsWith(`${fromDir}/`)) {
     const moved = { ...manifest, mesh: { ...manifest.mesh, viewerPath: `${toDir}${manifest.mesh.viewerPath.slice(fromDir.length)}` } };
-    if (!writeFile(`${toDir}/manifest.json`, serializeManifest(moved))) return false;
+    if (!writeFileBytesAtomic(`${toDir}/manifest.json`, textBytes(serializeManifest(moved)))) return false;
   }
   // Every byte landed — now retire the old home.
   for (const sub of MODEL_PACKAGE_SUBDIRS) {
@@ -828,7 +1015,7 @@ export function copyModelPackage(src: ModelPackage, newId: string, newName: stri
       if (!writeFileBase64Atomic(`${destDir}/${sub}/${name}`, bytes)) return null;
     }
   }
-  if (!writeFile(`${destDir}/manifest.json`, serializeManifest(manifest))) return null;
+  if (!writeFileBytesAtomic(`${destDir}/manifest.json`, textBytes(serializeManifest(manifest)))) return null;
   indexPackageDir(src.kind, newId, destDir);
   return manifestToPackage(manifest, destDir);
 }
@@ -845,6 +1032,7 @@ export function loadMaterializedPackages(): ModelPackage[] {
     const categoryPath = `${MODELS_HOME}/${category}`;
     if (!exists(categoryPath)) continue;
     for (const leaf of listDir(categoryPath)) {
+      if (!leaf || leaf.startsWith('.')) continue;
       const dir = `${categoryPath}/${leaf}`;
       const text = readFile(`${dir}/manifest.json`);
       if (!text) continue;
@@ -1064,6 +1252,13 @@ export function persistModelRetopoGuide(
 ): boolean {
   const dir = resolvePackageDir(pkg.kind, pkg.id);
   if (!dir) return false;
+  return persistModelRetopoGuideAtDirectory(dir, options);
+}
+
+function persistModelRetopoGuideAtDirectory(
+  dir: string,
+  options: { clearWhenAbsent?: boolean } = {},
+): boolean {
   const path = `${dir}/${MODEL_RETOPO_GUIDE_FILE}`;
   const prior = exists(path);
   if (typeof host.__mesh_retopo_guide_write !== 'function') {
@@ -1104,7 +1299,15 @@ export function writeModelArtifacts(
   recoveryRanges?: { lo: number; hi: number }[],
   options: { allowPartShrink?: boolean; allowSemanticClear?: boolean; captureUvResetBaseline?: boolean } = {},
 ): boolean {
-  const dir = claimPackageDir(pkg);
+  return writeModelArtifactsAtDirectory(claimPackageDir(pkg), parts, recoveryRanges, options);
+}
+
+export function writeModelArtifactsAtDirectory(
+  dir: string,
+  parts?: MeshDocPartMeta[],
+  recoveryRanges?: { lo: number; hi: number }[],
+  options: { allowPartShrink?: boolean; allowSemanticClear?: boolean; captureUvResetBaseline?: boolean } = {},
+): boolean {
   const meshDir = `${dir}/mesh`;
   const atlasDir = `${dir}/atlases`;
   mkdir(meshDir);
@@ -1116,7 +1319,7 @@ export function writeModelArtifacts(
     ? writeMeshDoc(dir, parts, recoveryRanges, options)
     : exists(`${meshDir}/doc.blob`);
   if (parts && docWritten) host.__model_mesh_write?.(`${meshDir}/base.blob`);
-  const retopoGuideWritten = docWritten && persistModelRetopoGuide(pkg);
+  const retopoGuideWritten = docWritten && persistModelRetopoGuideAtDirectory(dir);
   // Every save re-anchors the package's persisted collision bake to the doc
   // revision that just landed (paint-only saves self-heal a missing/stale one).
   if (docWritten) writePackageCollision(dir);

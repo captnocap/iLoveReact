@@ -601,6 +601,23 @@ export type EditorState = {
   /** Raw use-history — every committed color select, newest first (req_3097). */
   colorSpineRecents: OklchColor[];
   colorSpineScenePick: string | null;
+  /** Named color sets — REAL, persisted in color-library.json (req_4395; the
+   *  hardcoded SPINE_LIBRARY facade is dead). Seeded once with deletable
+   *  starter sets on the first boot without a `sets` field. */
+  colorSpineSets: import('./colorSpine').SpinePaletteSet[];
+  /** Material Lab recipe documents (req_4395) — micro-saved per-concern via
+   *  labRecipeStore; experiments live here until deleted or promoted to the
+   *  catalog. */
+  labRecipes: import('../render3d/shaders/recipe').MaterialRecipe[];
+  /** The recipe open in the Lab; null = the Lab shows the entered material in
+   *  single-material mode (non-registry specs: road, imported patches). */
+  labActiveRecipeId: string | null;
+  /** Stack selection driving the inspector: -1 = base, null = whole recipe. */
+  labSelectedLayer: number | null;
+  /** Stage tiling: tiles across the preview (1 = one tile, big). */
+  labStageTiles: number;
+  /** Intermediates-strip solo: stage index shown on the main stage; null = final. */
+  labSoloStage: number | null;
   buildDialogOpen: boolean;
   /** Named map-document picker. Map documents own BOTH native painting and
    * React-authored placements; switching replaces those concerns together. */

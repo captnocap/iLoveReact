@@ -10,8 +10,9 @@ import {
   loreSnapshotObjectIds,
   modelPackageGeometryPath,
   snapshotNormalModelSave,
-  type LoreSnapshotResponse,
 } from './modelLoreSnapshots';
+import type { RecoverySnapshotReceiptV1 } from '../../../runtime/vcs/lore';
+import type { VerifiedSaveReceiptV1 } from '../../../runtime/vcs/loreSaveCoordinator';
 
 let passed = 0;
 let failed = 0;
@@ -21,6 +22,37 @@ function test(name: string, run: () => void): void {
   try { run(); passed += 1; log(`  ok  ${name}`); }
   catch (error) { failed += 1; log(`FAIL  ${name}: ${(error as Error).message}`); }
 }
+
+const SHA = 'a'.repeat(64);
+const SAVE_RECEIPT: VerifiedSaveReceiptV1 = {
+  ok: true,
+  version: 1,
+  modelId: 'car',
+  saveReceiptToken: `save-v1-${'b'.repeat(64)}`,
+  sha256: SHA,
+  bytes: 128,
+  formatVersion: 5,
+};
+const NORMAL_RECEIPT: RecoverySnapshotReceiptV1 = {
+  ok: true,
+  version: 1,
+  snapshotId: 'snapshot-1',
+  revision: 'c'.repeat(64),
+  revisionNumber: 42,
+  timestampMs: 1_723_000_000_000,
+  sha256: SHA,
+  sourceSha256: SHA,
+  bytes: 128,
+  triangles: 2,
+  authoredFaces: 1,
+  parts: 1,
+  logicalVertices: 0,
+  indexed: true,
+  pushState: 'pushed',
+  identityQuality: 'exact',
+  objectNamespaceHash: 'd'.repeat(64),
+  recoveryDegradations: [],
+};
 
 test('stable object IDs follow native range rank rather than outliner order', () => {
   const ids = loreSnapshotObjectIds([
@@ -36,30 +68,18 @@ test('an unranked outliner row omits ID stamping instead of guessing a native ra
     { id: 'body', lo: 0 },
     { id: 'unranked' },
   ]) === null, 'unranked row was assigned to a native range by list position');
-
-  let request: Readonly<Record<string, unknown>> | null = null;
-  snapshotNormalModelSave({
-    saveSucceeded: true,
-    modelId: 'car',
-    activeResidentModelId: 'car',
-    packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
-    objectRows: [{ id: 'body', lo: 0 }, { id: 'unranked' }],
-    label: 'Save',
-  }, (payload) => { request = payload; return { ok: true }; });
-  assert(request !== null && !Object.prototype.hasOwnProperty.call(request, 'objectIds'),
-    'request carried fabricated range identity');
 });
 
-test('a failed package Save never invokes the resident snapshot door', () => {
+test('a failed package Save never issues or consumes a verified receipt', () => {
   let calls = 0;
   const result = snapshotNormalModelSave({
     saveSucceeded: false,
     modelId: 'car',
     activeResidentModelId: 'car',
     packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
-    objectRows: [],
+    packageGeometrySha256: SHA,
     label: 'Save',
-  }, () => { calls += 1; return { ok: true }; });
+  }, () => { calls += 1; return SAVE_RECEIPT; }, () => { calls += 1; return NORMAL_RECEIPT; });
   assert(!result.attempted && calls === 0, 'failed Save entered Lore');
 });
 
@@ -70,33 +90,30 @@ test('a background Save cannot archive a different resident model', () => {
     modelId: 'background-model',
     activeResidentModelId: 'visible-model',
     packageGeometryPath: 'cart/editor/data/models/props/background/mesh/doc.blob',
-    objectRows: [],
+    packageGeometrySha256: SHA,
     label: 'Autosaved',
-  }, () => { calls += 1; return { ok: true }; });
+  }, () => { calls += 1; return SAVE_RECEIPT; }, () => { calls += 1; return NORMAL_RECEIPT; });
   assert(!result.attempted && calls === 0, 'the visible resident was archived under the background model ID');
 });
 
-test('a validated active Save snapshots exact identity and keeps push outside the Save transaction', () => {
-  let request: Readonly<Record<string, unknown>> | null = null;
-  const response: LoreSnapshotResponse = {
-    ok: true,
-    revision: 'abc123',
-    revisionNumber: 42,
-    pushed: true,
-  };
+test('a validated active Save issues an exact package receipt then appends normal by token only', () => {
+  let issued: any = null;
+  let captured: any = null;
   const result = snapshotNormalModelSave({
     saveSucceeded: true,
     modelId: 'car',
     activeResidentModelId: 'car',
     packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
-    objectRows: [{ id: 'glass', lo: 30 }, { id: 'body', lo: 0 }],
+    packageGeometrySha256: SHA,
     label: 'Saved by Agent Seat',
     note: 'checkpoint before roof edit',
-  }, (payload) => { request = payload; return response; });
+  }, (payload) => { issued = payload; return SAVE_RECEIPT; }, (payload) => { captured = payload; return NORMAL_RECEIPT; });
   assert(result.attempted && result.archived, 'successful Save did not archive');
-  assert(request !== null, 'snapshot request was not captured');
-  assert(request!.kind === 'normal' && request!.push === true, 'normal snapshot did not request a remote push');
-  assert(JSON.stringify(request!.objectIds) === JSON.stringify(['body', 'glass']), 'range-ranked IDs were lost');
+  assert(issued?.expectedSha256 === SHA && issued?.packageGeometryPath.endsWith('/mesh/doc.blob'),
+    'receipt issuance was not bound to exact installed package geometry');
+  assert(captured?.kind === 'normal' && captured?.push === true, 'normal snapshot did not request a remote push');
+  assert(captured?.saveReceiptToken === SAVE_RECEIPT.saveReceiptToken, 'one-use native receipt was not consumed');
+  assert(!Object.prototype.hasOwnProperty.call(captured, 'packageGeometryPath'), 'capture leaked or trusted a package path');
   assert(result.statusSuffix.includes('42'), 'revision was not exposed to Save status');
 });
 
@@ -106,9 +123,9 @@ test('Lore rejection or host throw cannot turn a committed package Save into fai
     modelId: 'car',
     activeResidentModelId: 'car',
     packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
-    objectRows: [],
+    packageGeometrySha256: SHA,
     label: 'Save',
-  }, () => ({ ok: false, error: 'server unavailable' }));
+  }, () => ({ ok: false, version: 1, code: 'server_unavailable', detail: 'server unavailable' }), () => NORMAL_RECEIPT);
   assert(rejected.attempted && !rejected.archived, 'Lore rejection was not isolated');
   assert(rejected.statusSuffix.startsWith('; package saved'), 'warning implied the package Save was rolled back');
 
@@ -117,9 +134,9 @@ test('Lore rejection or host throw cannot turn a committed package Save into fai
     modelId: 'car',
     activeResidentModelId: 'car',
     packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
-    objectRows: [],
+    packageGeometrySha256: SHA,
     label: 'Save',
-  }, () => { throw new Error('bridge failed'); });
+  }, () => { throw new Error('bridge failed'); }, () => NORMAL_RECEIPT);
   assert(!threw.archived && threw.statusSuffix.includes('bridge failed'), 'host throw escaped the recovery boundary');
 });
 
@@ -129,12 +146,25 @@ test('a local-only snapshot remains a successful recovery checkpoint with an exp
     modelId: 'car',
     activeResidentModelId: 'car',
     packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
-    objectRows: [],
+    packageGeometrySha256: SHA,
     label: 'Save',
-  }, () => ({ ok: true, revisionNumber: 7, pushed: false, pushError: 'remote down' }));
+  }, () => SAVE_RECEIPT, () => ({ ...NORMAL_RECEIPT, revisionNumber: 7, pushState: 'local' }));
   assert(result.archived, 'durable local snapshot was misreported as failed');
-  assert(result.statusSuffix.includes('local only') && result.statusSuffix.includes('remote down'),
-    'remote outage was not exposed');
+  assert(result.statusSuffix.includes('local only'), 'remote outage was not exposed');
+});
+
+test('missing exact readback SHA fails outside the package transaction without issuing a receipt', () => {
+  let calls = 0;
+  const result = snapshotNormalModelSave({
+    saveSucceeded: true,
+    modelId: 'car',
+    activeResidentModelId: 'car',
+    packageGeometryPath: 'cart/editor/data/models/props/car/mesh/doc.blob',
+    packageGeometrySha256: '',
+    label: 'Save',
+  }, () => { calls += 1; return SAVE_RECEIPT; }, () => { calls += 1; return NORMAL_RECEIPT; });
+  assert(result.attempted && !result.archived && calls === 0, 'unverified bytes reached Lore');
+  assert(result.statusSuffix.startsWith('; package saved'), 'Lore verification failure changed package success');
 });
 
 test('restore targets ordinary documents and manifest-declared character geometry', () => {

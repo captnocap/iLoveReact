@@ -58,9 +58,16 @@ const CONTENT_BROWSER_WIDTH = 350; // content browser, left panel (HW_SidePanel)
 const CONTENT_BROWSER_WIDTH_EXPANDED = 680; // content browser, expanded (HW_SidePanelWide)
 const CONTENT_BROWSER_TREE_WIDTH = 218; // expanded mode: the fixed tree column (HW_LibTreeCol)
 const FOCUS_PANEL_WIDTH = 326; // open focus body + rail (HW_RightPanel)
+// Character bind inspection is a two-column diagnostic workspace. Keep its
+// width separate from the ordinary prop/model inspector so opting into a
+// character rig does not silently widen every focus surface.
+const FOCUS_PANEL_CHARACTER_RIG_WIDTH = 720;
+const FOCUS_PANEL_BLOB_COMPACT_WIDTH = 420;
+const FOCUS_PANEL_BLOB_WIDE_WIDTH = 720;
 const FOCUS_PANEL_ATLAS_WIDTH = 480; // Blockbench-scale UV workspace + rail
 const FOCUS_PANEL_ATLAS_FOCUS_WIDTH = 960; // dedicated dense-mesh UV workspace + rail
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
+const FOCUS_PANEL_BLOB_COLLAPSED_WIDTH = FOCUS_RAIL_WIDTH;
 const FOCUS_PANEL_RESIZE_MIN_WIDTH = 420; // smallest usable atlas authoring body + rail
 const FOCUS_PANEL_RESIZE_MAX_WIDTH = 1600; // prevents the panel from consuming ultra-wide windows
 const FOCUS_PANEL_MIN_OUTSIDE_WIDTH = 560; // stage + surrounding rails retained while dragging
@@ -106,6 +113,10 @@ export const REGIONS = {
    */
   focusPanel: {
     width: FOCUS_PANEL_WIDTH,
+    characterRigWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH,
+    blobCompactWidth: FOCUS_PANEL_BLOB_COMPACT_WIDTH,
+    blobWideWidth: FOCUS_PANEL_BLOB_WIDE_WIDTH,
+    blobCollapsedWidth: FOCUS_PANEL_BLOB_COLLAPSED_WIDTH,
     atlasWidth: FOCUS_PANEL_ATLAS_WIDTH,
     atlasFocusWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH,
     railWidth: FOCUS_RAIL_WIDTH,
@@ -116,10 +127,12 @@ export const REGIONS = {
     resizeStep: FOCUS_PANEL_RESIZE_STEP,
     resizePreviewIntervalMs: FOCUS_PANEL_RESIZE_PREVIEW_INTERVAL_MS,
     bodyWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 285
+    characterRigBodyWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 679
     atlasBodyWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     atlasFocusBodyWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     gutter: PANEL_GUTTER,
     innerWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 265
+    characterRigInnerWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 659
     atlasInnerWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
     atlasFocusInnerWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
   },

@@ -1,4 +1,4 @@
-import { appendPathArrayPoint, arcPathArrayPoints, defaultPathArrayParams, materializePathArrayRows, sanitizePathArrayParams } from './pathArray';
+import { appendPathArrayPoint, arcPathArrayPoints, defaultPathArrayParams, linearArrayParams, materializePathArrayRows, sanitizePathArrayParams } from './pathArray';
 import type { ModelPart } from './types';
 
 let passed = 0, failed = 0;
@@ -40,6 +40,16 @@ test('range cardinality and numeric parameters are bounded at the cart boundary'
   assert(materializePathArrayRows([source, part('p2', 'Rail')], ['p1', 'p2'], [{ lo: 9, hi: 10 }], 1) === null, 'partial generated bay was accepted');
   const clean = sanitizePathArrayParams({ ...defaultPathArrayParams(), axis: 9 as any, bays: 999, turnDegrees: Number.NaN, riseU: Number.POSITIVE_INFINITY, profile: 'wat' as any });
   assert(clean.axis === 0 && clean.bays === 64 && clean.turnDegrees === 0 && clean.riseU === 0 && clean.profile === 'eased', 'boundary sanitization drifted');
+});
+
+test('linear array is the strict straight preset and names its generated family plainly', () => {
+  const params = linearArrayParams(3, 6);
+  assert(params.axis === 3 && params.bays === 6, 'linear direction or bay count drifted');
+  assert(params.turnDegrees === 0 && params.riseU === 0 && params.profile === 'linear' && !params.points, 'linear preset leaked curved-path state');
+  const source = part('p1', 'Picket Bay');
+  const result = materializePathArrayRows([source], [source.id], [{ lo: 20, hi: 22 }], 7, 'linear');
+  assert(result?.groupName === 'Picket Bay Array', `linear folder was named ${result?.groupName}`);
+  assert(result?.created[0]?.id.startsWith('part:array:') === true, 'linear copy retained a path identity');
 });
 
 test('arc parameters seed editable authoring-space XYZ boundary points', () => {

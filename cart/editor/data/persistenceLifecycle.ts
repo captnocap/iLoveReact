@@ -1,4 +1,17 @@
-import type { EditorState } from './types';
+import type { EditorState, ModelPackage } from './types';
+
+/** Keep the session catalog projection on the exact package revision that was
+ * just committed. Effective package lookup prefers this list over the boot
+ * catalog, so retaining an older draft here would undo a successful save on the
+ * next close/reopen within the same editor process. */
+export function upsertModelPackageProjection(
+  packages: readonly ModelPackage[],
+  committed: ModelPackage,
+): ModelPackage[] {
+  return packages.some((item) => item.id === committed.id)
+    ? packages.map((item) => item.id === committed.id ? committed : item)
+    : [...packages, committed];
+}
 
 /** Remove one model's ephemeral authoring copy. The caller separately clears
  * the native resident-session claim; this pure state transition is kept here so
@@ -29,6 +42,9 @@ export function discardModelWorkingCopyState(
     modelDirty,
     modelOverrides,
     modelDupes: materialized ? state.modelDupes : state.modelDupes.filter((item) => item.id !== modelId),
+    recentLibraryKeys: materialized
+      ? state.recentLibraryKeys
+      : state.recentLibraryKeys.filter((key) => key !== `model:${modelId}`),
     modelActivePartId: null,
   };
 }

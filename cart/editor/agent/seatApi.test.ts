@@ -1,7 +1,7 @@
 // Run:
 //   tools/esbuild cart/editor/agent/seatApi.test.ts --bundle --outfile=/tmp/editor-seat-api.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-seat-api.test.js
-import { runSeatForEach, backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, retopoRailPairsFromPatch, seatBatchGenerationReason, seatModelClaimedByToken, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
+import { runSeatForEach, backgroundSeatRefusal, compactSeatReply, compileSeatSelector, createAgentSeat, executeSeatRequest, executeSeatRequestAtShell, formatGeometryFacts, formatSeatPercept, orbitPoseByDegrees, readSeatPercept, retopoRailPairsFromPatch, seatBatchGenerationReason, seatModelClaimedByToken, seatRequestTarget, type SeatBoundaryContinuation, type SeatFollowPatch, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec } from './seatApi';
 import { claimModel, resetClaimsForTest, setClaimActiveModel } from './claims';
 import type { CharacterRigSeatStatus } from './characterRigSeat';
 
@@ -21,6 +21,30 @@ const percept: SeatPercept = {
   table: { version: 1, regions: [{ id: 7, name: 'window.rim' }], nextRegionId: 8 },
 };
 (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+
+test('resident authored-face count overrides a stale opening atlas', () => {
+  const previousState = (globalThis as any).__mesh_semantic_state;
+  const previousAtlas = (globalThis as any).__model_atlas_read;
+  try {
+    (globalThis as any).__mesh_semantic_state = () => JSON.stringify({
+      ...percept,
+      faces: 20_012,
+      authoredFaces: 10_006,
+    });
+    // One old authored group remains in the preserved pre-edit atlas.
+    (globalThis as any).__model_atlas_read = () => JSON.stringify({
+      islands: [0, 0, 16, 16],
+      groups: [0],
+      triangles: [0, 0, 0, 0, 1, 0, 1, 1],
+      cornerVertices: [0, 1, 2],
+    });
+    const live = readSeatPercept();
+    assert(live?.authoredFaces === 10_006, `stale atlas won over resident grouping (${live?.authoredFaces})`);
+  } finally {
+    (globalThis as any).__mesh_semantic_state = previousState;
+    (globalThis as any).__model_atlas_read = previousAtlas;
+  }
+});
 
 const rigPercept: CharacterRigSeatStatus = {
   state: 'needs_bind',
@@ -1054,6 +1078,18 @@ test('a claimed model admits only the password lane and stays readable (req_3850
 
   const wrongToken = executeSeatRequestAtShell(null, { action: 'extrude', args: { distance: 0.2 }, token: 'other' }, bootstrap);
   assert(!wrongToken.ok, 'a wrong token mutated a claimed model');
+
+  const loreHistory = executeSeatRequestAtShell(null, { action: 'lore', args: { operation: 'history' } }, bootstrap);
+  assert(!loreHistory.ok && loreHistory.reason?.includes('lane-a') !== true,
+    'Lore history stopped being a claim-free read');
+  const loreRestoreBlocked = executeSeatRequestAtShell(null, { action: 'lore', args: { operation: 'restore' } }, bootstrap);
+  assert(!loreRestoreBlocked.ok && loreRestoreBlocked.reason?.includes('lane-a') === true,
+    'Lore restore inherited the claim-free history lane');
+  const loreRestoreAllowed = executeSeatRequestAtShell(null, {
+    action: 'lore', args: { operation: 'restore' }, token: 'hush',
+  }, bootstrap);
+  assert(!loreRestoreAllowed.ok && loreRestoreAllowed.reason?.includes('no live model') === true,
+    'the Lore restore holder token did not pass the model claim gate');
 
   // The right token clears admission; the refusal that remains is the ordinary
   // no-live-model shell boundary, proving the gate itself opened.

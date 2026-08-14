@@ -399,12 +399,14 @@ function palmMesh(): Float32Array | null {
 }
 
 /** Derived engine-flora meshes used only by rigged-surface patch refs. */
-export function builtinSurfaceFloraResidentMeshes(): ResidentMesh[] {
+export function builtinSurfaceFloraResidentMeshes(requiredSpeciesIds?: ReadonlySet<string>): ResidentMesh[] {
   const meshes: ResidentMesh[] = [];
   for (const definition of FLORA_KIND_DEFINITIONS) {
+    const speciesId = builtinFloraSpeciesId(definition.kind);
+    if (requiredSpeciesIds && !requiredSpeciesIds.has(speciesId)) continue;
     if (definition.kind === 'palmDense') {
       const vertices = palmMesh();
-      if (vertices) meshes.push({ key: surfaceFloraResidentKey(builtinFloraSpeciesId(definition.kind)), vertices, color: hexRgb(definition.color) });
+      if (vertices) meshes.push({ key: surfaceFloraResidentKey(speciesId), vertices, color: hexRgb(definition.color) });
       continue;
     }
     const recipe = BUILTIN_MESH_RECIPES[definition.kind];
@@ -412,7 +414,7 @@ export function builtinSurfaceFloraResidentMeshes(): ResidentMesh[] {
     const source = packageVertices(recipe.packageId);
     if (!source) continue;
     meshes.push({
-      key: surfaceFloraResidentKey(builtinFloraSpeciesId(definition.kind)),
+      key: surfaceFloraResidentKey(speciesId),
       vertices: transformedMesh(source, recipe.scale, recipe.translate),
       color: hexRgb(definition.color),
     });

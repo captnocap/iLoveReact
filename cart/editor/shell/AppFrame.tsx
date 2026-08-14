@@ -15,6 +15,7 @@ import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
 import PathArrayDialog from './PathArrayDialog';
+import LinearArrayDialog from './LinearArrayDialog';
 import ScaleByDialog from './ScaleByDialog';
 import NameSelectionDialog from './NameSelectionDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
@@ -340,8 +341,20 @@ import { FACADE_TEXELS_PER_METER, facadeFromSelection, facadeLayers, type Facade
 import { resizeFacadeRgba, setLiveFacades, saveFacadeBake } from '../world/facadeBake';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
-import { oklchName, pushRecentColor, SPINE_LIBRARY } from '../data/colorSpine';
+import { oklchName, pushRecentColor } from '../data/colorSpine';
 import { scheduleColorLibrarySave } from '../data/colorLibraryStore';
+import { scheduleLabRecipesSave } from '../data/labRecipeStore';
+import { validateRecipe, type MaterialRecipe } from '../render3d/shaders/recipe';
+import type { LabHandlers, LabRecipeEdit } from '../stage/MaterialLabSurface';
+
+// Material Lab undo entries (req_4395): whole-document snapshots — a recipe is
+// a few hundred bytes, so exactness beats slice-diffing here.
+type LabHistoryEntry = {
+  label: string;
+  before: { recipes: MaterialRecipe[]; activeId: string | null; selectedLayer: number | null };
+  after: { recipes: MaterialRecipe[]; activeId: string | null; selectedLayer: number | null };
+};
+const LAB_UNDO_CAP = 32;
 import { scheduleLibraryHistorySave } from '../data/libraryHistoryStore';
 import { hexToOklch, oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
@@ -636,7 +649,7 @@ export default function AppFrame() {
   const [stlConversionName, setStlConversionName] = useState<string | null>(null);
   // Path Array's source is frozen when the dialog opens. Params remain dialog-local;
   // Apply revalidates these ids/ranges against the live outliner before touching mesh.
-  const [pathArrayPrompt, setPathArrayPrompt] = useState<{ sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
+  const [pathArrayPrompt, setPathArrayPrompt] = useState<{ mode: 'path' | 'linear'; sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
   // Guided role naming (req_3263): the ask queue over one rig contract, pinned to
   // the model it started on. Session-only — the renames it makes are the record.
   // The ref mirrors the session for handlers: Pressable registrations only refresh
@@ -832,6 +845,13 @@ export default function AppFrame() {
   const colorStudioHistoryRef = useRef<{
     undo: ColorStudioHistoryEntry[];
     redo: ColorStudioHistoryEntry[];
+  }>({ undo: [], redo: [] });
+  // Material Lab history (req_4395) — same controller-state shape as the
+  // studio's. Recipes are small documents, so entries carry exact whole-recipe
+  // before/after snapshots plus the selection context that made the edit.
+  const labHistoryRef = useRef<{
+    undo: LabHistoryEntry[];
+    redo: LabHistoryEntry[];
   }>({ undo: [], redo: [] });
 
   const applicationCommandsRef = useRef<ReturnType<typeof createEditorApplicationCommands> | null>(null);
@@ -1626,12 +1646,19 @@ export default function AppFrame() {
     return () => clearTimeout(checkpoint);
   }, [state]);
 
-  // Micro-save the color library (req_3097): SAVED tray + RECENT use-history go
-  // to their per-concern disk file on every change, so a saved color is a real
-  // save — it survives the cold restart, not just the hot reload.
+  // Micro-save the color library (req_3097/req_4395): SAVED tray + RECENT
+  // use-history + named SETS go to their per-concern disk file on every
+  // change, so a saved color or set is a real save — it survives the cold
+  // restart, not just the hot reload.
   useEffect(() => {
-    scheduleColorLibrarySave(state.colorSpinePalette, state.colorSpineRecents);
-  }, [state.colorSpinePalette, state.colorSpineRecents]);
+    scheduleColorLibrarySave(state.colorSpinePalette, state.colorSpineRecents, state.colorSpineSets);
+  }, [state.colorSpinePalette, state.colorSpineRecents, state.colorSpineSets]);
+
+  // Micro-save the Material Lab recipe documents (req_4395) — experiments are
+  // real documents; bad ones get deleted, good ones get promoted, none get lost.
+  useEffect(() => {
+    scheduleLabRecipesSave(state.labRecipes);
+  }, [state.labRecipes]);
 
   // Asset Explorer Recent is durable user history, not session-only view
   // state. Every mixed asset/model history change micro-saves independently.
@@ -1871,9 +1898,12 @@ export default function AppFrame() {
     characterRigSnapshot?.history.redoDepth ?? 0,
     characterRigHistoryActive,
   );
+  // The 'material' depth channel: the LAB's history while a recipe is open in
+  // the Lab view, the studio's slot-override history otherwise.
+  const labOwnsUndo = !!state.labActiveRecipeId && state.materialFocused && state.colorStudioView === 'materialPalette';
   publishColorStudioUndoDepths(
-    colorStudioHistoryRef.current.undo.length,
-    colorStudioHistoryRef.current.redo.length,
+    labOwnsUndo ? labHistoryRef.current.undo.length : colorStudioHistoryRef.current.undo.length,
+    labOwnsUndo ? labHistoryRef.current.redo.length : colorStudioHistoryRef.current.redo.length,
   );
   const liveUndoDepths = undoDepths(state);
   publishUndoDepths(liveUndoDepths);
@@ -3607,6 +3637,12 @@ export default function AppFrame() {
       return;
     }
     if ((commandId === 'undo-local' || commandId === 'redo-local') && activeSurface(stateRef.current) === 'material') {
+      // The Lab owns material-surface undo while a recipe is open in the Lab
+      // view; the studio's registered undo commands keep the palette panel.
+      if (stateRef.current.labActiveRecipeId && stateRef.current.colorStudioView === 'materialPalette') {
+        if (commandId === 'undo-local') labUndo(); else labRedo();
+        return;
+      }
       const undo = commandId === 'undo-local';
       const entry = undo ? colorStudioHistoryRef.current.undo[0] : colorStudioHistoryRef.current.redo[0];
       invokeApplicationCommand(
@@ -3707,7 +3743,8 @@ export default function AppFrame() {
     }
     if (commandId === 'mesh-tris-to-quads') { runFaceOp('tris-to-quads', source); return; }
     if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1, source); return; }
-    if (commandId === 'mesh-path-array') { pathArraySourceRef.current = source; openPathArrayPrompt(); return; }
+    if (commandId === 'mesh-linear-array') { pathArraySourceRef.current = source; openPathArrayPrompt('linear'); return; }
+    if (commandId === 'mesh-path-array') { pathArraySourceRef.current = source; openPathArrayPrompt('path'); return; }
     if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0, source); return; }
     if (commandId === 'mesh-mirror-y') { duplicatePartById(state.modelActivePartId, 1, source); return; }
     if (commandId === 'mesh-mirror-z') { duplicatePartById(state.modelActivePartId, 2, source); return; }
@@ -5342,9 +5379,172 @@ export default function AppFrame() {
     invokeApplicationCommand(COLOR_STUDIO_COLOR_SELECT_COMMAND_ID, { color, source: 'scene', scenePick: css }, invocationSource);
   };
 
-  const loadColorSpineLibrarySet = (colors: OklchColor[], invocationSource = 'stage') => {
-    const setName = SPINE_LIBRARY.find((set) => set.colors === colors)?.name ?? 'library set';
-    invokeApplicationCommand(COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID, { colors, setName }, invocationSource);
+  const loadColorSpineLibrarySet = (name: string, colors: OklchColor[], invocationSource = 'stage') => {
+    invokeApplicationCommand(COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID, { colors, setName: name }, invocationSource);
+  };
+
+  // ── the REAL named color sets (req_4395 — SPINE_LIBRARY's facade is dead) ──
+  const createColorSetFromTray = () => {
+    const previous = stateRef.current;
+    if (previous.colorSpinePalette.length === 0) {
+      setState((prev) => ({ ...prev, status: 'SAVED is empty — save some colors first, then bank them as a set' }));
+      return;
+    }
+    const taken = new Set(previous.colorSpineSets.map((set) => set.name));
+    let n = previous.colorSpineSets.length + 1;
+    while (taken.has(`Set ${n}`)) n += 1;
+    setState((prev) => ({
+      ...prev,
+      colorSpineSets: [...prev.colorSpineSets, { name: `Set ${n}`, colors: prev.colorSpinePalette.map((c) => ({ ...c })) }],
+      status: `banked SAVED as "Set ${n}" (${previous.colorSpinePalette.length} colors)`,
+    }));
+  };
+
+  const deleteColorSet = (index: number) => {
+    setState((prev) => {
+      const set = prev.colorSpineSets[index];
+      if (!set) return prev;
+      return {
+        ...prev,
+        colorSpineSets: prev.colorSpineSets.filter((_, at) => at !== index),
+        status: `deleted color set "${set.name}"`,
+      };
+    });
+  };
+
+  // ── Material Lab (req_4395) ────────────────────────────────────────────────
+  const labSnapshot = (s: EditorState): LabHistoryEntry['before'] => ({
+    recipes: s.labRecipes,
+    activeId: s.labActiveRecipeId,
+    selectedLayer: s.labSelectedLayer,
+  });
+
+  const activeLabRecipe = (s: EditorState): MaterialRecipe | null =>
+    s.labActiveRecipeId ? s.labRecipes.find((recipe) => recipe.id === s.labActiveRecipeId) ?? null : null;
+
+  const applyLabEdit = (label: string, edit: LabRecipeEdit) => {
+    const previous = stateRef.current;
+    const recipe = activeLabRecipe(previous);
+    if (!recipe) return;
+    const edited = edit(recipe);
+    if (!edited || edited === recipe) return;
+    const next: EditorState = {
+      ...previous,
+      labRecipes: previous.labRecipes.map((r) => (r.id === recipe.id ? edited : r)),
+      status: label,
+    };
+    labHistoryRef.current = {
+      undo: [{ label, before: labSnapshot(previous), after: labSnapshot(next) }, ...labHistoryRef.current.undo].slice(0, LAB_UNDO_CAP),
+      redo: [],
+    };
+    stateRef.current = next;
+    setState(next);
+  };
+
+  const labUndo = () => {
+    const entry = labHistoryRef.current.undo[0];
+    if (!entry) {
+      setState((prev) => ({ ...prev, status: 'nothing to undo in the Lab' }));
+      return;
+    }
+    labHistoryRef.current = {
+      undo: labHistoryRef.current.undo.slice(1),
+      redo: [entry, ...labHistoryRef.current.redo].slice(0, LAB_UNDO_CAP),
+    };
+    const previous = stateRef.current;
+    const next: EditorState = {
+      ...previous,
+      labRecipes: entry.before.recipes,
+      labActiveRecipeId: entry.before.activeId,
+      labSelectedLayer: entry.before.selectedLayer,
+      status: `undid ${entry.label}`,
+    };
+    stateRef.current = next;
+    setState(next);
+  };
+
+  const labRedo = () => {
+    const entry = labHistoryRef.current.redo[0];
+    if (!entry) {
+      setState((prev) => ({ ...prev, status: 'nothing to redo in the Lab' }));
+      return;
+    }
+    labHistoryRef.current = {
+      undo: [entry, ...labHistoryRef.current.undo].slice(0, LAB_UNDO_CAP),
+      redo: labHistoryRef.current.redo.slice(1),
+    };
+    const previous = stateRef.current;
+    const next: EditorState = {
+      ...previous,
+      labRecipes: entry.after.recipes,
+      labActiveRecipeId: entry.after.activeId,
+      labSelectedLayer: entry.after.selectedLayer,
+      status: `redid ${entry.label}`,
+    };
+    stateRef.current = next;
+    setState(next);
+  };
+
+  /** Enter the Lab on a catalog material: reuse the newest recipe based on it,
+   *  or mint a fresh working recipe (micro-saved — experiments survive until
+   *  deleted). Returns the patch to fold into the entry's setState. */
+  const ensureLabRecipeFor = (fillFn: string, name: string): Partial<EditorState> => {
+    const previous = stateRef.current;
+    const existing = [...previous.labRecipes].reverse().find((recipe) => recipe.base.fn === fillFn);
+    if (existing) {
+      return { labActiveRecipeId: existing.id, labSelectedLayer: null, labSoloStage: null };
+    }
+    const taken = new Set(previous.labRecipes.map((recipe) => recipe.id));
+    const stem = fillFn.replace(/_/g, '-');
+    let id = `${stem}-lab`;
+    let n = 2;
+    while (taken.has(id)) id = `${stem}-lab-${n++}`;
+    const fresh: MaterialRecipe = { version: 1, id, name: `${name} Lab`, base: { fn: fillFn }, layers: [] };
+    const invalid = validateRecipe(fresh);
+    if (invalid) {
+      console.error(`[lab] cannot open '${fillFn}' as a recipe base: ${invalid}`);
+      return { labActiveRecipeId: null };
+    }
+    return {
+      labRecipes: [...previous.labRecipes, fresh],
+      labActiveRecipeId: id,
+      labSelectedLayer: null,
+      labSoloStage: null,
+    };
+  };
+
+  const labHandlers: LabHandlers = {
+    onEditRecipe: applyLabEdit,
+    onRenameRecipe: (name: string) => applyLabEdit(`rename recipe → ${name}`, (recipe) => ({ ...recipe, name })),
+    onSelectLayer: (layer) => setState((prev) => ({ ...prev, labSelectedLayer: layer })),
+    onSoloStage: (stage) => setState((prev) => ({ ...prev, labSoloStage: stage })),
+    onStageTiles: (tiles) => setState((prev) => ({ ...prev, labStageTiles: tiles })),
+    onVariant: (variant) => setColorStudioVariant(variant),
+    onSeed: () => rollColorStudioSeed(),
+    onQuality: (quality) => setColorStudioQuality(quality),
+    onSpineCurrent: (color) => setColorSpineCurrent(color, 'lab'),
+    onSpineAddToTray: () => addColorSpineToTray('lab'),
+    onSpineLoadLibrarySet: (name, colors) => loadColorSpineLibrarySet(name, colors, 'lab'),
+  };
+
+  /** References to the Lab base material across authored data — the honest,
+   *  derivable usage counts (world piece slots + model texture slots). */
+  const labUsageFor = (recipe: MaterialRecipe | null): { world: number; models: number } => {
+    if (!recipe) return { world: 0, models: 0 };
+    const fn = recipe.base.fn;
+    let world = 0;
+    for (const piece of stateRef.current.worldPieces) {
+      for (const ref of Object.values(piece.slots ?? {})) {
+        if ((ref as { fn?: string }).fn === fn) world += 1;
+      }
+    }
+    let models = 0;
+    for (const slots of Object.values(stateRef.current.modelTextureSlots)) {
+      for (const slot of slots) {
+        if (slot.liveMaterial?.fn === fn) models += 1;
+      }
+    }
+    return { world, models };
   };
 
   const focusMaterialDocument = (variant?: number) => {
@@ -5353,13 +5553,17 @@ export default function AppFrame() {
     const doc = materialDocument(asset);
     const spec = asset.recipe ? shaderSpec(asset.recipe) : undefined;
     selectNativeModelSession(doc);
+    // Catalog materials open THE LAB (req_4395) as a working recipe; specs
+    // without a registry fn (road, imported patches) keep the palette panel.
+    const labPatch = spec?.fillFn ? ensureLabRecipeFor(spec.fillFn, spec.label) : { labActiveRecipeId: null };
     const next: EditorState = {
       ...previous,
+      ...labPatch,
       materialFocused: true,
       workspaceDocuments: upsertDocument(previous.workspaceDocuments, doc),
       activeWorkspaceDocumentId: doc.id,
       colorStudioView: spec ? 'materialPalette' : previous.colorStudioView,
-      status: spec ? `opened Color Studio: ${asset.name}` : `opened material document: ${asset.name}`,
+      status: spec?.fillFn ? `opened Material Lab: ${asset.name}` : spec ? `opened Color Studio: ${asset.name}` : `opened material document: ${asset.name}`,
     };
     stateRef.current = next;
     setState(next);
@@ -5379,14 +5583,16 @@ export default function AppFrame() {
     const asset = match ?? assetById(previous.activeAssetId, previous.assetOverrides);
     const doc = materialDocument(asset);
     selectNativeModelSession(doc);
+    const labPatch = spec.fillFn ? ensureLabRecipeFor(spec.fillFn, spec.label) : { labActiveRecipeId: null };
     const next: EditorState = {
       ...previous,
+      ...labPatch,
       materialFocused: true,
       activeAssetId: match ? match.id : previous.activeAssetId,
       workspaceDocuments: upsertDocument(previous.workspaceDocuments, doc),
       activeWorkspaceDocumentId: doc.id,
       colorStudioView: 'materialPalette',
-      status: `opened Color Studio: ${spec.label}`,
+      status: spec.fillFn ? `opened Material Lab: ${spec.label}` : `opened Color Studio: ${spec.label}`,
     };
     stateRef.current = next;
     setState(next);
@@ -6706,13 +6912,13 @@ export default function AppFrame() {
     });
   };
 
-  const openPathArrayPrompt = () => {
+  const openPathArrayPrompt = (mode: 'path' | 'linear' = 'path') => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
     const sourceIds = effectiveSelectedIds(state, parts, selectedPartIdsRef.current);
     const sources = sourceIds.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part));
     if (!mid || sources.length === 0) {
-      setState((prev) => ({ ...prev, status: 'path array: select a source part or outliner group first' }));
+      setState((prev) => ({ ...prev, status: `${mode === 'linear' ? 'linear' : 'path'} array: select a source part or outliner group first` }));
       return;
     }
     const blocked = sources.find((part) => !part.visible || !partRange(part));
@@ -6720,8 +6926,8 @@ export default function AppFrame() {
       setState((prev) => ({
         ...prev,
         status: !blocked.visible
-          ? `path array: show ${blocked.name} first — every source member must be live`
-          : `path array: ${blocked.name} has no stamped host range`,
+          ? `${mode === 'linear' ? 'linear' : 'path'} array: show ${blocked.name} first — every source member must be live`
+          : `${mode === 'linear' ? 'linear' : 'path'} array: ${blocked.name} has no stamped host range`,
       }));
       return;
     }
@@ -6734,8 +6940,8 @@ export default function AppFrame() {
     const ranges = sources.map((part) => partRange(part)!) as { lo: number; hi: number }[];
     const sourceSpanU = modelToolApiRef.current?.pathArraySpans(ranges) ?? { xU: 1, zU: 1 };
     modelMenu.close();
-    setPathArrayPrompt({ sourceIds, label, sourceSpanU });
-    setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `path array source: ${label}` }));
+    setPathArrayPrompt({ mode, sourceIds, label, sourceSpanU });
+    setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `${mode === 'linear' ? 'linear' : 'path'} array source: ${label}` }));
   };
 
   const applyPathArray = (rawParams: PathArrayParams, source = pathArraySourceRef.current) => {
@@ -6765,7 +6971,7 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: 'path array failed — source length/axis or host ranges were invalid; no partial array was kept' }));
       return;
     }
-    const materialized = materializePathArrayRows(parts, prompt.sourceIds, hostResult.ranges, state.seq);
+    const materialized = materializePathArrayRows(parts, prompt.sourceIds, hostResult.ranges, state.seq, prompt.mode);
     if (!materialized || materialized.created.length !== expectedRanges) {
       withNativeMeshActionSource(source, () => api.undoMesh());
       setState((prev) => ({ ...prev, status: 'path array metadata failed validation — host append rolled back exactly' }));
@@ -6774,7 +6980,9 @@ export default function AppFrame() {
     const focusedIds = materialized.created.map((part) => part.id);
     const primaryId = focusedIds[focusedIds.length - 1]!;
     const pointEnd = params.points?.[params.points.length - 1];
-    const pathSummary = pointEnd
+    const pathSummary = prompt.mode === 'linear'
+      ? `${params.bays} straight bays along ${['+X', '−X', '+Z', '−Z'][params.axis]}`
+      : pointEnd
       ? `${params.points!.length} XYZ boundaries ending at (${pointEnd.xU}, ${pointEnd.yU}, ${pointEnd.zU}) u`
       : `${params.turnDegrees >= 0 ? '+' : ''}${params.turnDegrees}° turn, ${params.riseU >= 0 ? '+' : ''}${params.riseU} u rise`;
     selectedPartIdsRef.current = focusedIds;
@@ -6787,7 +6995,7 @@ export default function AppFrame() {
       modelParts: { ...prev.modelParts, [mid]: materialized.parts },
       modelActivePartId: primaryId,
       modelDirty: { ...prev.modelDirty, [mid]: true },
-      status: `built ${params.bays}-bay path in ${materialized.groupName} — ${materialized.created.length} new independent part${materialized.created.length === 1 ? '' : 's'}, ${pathSummary} · one undo`,
+      status: `built ${params.bays}-bay ${prompt.mode === 'linear' ? 'linear array' : 'path'} in ${materialized.groupName} — ${materialized.created.length} new independent part${materialized.created.length === 1 ? '' : 's'}, ${pathSummary} · one undo`,
     }));
   };
 
@@ -9691,7 +9899,7 @@ export default function AppFrame() {
     onAddToTray: () => addColorSpineToTray('paint dock'),
     onPickTray: (color: typeof state.colorSpineCurrent) => pickColorSpineTray(color, 'paint dock'),
     onScenePick: (color: typeof state.colorSpineCurrent, css: string) => pickColorSpineScene(color, css, 'paint dock'),
-    onLoadLibrarySet: (colors: typeof state.colorSpinePalette) => loadColorSpineLibrarySet(colors, 'paint dock'),
+    onLoadLibrarySet: (name: string, colors: typeof state.colorSpinePalette) => loadColorSpineLibrarySet(name, colors, 'paint dock'),
   };
   const activeFacade = facadePaintActive
     ? state.worldFacades.find((facade) => facade.id === activeWorkspaceDocument.sourceId) ?? null
@@ -9724,6 +9932,7 @@ export default function AppFrame() {
         palette={state.colorSpinePalette}
         recents={state.colorSpineRecents}
         scenePick={state.colorSpineScenePick}
+        sets={state.colorSpineSets}
         paletteFor={paintPaletteFor}
         onEditMaterial={openColorStudioForSpec}
         spine={paintSpine}
@@ -10014,6 +10223,11 @@ export default function AppFrame() {
             onColorSpineTrayPick={pickColorSpineTray}
             onColorSpineScenePick={pickColorSpineScene}
             onColorSpineLoadLibrarySet={loadColorSpineLibrarySet}
+            onCreateColorSet={createColorSetFromTray}
+            onDeleteColorSet={deleteColorSet}
+            labRecipe={activeLabRecipe(state)}
+            labHandlers={labHandlers}
+            labUsage={labUsageFor(activeLabRecipe(state))}
           />
         </RenderProbe>
         {activeDocumentKind !== 'knowledge' ? <RenderProbe id="Inspector">
@@ -10323,14 +10537,24 @@ export default function AppFrame() {
         />
       ) : null}
       {pathArrayPrompt ? (
-        <RenderProbe id="Path Array Dialog">
-          <PathArrayDialog
-            sourceLabel={pathArrayPrompt.label}
-            sourcePartCount={pathArrayPrompt.sourceIds.length}
-            sourceSpanU={pathArrayPrompt.sourceSpanU}
-            onCancel={() => { setPathArrayPrompt(null); setState((prev) => ({ ...prev, status: 'path array cancelled' })); }}
-            onApply={applyPathArray}
-          />
+        <RenderProbe id={pathArrayPrompt.mode === 'linear' ? 'Linear Array Dialog' : 'Path Array Dialog'}>
+          {pathArrayPrompt.mode === 'linear' ? (
+            <LinearArrayDialog
+              sourceLabel={pathArrayPrompt.label}
+              sourcePartCount={pathArrayPrompt.sourceIds.length}
+              sourceSpanU={pathArrayPrompt.sourceSpanU}
+              onCancel={() => { setPathArrayPrompt(null); setState((prev) => ({ ...prev, status: 'linear array cancelled' })); }}
+              onApply={applyPathArray}
+            />
+          ) : (
+            <PathArrayDialog
+              sourceLabel={pathArrayPrompt.label}
+              sourcePartCount={pathArrayPrompt.sourceIds.length}
+              sourceSpanU={pathArrayPrompt.sourceSpanU}
+              onCancel={() => { setPathArrayPrompt(null); setState((prev) => ({ ...prev, status: 'path array cancelled' })); }}
+              onApply={applyPathArray}
+            />
+          )}
         </RenderProbe>
       ) : null}
       {scaleByOpen ? (

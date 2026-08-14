@@ -4,6 +4,7 @@ import type { ModelPart } from './types';
 export type PathArrayAxis = 0 | 1 | 2 | 3;
 export type PathArrayProfile = 'linear' | 'eased';
 export type PathArrayPoint = { xU: number; yU: number; zU: number };
+export type LinearArrayAxis = PathArrayAxis;
 
 export type PathArrayParams = {
   /** +X, -X, +Z, -Z. Y remains world-up. */
@@ -41,6 +42,19 @@ export function defaultPathArrayParams(): PathArrayParams {
     riseU: PATH_ARRAY_TUNING.defaultRiseU,
     profile: 'eased',
   };
+}
+
+/** The straight modifier is one deliberate preset of the path-array engine:
+ * no turn, no rise, rigid source-length steps. Keeping this conversion here
+ * prevents the visible Linear Array and the native transaction from drifting. */
+export function linearArrayParams(axis: LinearArrayAxis, bays: number): PathArrayParams {
+  return sanitizePathArrayParams({
+    axis,
+    bays,
+    turnDegrees: 0,
+    riseU: 0,
+    profile: 'linear',
+  });
 }
 
 export function sanitizePathArrayParams(raw: PathArrayParams): PathArrayParams {
@@ -122,6 +136,7 @@ export function materializePathArrayRows(
   sourceIds: readonly string[],
   freshRanges: readonly { lo: number; hi: number }[],
   seq: number,
+  kind: 'path' | 'linear' = 'path',
 ): PathArrayRowsResult | null {
   const sourceSet = new Set(sourceIds);
   const sources = sourceIds
@@ -134,10 +149,15 @@ export function materializePathArrayRows(
     ? sources[0]!.groupId
     : null;
   let cursor = seq;
-  const groupId = commonGroupId ?? `part-group:path:${cursor++}`;
+  const groupId = commonGroupId ?? `part-group:${kind === 'linear' ? 'array' : 'path'}:${cursor++}`;
   const groupName = commonGroupId
     ? (sources[0]!.groupName?.trim() || 'Path Array')
-    : nextDuplicateGroupName(sources.length === 1 ? `${duplicateNameStem(sources[0]!.name)} Path` : 'Path Array', parts);
+    : nextDuplicateGroupName(
+        sources.length === 1
+          ? `${duplicateNameStem(sources[0]!.name)} ${kind === 'linear' ? 'Array' : 'Path'}`
+          : kind === 'linear' ? 'Linear Array' : 'Path Array',
+        parts,
+      );
   const groupedSources = commonGroupId
     ? parts.slice()
     : parts.map((part) => sourceSet.has(part.id) ? { ...part, groupId, groupName } : part);
@@ -150,7 +170,7 @@ export function materializePathArrayRows(
     const { id: _id, name: _name, mesh: _mesh, sourcePath: _sourcePath, lo: _lo, hi: _hi, groupId: _groupId, groupName: _groupName, ...copyable } = source;
     return {
       ...copyable,
-      id: `part:path:${cursor++}`,
+      id: `part:${kind === 'linear' ? 'array' : 'path'}:${cursor++}`,
       name,
       visible: true,
       groupId,

@@ -87,7 +87,12 @@ export default function Stage(props: {
   onColorSpineAddToTray: () => void;
   onColorSpineTrayPick: (color: OklchColor) => void;
   onColorSpineScenePick: (color: OklchColor, css: string) => void;
-  onColorSpineLoadLibrarySet: (colors: OklchColor[]) => void;
+  onColorSpineLoadLibrarySet: (name: string, colors: OklchColor[]) => void;
+  onCreateColorSet: () => void;
+  onDeleteColorSet: (index: number) => void;
+  labRecipe: import('../render3d/shaders/recipe').MaterialRecipe | null;
+  labHandlers: import('./MaterialLabSurface').LabHandlers;
+  labUsage: { world: number; models: number };
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
@@ -218,6 +223,9 @@ export default function Stage(props: {
           <MaterialFocusSurface
             state={props.state}
             activeAsset={props.activeAsset}
+            labRecipe={props.labRecipe}
+            labHandlers={props.labHandlers}
+            labUsage={props.labUsage}
             onExit={props.onExitMaterialFocus}
             onSelectMaterial={props.onSelectColorStudioMaterial}
             onVariant={props.onColorStudioVariant}
@@ -232,6 +240,8 @@ export default function Stage(props: {
             onSpineTrayPick={props.onColorSpineTrayPick}
             onSpineScenePick={props.onColorSpineScenePick}
             onSpineLoadLibrarySet={props.onColorSpineLoadLibrarySet}
+            onCreateSet={props.onCreateColorSet}
+            onDeleteSet={props.onDeleteColorSet}
           />
         )}
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}

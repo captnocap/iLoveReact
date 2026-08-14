@@ -10,6 +10,7 @@ import type { EditorState } from '../data/types';
 import MapPaintBar from './MapPaintBar';
 import { Box, Effect } from '../../../runtime/primitives';
 import { importedSpecs } from '../textures/shaders';
+import type { ExternalAutoRigUiState } from '../skeleton/externalAutoRig';
 
 // Place Sticker (req_3025): the stamp scale presets the rail cycles through.
 const STICKER_SCALES = [0.5, 1, 2, 4];
@@ -45,6 +46,10 @@ export default function ToolOptions(props: {
   onRetopoGhost: () => void;
   onRetopoClear: () => void;
   retopoGhostVisible: boolean;
+  externalAutoRigAvailable: boolean;
+  externalAutoRigState: ExternalAutoRigUiState;
+  onExternalAutoRig: () => void;
+  onAcceptExternalAutoRig: () => void;
 }) {
   const [retopoBandId, setRetopoBandId] = useState(0);
   const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
@@ -138,6 +143,39 @@ export default function ToolOptions(props: {
             <C.HW_IconButton tooltip="Clear the entire saved retopology guide and frozen source" onPress={props.onRetopoClear}>
               <Icon name="X" size={14} color={accentFor('textDim')} />
             </C.HW_IconButton>
+          </Fragment>
+        ) : null}
+        {props.externalAutoRigAvailable ? (
+          <Fragment>
+            <C.HW_OptionDivider />
+            {props.externalAutoRigState.phase === 'running' ? (
+              <C.HW_Pill tooltip="SkinTokens is generating a new skeleton and four-influence skin">
+                <Icon name="Sparkles" size={13} color={accentFor('textDim')} />
+                <C.HW_PillText>RIGGING…</C.HW_PillText>
+              </C.HW_Pill>
+            ) : props.externalAutoRigState.phase === 'preview' ? (
+              <Fragment>
+                <C.HW_PillOn
+                  tooltip={`Generate another SkinTokens draft; current roll ${props.externalAutoRigState.roll} remains unsaved until Accept`}
+                  onPress={props.onExternalAutoRig}>
+                  <Icon name="RefreshCw" size={13} color={accentFor('primary')} />
+                  <C.HW_PillTextOn>REROLL</C.HW_PillTextOn>
+                </C.HW_PillOn>
+                <C.HW_PillOn
+                  tooltip={`Persist this ${props.externalAutoRigState.joints}-joint draft, weights, descriptor, and semantic stamp`}
+                  onPress={props.onAcceptExternalAutoRig}>
+                  <Icon name="Check" size={13} color={accentFor('primary')} />
+                  <C.HW_PillTextOn>ACCEPT</C.HW_PillTextOn>
+                </C.HW_PillOn>
+              </Fragment>
+            ) : (
+              <C.HW_Pill
+                tooltip="Generate a SkinTokens skeleton and four-influence skin from the saved character model"
+                onPress={props.onExternalAutoRig}>
+                <Icon name="Bone" size={13} color={accentFor('primary')} />
+                <C.HW_PillText>AUTO-RIG</C.HW_PillText>
+              </C.HW_Pill>
+            )}
           </Fragment>
         ) : null}
       </C.HW_ToolOptions>

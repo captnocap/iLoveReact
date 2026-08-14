@@ -42,6 +42,10 @@ export type RecipeMask = {
   invert?: boolean;
 };
 
+/** Per-slot color overrides for one call site, in the owning material's slot
+ *  order; null/absent = the baked constant. Pure DATA — never in the string. */
+export type RecipePalette = (readonly [number, number, number] | null)[];
+
 export type RecipeLayer = {
   /** a catalog material fn (surface/composition/gradient) painted over the
    *  running color, or a colormod_* atom filtering it. */
@@ -62,6 +66,8 @@ export type RecipeLayer = {
   warp?: RecipeWarp;
   /** default true; a disabled layer is absent from the composed fn. */
   enabled?: boolean;
+  /** surface layers: slot color overrides, riding the layer through reorders. */
+  palette?: RecipePalette;
 };
 
 export type MaterialRecipe = {
@@ -77,8 +83,13 @@ export type MaterialRecipe = {
     /** absent = the recipe seed passes through. */
     seed?: number;
     warp?: RecipeWarp;
+    palette?: RecipePalette;
   };
   layers: RecipeLayer[];
+  /** stored atom-@param values, keyed by RecipeParamEntry.key. Structural
+   *  tunables (opacity, thresholds, amounts) live on their layer fields; this
+   *  map carries only the callee knobs. Pure DATA — never in the string. */
+  params?: Record<string, number>;
 };
 
 const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
@@ -149,13 +160,18 @@ export type RecipeSlotEntry = {
   layer: number;
   /** the owning material fn */
   fn: string;
+  /** the slot's index within its owning call site (RecipePalette position). */
+  ordinal: number;
   name: string;
+  /** the RESOLVED color: the call site's stored override, else the baked rgb. */
   rgb: [number, number, number];
+  baked: [number, number, number];
 };
 
 type ParamIndexMap = Map<string, number>;
 
 function pushFnParams(
+  recipe: MaterialRecipe,
   entries: RecipeParamEntry[],
   layer: number,
   siteKey: string,
@@ -163,26 +179,29 @@ function pushFnParams(
   labelPrefix: string,
 ): void {
   for (const p of fnParams(fn)) {
+    const key = `${siteKey}.${fn}.${p.key}`;
     entries.push({
-      key: `${siteKey}.${fn}.${p.key}`,
+      key,
       layer,
       label: `${labelPrefix}${p.label}`,
-      default: p.default,
+      default: recipe.params?.[key] ?? p.default,
       min: p.min,
       max: p.max,
     });
   }
 }
 
-/** The recipe's flat param table, in mat_param index order. */
+/** The recipe's flat param table, in mat_param index order. Defaults reflect
+ *  STORED values (layer fields / recipe.params), so recipeData with no
+ *  overrides renders the document as saved. */
 export function recipeParams(recipe: MaterialRecipe): RecipeParamEntry[] {
   const entries: RecipeParamEntry[] = [];
   const base = recipe.base;
   if (base.warp) {
     entries.push({ key: 'base.warp.amount', layer: -1, label: 'Base warp', default: base.warp.amount, min: 0, max: 2 });
-    pushFnParams(entries, -1, 'base.warp', base.warp.atom, 'Base warp · ');
+    pushFnParams(recipe, entries, -1, 'base.warp', base.warp.atom, 'Base warp · ');
   }
-  pushFnParams(entries, -1, 'base', base.fn, 'Base · ');
+  pushFnParams(recipe, entries, -1, 'base', base.fn, 'Base · ');
   for (const [index, layer] of recipe.layers.entries()) {
     if (layer.enabled === false) continue;
     const n = index + 1;
@@ -194,31 +213,41 @@ export function recipeParams(recipe: MaterialRecipe): RecipeParamEntry[] {
     if (layer.mask) {
       entries.push({ key: `layer.${index}.mask.threshold`, layer: index, label: `Layer ${n} mask threshold`, default: layer.mask.threshold ?? 0.5, min: 0, max: 1 });
       entries.push({ key: `layer.${index}.mask.softness`, layer: index, label: `Layer ${n} mask softness`, default: layer.mask.softness ?? 0.25, min: 0.0001, max: 0.5 });
-      pushFnParams(entries, index, `layer.${index}.mask`, layer.mask.field, `Layer ${n} mask · `);
+      pushFnParams(recipe, entries, index, `layer.${index}.mask`, layer.mask.field, `Layer ${n} mask · `);
     }
     if (layer.warp) {
       entries.push({ key: `layer.${index}.warp.amount`, layer: index, label: `Layer ${n} warp`, default: layer.warp.amount, min: 0, max: 2 });
-      pushFnParams(entries, index, `layer.${index}.warp`, layer.warp.atom, `Layer ${n} warp · `);
+      pushFnParams(recipe, entries, index, `layer.${index}.warp`, layer.warp.atom, `Layer ${n} warp · `);
     }
-    pushFnParams(entries, index, `layer.${index}`, layer.atom, `Layer ${n} · `);
+    pushFnParams(recipe, entries, index, `layer.${index}`, layer.atom, `Layer ${n} · `);
   }
   return entries;
 }
 
-/** The recipe's flat palette table, in mat_pal index order. */
+/** The recipe's flat palette table, in mat_pal index order. Colors resolve
+ *  stored per-call-site overrides over the baked constants. */
 export function recipeSlots(recipe: MaterialRecipe): RecipeSlotEntry[] {
   const entries: RecipeSlotEntry[] = [];
-  const push = (layer: number, fn: string) => {
+  const push = (layer: number, fn: string, palette: RecipePalette | undefined) => {
     const mat = MATERIAL_BY_FN.get(fn);
     if (!mat) return;
-    for (const slot of mat.slots) {
-      entries.push({ layer, fn, name: slot.name, rgb: [slot.rgb[0], slot.rgb[1], slot.rgb[2]] });
-    }
+    mat.slots.forEach((slot, ordinal) => {
+      const baked: [number, number, number] = [slot.rgb[0], slot.rgb[1], slot.rgb[2]];
+      const override = palette?.[ordinal] ?? null;
+      entries.push({
+        layer,
+        fn,
+        ordinal,
+        name: slot.name,
+        rgb: override ? [override[0], override[1], override[2]] : baked,
+        baked,
+      });
+    });
   };
-  push(-1, recipe.base.fn);
+  push(-1, recipe.base.fn, recipe.base.palette);
   for (const [index, layer] of recipe.layers.entries()) {
     if (layer.enabled === false) continue;
-    if (MATERIAL_BY_FN.has(layer.atom)) push(index, layer.atom);
+    if (MATERIAL_BY_FN.has(layer.atom)) push(index, layer.atom, layer.palette);
   }
   return entries;
 }

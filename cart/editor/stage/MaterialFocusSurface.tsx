@@ -1,12 +1,12 @@
-// editor/stage/MaterialFocusSurface.tsx — the Color Studio focus page.
+// editor/stage/MaterialFocusSurface.tsx — the Material Lab focus page
+// (req_4395; the Color Studio bench this replaces lives on only as the
+// single-material fallback below).
 //
-// The Material Palette view is the design handoff's destination (turn 4a):
-// pick a REAL catalog material, see the REAL WGSL render, and own every baked
-// color the shader uses as an editable slot. Slots come from the generated
-// registry (build-shaders.ts extraction); overrides ride the D[] palette
-// section (D[5]=count, D[6+i*3..]=RGB) so the preview, the paint bake, and any
-// future consumer read ONE contract. The spine's current color is the primary
-// fill source — turn 4a layered on turn 3a, one substrate, not sibling demos.
+// Two views: THE LAB (MaterialLabSurface — stackable, blendable recipes over
+// the catalog) and LIBRARY (the shared color surface with the REAL persisted
+// sets). Non-registry specs (the layered road shader, imported UV patches)
+// cannot base a recipe, so they keep the original palette-slot panel — the
+// overrides still ride the D[] palette section shared with the paint bake.
 import { useMemo, useState } from 'react';
 import { Effect } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
@@ -23,17 +23,19 @@ import {
   studioPreviewData,
   studioSpecs,
 } from '../data/colorStudio';
-import { SPINE_LIBRARY, oklchName } from '../data/colorSpine';
+import { oklchName, type SpinePaletteSet } from '../data/colorSpine';
 import { FILL_GRADES } from '../textures/shaders';
 import { hexToRgb01, oklchToHex, oklchToRgb01 } from '../../../runtime/paint/colors';
 import { C, accentFor } from '../workspace.cls';
 import type { Asset, EditorState, Rgb } from '../data/types';
 import type { OklchColor } from '../../../runtime/paint/colors';
+import type { MaterialRecipe } from '../render3d/shaders/recipe';
 import ColorStudioViewTabs from './ColorStudioViewTabs';
 import ColorLibraryPanel from './ColorLibraryPanel';
+import MaterialLabSurface, { type LabHandlers } from './MaterialLabSurface';
 
 const VIEW_LABELS: Record<EditorState['colorStudioView'], string> = {
-  materialPalette: 'Material Palette',
+  materialPalette: 'Lab',
   library: 'Library',
 };
 
@@ -42,6 +44,10 @@ const MATERIAL_STRIP_PAGE = 6;
 export default function MaterialFocusSurface(props: {
   state: EditorState;
   activeAsset: Asset;
+  /** The active Lab recipe — null = single-material fallback (non-registry spec). */
+  labRecipe: MaterialRecipe | null;
+  labHandlers: LabHandlers;
+  labUsage: { world: number; models: number };
   onExit: () => void;
   onSelectMaterial: (specId: string) => void;
   onVariant: (variant: number) => void;
@@ -55,7 +61,9 @@ export default function MaterialFocusSurface(props: {
   onSpineAddToTray: () => void;
   onSpineTrayPick: (color: OklchColor) => void;
   onSpineScenePick: (color: OklchColor, css: string) => void;
-  onSpineLoadLibrarySet: (colors: OklchColor[]) => void;
+  onSpineLoadLibrarySet: (name: string, colors: OklchColor[]) => void;
+  onCreateSet: () => void;
+  onDeleteSet: (index: number) => void;
 }) {
   const spec = colorStudioSpec(props.state);
   const specs = studioSpecs();
@@ -93,13 +101,13 @@ export default function MaterialFocusSurface(props: {
   return (
     <C.HW_MaterialFocus>
       <C.HW_FocusHeader>
-        <Icon name="Palette" size={14} color={accentFor('primary')} />
-        <C.HW_HeadTitle>Color Studio</C.HW_HeadTitle>
+        <Icon name="FlaskConical" size={14} color={accentFor('primary')} />
+        <C.HW_HeadTitle>Material Lab</C.HW_HeadTitle>
         <C.HW_PillOn><C.HW_PillTextOn>{VIEW_LABELS[props.state.colorStudioView]}</C.HW_PillTextOn></C.HW_PillOn>
         {props.state.colorStudioView === 'materialPalette' ? (
           <>
-            <C.HW_Pill><C.HW_PillText>{spec.id}</C.HW_PillText></C.HW_Pill>
-            <C.HW_Pill><C.HW_PillText>D {dDescriptor}</C.HW_PillText></C.HW_Pill>
+            <C.HW_Pill><C.HW_PillText>{props.labRecipe ? props.labRecipe.id : spec.id}</C.HW_PillText></C.HW_Pill>
+            {!props.labRecipe ? <C.HW_Pill><C.HW_PillText>D {dDescriptor}</C.HW_PillText></C.HW_Pill> : null}
           </>
         ) : null}
         <C.HW_Spacer />
@@ -115,14 +123,24 @@ export default function MaterialFocusSurface(props: {
                 palette={props.state.colorSpinePalette}
                 recents={props.state.colorSpineRecents}
                 scenePick={props.state.colorSpineScenePick}
+                sets={props.state.colorSpineSets}
                 onSetCurrent={props.onSpineCurrent}
                 onAddToTray={props.onSpineAddToTray}
                 onPickTray={props.onSpineTrayPick}
                 onScenePick={props.onSpineScenePick}
                 onLoadLibrarySet={props.onSpineLoadLibrarySet}
+                onCreateSet={props.onCreateSet}
+                onDeleteSet={props.onDeleteSet}
               />
             </C.HW_ColorStudioBody>
           </C.HW_ColorPreviewPanel>
+        ) : props.labRecipe ? (
+          <MaterialLabSurface
+            state={props.state}
+            recipe={props.labRecipe}
+            usage={props.labUsage}
+            handlers={props.labHandlers}
+          />
         ) : (
         <>
         <C.HW_ColorMaterialStrip>
@@ -272,7 +290,7 @@ export default function MaterialFocusSurface(props: {
               <C.HW_GroupText>LIBRARY SLOT PULL</C.HW_GroupText>
             </C.HW_GroupTitle>
             <C.HW_ColorLibraryList>
-              {SPINE_LIBRARY.map((set) => (
+              {props.state.colorSpineSets.map((set: SpinePaletteSet) => (
                 <C.HW_ColorLibraryRow key={set.name}>
                   <C.HW_ColorLibraryName>
                     <C.HW_FormValue numberOfLines={1} noWrap>{set.name}</C.HW_FormValue>

@@ -27,7 +27,9 @@ function assert(condition: boolean, message: string) { if (!condition) throw new
 
 test('model browse context exposes one Asset Explorer and focus tools', () => {
   assert(leftPanelsFor('model').map((button) => button.id).join(',') === 'assets', 'model left rail duplicated the Asset Explorer');
-  assert(rightPanelsFor('model').map((button) => button.id).join(',') === 'inspector,paint,rig', 'model right rail drifted');
+  assert(rightPanelsFor('model').map((button) => button.id).join(',') === 'inspector,paint,names,rig,recovery', 'model right rail drifted');
+  const recovery = rightPanelsFor('model').find((button) => button.id === 'recovery');
+  assert(recovery?.label === 'Recovery' && recovery.icon === 'DatabaseBackup', 'Recovery pane has no rail presentation');
 });
 
 test('category shortcuts never reappear as duplicate library rail panes', () => {
@@ -73,6 +75,7 @@ test('pressing a different button selects it and opens its panel', () => {
 test('invalid pane state resolves to the context default without inventing a renderer', () => {
   assert(resolvedPanelId(leftPanelsFor('model'), 'missions') === 'assets', 'model left default was not the Asset Explorer');
   assert(resolvedPanelId(rightPanelsFor('world'), 'rig') === 'inspector', 'world right default was not contextual');
+  assert(resolvedPanelId(rightPanelsFor('world'), 'recovery') === 'inspector', 'Recovery escaped the model-only renderer');
   assert(resolvedPanelIdOrNull(rightPanelsFor('knowledge'), 'inspector') === null, 'empty World Bible focus rail did not resolve safely');
 });
 
@@ -98,6 +101,7 @@ test('mock-era hot state migrates into the live pane vocabulary', () => {
   assert(normalizeLeftPanelId('paint') === 'paint', 'live Paint pane did not survive hot reload');
   assert(normalizeRightPanelId('layers') === 'inspector', 'inert legacy right pane became live content unexpectedly');
   assert(normalizeRightPanelId('rig') === 'rig', 'live rig pane did not survive hot reload');
+  assert(normalizeRightPanelId('recovery') === 'recovery', 'persisted Recovery pane did not survive reload');
 });
 
 log(`\npanel system: ${passed} passed, ${failed} failed`);

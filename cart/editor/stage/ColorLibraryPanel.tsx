@@ -32,11 +32,11 @@ import {
 import {
   fitsWellNow,
   libraryRows,
-  mixPigments,
   oklchName,
   oklchReadout,
   rampForge,
   sceneSwatches,
+  type SpinePaletteSet,
 } from '../data/colorSpine';
 
 const LINE = '#242a33', TEXT = '#e8edf6', DIM = '#8b93a3', FAINT = '#6b7280';
@@ -277,22 +277,27 @@ export default function ColorLibraryPanel(props: {
   /** Raw use-history, newest first (req_3097) — shown as RECENT when present. */
   recents?: OklchColor[];
   scenePick: string | null;
+  /** The REAL named sets (state-backed, persisted). Absent = SETS hidden. */
+  sets?: SpinePaletteSet[];
   onSetCurrent: (color: OklchColor) => void;
   onAddToTray: () => void;
   onPickTray: (color: OklchColor) => void;
   onScenePick: (color: OklchColor, css: string) => void;
-  onLoadLibrarySet: (colors: OklchColor[]) => void;
+  onLoadLibrarySet: (name: string, colors: OklchColor[]) => void;
+  /** Set management verbs — when present, SETS grows create/delete controls. */
+  onCreateSet?: () => void;
+  onDeleteSet?: (index: number) => void;
 }) {
   const current = props.current;
   const recents = props.recents ?? [];
   const fits = fitsWellNow(current);
   const ramp = rampForge(current, RAMP_STEPS);
-  const pigments = mixPigments();
   // The host histograms the live paint atlas — real work, so once per mount
   // (each panel mount re-reads), never per color-pick render.
   const sceneBase = useMemo(() => sceneSwatches(null), []);
   const scene = sceneBase.map((s) => ({ ...s, picked: s.css === props.scenePick }));
-  const sets = libraryRows(current);
+  const setDefs = props.sets ?? [];
+  const sets = libraryRows(current, setDefs);
 
   return (
     <Col style={{ gap: 8 }}>
@@ -345,44 +350,55 @@ export default function ColorLibraryPanel(props: {
           ))}
         </Row>
       </Col>
-      <Row style={{ gap: 12 }}>
+      {/* SCENE only exists when there IS a scene — the host's dominant-color read
+          of the live paint atlas (req_3097: no more pretend scene colors). The
+          old hardcoded PIGMENTS dabs live on as a deletable starter SET. */}
+      {scene.length > 0 ? (
         <Col style={{ gap: 4 }}>
-          <SectionLabel>PIGMENTS</SectionLabel>
+          <SectionLabel>SCENE</SectionLabel>
           <SwatchRow
-            entries={pigments.map((p) => ({ css: p.css, tooltip: p.name }))}
+            entries={scene.map((s) => ({ css: s.css, ring: s.picked }))}
             size={20}
-            onPick={(index) => props.onSetCurrent(pigments[index]!.color)}
+            onPick={(index) => props.onScenePick(scene[index]!.color, scene[index]!.css)}
           />
         </Col>
-        {/* SCENE only exists when there IS a scene — the host's dominant-color read
-            of the live paint atlas (req_3097: no more pretend scene colors). */}
-        {scene.length > 0 ? (
-          <Col style={{ gap: 4, flexGrow: 1, minWidth: 0 }}>
-            <SectionLabel>SCENE</SectionLabel>
-            <SwatchRow
-              entries={scene.map((s) => ({ css: s.css, ring: s.picked }))}
-              size={20}
-              onPick={(index) => props.onScenePick(scene[index]!.color, scene[index]!.css)}
-            />
-          </Col>
-        ) : null}
-      </Row>
-      <Col style={{ gap: 4 }}>
-        <SectionLabel>SETS</SectionLabel>
-        {sets.map((set) => (
-          <Row key={set.name} style={{ alignItems: 'center', gap: 6 }}>
-            <Pressable tooltip="Load this set into SAVED" onPress={() => props.onLoadLibrarySet(set.swatches.map((s) => s.color))}
-              style={{ width: 92 }}>
-              <Text numberOfLines={1} noWrap style={{ color: set.matched ? TEXT : DIM, fontSize: 10, fontWeight: '700' }}>{set.name}</Text>
-            </Pressable>
-            <SwatchRow
-              entries={set.swatches.map((s) => ({ css: s.css, ring: s.isMatch }))}
-              size={16}
-              onPick={(index) => props.onSetCurrent(set.swatches[index]!.color)}
-            />
+      ) : null}
+      {props.sets ? (
+        <Col style={{ gap: 4 }}>
+          <Row style={{ alignItems: 'center', gap: 6 }}>
+            <SectionLabel>SETS</SectionLabel>
+            <Box style={{ flexGrow: 1 }} />
+            {props.onCreateSet ? (
+              <Pressable tooltip="Save the SAVED tray as a new set" onPress={props.onCreateSet}
+                style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 6, borderWidth: 1, borderColor: LINE }}>
+                <Text style={{ color: TEXT, fontSize: 9, fontWeight: '700' }}>+ set from saved</Text>
+              </Pressable>
+            ) : null}
           </Row>
-        ))}
-      </Col>
+          {sets.length === 0 ? (
+            <Text style={{ color: FAINT, fontSize: 10 }}>no saved sets yet</Text>
+          ) : sets.map((set, setIndex) => (
+            <Row key={`${setIndex}-${set.name}`} style={{ alignItems: 'center', gap: 6 }}>
+              <Pressable tooltip="Load this set into SAVED" onPress={() => props.onLoadLibrarySet(set.name, setDefs[setIndex]!.colors)}
+                style={{ width: 92 }}>
+                <Text numberOfLines={1} noWrap style={{ color: set.matched ? TEXT : DIM, fontSize: 10, fontWeight: '700' }}>{set.name}</Text>
+              </Pressable>
+              <SwatchRow
+                entries={set.swatches.map((s) => ({ css: s.css, ring: s.isMatch }))}
+                size={16}
+                onPick={(index) => props.onSetCurrent(set.swatches[index]!.color)}
+              />
+              <Box style={{ flexGrow: 1 }} />
+              {props.onDeleteSet ? (
+                <Pressable tooltip={`Delete set "${set.name}"`} onPress={() => props.onDeleteSet!(setIndex)}
+                  style={{ width: 20, height: 20, borderRadius: 5, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
+                  <Text style={{ color: DIM, fontSize: 10 }}>x</Text>
+                </Pressable>
+              ) : null}
+            </Row>
+          ))}
+        </Col>
+      ) : null}
     </Col>
   );
 }

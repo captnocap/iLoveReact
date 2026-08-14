@@ -43,8 +43,10 @@ against these.
 
 ## 1. Model Package: Declarations
 
-The manifest (`data/models/*/manifest.json`) holds `skeleton.bones` (id, parent,
-transform.pos), `mesh/parts.json` names parts after bones (rigid per-part binding).
+The manifest (`data/models/*/manifest.json`) holds an independent skeleton with
+stable bone IDs. Character packages additionally declare immutable RJMD v5
+logical topology, semantic anatomy, stable object bindings, and an RJSK weight
+artifact; display names and `mesh/parts.json` ordering never bind a character.
 The package grows by adding **declaration blocks** — closed-schema data read by
 specific systems:
 
@@ -77,7 +79,7 @@ Socket families (open-ended; the envelope `{kind, ...payload}` is what's fixed):
 | Mating | socket-to-socket snapping for modular building (needs compatibility rules) |
 | Sensors | Flockbook cameras: `{kind: "camera", fov, range, tickRate}` |
 
-Clothing binds to the wearer's skeleton **by bone name** (shared skeleton
+Clothing binds to the wearer's skeleton **by stable bone ID** (shared skeleton
 contract); it contributes its own extra socket bones grafted onto the wearer's
 tree at equip, pruned at unequip. Cross-item conflicts (jacket covering pants
 pockets) resolve in game rules, never in model data.

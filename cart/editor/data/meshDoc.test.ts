@@ -70,11 +70,12 @@ function logicalDocBlob(): Uint8Array {
   return bytes;
 }
 
-function logicalObjectDocBlob(): Uint8Array {
+function logicalObjectDocBlob(edgeVertices?: number[]): Uint8Array {
   const headerBytes = 48, vertCount = 6, faceCount = 2;
   const semanticText = JSON.stringify({
     version: 1,
     regions: [{ id: 5, name: 'display name can change', role: 'chest' }],
+    ...(edgeVertices ? { edgeRegions: [{ id: 6, name: 'hood.hinge', role: 'hinge', objectId: 'object-body-stable', closed: false, vertices: edgeVertices }] } : {}),
     rangeObjects: [{ objectId: 'object-body-stable', lo: 7, hi: 9 }],
   });
   const semanticJson = Uint8Array.from(Array.from(semanticText, (ch) => ch.charCodeAt(0)));
@@ -357,8 +358,8 @@ test('paint-only artifact persistence cannot rewrite editable mesh files', () =>
   }
 });
 
-function semanticDocBlob(): Uint8Array {
-  const tableText = JSON.stringify({ version: 1, regions: [{ id: 5, name: 'window.rim', createdBy: { op: 'inset', take: 3 } }] });
+function semanticDocBlob(tableValue: unknown = { version: 1, regions: [{ id: 5, name: 'window.rim', createdBy: { op: 'inset', take: 3 } }] }): Uint8Array {
+  const tableText = JSON.stringify(tableValue);
   const table = Uint8Array.from(Array.from(tableText, (ch) => ch.charCodeAt(0)));
   const headerBytes = 40;
   const vertCount = 3;
@@ -374,12 +375,52 @@ function semanticDocBlob(): Uint8Array {
   return bytes;
 }
 
+function nonLogicalV5EdgeDocBlob(): Uint8Array {
+  const legacy = semanticDocBlob({
+    version: 1,
+    regions: [{ id: 5, name: 'window.rim' }],
+    edgeRegions: [{ id: 19, name: 'test', role: 'hinge', objectId: 'car_body', closed: false, vertices: [0, 1] }],
+  });
+  const current = new Uint8Array(legacy.length + 8);
+  current.set(legacy.subarray(0, 40), 0);
+  new DataView(current.buffer).setUint32(4, 5, true);
+  // v5 logical flag/count remain zero; payload starts after the enlarged header.
+  current.set(legacy.subarray(40), 48);
+  return current;
+}
+
 test('RJMD v4 restores semantic membership and its name table together', () => {
   const doc = parseMeshDocBytes(semanticDocBlob());
   assert(!!doc, 'v4 fixture did not decode');
   assert(doc!.semanticRegions?.[0] === 5, 'region membership was lost');
   assert(doc!.semanticInstances?.[0] === 2, 'instance membership was lost');
   assert(doc!.semanticTable?.regions[0]?.name === 'window.rim', 'semantic name table was lost');
+});
+
+test('RJMD v4 accepts legacy native edge vertex ids without inventing a logical table', () => {
+  const doc = parseMeshDocBytes(semanticDocBlob({
+    version: 1,
+    regions: [{ id: 5, name: 'window.rim' }],
+    // v4 persisted native indexed-edit ids inside semantic JSON. They are not
+    // render-corner indices and there is no v4 logicalVertexCount to bound them.
+    edgeRegions: [{ id: 19, name: 'test', role: 'hinge', objectId: 'car_body', closed: false, vertices: [90, 100, 120] }],
+  }));
+  assert(!!doc, 'v4 edge semantics were rejected for lacking a v5 logical table');
+  assert(doc!.formatVersion === 4 && doc!.hasLogicalVertices === false && doc!.logicalVertexCount === 0,
+    'v4 fixture invented current logical topology');
+  assert(doc!.semanticTable?.edgeRegions?.[0]?.vertices.join(',') === '90,100,120',
+    'legacy native edge ids changed during decode');
+});
+
+test('RJMD v5 keeps edge regions strict against its dense logical table', () => {
+  const valid = parseMeshDocBytes(logicalObjectDocBlob([0, 3]));
+  assert(!!valid, 'v5 rejected edge ids inside its dense logical table');
+  const invalid = diagnoseMeshDocBytes(logicalObjectDocBlob([0, 4]));
+  assert(!invalid.ok && invalid.diagnostic.code === 'invalid-edge-logical-id',
+    `out-of-range v5 edge id drifted to ${invalid.ok ? 'accepted' : invalid.diagnostic.code}`);
+  const missing = diagnoseMeshDocBytes(nonLogicalV5EdgeDocBlob());
+  assert(!missing.ok && missing.diagnostic.code === 'invalid-edge-logical-id',
+    `v5 edge row without a logical table drifted to ${missing.ok ? 'accepted' : missing.diagnostic.code}`);
 });
 
 test('RJMD v4 rejects semantic membership without a dictionary', () => {

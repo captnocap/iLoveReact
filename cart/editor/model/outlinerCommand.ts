@@ -84,6 +84,35 @@ export function modelOutlinerNote(modelId: string, parts: readonly ModelPartReco
   return JSON.stringify({ modelId, parts });
 }
 
+/** One synchronous handoff for Detach Faces. The native operation has already
+ * minted `placed` by this boundary; the very next mesh edit must see the appended
+ * row as both the active scope and the journal-note truth. Keeping those outputs
+ * in one plan prevents React render timing from exposing a pre-detach row table. */
+export function planDetachedPartHandoff(
+  modelId: string,
+  parts: readonly ModelPart[],
+  placed: ModelPart,
+): {
+  parts: ModelPart[];
+  selectedIds: string[];
+  primaryId: string;
+  journalNote: string;
+} {
+  if (!modelId || !placed.id || parts.some((part) => part.id === placed.id)) {
+    throw new ModelOutlinerRejected('detach requires a unique model and part identity');
+  }
+  if (!Number.isInteger(placed.lo) || !Number.isInteger(placed.hi) || placed.lo! < 0 || placed.hi! <= placed.lo!) {
+    throw new ModelOutlinerRejected('detach requires one valid authored range');
+  }
+  const next = [...parts, placed];
+  return {
+    parts: next,
+    selectedIds: [placed.id],
+    primaryId: placed.id,
+    journalNote: modelOutlinerNote(modelId, modelPartRecords(next)),
+  };
+}
+
 const APPENDED_PART_HISTORY_LABELS = new Set(['duplicate part', 'mirror part']);
 
 /** Last-resort inverse for append-only part history when an older/native caller

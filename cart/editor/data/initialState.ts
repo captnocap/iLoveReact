@@ -116,6 +116,13 @@ export function initialState(): EditorState {
     colorSpinePalette: [],
     colorSpineRecents: [],
     colorSpineScenePick: null,
+    // Sets + recipes also rehydrate from their per-concern saves in persistView.
+    colorSpineSets: [],
+    labRecipes: [],
+    labActiveRecipeId: null,
+    labSelectedLayer: null,
+    labStageTiles: 4,
+    labSoloStage: null,
     buildDialogOpen: false,
     mapDocumentOpen: false,
     mapOverviewOpen: false,

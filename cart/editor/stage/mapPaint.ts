@@ -7,7 +7,8 @@
 // host tool tracks chrome.
 import {
   mapChunkCount, mapGeneratedAbort, mapGeneratedBegin, mapGeneratedChunk, mapGeneratedCommit,
-  mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
+  mapCommitPrepared, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapPrepareFile,
+  mapPrepareStatus, mapReset, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
   mapPathSetProfile, mapSetBrushGizmo,
   mapPathSetLevel, mapPathSetTool,
@@ -153,6 +154,15 @@ export type MapPaintingActivation =
   | { ok: true; bindings: TileMaterialBinding[]; seeded: boolean }
   | { ok: false; error: string };
 
+export type AsyncMapPaintingActivation =
+  | { ok: true; bindings: TileMaterialBinding[]; seeded: boolean; chunks: number }
+  | { ok: false; error: string; replaced: boolean };
+
+const MAP_PREPARE_TUNING = {
+  pollIntervalMs: 8,
+  deadlineMs: 120_000,
+} as const;
+
 export type GeneratedMapPaintingInstallation =
   | { ok: true; bindings: TileMaterialBinding[]; chunks: number; paths: number; roads: number; rails: number }
   | { ok: false; error: string };
@@ -191,6 +201,9 @@ export function activateMapDocumentPainting(stem: string, zones: readonly MapZon
   if (!mapSetAutosaveFile('')) {
     return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
   }
+  // Load-time road derivation consumes the cart legend. Establish it before
+  // either synchronous restamp or detached worker preparation.
+  mapRoadSetKinds(ROAD_KIND_INDICES);
 
   let seeded = false;
   if (exists(paths.painting)) {
@@ -212,6 +225,84 @@ export function activateMapDocumentPainting(stem: string, zones: readonly MapZon
   finishLegacyMapImport(paths.stem);
   liveMapStem = paths.stem;
   return { ok: true, bindings: floatsToBindings(mapGetTileBindings()), seeded };
+}
+
+function waitForPreparedMap(requestId: number): Promise<{ ok: true; chunks: number } | { ok: false; error: string }> {
+  const startedMs = Date.now();
+  return new Promise((resolve) => {
+    const poll = () => {
+      const status = mapPrepareStatus(requestId);
+      if (status.id !== requestId || status.state === 'failed') {
+        resolve({ ok: false, error: 'native map preparation failed' });
+        return;
+      }
+      if (status.state === 'ready') {
+        resolve({ ok: true, chunks: status.chunks });
+        return;
+      }
+      if (Date.now() - startedMs >= MAP_PREPARE_TUNING.deadlineMs) {
+        resolve({ ok: false, error: 'native map preparation timed out' });
+        return;
+      }
+      setTimeout(poll, MAP_PREPARE_TUNING.pollIntervalMs);
+    };
+    poll();
+  });
+}
+
+/** Decode an existing RMAP away from the frame thread, then publish it with a
+ * bounded ownership swap. The current map remains live until commit. Missing
+ * and legacy documents retain the synchronous seed/import path because they
+ * are small one-time creation operations. */
+async function performMapDocumentPaintingActivation(
+  stem: string,
+  zones: readonly MapZoneDef[],
+): Promise<AsyncMapPaintingActivation> {
+  if (!mapHostLive()) return { ok: false, error: 'map host is not live in this binary', replaced: false };
+  const paths = mapDocumentPaths(stem);
+  if (!exists(paths.painting) || (hasLegacyMapImport(paths.stem) && exists(LEGACY_MAP_FILE))) {
+    const activation = activateMapDocumentPainting(stem, zones);
+    return activation.ok
+      ? { ...activation, chunks: mapChunkCount() }
+      : { ...activation, replaced: false };
+  }
+  if (!mapSetAutosaveFile('')) {
+    return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host', replaced: false };
+  }
+  mapRoadSetKinds(ROAD_KIND_INDICES);
+  const requestId = mapPrepareFile(paths.painting);
+  if (!requestId) {
+    return { ok: false, error: 'detached map preparation door is unavailable or busy', replaced: false };
+  }
+  const prepared = await waitForPreparedMap(requestId);
+  if (!prepared.ok) return { ...prepared, replaced: false };
+  if (!mapCommitPrepared(requestId, paths.painting)) {
+    return { ok: false, error: 'prepared map could not be published', replaced: false };
+  }
+  configureMapContent(zones);
+  if (!mapSetAutosaveFile(mapAutosaveEnabled ? paths.painting : '')) {
+    return { ok: false, error: 'map autosave door is unavailable after publication', replaced: true };
+  }
+  finishLegacyMapImport(paths.stem);
+  liveMapStem = paths.stem;
+  return { ok: true, bindings: floatsToBindings(mapGetTileBindings()), seeded: false, chunks: prepared.chunks };
+}
+
+let mapActivationTail: Promise<void> = Promise.resolve();
+
+/** Serialize publication requests without blocking the frame thread. A cold
+ * boot and a user map click can overlap; the latter waits for the former's
+ * detached transaction instead of falling through a transient "busy" error. */
+export function activateMapDocumentPaintingAsync(
+  stem: string,
+  zones: readonly MapZoneDef[],
+): Promise<AsyncMapPaintingActivation> {
+  const scheduled = mapActivationTail.then(
+    () => performMapDocumentPaintingActivation(stem, zones),
+    () => performMapDocumentPaintingActivation(stem, zones),
+  );
+  mapActivationTail = scheduled.then(() => undefined, () => undefined);
+  return scheduled;
 }
 
 /** Replace the already-activated target document with a complete generated
@@ -329,6 +420,27 @@ export function ensureMapSeeded(
   if (!mapHostLive()) return false;
   if (liveMapStem !== stem || mapChunkCount() === 0) {
     const activation = activateMapDocumentPainting(stem, zones);
+    if (!activation.ok) {
+      console.error(`[map-seed] ${activation.error}`);
+      return false;
+    }
+  } else {
+    if (!mapSetAutosaveFile(mapAutosaveEnabled ? editorMapFile(stem) : '')) return false;
+    configureMapContent(zones);
+  }
+  console.warn(`[map-seed] ground seeded — ${mapChunkCount()} chunk(s) live`);
+  return true;
+}
+
+/** Non-blocking boot equivalent of ensureMapSeeded. Retained world chrome can
+ * mount immediately while a large painting expands on a native worker. */
+export async function ensureMapSeededAsync(
+  zones: readonly MapZoneDef[] = [],
+  stem = activeMapDocumentStem(),
+): Promise<boolean> {
+  if (!mapHostLive()) return false;
+  if (liveMapStem !== stem || mapChunkCount() === 0) {
+    const activation = await activateMapDocumentPaintingAsync(stem, zones);
     if (!activation.ok) {
       console.error(`[map-seed] ${activation.error}`);
       return false;

@@ -32,6 +32,7 @@ import {
   gradeTriangleBudget,
   type ClassSpec,
 } from './seatClassSpec';
+import type { CharacterRigSeatStatus } from './characterRigSeat';
 
 export const ORACLE_PHASES = [
   'setup', 'blockout', 'topology', 'retopo', 'naming',
@@ -141,6 +142,8 @@ export type OracleFacts = {
   packageInSync: boolean | null;
   packageDirty: boolean | null;
   semanticHealthy: boolean | null;
+  /** Same host-computed seven-row matrix returned by `tools/seat rig-status`. */
+  rig: CharacterRigSeatStatus | null;
   /** Check ids the agent has attested, with its own note. */
   attest: Record<string, string>;
 };
@@ -325,7 +328,25 @@ const CHECKS: Record<string, CheckSpec> = {
   'atlas-imported': attested('atlas-imported', 'the chosen skin was resized to the LIVE atlas dims and imported'),
   'shots-read': attested('shots-read', 'at least two viewport shots were taken AND read — alignment judged from the render, never from the flat PNG'),
   'variant-saved': attested('variant-saved', 'the accepted look was banked with paint-variant save-new'),
-  'rig-gates': attested('rig-gates', 'the rig/export gates pass; no host rig audit exists yet, so say how you verified it'),
+  'rig-gates': {
+    id: 'rig-gates', verified: 'host',
+    evaluate: (facts) => {
+      const rig = facts.rig;
+      if (!rig) return { pass: false, detail: 'no resident humanoid rig — run attach-humanoid, then read `tools/seat rig-status`' };
+      const rows = Object.entries(rig.rows).filter(([, row]) =>
+        typeof row === 'string' ? row !== 'ready' : row.status !== 'ready');
+      const review = [rig.weightsStale ? 'weightsStale' : '', rig.fitReview ? 'fitReview' : '', rig.bindReview ? 'bindReview' : '']
+        .filter(Boolean);
+      if (rig.state === 'bound' && rows.length === 0 && review.length === 0) {
+        return { pass: true, detail: 'bound rig is saved-current: all seven readiness rows ready and no review debt' };
+      }
+      const failures = rows.map(([id, row]) => `${id}:${typeof row === 'string' ? row : row.status}`);
+      return {
+        pass: false,
+        detail: `rig is ${rig.state}; failing ${[...failures, ...review].join(', ') || 'bound-state cutover'} — read \`tools/seat rig-status\``,
+      };
+    },
+  },
   'cold-verified': attested('cold-verified', 'the editor was fully reopened and the names proved with a generation-1 look'),
 };
 
@@ -396,8 +417,12 @@ export const PHASE_CHECKLISTS: Record<OraclePhase, string[]> = {
     '`tools/seat save`, then `semantic-status`: the semantic table must survive skinning',
   ],
   rig: [
-    'Confirm naming and connectivity BEFORE the rig gates — they are rig inputs',
-    'Read the ruled export shape (`tools/oracle "prop export rigging"`) before inventing one',
+    '`tools/seat rig-status` first; clear connectivity, semantic coverage, then skeleton in that order',
+    'One gate per step; re-read rig-status after every topology, anatomy, object-binding, fit, or bind edit',
+    'Run boundary-audit before Fit/Bind; repair every ragged authored interface before paying for a bind',
+    'After Bind: weights-summary for every limb bone, all five bend tests on both sides, then weights-symmetry',
+    'Save and cold-reopen; rig-status must return bound with all seven rows ready without binding again',
+    'Choose Player/NPC only in model-export; package kind never grants or removes rigging capability',
   ],
   finish: [
     '`tools/seat save`, then `tools/seat package diff` — prove saved matches resident',

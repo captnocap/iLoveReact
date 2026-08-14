@@ -1,4 +1,4 @@
-// cart/editor/data/roleNamer.test.ts — the guided role-naming plan (req_3263).
+// cart/editor/data/roleNamer.test.ts — the vehicle role-naming plan (req_3263).
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/data/roleNamer.test.ts --bundle \
@@ -16,31 +16,32 @@ function test(name: string, fn: () => void) {
 }
 function expect(cond: boolean, msg: string) { if (!cond) throw new Error(msg); }
 
-test('head contract is the head subtree, not the whole body', () => {
-  const roles = roleContract('head').roles;
-  expect(roles.includes('head'), 'head itself is in');
-  expect(roles.includes('eye_left') && roles.includes('eye_right'), 'eye pair is in');
-  expect(roles.includes('lips') && roles.includes('teeth'), 'mouth chain is in');
-  expect(!roles.includes('toes_left') && !roles.includes('chest'), 'body-only bones are out');
+test('the sole role contract is the complete vehicle formation', () => {
+  const roles = roleContract('car').roles;
+  expect(roles.includes('body'), 'vehicle root is present');
+  expect(roles.includes('door_driver'), 'vehicle panels are present');
+  expect(roles.includes('wheel_back_right'), 'all four wheels are present');
 });
 
-test('body and car contracts carry their full formations', () => {
-  expect(roleContract('body').roles.includes('toes_left'), 'body reaches the toes');
-  expect(roleContract('car').roles.includes('door_driver'), 'car has its panels');
+test('retired character naming contracts are rejected at the runtime boundary', () => {
+  let error = '';
+  try { (roleContract as (id: string) => unknown)('body'); }
+  catch (caught) { error = (caught as Error).message; }
+  expect(error.includes('unknown role-naming contract'), 'body must not enter a compatibility path');
 });
 
-test('plan marks claimed roles via bone-name normalization and asks only the rest', () => {
-  const plan = roleNamerPlan('head', ['Eye.L', 'nose', 'Cube 1', 'Cone 4']);
-  expect(plan.claimed.get('eye_left') === 'Eye.L', 'Eye.L normalizes to eye_left');
-  expect(plan.claimed.get('nose') === 'nose', 'exact name claims');
-  expect(!plan.open.includes('eye_left') && !plan.open.includes('nose'), 'claimed roles are not asked');
-  expect(plan.open.includes('eye_right') && plan.open.includes('mouth'), 'missing roles are asked');
+test('plan recognizes vehicle role spelling and asks only for missing roles', () => {
+  const plan = roleNamerPlan('car', ['Door Driver', 'Wheel Front.L', 'Cube 1']);
+  expect(plan.claimed.get('door_driver') === 'Door Driver', 'spaces normalize for vehicle panels');
+  expect(plan.claimed.get('wheel_front_left') === 'Wheel Front.L', 'vehicle side suffix normalizes');
+  expect(!plan.open.includes('door_driver') && !plan.open.includes('wheel_front_left'), 'claimed roles are not asked');
+  expect(plan.open.includes('door_passenger') && plan.open.includes('wheel_front_right'), 'missing roles are asked');
 });
 
 test('first claimant wins a role — a duplicate name never double-claims', () => {
-  const plan = roleNamerPlan('head', ['head', 'HEAD']);
-  expect(plan.claimed.get('head') === 'head', 'first row claims');
-  expect(!plan.open.includes('head'), 'role stays satisfied');
+  const plan = roleNamerPlan('car', ['hood', 'HOOD']);
+  expect(plan.claimed.get('hood') === 'hood', 'first row claims');
+  expect(!plan.open.includes('hood'), 'role stays satisfied');
 });
 
 log(`${passed} passed, ${failed} failed`);

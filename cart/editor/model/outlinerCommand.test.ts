@@ -1,5 +1,6 @@
 import type { ModelPart } from '../data/types';
 import {
+  planDetachedPartHandoff,
   ModelOutlinerRejected,
   modelPartRecords,
   modelOutlinerNote,
@@ -90,6 +91,17 @@ test('journal notes exclude mesh blobs while retaining exact durable metadata', 
   const note = modelOutlinerNote('model-a', modelPartRecords([withMesh]));
   assert(!note.includes('"mesh"'), 'mesh geometry leaked into the journal note');
   assert(note.includes('"modelId":"model-a"') && note.includes('"name":"Deck"'), 'journal note lost identity metadata');
+});
+
+test('detach handoff focuses the appended row and journals it before the next mesh edit', () => {
+  const body = { ...part('body', 'Body'), lo: 0, hi: 60 };
+  const door = { ...part('door', 'Door'), lo: 60, hi: 72 };
+  const detached = { ...part('detached', 'Detached 1'), lo: 72, hi: 88 };
+  const handoff = planDetachedPartHandoff('model-a', [body, door], detached);
+  assert(handoff.parts.length === 3 && handoff.parts[2]?.id === 'detached', 'detached row was not appended');
+  assert(handoff.primaryId === 'detached' && handoff.selectedIds.join(',') === 'detached', 'new native scope would not focus the detached row');
+  const note = JSON.parse(handoff.journalNote);
+  assert(note.parts.length === 3 && note.parts[2]?.name === 'Detached 1', 'the next mesh snapshot would retain stale pre-detach metadata');
 });
 
 test('mirror undo preserves authored row identities when its journal note is unusable', () => {

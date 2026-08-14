@@ -3,10 +3,9 @@ import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { EDITOR_ASSET_CATALOG, fileModelPackage, modelCategoryNodes } from './assetCatalog';
 import { isMaterialized } from './modelPackageStore';
 import { modelFolderIdFor } from './modelPackage';
-import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
+import { allocateBuildStarterModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX } from './modelIdentity';
 import { PRIMITIVE_MESHES } from './commands';
 import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
-import { playerStarterSkeleton } from '../model/playerStarter';
 import { mintedModelIds } from '../model/docSession';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
@@ -113,11 +112,12 @@ export function modelPackagesForFolder(
   const needle = search.trim().toLowerCase();
   return models
     .filter((model) => {
+      const exportedCharacter = model.placeable?.as === 'character';
       if (folder === 'models') return true;
-      if (folder === 'models-build') return model.kind === 'build';
-      if (folder === 'models-props') return model.kind === 'prop';
-      if (folder === 'models-characters') return model.kind === 'character';
-      if (folder === 'models-vehicles') return model.kind === 'vehicle';
+      if (folder === 'models-build') return model.kind === 'build' && !exportedCharacter;
+      if (folder === 'models-props') return model.kind === 'prop' && !exportedCharacter;
+      if (folder === 'models-characters') return exportedCharacter;
+      if (folder === 'models-vehicles') return model.kind === 'vehicle' && !exportedCharacter;
       if (folder === 'models-props-wip') return model.sourceKind === 'studio-model' || model.stage === 'wip';
       return model.folderId === folder;
     })
@@ -157,42 +157,6 @@ export function primitiveModelPackage(id: string): ModelPackage {
     semanticKind: meta.kind,
     primitive: meta.kind,
   };
-}
-
-// A fresh player/NPC starter document (`character:player:<n>`) — the humanoid
-// body formation seeded as a multi-part model (req_2761). Like a primitive doc
-// it is fully described by its id until first save; the skeleton (bodyRigBones
-// formation + per-bone mesh assignments) rides the package so Save writes it
-// into the manifest as the rig truth (req_2718 pattern).
-export { PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
-export function playerModelPackage(id: string): ModelPackage {
-  const seq = id.slice(PLAYER_MODEL_ID_PREFIX.length);
-  return {
-    id,
-    folderId: modelFolderIdFor(id),
-    name: seq ? `Player Model ${seq}` : 'Player Model',
-    path: 'character/player',
-    kind: 'character',
-    stage: 'wip',
-    color: '#d9b08c',
-    source: 'starter',
-    rig: 'body',
-    data: '-',
-    triangles: 0,
-    lods: 1,
-    decompositions: [],
-    atlases: [],
-    paints: [],
-    semanticKind: 'player',
-    skeleton: playerStarterSkeleton(id),
-  };
-}
-
-// The next pristine player-model doc id — same collision rules as
-// nextPrimitiveDocId (open docs AND saved packages AND synthesized names AND
-// every identity this session already minted).
-export function nextPlayerModelDocId(docs: WorkspaceDocument[]): string {
-  return allocatePlayerModelId(docs, MODEL_PACKAGES, (id) => isMaterialized('character', id), mintedModelIds());
 }
 
 /** A fresh semantic build starter. Its mesh lives in AppFrame's modelParts until
@@ -247,7 +211,6 @@ export function modelPackageById(id: string): ModelPackage | null {
   if (registered) return registered;
   if (id.startsWith('primitive:')) return primitiveModelPackage(id);
   if (id.startsWith(BUILD_STARTER_MODEL_ID_PREFIX)) return buildStarterModelPackage(id);
-  if (id.startsWith(PLAYER_MODEL_ID_PREFIX)) return playerModelPackage(id);
   // A file-explorer / disk-picker open (`file:<path>`) re-synthesizes from the path in
   // the id — the file may live outside every indexed catalog dir.
   if (id.startsWith('file:')) return fileModelPackage(id.slice('file:'.length));

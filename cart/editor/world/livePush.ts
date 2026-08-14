@@ -326,6 +326,7 @@ export function pushResidentMeshes(
   nodeId: number,
   authoredPieces: readonly AuthoredBuildPiece[],
   floraSpecies: readonly AuthoredFloraSpecies[] = [],
+  builtinFloraSpeciesIds?: readonly string[],
 ): boolean {
   if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
   const meshes: ResidentMesh[] = [];
@@ -399,7 +400,9 @@ export function pushResidentMeshes(
       }
     }
   }
-  meshes.push(...builtinSurfaceFloraResidentMeshes());
+  meshes.push(...builtinSurfaceFloraResidentMeshes(
+    builtinFloraSpeciesIds ? new Set(builtinFloraSpeciesIds) : undefined,
+  ));
   meshes.push(...liveFacadeResidentMeshes()); // graffiti facade quads (req_3057)
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
   console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId}`);

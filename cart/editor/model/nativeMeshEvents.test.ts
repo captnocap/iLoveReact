@@ -6,6 +6,7 @@ import {
   decodeNativeMeshActions,
   modelDocumentToken,
   nativeMeshActionSourceOrdinal,
+  reconcileNativeModelSession,
   withNativeMeshActionSource,
 } from './nativeMeshEvents';
 
@@ -48,6 +49,21 @@ test('document tokens are stable, distinct, nonzero, and bridge-exact', () => {
   assert(new Uint32Array([bridge])[0] === bridge, 'token did not survive Uint32 exactly');
 });
 
+test('hot reload rebinds disposable JS session refs to the surviving model document', () => {
+  const selected: number[] = [];
+  const model = reconcileNativeModelSession(
+    { token: 0, modelId: null },
+    { kind: 'model', sourceId: 'import:compact_car_001' },
+    (token) => { selected.push(token); return 1; },
+  );
+  assert(model.status === 'selected', 'null hot-reload refs did not select the active model session');
+  assert(model.binding.modelId === 'import:compact_car_001', 'the active model id was not restored');
+  assert(model.binding.token === modelDocumentToken('import:compact_car_001'), 'the restored native token drifted');
+  const unchanged = reconcileNativeModelSession(model.binding, { kind: 'model', sourceId: 'import:compact_car_001' }, () => 1);
+  assert(unchanged.status === 'unchanged' && selected.length === 1, 'an already-bound render selected the host again');
+  const world = reconcileNativeModelSession(model.binding, { kind: 'world' }, (token) => { selected.push(token); return 1; });
+  assert(world.status === 'selected' && world.binding.token === 0 && world.binding.modelId === null, 'leaving a model did not restore session zero');
+});
 
 test('one fixed native row decodes identity, phase, source, and counts', () => {
   const row = new Uint32Array(11);

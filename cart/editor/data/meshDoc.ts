@@ -687,8 +687,16 @@ function decodeMeshDocBytes(bytes: Uint8Array, reject: MeshDocDiagnosticSink): P
     const ids = new Set(regions.map((region) => region.id));
     const unknownRegion = [...(semanticRegions ?? [])].find((region) => region !== 0xffffffff && !ids.has(region));
     if (unknownRegion !== undefined) return fail('unknown-semantic-region', `face membership refers to semantic region ${unknownRegion}, which is absent from the dictionary`, version, { regionId: unknownRegion });
-    const invalidEdge = table.edgeRegions?.find((region: MeshEdgeRegion) =>
-      !hasLogicalVertices || region.vertices.some((vertex) => vertex >= logicalVertexCount));
+    // RJMD v4 predates the persisted render-corner logical-id table. Its edge
+    // rows carry the native indexed-edit vertex ids that were durable at the
+    // time, so the wire reader can validate only their u32/uniqueness shape
+    // (parseMeshSemanticTable does that above). RJMD v5 makes those ids dense
+    // and inspectable; from that version onward every edge row must resolve
+    // through the saved logical table.
+    const invalidEdge = version === 5
+      ? table.edgeRegions?.find((region: MeshEdgeRegion) =>
+          !hasLogicalVertices || region.vertices.some((vertex) => vertex >= logicalVertexCount))
+      : undefined;
     if (invalidEdge) return fail('invalid-edge-logical-id', `edge region "${invalidEdge.name}" refers outside the saved logical-vertex table`, version, {
       edgeRegionId: invalidEdge.id,
       logicalVertexCount,

@@ -38,8 +38,6 @@ export function allocatePrimitiveModelId(
   return `primitive:${kind}:${n}`;
 }
 
-export const PLAYER_MODEL_ID_PREFIX = 'character:player:';
-
 export const BUILD_STARTER_MODEL_ID_PREFIX = 'starter:build:';
 
 /** Allocate a semantic build-starter id without trusting the visible catalog. */
@@ -61,23 +59,4 @@ export function allocateBuildStarterModelId(
   let n = 1;
   while (taken(n)) n += 1;
   return `${prefix}${n}`;
-}
-
-/** Player/NPC starter twin of allocatePrimitiveModelId. */
-export function allocatePlayerModelId(
-  docs: readonly WorkspaceDocument[],
-  catalog: readonly ModelPackage[],
-  durableIdExists: DurableModelIdExists,
-  minted: MintedModelIds = [],
-): string {
-  const taken = (n: number) => {
-    const id = `${PLAYER_MODEL_ID_PREFIX}${n}`;
-    return durableIdExists(id)
-      || minted.includes(id)
-      || catalog.some((model) => model.id === id || model.name === `Player Model ${n}`)
-      || docs.some((doc) => doc.kind === 'model' && doc.sourceId === id);
-  };
-  let n = 1;
-  while (taken(n)) n += 1;
-  return `${PLAYER_MODEL_ID_PREFIX}${n}`;
 }

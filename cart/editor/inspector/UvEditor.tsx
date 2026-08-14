@@ -18,6 +18,7 @@ import { loadTexturePackages, texturePatchPackages, type TexturePatchPackage } f
 import { importedSpecs } from '../textures/shaders';
 import { rasterizeUvTexturePatch } from '../model/uvTexturePatch';
 import TexturePatchExplorer from './TexturePatchExplorer';
+import { UV_WORKSPACE_FLEX_STYLE } from './uvWorkspace';
 import { isUvDocumentHistoryLabel, UV_HISTORY_TUNING, uvHistoryAvailability, type ModelHistoryDepths, type UvHistoryAction } from '../model/uvHistory';
 import { planUvAtlasResize, uvAtlasResizePreview, UV_ATLAS_SIZE_TUNING } from '../model/uvAtlasSize';
 import {
@@ -1478,7 +1479,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
           height: Math.max(1, Number(layout.height)),
         };
       }}
-      style={{ flexGrow: 1, minHeight: 0, gap: 6, position: 'relative' }}
+      style={{ ...UV_WORKSPACE_FLEX_STYLE, gap: 6, position: 'relative' }}
     >
       <Row style={{ height: 27, alignItems: 'center', gap: 7 }}>
         <Pressable

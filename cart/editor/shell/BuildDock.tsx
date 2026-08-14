@@ -10,7 +10,9 @@ import { formatBytes, formatCount, formatMeters, selectedPieceReadout } from '..
 import { useWorldHoverReadout } from '../data/worldHoverReadout';
 import { PIECE_MODULE_METERS } from '../world/pieces';
 import type { BuildJournalSnapshot, EditorState } from '../data/types';
+import type { UndoDepths } from '../data/commands';
 import { mapHistory } from '../../../runtime/game/map';
+import type { RecoveryServerStatusV1 } from '../../../runtime/vcs/lore';
 
 const BUS_METRIC_TAIL = 256;
 
@@ -22,21 +24,33 @@ function readBusTail(): { count: number; events: EditorEvent[] } {
 export default function BuildDock({
   state,
   journal,
+  liveUndoDepths,
   onBuild,
   onEventbus,
   onUndo,
   onRedo,
   onPerf,
   onMemory,
+  nativeUpdateReady,
+  nativeUpdateOpen,
+  onNativeUpdate,
+  loreStatus,
+  onLore,
 }: {
   state: EditorState;
   journal: BuildJournalSnapshot;
+  liveUndoDepths: UndoDepths;
   onBuild: () => void;
   onEventbus: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onPerf: () => void;
   onMemory: () => void;
+  nativeUpdateReady: boolean;
+  nativeUpdateOpen: boolean;
+  onNativeUpdate: () => void;
+  loreStatus: RecoveryServerStatusV1;
+  onLore: () => void;
 }) {
   const [bus, setBus] = useState(readBusTail);
   useEffect(() => onEvent(() => setBus(readBusTail())), []);
@@ -53,11 +67,12 @@ export default function BuildDock({
   // While the paint session is live the STROKE journal is the badge's truth (req_2672)
   // — same 2Hz poll, different door: strokes land host-side per gesture with no render.
   const painting = isModelDoc && state.modelTool.paint;
+  const rigHistory = isModelDoc && liveUndoDepths.source === 'rig';
   const mapPainting = activeDocumentKind === 'world' && state.mapPaint.active;
   const [meshDepths, setMeshDepths] = useState({ undo: 0, redo: 0 });
   const [mapDepths, setMapDepths] = useState({ undo: 0, redo: 0 });
   useEffect(() => {
-    if (!isModelDoc) return;
+    if (!isModelDoc || rigHistory) return;
     const read = () => {
       try {
         const j = painting ? (globalThis as any).__mesh_paint_history?.() : (globalThis as any).__mesh_history?.();
@@ -71,7 +86,7 @@ export default function BuildDock({
     read();
     const t = setInterval(read, 500);
     return () => clearInterval(t);
-  }, [isModelDoc, painting]);
+  }, [isModelDoc, painting, rigHistory]);
   useEffect(() => {
     if (!mapPainting) return;
     const read = () => {
@@ -83,8 +98,8 @@ export default function BuildDock({
     const t = setInterval(read, 500);
     return () => clearInterval(t);
   }, [mapPainting]);
-  const undoCount = isKnowledgeDoc ? 0 : isModelDoc ? meshDepths.undo : mapPainting ? mapDepths.undo : state.worldUndo.length;
-  const redoCount = isKnowledgeDoc ? 0 : isModelDoc ? meshDepths.redo : mapPainting ? mapDepths.redo : state.worldRedo.length;
+  const undoCount = isKnowledgeDoc ? 0 : isModelDoc ? (rigHistory ? liveUndoDepths.undo : meshDepths.undo) : mapPainting ? mapDepths.undo : state.worldUndo.length;
+  const redoCount = isKnowledgeDoc ? 0 : isModelDoc ? (rigHistory ? liveUndoDepths.redo : meshDepths.redo) : mapPainting ? mapDepths.redo : state.worldRedo.length;
   // Cursor hover wins while the mouse is over the world; selection is the fallback.
   const hover = useWorldHoverReadout();
   const piece = isKnowledgeDoc ? null : hover ?? selectedPieceReadout(state);
@@ -94,6 +109,23 @@ export default function BuildDock({
   const { data: frame } = useTelemetry<{ frame_total_us?: number; gpu_us?: number }>({ kind: 'frame', pollMs: 500 });
   const { data: gpu } = useTelemetry<{ scene3d_triangles?: number; scene3d_draw_calls?: number }>({ kind: 'gpu', pollMs: 500 });
   const { data: system } = useTelemetry<{ process_rss_bytes?: number; mem_total_bytes?: number }>({ kind: 'system', pollMs: 1000 });
+  const loreTone = loreStatus.state === 'ready' ? 'success'
+    : loreStatus.state === 'checking' ? 'textFaint'
+      : 'warning';
+  const loreBadge = (
+    <C.HW_DockBuild
+      onPress={onLore}
+      tooltip={loreStatus.state === 'blocked'
+        ? `Lore recovery is blocked · ${loreStatus.retention.lastError ?? 'open Service for details'}`
+        : loreStatus.state === 'local'
+          ? 'Lore server is unavailable; native-resident recovery remains local'
+          : 'Open Blob Explorer recovery service'}
+    >
+      <Icon name={loreStatus.state === 'ready' ? 'DatabaseBackup' : 'TriangleAlert'} size={12} color={accentFor(loreTone)} />
+      <C.HW_DockLabel>LORE</C.HW_DockLabel>
+      <C.HW_DockValue>{loreStatus.state.toUpperCase()}</C.HW_DockValue>
+    </C.HW_DockBuild>
+  );
   const frameMs = frame?.frame_total_us ? frame.frame_total_us / 1000 : 0;
   const gpuMs = frame?.gpu_us ? frame.gpu_us / 1000 : 0;
   const triCount = gpu?.scene3d_triangles ?? 0;
@@ -113,6 +145,14 @@ export default function BuildDock({
           <C.HW_DockLabel>MEM</C.HW_DockLabel>
           <C.HW_DockLabel>{formatBytes(system?.process_rss_bytes)}/{formatBytes(system?.mem_total_bytes)}</C.HW_DockLabel>
         </C.HW_DockPerfButton>
+        {nativeUpdateReady ? (
+          <C.HW_DockBuild onPress={onNativeUpdate} tooltip="Compiled native update waiting for your approval">
+            <Icon name="TriangleAlert" size={13} color={accentFor(nativeUpdateOpen ? 'primary' : 'warning')} />
+            <C.HW_DockLabel>NATIVE</C.HW_DockLabel>
+            <C.HW_DockValue>READY</C.HW_DockValue>
+          </C.HW_DockBuild>
+        ) : null}
+        {loreBadge}
       </C.HW_BuildDock>
     );
   }
@@ -142,12 +182,12 @@ export default function BuildDock({
         <C.HW_DockLabel>BUS</C.HW_DockLabel>
         <C.HW_DockValue>{busCount}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onUndo} tooltip={mapPainting ? 'Undo (Map Paint native journal)' : painting ? 'Undo (paint strokes)' : isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
+      <C.HW_DockBuild onPress={onUndo} tooltip={mapPainting ? 'Undo (Map Paint native journal)' : rigHistory ? 'Undo (character rig history)' : painting ? 'Undo (paint strokes)' : isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
         <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>UNDO</C.HW_DockLabel>
         <C.HW_DockValue>{undoCount}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onRedo} tooltip={mapPainting ? 'Redo (Map Paint native journal)' : painting ? 'Redo (paint strokes)' : isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
+      <C.HW_DockBuild onPress={onRedo} tooltip={mapPainting ? 'Redo (Map Paint native journal)' : rigHistory ? 'Redo (character rig history)' : painting ? 'Redo (paint strokes)' : isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
         <Icon name="Redo2" size={12} color={accentFor(redoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>REDO</C.HW_DockLabel>
         <C.HW_DockValue>{redoCount}</C.HW_DockValue>
@@ -184,6 +224,14 @@ export default function BuildDock({
         <C.HW_DockLabel>MEM</C.HW_DockLabel>
         <C.HW_DockLabel>{formatBytes(system?.process_rss_bytes)}/{formatBytes(system?.mem_total_bytes)}</C.HW_DockLabel>
       </C.HW_DockPerfButton>
+      {nativeUpdateReady ? (
+        <C.HW_DockBuild onPress={onNativeUpdate} tooltip="Compiled native update waiting for your approval">
+          <Icon name="TriangleAlert" size={13} color={accentFor(nativeUpdateOpen ? 'primary' : 'warning')} />
+          <C.HW_DockLabel>NATIVE</C.HW_DockLabel>
+          <C.HW_DockValue>READY</C.HW_DockValue>
+        </C.HW_DockBuild>
+      ) : null}
+      {loreBadge}
     </C.HW_BuildDock>
   );
 }

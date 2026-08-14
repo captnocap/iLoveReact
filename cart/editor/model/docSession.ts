@@ -22,10 +22,15 @@ import { getHotState, removeHotState, setHotState } from '@reactjit/runtime/hook
 
 const MODEL_DOC_SESSION_KEY = 'editor:meshdoc:v1';
 const MINTED_MODEL_IDS_KEY = 'editor:minted-model-ids:v1';
+export const MODEL_DOC_SESSION_PROTOCOL = 2 as const;
 
-/** The document currently holding the host's resident mesh, and the mesh key it
- *  was last seen at. A resume requires BOTH to still match. */
-export type ModelDocSession = { docId: string; key: string };
+/** The document currently holding the host's resident mesh, the mesh key it was
+ *  last seen at, and the mount policy that admitted it. All three must match. */
+export type ModelDocSession = {
+  docId: string;
+  key: string;
+  protocol: typeof MODEL_DOC_SESSION_PROTOCOL;
+};
 
 /** The twig's document id: package identity, not the tab's id — the viewer keys
  *  its per-document state (reference images, retopo guide) by the same string. */
@@ -38,9 +43,14 @@ export function readModelDocSession(): ModelDocSession | null {
 }
 
 /** Claim the live mesh for `docId` at `key`. Re-claimed on every mesh re-key so
- *  the twig always names the CURRENT resident mesh. */
-export function claimModelDocSession(docId: string, key: string): void {
-  setHotState<ModelDocSession>(MODEL_DOC_SESSION_KEY, { docId, key });
+ *  the twig always names the CURRENT resident mesh. The protocol is explicit at
+ *  the caller so a mount-policy change cannot silently reuse a legacy lease. */
+export function claimModelDocSession(
+  docId: string,
+  key: string,
+  protocol: typeof MODEL_DOC_SESSION_PROTOCOL,
+): void {
+  setHotState<ModelDocSession>(MODEL_DOC_SESSION_KEY, { docId, key, protocol });
 }
 
 /** Drop the claim when `docId` closes (or unconditionally when it is omitted —

@@ -1,5 +1,5 @@
 import { initialState } from './initialState';
-import { discardModelWorkingCopyState } from './persistenceLifecycle';
+import { discardModelWorkingCopyState, upsertModelPackageProjection } from './persistenceLifecycle';
 import type { ModelPackage } from './types';
 
 let passed = 0, failed = 0;
@@ -17,6 +17,7 @@ function dirtyState(id: string) {
   state.modelDirty[id] = true;
   state.modelOverrides[id] = { name: 'Renamed Draft' };
   state.modelDupes = [pkg];
+  state.recentLibraryKeys = [`model:${id}`, 'asset:water'];
   state.modelActivePartId = 'part:1';
   return state;
 }
@@ -30,6 +31,7 @@ test('discard drops every ephemeral model-authoring slice', () => {
   assert(next.modelDirty.draft === undefined, 'dirty marker survived');
   assert(next.modelOverrides.draft === undefined, 'unsaved identity override survived');
   assert(!next.modelDupes.some((item) => item.id === 'draft'), 'unsaved session package survived');
+  assert(next.recentLibraryKeys.join(',') === 'asset:water', 'discarded draft survived in durable Recent history');
   assert(next.modelActivePartId === null, 'active part survived');
 });
 
@@ -37,7 +39,22 @@ test('discard keeps durable identity projections for a materialized model', () =
   const next = discardModelWorkingCopyState(dirtyState('saved'), 'saved', true);
   assert(next.modelOverrides.saved?.name === 'Renamed Draft', 'durable identity projection was discarded');
   assert(next.modelDupes.some((item) => item.id === 'saved'), 'materialized catalog row was discarded');
+  assert(next.recentLibraryKeys[0] === 'model:saved', 'durable model disappeared from Recent history');
   assert(next.modelParts.saved === undefined && next.modelDirty.saved === undefined, 'working data survived');
+});
+
+test('committed character revision replaces its shadowing draft projection', () => {
+  const draft: ModelPackage = { id: 'saved', name: 'Draft', kind: 'props', folderId: 'model-saved' as any };
+  const committed: ModelPackage = {
+    ...draft,
+    name: 'Committed',
+    geometryPath: 'mesh/character-hash.rjmd',
+    skeleton: { id: 'saved', bones: [{ id: 'root' }] },
+  };
+  const next = upsertModelPackageProjection([draft], committed);
+  assert(next.length === 1 && next[0] === committed, 'draft continued to shadow the committed package');
+  const appended = upsertModelPackageProjection([], committed);
+  assert(appended.length === 1 && appended[0] === committed, 'first committed projection was not retained');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

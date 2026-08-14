@@ -20,6 +20,8 @@ import { readWorldSave } from './worldStore';
 import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
 import { loadColorLibrary } from './colorLibraryStore';
+import { starterPaletteSets } from './colorSpine';
+import { loadLabRecipes } from './labRecipeStore';
 import { loadLibraryHistory } from './libraryHistoryStore';
 import { commandExists, MENUS } from './commands';
 import { normalizeContentFolderId, normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
@@ -103,13 +105,21 @@ export function loadPersistedState(): EditorState {
   // a locked-in jump height survives the cold restart like placed pieces do.
   const globals = loadGlobalsSave();
   if (globals) base.worldGlobals = globals;
-  // Saved colors + the raw use-history rehydrate from the color library save
-  // (req_3097) — a saved color is a real save, not a session-lifetime illusion.
+  // Saved colors + the raw use-history + named sets rehydrate from the color
+  // library save (req_3097/req_4395) — a saved color is a real save, not a
+  // session-lifetime illusion. A file that predates named sets (sets: null)
+  // seeds the deletable starters exactly once; from then on the file rules.
   const colorLibrary = loadColorLibrary();
   if (colorLibrary) {
     base.colorSpinePalette = colorLibrary.saved;
     base.colorSpineRecents = colorLibrary.recents;
+    base.colorSpineSets = colorLibrary.sets ?? starterPaletteSets();
+  } else {
+    base.colorSpineSets = starterPaletteSets();
   }
+  // Material Lab recipe documents (req_4395) — the same per-concern contract.
+  const labRecipes = loadLabRecipes();
+  if (labRecipes) base.labRecipes = labRecipes;
   // Asset/model use history is editor-wide user state. Unlike ordinary view
   // chrome it survives a cold process restart through its per-concern save.
   const libraryHistory = loadLibraryHistory();

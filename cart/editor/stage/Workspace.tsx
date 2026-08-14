@@ -10,6 +10,7 @@ import Stage from './Stage';
 import type { PieceSelectionIntent } from '../world/selection';
 import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 import type { CharacterRigApi, CharacterRigSnapshot } from '../../../runtime/skeleton';
+import type { ExternalAutoRigUiState } from '../skeleton/externalAutoRig';
 
 export default function Workspace(props: {
   state: EditorState;
@@ -31,6 +32,10 @@ export default function Workspace(props: {
   characterRigSnapshot: CharacterRigSnapshot | null;
   onCharacterRigSnapshot: (snapshot: CharacterRigSnapshot | null) => void;
   onCharacterRigStatus: (message: string) => void;
+  externalAutoRigAvailable: boolean;
+  externalAutoRigState: ExternalAutoRigUiState;
+  onExternalAutoRig: () => void;
+  onAcceptExternalAutoRig: () => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: (delta: number) => void;

@@ -1,22 +1,29 @@
 // Coordination policy between the ordinary model Save transaction and Lore.
 //
-// Lore captures the resident native document through its own host door. It is a
-// recovery journal, not another phase of the package transaction: a Lore outage
-// must never roll back a package whose artifacts and manifest already passed
-// their read-back checks. Conversely, a failed or background/non-resident Save
-// must never archive whichever unrelated document happens to own Scene3D.
+// Lore captures exact package geometry only after native readback issues a
+// one-use receipt. It is a recovery journal, not another phase of the package
+// transaction: a Lore outage must never roll back a package whose artifacts and
+// manifest already passed their read-back checks. Conversely, a failed or
+// background/non-resident Save must never archive an unrelated model.
 
-export type LoreSnapshotResponse = Readonly<{
-  ok: boolean;
-  error?: string;
-  revision?: string;
-  revisionNumber?: number;
-  pushed?: boolean;
-  pushError?: string;
-}>;
+import type {
+  VerifiedNormalSnapshotRequestV1,
+  VerifiedSaveReceiptIssueRequestV1,
+  VerifiedSaveReceiptV1,
+} from '../../../runtime/vcs/loreSaveCoordinator';
+import type {
+  LoreErrorV1,
+  RecoverySnapshotReceiptV1,
+} from '../../../runtime/vcs/lore';
 
-export type LoreSnapshotCall = (
-  payload: Readonly<Record<string, unknown>>,
+export type LoreSnapshotResponse = RecoverySnapshotReceiptV1 | LoreErrorV1;
+
+export type VerifiedSaveReceiptCall = (
+  payload: VerifiedSaveReceiptIssueRequestV1,
+) => VerifiedSaveReceiptV1 | LoreErrorV1;
+
+export type VerifiedNormalSnapshotCall = (
+  payload: VerifiedNormalSnapshotRequestV1,
 ) => LoreSnapshotResponse;
 
 export type NormalModelLoreSnapshotInput = Readonly<{
@@ -24,7 +31,7 @@ export type NormalModelLoreSnapshotInput = Readonly<{
   modelId: string;
   activeResidentModelId: string | null;
   packageGeometryPath: string;
-  objectRows: readonly Readonly<{ id: string; lo?: number }>[];
+  packageGeometrySha256: string;
   label: string;
   note?: string;
 }>;
@@ -53,7 +60,8 @@ export function loreSnapshotObjectIds(
  * recovery unavailability is reported, never re-thrown into Save. */
 export function snapshotNormalModelSave(
   input: NormalModelLoreSnapshotInput,
-  capture: LoreSnapshotCall,
+  issueReceipt: VerifiedSaveReceiptCall,
+  capture: VerifiedNormalSnapshotCall,
 ): NormalModelLoreSnapshotOutcome {
   if (!input.saveSucceeded || input.activeResidentModelId !== input.modelId) {
     return { attempted: false, archived: false, response: null, statusSuffix: '' };
@@ -61,20 +69,36 @@ export function snapshotNormalModelSave(
 
   let response: LoreSnapshotResponse;
   try {
-    const objectIds = loreSnapshotObjectIds(input.objectRows);
-    response = capture({
-      modelId: input.modelId,
-      packageGeometryPath: input.packageGeometryPath,
-      ...(objectIds ? { objectIds } : {}),
-      kind: 'normal',
-      push: true,
-      label: input.label,
-      ...(input.note ? { note: input.note } : {}),
-    });
+    if (!/^[0-9a-f]{64}$/.test(input.packageGeometrySha256)) {
+      response = {
+        ok: false,
+        version: 1,
+        code: 'hash_mismatch',
+        detail: 'verified ordinary Save did not provide an exact lowercase package geometry SHA-256',
+      };
+    } else {
+      const receipt = issueReceipt({
+        version: 1,
+        modelId: input.modelId,
+        packageGeometryPath: input.packageGeometryPath,
+        expectedSha256: input.packageGeometrySha256,
+      });
+      response = receipt.ok ? capture({
+        version: 1,
+        modelId: input.modelId,
+        kind: 'normal',
+        saveReceiptToken: receipt.saveReceiptToken,
+        push: true,
+        label: input.label,
+        ...(input.note ? { note: input.note } : {}),
+      }) : receipt;
+    }
   } catch (error) {
     response = {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      version: 1,
+      code: 'internal_error',
+      detail: error instanceof Error ? error.message : String(error),
     };
   }
 
@@ -83,19 +107,20 @@ export function snapshotNormalModelSave(
       attempted: true,
       archived: false,
       response,
-      statusSuffix: `; package saved, but recovery snapshot failed (${response.error ?? 'unknown Lore error'})`,
+      statusSuffix: `; package saved, but recovery snapshot failed (${response.detail})`,
     };
   }
 
-  const revision = response.revisionNumber ?? response.revision;
-  const pushWarning = response.pushed === false
-    ? `; recovery snapshot is local only${response.pushError ? ` (${response.pushError})` : ''}`
+  const revision = response.revisionNumber;
+  const pushWarning = response.pushState !== 'pushed'
+    ? `; recovery snapshot is ${response.pushState === 'local' ? 'local only' : 'not confirmed remote'}`
     : '';
+  const indexWarning = response.indexed ? '' : '; recovery snapshot index is pending repair';
   return {
     attempted: true,
     archived: true,
     response,
-    statusSuffix: `; recovery snapshot${revision !== undefined ? ` ${revision}` : ''}${pushWarning}`,
+    statusSuffix: `; recovery snapshot ${revision}${pushWarning}${indexWarning}`,
   };
 }
 

@@ -1,4 +1,9 @@
-import { modelFocusSemantics, semanticHorizonLines, NO_SEMANTIC_ID } from './modelSemanticsFocus';
+import {
+  filterModelFocusSemanticRows,
+  modelFocusSemantics,
+  semanticHorizonLines,
+  NO_SEMANTIC_ID,
+} from './modelSemanticsFocus';
 
 let passed = 0;
 const assert = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
@@ -48,6 +53,32 @@ test('hidden parts are a visibility filter rather than a semantic load mismatch'
 test('documents with no saved or resident names remain honestly empty', () => {
   const focus = modelFocusSemantics({ regions: [NO_SEMANTIC_ID], instances: [NO_SEMANTIC_ID], table: null }, null);
   assert(focus.status === 'none' && focus.rows.length === 0, 'anonymous document invented semantics');
+});
+
+test('face regions and edge paths remain visibly distinct in the Names projection', () => {
+  const semanticTable = {
+    ...table,
+    edgeRegions: [{
+      id: 5,
+      name: 'door.hinge',
+      role: 'hinge' as const,
+      objectId: 'driver-door',
+      closed: false,
+      vertices: [10, 11, 12],
+    }],
+  };
+  const focus = modelFocusSemantics({ regions: [3, 3, 4], instances: [0, 0, 0], table: semanticTable }, {
+    faces: 3,
+    unnamed: 0,
+    regions: [{ id: 3, faces: 2, instances: 1 }, { id: 4, faces: 1, instances: 1 }],
+    table: semanticTable,
+  });
+  const all = filterModelFocusSemanticRows(focus.rows, '');
+  assert(all.faces.length === 2, `Names projection lost face regions (${all.faces.length})`);
+  assert(all.edges.length === 1 && all.edges[0]?.name === 'door.hinge', 'Names projection hid the named edge path');
+  assert(all.edges[0]?.edges === 2 && all.edges[0]?.presence === 'resident', 'edge path summary lost its resident edge count');
+  assert(filterModelFocusSemanticRows(focus.rows, 'driver-door').edges.length === 1, 'edge object id was not searchable');
+  assert(filterModelFocusSemanticRows(focus.rows, 'wall').faces.length === 1, 'face role was not searchable');
 });
 
 

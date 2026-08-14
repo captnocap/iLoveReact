@@ -8,7 +8,6 @@
 
 import {
   allocateBuildStarterModelId,
-  allocatePlayerModelId,
   allocatePrimitiveModelId,
 } from './modelIdentity';
 import type { WorkspaceDocument } from './types';
@@ -26,12 +25,6 @@ test('disk truth reserves a primitive id even when the browser catalog omitted i
   assert(next === 'primitive:cylinder:2', `reused stored cylinder id: ${next}`);
 });
 
-test('disk truth also reserves player starter identities', () => {
-  const docs: WorkspaceDocument[] = [];
-  const next = allocatePlayerModelId(docs, [], (id) => id === 'character:player:1');
-  assert(next === 'character:player:2', `reused stored player id: ${next}`);
-});
-
 // req_3773/req_3774: a document closed before its first save leaves no tab, no
 // package, and no file. Re-minting its id handed the next New Mesh the dead
 // document's live-mesh lease — it opened the model the user had just closed —
@@ -43,9 +36,7 @@ test('an identity minted this session is never re-minted after its document clos
   assert(next === 'primitive:cube:2', `re-minted a closed document's id: ${next}`);
 });
 
-test('the session ledger reserves starter and player identities too', () => {
-  const player = allocatePlayerModelId([], [], () => false, ['character:player:1']);
-  assert(player === 'character:player:2', `re-minted a closed player id: ${player}`);
+test('the session ledger reserves semantic starter identities too', () => {
   const wall = allocateBuildStarterModelId('wall', [], [], () => false, ['starter:build:wall:1']);
   assert(wall === 'starter:build:wall:2', `re-minted a closed starter id: ${wall}`);
 });
@@ -54,8 +45,6 @@ test('the ledger is per-identity, not a blanket counter bump', () => {
   // A retired cube must not push an untouched cone off its first identity.
   const cone = allocatePrimitiveModelId('cone', [], [], () => false, ['primitive:cube:1']);
   assert(cone === 'primitive:cone:2', `expected the shared Model N numbering to skip 1: ${cone}`);
-  const player = allocatePlayerModelId([], [], () => false, ['primitive:cube:1']);
-  assert(player === 'character:player:1', `a primitive id leaked into player numbering: ${player}`);
 });
 
 test('build starters reserve identities per semantic kind', () => {

@@ -1,42 +1,30 @@
-// editor/data/roleNamer.ts — the guided role-naming pass (req_3263).
+// editor/data/roleNamer.ts — the vehicle guided role-naming pass (req_3263).
 //
-// "Formal lazy" naming: part name → bone id IS the rigging contract
-// (runtime/skeleton rigs, req_2777), but remembering every name the compiler
-// binds and renaming rows one by one is busywork. A namer session walks a
-// contract's role list and the user just clicks the outliner row that should
-// take each name. Roles a part already claims (by normalized name) are
-// satisfied up front — the session only asks for what's missing.
-import { bodyRigBones, carRigBones, normalizeBoneName } from '../../../runtime/skeleton';
+// Vehicle rigs still use per-part bone names, so a namer session walks the car
+// formation and lets the user click each corresponding outliner row. Character
+// anatomy is independent semantic data and never enters this name-based tool.
+import { carRigBones } from '../../../runtime/skeleton';
 
-export type RoleContractId = 'head' | 'body' | 'car';
+export type RoleContractId = 'car';
 
 export type RoleContract = { id: RoleContractId; label: string; roles: string[] };
 
-// head = the head subtree of the body formation — a bust like heroin_bob_head
-// never gets asked for toes. body/car = the full formations, authored order.
-function headRoles(): string[] {
-  const bones = bodyRigBones();
-  const parentOf = new Map(bones.map((bone) => [bone.id, bone.parent]));
-  const underHead = (id: string): boolean => {
-    for (let at: string | undefined = id; at; at = parentOf.get(at)) {
-      if (at === 'head') return true;
-    }
-    return false;
-  };
-  return bones.map((bone) => bone.id).filter(underHead);
+export function roleContract(id: RoleContractId): RoleContract {
+  if (id !== 'car') throw new Error(`unknown role-naming contract: ${String(id)}`);
+  return { id, label: 'car', roles: carRigBones().map((bone) => bone.id) };
 }
 
-export function roleContract(id: RoleContractId): RoleContract {
-  if (id === 'head') return { id, label: 'head', roles: headRoles() };
-  if (id === 'body') return { id, label: 'body', roles: bodyRigBones().map((bone) => bone.id) };
-  return { id, label: 'car', roles: carRigBones().map((bone) => bone.id) };
+function canonicalVehicleRoleName(name: string): string {
+  let canonical = name.trim().toLowerCase().replace(/[\s\-.]+/g, '_');
+  canonical = canonical.replace(/_l$/, '_left').replace(/_r$/, '_right');
+  return canonical;
 }
 
 export type RoleNamerPlan = {
   contract: RoleContract;
   /** roles no part claims yet, contract order — the session's ask queue */
   open: string[];
-  /** role → claiming part name (first claimant wins, same as the compiler) */
+  /** role → claiming part name (first claimant wins) */
   claimed: Map<string, string>;
 };
 
@@ -45,7 +33,7 @@ export function roleNamerPlan(contractId: RoleContractId, partNames: readonly st
   const roles = new Set(contract.roles);
   const claimed = new Map<string, string>();
   for (const name of partNames) {
-    const bone = normalizeBoneName(name);
+    const bone = canonicalVehicleRoleName(name);
     if (roles.has(bone) && !claimed.has(bone)) claimed.set(bone, name);
   }
   return { contract, open: contract.roles.filter((role) => !claimed.has(role)), claimed };

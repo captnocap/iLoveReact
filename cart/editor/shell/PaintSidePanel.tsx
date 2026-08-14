@@ -53,6 +53,8 @@ export type PaintInkControls = {
   palette: OklchColor[];
   recents: OklchColor[];
   scenePick: string | null;
+  /** The REAL named color sets (state-backed, persisted) — one store, every picker. */
+  sets?: import('../data/colorSpine').SpinePaletteSet[];
   spine: ColorSpineHandlers;
   /** Color Studio overrides folded into a selected shader variant. */
   paletteFor?: (specId: string, variant: number) => Rgb[] | null;
@@ -222,6 +224,7 @@ export function PaintPanel(props: PaintPanelProps) {
               palette={props.palette}
               recents={props.recents}
               scenePick={props.scenePick}
+              sets={props.sets}
               onSetCurrent={pickColor}
               onAddToTray={props.spine.onAddToTray}
               onPickTray={pickColor}

@@ -21,6 +21,7 @@ import {
   viewSession,
   type OracleFacts,
 } from './seatOracle';
+import type { CharacterRigSeatStatus } from './characterRigSeat';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -37,9 +38,25 @@ const cleanModel = {
 const facts = (over: Partial<OracleFacts> = {}, model: Partial<typeof cleanModel> = {}): OracleFacts => ({
   model: { ...cleanModel, ...model },
   classSpec: null, shape: { bbox: [0, 0, 0, 4, 1.5, 2], regionNames: [], partNames: [] },
-  claimed: true, packageInSync: true, packageDirty: false, semanticHealthy: true, attest: {},
+  claimed: true, packageInSync: true, packageDirty: false, semanticHealthy: true, rig: null, attest: {},
   ...over,
 });
+
+const readyRig: CharacterRigSeatStatus = {
+  state: 'bound',
+  rows: {
+    connected_body: { status: 'ready', components: 1, main: 4732, detached: 0 },
+    required_semantics: { status: 'ready', missing: [], uncoveredBodyFaces: 0 },
+    canonical_skeleton: 'ready',
+    current_topology_hash: 'ready',
+    current_semantic_hash: 'ready',
+    current_object_binding_hash: 'ready',
+    saved_four_influence_weights: 'ready',
+  },
+  weightsStale: false,
+  fitReview: false,
+  bindReview: false,
+};
 
 test('a retopology task loads the retopology plan, not the blockout corridor', () => {
   const { plan } = classifyTask('retopologize this Tripo soup into a skinnable prop');
@@ -137,6 +154,46 @@ test('a host-measured check cannot be attested past', () => {
   // The seat refuses this at the API boundary; the router marks it so that is possible.
   assert(view.checks.filter((check) => check.verified === 'agent-attest').every((check) => check.pass === null),
     'an unattested check reported a verdict');
+});
+
+test('rig-gates is one exact host check over readiness and ambient debt', () => {
+  assert(PHASE_CHECKS.rig.join(',') === 'every-face-named,no-placeholders,rig-gates',
+    `rig phase checks drifted to ${PHASE_CHECKS.rig.join(',')}`);
+
+  const absent = evaluatePhase('rig', facts()).find((check) => check.id === 'rig-gates')!;
+  assert(absent.verified === 'host' && absent.pass === false,
+    'missing resident rig became attested or passed');
+  assert(absent.detail === 'no resident humanoid rig — run attach-humanoid, then read `tools/seat rig-status`',
+    `missing-rig refusal drifted: ${absent.detail}`);
+
+  const ready = evaluatePhase('rig', facts({ rig: readyRig })).find((check) => check.id === 'rig-gates')!;
+  assert(ready.verified === 'host' && ready.pass === true,
+    `saved-current rig did not clear the host gate: ${ready.detail}`);
+  assert(ready.detail === 'bound rig is saved-current: all seven readiness rows ready and no review debt',
+    `ready-rig detail drifted: ${ready.detail}`);
+
+  const blockedRig: CharacterRigSeatStatus = {
+    ...readyRig,
+    state: 'needs_bind',
+    rows: {
+      ...readyRig.rows,
+      connected_body: { status: 'blocked', components: 2, main: 4732, detached: 1 },
+      current_topology_hash: 'waiting',
+      current_semantic_hash: 'waiting',
+      current_object_binding_hash: 'waiting',
+      saved_four_influence_weights: 'waiting',
+    },
+    weightsStale: true,
+    bindReview: true,
+  };
+  const blocked = evaluatePhase('rig', facts({
+    rig: blockedRig,
+    attest: { 'rig-gates': 'claimed clean without reading the host' },
+  })).find((check) => check.id === 'rig-gates')!;
+  assert(blocked.verified === 'host' && blocked.pass === false,
+    'an attestation talked past measured rig debt');
+  assert(blocked.detail === 'rig is needs_bind; failing connected_body:blocked, current_topology_hash:waiting, current_semantic_hash:waiting, current_object_binding_hash:waiting, saved_four_influence_weights:waiting, weightsStale, bindReview — read `tools/seat rig-status`',
+    `blocked-rig refusal did not name the exact rows and debt: ${blocked.detail}`);
 });
 
 test('each attested check names a future audit rather than passing silently', () => {

@@ -23,7 +23,7 @@ export type ColorSpineHandlers = {
   onAddToTray: () => void;
   onPickTray: (color: OklchColor) => void;
   onScenePick: (color: OklchColor, css: string) => void;
-  onLoadLibrarySet: (colors: OklchColor[]) => void;
+  onLoadLibrarySet: (name: string, colors: OklchColor[]) => void;
 };
 
 // The dials, isolated. Owns a synchronous local draft so sliders are responsive, and its
