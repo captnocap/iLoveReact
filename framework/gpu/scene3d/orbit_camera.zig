@@ -386,6 +386,25 @@ test "Studio orbit navigation modifiers provide traverse and precision speeds" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.4), fast_distance, 0.00001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0525), precision_distance, 0.00001);
     try std.testing.expect(fast_distance > precision_distance);
+
+    // Modifier releases are transported even though they are not WASD and are
+    // therefore not consumed. The next held-key tick must immediately be normal.
+    z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
+    _ = orbitNavigationSet(true);
+    _ = orbitNavigationKey('w', true, true, false);
+    try std.testing.expect(!orbitNavigationKey('x', false, false, false));
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), -z3d.g_orbit.target[2], 0.00001);
+
+    // Tab's mode boundary clears every axis/modifier. Normal middle-drag orbit
+    // keeps its original pixel rate after fast navigation has been disabled.
+    _ = orbitNavigationKey('x', true, true, false);
+    try std.testing.expect(!orbitNavigationSet(false));
+    try std.testing.expectEqual(@as(u8, 0), z3d.g_orbit.navigation_keys);
+    try std.testing.expect(!z3d.g_orbit.navigation_shift);
+    const yaw_before = z3d.g_orbit.yaw;
+    orbitDrag(10, 0);
+    try std.testing.expectApproxEqAbs(yaw_before - 0.1, z3d.g_orbit.yaw, 0.00001);
 }
 
 test "Studio automatic far plane follows translated camera distance from mesh" {

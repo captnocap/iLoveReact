@@ -4531,8 +4531,9 @@ pub fn run(config_in: AppConfig) !void {
                             }
                             // Orientation compass (req_2643 gap LL): the bottom-left
                             // nav ball is furniture, never a mesh pick — an axis dot
-                            // snaps the orbit to that axis-aligned view; the ball body
-                            // just consumes the press so nothing selects through it.
+                            // snaps the orbit to that axis-aligned view; its centre
+                            // rebases the full-model frame, and the remaining ball body
+                            // consumes the press so nothing selects through it.
                             // Checked after the loop-cut modal (its law: other presses
                             // are inert) and before every pick.
                             const compass_hit = r3d.meshCompassHit(mx, my);
@@ -5587,12 +5588,17 @@ pub fn run(config_in: AppConfig) !void {
                         // WASD updates host-held axes and never reaches the model command
                         // keymap (W wireframe, A align, S scale, D detach). Text inputs still
                         // win above, and the shell owns Tab so modal discipline stays intact.
+                        // The physical modifier edge wins over SDL's aggregate mask:
+                        // on some backends a Shift/Ctrl key-up still reports that bit,
+                        // which otherwise leaves navigation latched at its old speed.
+                        const nav_shift = (mod & c.SDL_KMOD_SHIFT) != 0 or sym == c.SDLK_LSHIFT or sym == c.SDLK_RSHIFT;
+                        const nav_ctrl = (mod & c.SDL_KMOD_CTRL) != 0 or sym == c.SDLK_LCTRL or sym == c.SDLK_RCTRL;
                         const studio_navigation_consumed = !input_consumed and r3d.meshEditCapturing() and
                             r3d.orbitNavigationKey(
                                 sym,
                                 true,
-                                (mod & c.SDL_KMOD_SHIFT) != 0,
-                                (mod & c.SDL_KMOD_CTRL) != 0,
+                                nav_shift,
+                                nav_ctrl,
                             );
                         if (studio_navigation_consumed) {
                             state_mod.markDirty();
@@ -5609,12 +5615,15 @@ pub fn run(config_in: AppConfig) !void {
                 },
                 c.SDL_EVENT_KEY_UP => {
                     // Same full-width packing as KEY_DOWN (key_pack.zig).
+                    const sym: i32 = @intCast(event.key.key);
                     const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(event.key.mod));
+                    const nav_shift = (event.key.mod & c.SDL_KMOD_SHIFT) != 0 and sym != c.SDLK_LSHIFT and sym != c.SDLK_RSHIFT;
+                    const nav_ctrl = (event.key.mod & c.SDL_KMOD_CTRL) != 0 and sym != c.SDLK_LCTRL and sym != c.SDLK_RCTRL;
                     if (r3d.orbitNavigationKey(
-                        @intCast(event.key.key),
+                        sym,
                         false,
-                        (event.key.mod & c.SDL_KMOD_SHIFT) != 0,
-                        (event.key.mod & c.SDL_KMOD_CTRL) != 0,
+                        nav_shift,
+                        nav_ctrl,
                     )) {
                         state_mod.markDirty();
                         continue;
