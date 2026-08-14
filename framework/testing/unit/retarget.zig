@@ -409,6 +409,38 @@ test "retarget emits constrained locals, preserves bind end-effector twist and t
     try testing.expectApproxEqAbs(@as(f32, 0.2) * scale_factor, pose.root_translation[1], 1.0e-5);
 }
 
+test "a forward-pointing arm aims the target arm out of the screen" {
+    // The req_4420 symptom: arms held toward the camera read as a T-pose
+    // because the old local-frame delta transport remapped out-of-plane
+    // motion into lateral splay. The aim transport must point the target
+    // bone where the person's limb actually points.
+    const calibration = try calibrateRest();
+    var mapper = try retarget.Retargeter.init(
+        testing.allocator,
+        &TARGET_IDS,
+        &TARGET_BONES,
+        retarget.DEFAULT_TUNING,
+    );
+    defer mapper.deinit();
+
+    var forward = makeFrame(1, 40_000, 0.9);
+    // Left arm straight at the camera (MediaPipe world: toward camera is
+    // NEGATIVE z), shoulder unchanged.
+    landmarkAt(&forward, .elbow_left).world = .{ 0.17, -0.50, -0.23 };
+    landmarkAt(&forward, .wrist_left).world = .{ 0.17, -0.50, -0.46 };
+    const assembled = try source.reconstruct(&forward, calibration, source.DEFAULT_TUNING);
+    const live_dir = assembled.segment(.upper_arm_left).direction;
+    try testing.expect(live_dir[2] > 0.95); // source space: +z is toward camera
+
+    _ = try mapper.retarget(calibration, &assembled);
+    const globals = mapper.globalMatrices();
+    const shoulder_pos = matrixPosition(globals[7]);
+    const elbow_pos = matrixPosition(globals[8]);
+    const bone_span = distance(shoulder_pos, elbow_pos);
+    const bone_dir_z = (elbow_pos[2] - shoulder_pos[2]) / bone_span;
+    try testing.expect(bone_dir_z > 0.95); // the rig arm points out of the screen
+}
+
 test "missing channel holds 150ms then slerps to bind over 350ms" {
     const calibration = try calibrateRest();
     var mapper = try retarget.Retargeter.init(

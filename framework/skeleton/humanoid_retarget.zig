@@ -54,9 +54,26 @@ pub const Error = std.mem.Allocator.Error || rig.Error || error{
     NoCompletedFrame,
 };
 
+/// How a channel's source segment drives its target bone (req_4420):
+///
+/// - `aim`: the bone POINTS WHERE THE SEGMENT POINTS — a world-space
+///   shortest-arc swing from the bone's bind direction to the live segment
+///   direction, twist preserved from bind. This is the only transport that
+///   keeps out-of-plane motion honest: transporting rotation deltas through
+///   local frames remapped a toward-camera arm into a lateral splay (the
+///   "arms forward reads as T-pose" bug), because the source segment's
+///   canonical twist axes and the rig author's local axes need not agree.
+/// - `world_delta`: the live-versus-calibration-rest rotation, composed in
+///   WORLD space onto the bind. For bones whose axis is perpendicular to
+///   their driving segment (pelvis under the hip line, clavicles under the
+///   shoulder line) and for the facial-basis head/neck, where aiming a
+///   direction would lose yaw/roll.
+const DriveKind = enum { aim, world_delta };
+
 const Channel = struct {
     bone_id: []const u8,
     segment: source.SegmentId,
+    drive: DriveKind = .aim,
     share_kind: enum {
         full,
         clavicle,
@@ -77,15 +94,15 @@ pub const DRIVEN_CHANNEL_IDS = blk: {
 };
 
 const CHANNELS = [_]Channel{
-    .{ .bone_id = "pelvis", .segment = .hip_line },
+    .{ .bone_id = "pelvis", .segment = .hip_line, .drive = .world_delta },
     .{ .bone_id = "spine_lower", .segment = .spine, .share_kind = .spine_lower },
     .{ .bone_id = "spine_upper", .segment = .spine, .share_kind = .spine_upper },
-    .{ .bone_id = "neck", .segment = .head, .share_kind = .neck },
-    .{ .bone_id = "head", .segment = .head, .share_kind = .head },
-    .{ .bone_id = "clavicle_left", .segment = .shoulder_line, .share_kind = .clavicle },
+    .{ .bone_id = "neck", .segment = .head, .drive = .world_delta, .share_kind = .neck },
+    .{ .bone_id = "head", .segment = .head, .drive = .world_delta, .share_kind = .head },
+    .{ .bone_id = "clavicle_left", .segment = .shoulder_line, .drive = .world_delta, .share_kind = .clavicle },
     .{ .bone_id = "upper_arm_left", .segment = .upper_arm_left },
     .{ .bone_id = "lower_arm_left", .segment = .lower_arm_left },
-    .{ .bone_id = "clavicle_right", .segment = .shoulder_line, .share_kind = .clavicle },
+    .{ .bone_id = "clavicle_right", .segment = .shoulder_line, .drive = .world_delta, .share_kind = .clavicle },
     .{ .bone_id = "upper_arm_right", .segment = .upper_arm_right },
     .{ .bone_id = "lower_arm_right", .segment = .lower_arm_right },
     .{ .bone_id = "upper_leg_left", .segment = .upper_leg_left },
@@ -120,6 +137,35 @@ fn dot(a: Vec3, b: Vec3) f32 {
 
 fn length(v: Vec3) f32 {
     return @sqrt(dot(v, v));
+}
+
+fn cross(a: Vec3, b: Vec3) Vec3 {
+    return .{
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    };
+}
+
+fn normalizeVec(v: Vec3, epsilon: f32) ?Vec3 {
+    const magnitude = length(v);
+    if (!std.math.isFinite(magnitude) or magnitude <= epsilon) return null;
+    return scale(v, 1 / magnitude);
+}
+
+/// The twist-free world rotation carrying `from` onto `to` (both unit).
+fn shortestArcQuat(from: Vec3, to: Vec3, epsilon: f32) Error!Quat {
+    const alignment = dot(from, to);
+    if (alignment > 1.0 - 1.0e-6) return fk.IDENTITY_QUAT;
+    if (alignment < -1.0 + 1.0e-6) {
+        // Antiparallel: π about any axis perpendicular to `from`.
+        var axis = cross(from, .{ 1, 0, 0 });
+        if (normalizeVec(axis, epsilon) == null) axis = cross(from, .{ 0, 1, 0 });
+        const unit_axis = normalizeVec(axis, epsilon) orelse return error.InvalidTuning;
+        return .{ unit_axis[0], unit_axis[1], unit_axis[2], 0 };
+    }
+    const axis = cross(from, to);
+    return fk.normalizeQuat(.{ axis[0], axis[1], axis[2], 1.0 + alignment });
 }
 
 fn shareFor(channel: Channel, tuning: Tuning) f32 {
@@ -161,6 +207,11 @@ pub const Retargeter = struct {
     bind_global: []Mat4,
     inverse_bind: []Mat4,
     bind_global_rotations: []Quat,
+    /// World-space bind direction of each bone: toward its first child's
+    /// bind origin (the real authored geometry), falling back to the local
+    /// +y convention for leaves. The aim transport swings THIS onto the
+    /// live segment direction.
+    bind_bone_directions: []Vec3,
     current_global_rotations: []Quat,
     requested_local_rotations: []Quat,
     current_local_rotations: []Quat,
@@ -222,6 +273,24 @@ pub const Retargeter = struct {
             current_global_rotations[index] = bind_global_rotations[index];
         }
 
+        const bind_bone_directions = try allocator.alloc(Vec3, bones.len);
+        errdefer allocator.free(bind_bone_directions);
+        for (bones, 0..) |_, index| {
+            var direction: ?Vec3 = null;
+            for (bones, 0..) |candidate, child_index| {
+                const candidate_parent = candidate.parent_index orelse continue;
+                if (candidate_parent != index) continue;
+                direction = normalizeVec(.{
+                    bind_global[child_index][12] - bind_global[index][12],
+                    bind_global[child_index][13] - bind_global[index][13],
+                    bind_global[child_index][14] - bind_global[index][14],
+                }, tuning.numeric_epsilon);
+                if (direction != null) break;
+            }
+            bind_bone_directions[index] = direction orelse
+                try fk.rotateVec3(bind_global_rotations[index], .{ 0, 1, 0 });
+        }
+
         var pelvis_index: ?usize = null;
         var head_index: ?usize = null;
         for (bone_ids, 0..) |bone_id, index| {
@@ -244,6 +313,7 @@ pub const Retargeter = struct {
             .bind_global = bind_global,
             .inverse_bind = inverse_bind,
             .bind_global_rotations = bind_global_rotations,
+            .bind_bone_directions = bind_bone_directions,
             .current_global_rotations = current_global_rotations,
             .requested_local_rotations = requested,
             .current_local_rotations = current,
@@ -259,6 +329,7 @@ pub const Retargeter = struct {
         self.allocator.free(self.bind_global);
         self.allocator.free(self.inverse_bind);
         self.allocator.free(self.bind_global_rotations);
+        self.allocator.free(self.bind_bone_directions);
         self.allocator.free(self.current_global_rotations);
         self.allocator.free(self.requested_local_rotations);
         self.allocator.free(self.current_local_rotations);
@@ -324,19 +395,31 @@ pub const Retargeter = struct {
             if (channelFor(self.bone_ids[index])) |channel| {
                 const live_segment = source_frame.segment(channel.segment);
                 if (live_segment.confidence >= self.tuning.minimum_confidence) {
-                    const rest_segment = calibration.rest_segments[@intFromEnum(channel.segment)];
-                    const full_delta = try fk.normalizeQuat(fk.multiplyQuat(
-                        fk.inverseUnitQuat(try fk.normalizeQuat(rest_segment.rotation)),
-                        try fk.normalizeQuat(live_segment.rotation),
-                    ));
+                    // Both transports produce a WORLD-space rotation that is
+                    // LEFT-composed onto the bind global — axes stay world
+                    // axes, so depth motion survives (req_4420).
+                    const full_delta = switch (channel.drive) {
+                        .aim => try shortestArcQuat(
+                            self.bind_bone_directions[index],
+                            live_segment.direction,
+                            self.tuning.numeric_epsilon,
+                        ),
+                        .world_delta => blk: {
+                            const rest_segment = calibration.rest_segments[@intFromEnum(channel.segment)];
+                            break :blk try fk.normalizeQuat(fk.multiplyQuat(
+                                try fk.normalizeQuat(live_segment.rotation),
+                                fk.inverseUnitQuat(try fk.normalizeQuat(rest_segment.rotation)),
+                            ));
+                        },
+                    };
                     const shared_delta = try fk.slerpQuat(
                         fk.IDENTITY_QUAT,
                         full_delta,
                         shareFor(channel, self.tuning),
                     );
                     const desired_global = try fk.normalizeQuat(fk.multiplyQuat(
-                        self.bind_global_rotations[index],
                         shared_delta,
+                        self.bind_global_rotations[index],
                     ));
                     requested = if (bone.parent_index) |parent|
                         try fk.normalizeQuat(fk.multiplyQuat(
