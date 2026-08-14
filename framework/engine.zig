@@ -54,6 +54,7 @@ const sim = @import("sim/root.zig");
 const input = @import("primitive/input.zig");
 const slider_math = @import("primitive/slider_math.zig");
 const latches = @import("state/latches.zig");
+const mesh_selection_policy = @import("state/mesh_selection_policy.zig");
 const crashlog = @import("diag/crashlog.zig");
 const watchdog = @import("diag/watchdog.zig");
 // ── Build-option-gated imports (lean tier omits these) ──────────────────
@@ -4576,7 +4577,7 @@ pub fn run(config_in: AppConfig) !void {
                                 }
                                 me_selecting = true;
                                 const me_mods = c.SDL_GetModState();
-                                me_shift = (me_mods & c.SDL_KMOD_SHIFT) != 0;
+                                me_shift = mesh_selection_policy.additiveForPointer((me_mods & c.SDL_KMOD_SHIFT) != 0);
                                 me_ctrl = (me_mods & c.SDL_KMOD_CTRL) != 0;
                                 me_cut_armed = false;
                                 if (me_ctrl and m == 3) {

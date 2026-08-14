@@ -229,6 +229,9 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-vertex', menu: 'Edit', scope: 'model', name: 'Vertex Select', icon: 'Grip', key: '1', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-edge', menu: 'Edit', scope: 'model', name: 'Edge Select', icon: 'Spline', key: '2', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-face', menu: 'Edit', scope: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
+  // Persistent additive selection is an input preference, not a replayable tool.
+  // It supplements Shift for pointer picks/marquees; Escape clears the set only.
+  { id: 'mesh-persistent-additive', menu: 'Edit', scope: 'model', name: 'Additive Select', icon: 'ListPlus', key: '', context: true, native: true, undoable: false },
   // Invert the selection within the active scope (req_4271). Ctrl+I resolves here
   // on the model surface (keymap MODEL_CHORDS outranks the global Import chord);
   // with nothing selected it selects everything — the complement of the empty set.
@@ -517,7 +520,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-curve-pull', 'mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
+const MESH_TOOL_IDS = ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-persistent-additive', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-curve-pull', 'mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -604,7 +607,7 @@ const MODEL_CONTEXT_GROUPS: {
   icon: string;
   commandIds: string[];
 }[] = [
-  { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face'] },
+  { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-persistent-additive'] },
   { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-scale-by', 'mesh-rotate'] },
   { id: 'mirror', label: 'Mirror', icon: 'FlipHorizontal2', commandIds: ['mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z'] },
   { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'] },
@@ -654,7 +657,7 @@ export function deviceToolReplayable(id: string, scope: 'world' | 'model'): bool
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
 // highlight. Gizmo tools only read active inside a select mode; view/paint/focus are exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; pathEdges?: boolean; curvePull?: boolean; focus: boolean; wire: boolean; measurements?: boolean; playerScale?: boolean; xray?: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; pathPlane?: boolean; pathEdges?: boolean; curvePull?: boolean; focus: boolean; wire: boolean; measurements?: boolean; playerScale?: boolean; xray?: boolean; persistentAdditive?: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
   switch (id) {
     case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
     case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
@@ -678,6 +681,7 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-measurements': return tool.measurements === true;
     case 'mesh-player-scale': return tool.playerScale === true;
     case 'mesh-xray': return tool.xray === true;
+    case 'mesh-persistent-additive': return tool.persistentAdditive === true;
     case 'mesh-cam-lock': return tool.camLock === true;
     // "Active" = a view is pinned — the store button stays lit so the user can see a
     // bookmark exists before trusting Recall with their camera.

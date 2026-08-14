@@ -195,7 +195,7 @@ test('structural merge requires the explicit selected set, not list adjacency', 
 test('model context menu folds stable tool families without hiding a command', () => {
   const layout = modelContextMenuLayout(true, 2);
   assert(layout.groups.map((group) => group.id).join('|') === 'select|gizmo|mirror|view', 'context groups drifted');
-  assert(ids(layout.groups[0]!.commands).join('|') === 'mesh-view|mesh-vertex|mesh-edge|mesh-face', 'select modes escaped their group');
+  assert(ids(layout.groups[0]!.commands).join('|') === 'mesh-view|mesh-vertex|mesh-edge|mesh-face|mesh-persistent-additive', 'select modes and additive preference escaped their group');
   assert(ids(layout.groups[1]!.commands).join('|') === 'mesh-move|mesh-scale|mesh-scale-by|mesh-rotate', 'gizmos escaped their group');
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
   assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-measurements|mesh-player-scale|mesh-xray|mesh-cam-lock|mesh-cam-store|mesh-cam-recall', 'view tools escaped their group');
@@ -211,10 +211,18 @@ test('model context menu folds stable tool families without hiding a command', (
   assert(presented === expected, `context layout lost or duplicated commands: ${presented}`);
 });
 
-test('X-Ray is not replayed as remembered pointer-device input state', () => {
+test('input preferences are not replayed as remembered pointer-device tools', () => {
   assert(commandById('mesh-xray').tool !== true, 'X-Ray was registered as a replayable input tool');
   assert(!deviceToolReplayable('mesh-xray', 'model'), 'a stale device slot can still replay X-Ray');
+  assert(commandById('mesh-persistent-additive').tool !== true, 'Additive Select was registered as a replayable input tool');
+  assert(!deviceToolReplayable('mesh-persistent-additive', 'model'), 'a stale device slot can toggle Additive Select');
   assert(deviceToolReplayable('mesh-face', 'model'), 'the device gate rejected a real model input tool');
+});
+
+test('Additive Select highlights only from its explicit preference state', () => {
+  const base = { selMode: 3, gizmoTool: 0, paint: false, focus: false, wire: false };
+  assert(!meshToolActive('mesh-persistent-additive', base), 'Additive Select invented an enabled state');
+  assert(meshToolActive('mesh-persistent-additive', { ...base, persistentAdditive: true }), 'Additive Select did not highlight when enabled');
 });
 
 test('View Only is the explicit neutral model tool and has a direct 0 shortcut', () => {

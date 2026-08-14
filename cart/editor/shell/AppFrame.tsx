@@ -3787,6 +3787,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-measurements') api.measurements();
         else if (commandId === 'mesh-player-scale') api.playerScale();
         else if (commandId === 'mesh-xray') api.xray();
+        else if (commandId === 'mesh-persistent-additive') api.persistentAdditive();
         else if (commandId === 'mesh-cam-lock') api.camLock();
         else if (commandId === 'mesh-cam-store') api.camStore();
         else if (commandId === 'mesh-cam-recall') api.camRecall();

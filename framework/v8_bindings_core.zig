@@ -12,6 +12,7 @@ const HostContext = @import("host_context.zig");
 const state = if (module_binding_build) @import("dev_modules/dirty_api.zig") else @import("state/dirty.zig");
 const input = @import("primitive/input.zig");
 const selection = @import("state/selection.zig");
+const mesh_selection_policy = @import("state/mesh_selection_policy.zig");
 const prepared_input = @import("state/prepared_input.zig");
 const mouse_state = @import("state/mouse_state.zig");
 const exec_async = @import("process/exec_async.zig");
@@ -1211,6 +1212,13 @@ fn hostMeshEditXray(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     scene3d.meshEditSetXray((argToI32(info, 0) orelse 0) != 0);
     state.markDirty();
+}
+
+/// __mesh_edit_persistent_additive(on) — make native pointer picks and marquees
+/// additive without requiring Shift. Clearing selection deliberately does not change it.
+fn hostMeshEditPersistentAdditive(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    mesh_selection_policy.setPersistentAdditive((argToI32(info, 0) orelse 0) != 0);
 }
 
 /// __mesh_edit_mirror(mask) — live mirror editing (req_2758): enable the X/Y/Z symmetry
@@ -5244,6 +5252,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
         v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
         v8_runtime.registerHostFn("__mesh_edit_xray", hostMeshEditXray);
+        v8_runtime.registerHostFn("__mesh_edit_persistent_additive", hostMeshEditPersistentAdditive);
         v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);
         v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
         v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
@@ -5510,6 +5519,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
     v8_runtime.registerHostFn("__mesh_edit_xray", hostMeshEditXray);
+    v8_runtime.registerHostFn("__mesh_edit_persistent_additive", hostMeshEditPersistentAdditive);
     v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);
     v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
     v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);

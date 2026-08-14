@@ -225,7 +225,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; persistentAdditive: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -356,6 +356,7 @@ export type ModelToolApi = {
   measurements: () => void;
   playerScale: () => void;
   xray: () => void;
+  persistentAdditive: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
   camLock: () => void;
   // View bookmarks (req_3067/req_3074): pin the current orbit pose; camRecall (the H
@@ -681,6 +682,7 @@ type QuadifyPlan = TopoResult & {
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshSetXray = (on: boolean) => host.__mesh_edit_xray?.(on ? 1 : 0);
+const meshSetPersistentAdditive = (on: boolean) => host.__mesh_edit_persistent_additive?.(on ? 1 : 0);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at the model origin —
 // the same fixed plane Mirror Part and symmetrize use (Center the model first, req_1538/req_3795).
 const meshSetMirror = (mask: number) => host.__mesh_edit_mirror?.(mask);
@@ -729,7 +731,7 @@ const TOOL_TWIG_KEY = 'editor:meshtool:v1';
 // __model_cam_pose read — [yaw, pitch, dist, target x/y/z].
 export type CamBookmark = { name: string; pose: number[] };
 type ToolTwig = {
-  wire: boolean; measurements: boolean; playerScale: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
+  wire: boolean; measurements: boolean; playerScale: boolean; persistentAdditive: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
@@ -1150,6 +1152,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Session-local and edit-mode-only. Persisting this view toggle made a remount or
   // document switch appear to turn X-Ray on by itself.
   const [xray, setXray] = useState(false);
+  const [persistentAdditive, setPersistentAdditive] = useState(toolTwig?.persistentAdditive ?? false);
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
@@ -2965,8 +2968,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Mirror the tool-holding state into its hot twig on every change (req_2898) —
   // cheap (one small JSON into the host map), and the next mount seeds from it.
   useEffect(() => {
-    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, measurements, playerScale, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
-  }, [wire, measurements, playerScale, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, measurements, playerScale, persistentAdditive, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, measurements, playerScale, persistentAdditive, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+
+  // Native pointer-down reads this policy. Escape clears only the host selection,
+  // allowing the next click to begin a fresh accumulated set with the toggle intact.
+  useEffect(() => {
+    meshSetPersistentAdditive(persistentAdditive);
+  }, [persistentAdditive]);
 
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
@@ -3135,6 +3144,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       }
       setXray((v) => !v);
     },
+    persistentAdditive: () => setPersistentAdditive((enabled) => !enabled),
     camLock: toggleCamLock,
     camStore: camStoreView,
     camRecall: camRecallView,
@@ -3815,8 +3825,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = extrude ? 'extrude' : bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, curvePullMode, focusMode, wire, measurements, playerScale, xrayActive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, persistentAdditive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, curvePullMode, focusMode, wire, measurements, playerScale, xrayActive, persistentAdditive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -5223,6 +5233,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <Text style={{ color: xrayActive ? '#ffe4d2' : '#ddf5e8', fontSize: 12, fontWeight: 600 }}>
                   {xrayActive ? 'X-Ray' : 'Surface'}
                 </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setPersistentAdditive((enabled) => !enabled)}
+                tooltip={persistentAdditive
+                  ? 'Additive Select is on — clicks accumulate without Shift; Esc clears the set and keeps this on'
+                  : 'Accumulate vertex, edge, or face selections without holding Shift'}
+                style={{
+                  paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                  backgroundColor: persistentAdditive ? '#2a466e' : '#16233aee',
+                  borderWidth: 1, borderColor: persistentAdditive ? '#5a86c0' : '#2c4a6a',
+                }}
+              >
+                <Text style={{ color: persistentAdditive ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Add</Text>
               </Pressable>
               {GIZMO_TOOLS.map((label, t) => {
                 const active = gizmoTool === t;

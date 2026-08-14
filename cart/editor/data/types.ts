@@ -153,7 +153,7 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // save picker, 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-edit confirmation. Mirrored up
 // through ModelToolSnapshot so the shell's central gate can see the session.
 export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; persistentAdditive: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
 export type FacadePaintState = { brush: Brush; tool: BrushTool; detail: number };
@@ -175,6 +175,8 @@ export type ModelToolApi = {
   /** Ruled player collider + visual-height scale reference. */
   playerScale: () => void;
   xray: () => void;
+  /** Keep pointer selection additive without holding Shift. Escape clears only the set. */
+  persistentAdditive: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the mesh editor's orbit view.
   camLock: () => void;
   // View bookmarks (req_3067/req_3074): pin the current orbit pose; camRecall (H)
