@@ -60,7 +60,14 @@ tree with the full app module graph and recursively references every pub decl,
 forcing semantic analysis of every moved decl. Status: **green** — compiles,
 links, and all 164 pulled-in framework tests pass.
 
-Known pre-existing quirk: the `zig build` run-step reports `failed command`
-for this target **and** for the existing `test-scene3d-mesh-drag` alike, while
-both test binaries exit 0 with all tests passing when run directly from
-`.zig-cache/o/...`. That harness `--listen` quirk predates this work.
+Known pre-existing cosmetic quirk (diagnosed under req_4376): the step prints
+a red `failed command: …` block yet succeeds — `zig build` exits 0 and the
+summary shows every test passing. The Zig 0.16 build runner renders the
+error-message block for any step that produced stderr, **pass or fail**
+(`lib/compiler/build_runner.zig:1381`), and that block always ends with the
+`failed command:` footer (`:1518`) since `result_failed_command` is populated
+on every spawn (`lib/std/Build/Step.zig:356`). The stderr here is the
+model_paint density-clamp warning (`model_paint.zig:2707`), printed on purpose
+by the passing test "density clamps: a huge face at high density stays inside
+the GPU limits". Same rendering hits `test-scene3d-mesh-drag`. Nothing is
+failing.
