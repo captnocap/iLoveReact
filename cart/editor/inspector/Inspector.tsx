@@ -7,7 +7,7 @@ import { C, accentFor } from '../workspace.cls';
 // Fixed-region contract (req_2627): the UV preview sizes itself from the focus
 // panel's CONSTANT inner width — imported, never measured.
 import { REGIONS } from '../shell/regions';
-import type { ModelFocusBridge, ModelFocusShape } from '../stage/ModelView';
+import type { ModelFocusBridge } from '../stage/ModelView';
 import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, SNAP_MODES, effectiveModelPackage } from '../data/content';
 import { resolvedPanelId, rightPanelsFor, type RightPanelId } from '../data/panelSystem';
@@ -41,13 +41,7 @@ import type { LightRig } from '../model/editMesh';
 import { blobViewportFaceSelection } from '../model/blobExplorerState';
 import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
-import {
-  modelSelectionModeName,
-  summarizeSelectedFaces,
-  type ModelSelectionFaceFact,
-  type ModelSelectionSnapshot,
-  type ModelSelectionVec3,
-} from '../model/modelSelectionFocus';
+import { ModelIdentityHeader, PartSection, SelectionSection, ShapeSection } from './ModelFocusSections';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -62,294 +56,9 @@ function useModelFocusBridge(): ModelFocusBridge | null {
   return snap;
 }
 
-function fmtCount(value: number): string {
-  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}m`;
-  if (value >= 10000) return `${(value / 1000).toFixed(1)}k`;
-  return String(value);
-}
-
-const SELECTION_READOUT_TUNING = {
-  decimalPlaces: 4,
-  maxVisibleDetailRows: 8,
-  idsPerRow: 6,
-} as const;
-
-function fmtSelectionNumber(value: number): string {
-  const nearZero = Math.abs(value) < 0.5 * 10 ** -SELECTION_READOUT_TUNING.decimalPlaces ? 0 : value;
-  return nearZero.toFixed(SELECTION_READOUT_TUNING.decimalPlaces).replace(/\.?0+$/, '');
-}
-
-const fmtSelectionVector = (value: ModelSelectionVec3): string =>
-  `(${value.map(fmtSelectionNumber).join(', ')})`;
-
-function fmtSelectionFact(value: ModelSelectionFaceFact, prefix: string): string {
-  return value === 'mixed' ? `mixed ${prefix}s` : value === null ? 'none' : `${prefix} ${value}`;
-}
-
-function SelectionSection({ selection, semantics }: {
-  selection: ModelSelectionSnapshot | null;
-  semantics: ModelFocusSemantics | null;
-}) {
-  const mode = selection ? modelSelectionModeName(selection.mode) : 'view';
-  const semanticNames = new Map((semantics?.rows ?? []).map((row) => [row.id, row.name]));
-  const faces = selection ? summarizeSelectedFaces(selection) : [];
-  const vertexById = new Map((selection?.vertices ?? []).map((vertex) => [vertex.id, vertex]));
-  const detailRows: { key: string; label: string; value: string }[] = [];
-  const pushIdRows = (key: string, label: string, ids: number[]) => {
-    for (let at = 0; at < ids.length; at += SELECTION_READOUT_TUNING.idsPerRow) {
-      detailRows.push({
-        key: `${key}-${at}`,
-        label: at === 0 ? label : `${label} +`,
-        value: ids.slice(at, at + SELECTION_READOUT_TUNING.idsPerRow).join(', '),
-      });
-    }
-  };
-
-  if (selection?.mode === 1) {
-    for (const vertex of selection.vertices) {
-      detailRows.push({
-        key: `vertex-${vertex.id}`,
-        label: `vertex v${vertex.id}`,
-        value: `${fmtSelectionVector(vertex.at)} m${vertex.part === null ? '' : ` · part ${vertex.part}`}`,
-      });
-    }
-  } else if (selection?.mode === 2) {
-    for (const edge of selection.edges) {
-      detailRows.push({
-        key: `edge-${edge.id}`,
-        label: `edge e${edge.id}`,
-        value: `v${edge.vertices[0]}—v${edge.vertices[1]} · ${fmtSelectionNumber(edge.length)} m`,
-      });
-      detailRows.push({
-        key: `edge-${edge.id}-topology`,
-        label: 'topology',
-        value: `${edge.faces} incident · ${edge.open ? 'open' : 'closed'} · ${edge.part === null ? 'no part' : `part ${edge.part}`}`,
-      });
-      for (const vertexId of edge.vertices) {
-        const vertex = vertexById.get(vertexId);
-        if (vertex) detailRows.push({
-          key: `edge-${edge.id}-vertex-${vertexId}`,
-          label: `vertex v${vertexId}`,
-          value: `${fmtSelectionVector(vertex.at)} m`,
-        });
-      }
-    }
-  } else if (selection?.mode === 3) {
-    for (const face of faces) {
-      const faceId = face.group === null ? `tri ${face.triangleIds[0]}` : `group ${face.group}`;
-      // With ONE face selected the summary above already said its triangle and
-      // welded-vertex counts; repeating them here was the same number a third time
-      // on screen (req_3889). With several faces this is real per-face detail.
-      if (faces.length > 1) detailRows.push({
-        key: `${face.key}-face`,
-        label: `face ${faceId}`,
-        value: `${face.triangleIds.length} tris · ${face.vertices.length} verts`,
-      });
-      pushIdRows(`${face.key}-triangles`, 'tri ids', face.triangleIds);
-      pushIdRows(`${face.key}-vertices`, 'vert ids', face.vertices);
-      const semantic = typeof face.region === 'number'
-        ? `${semanticNames.get(face.region) ?? 'unnamed'} · region ${face.region}`
-        : fmtSelectionFact(face.region, 'region');
-      detailRows.push({
-        key: `${face.key}-semantic`,
-        label: 'semantic',
-        value: `${semantic} · ${fmtSelectionFact(face.instance, 'instance')}`,
-      });
-      detailRows.push({
-        key: `${face.key}-normal`,
-        label: 'normal',
-        value: fmtSelectionVector(face.normal),
-      });
-      detailRows.push({
-        key: `${face.key}-area`,
-        label: 'area',
-        value: `${fmtSelectionNumber(face.area)} m²`,
-      });
-      detailRows.push({
-        key: `${face.key}-surface`,
-        label: 'surface',
-        value: `${fmtSelectionFact(face.part, 'part')} · ${fmtSelectionFact(face.material, 'material')}`,
-      });
-    }
-    for (const vertex of selection.vertices) {
-      detailRows.push({
-        key: `face-vertex-${vertex.id}`,
-        label: `vertex v${vertex.id}`,
-        value: `${fmtSelectionVector(vertex.at)} m${vertex.part === null ? '' : ` · part ${vertex.part}`}`,
-      });
-    }
-  }
-
-  const countLabel = !selection ? 'native read unavailable'
-    : selection.count === 0 ? 'none'
-      : selection.mode === 3
-        ? `${selection.count} authored face${selection.count === 1 ? '' : 's'} · ${selection.selectedTriangles} tris`
-        : `${selection.count} ${mode}${selection.count === 1 ? '' : 's'}`;
-  const detailHeight = Math.min(SELECTION_READOUT_TUNING.maxVisibleDetailRows, detailRows.length) * REGIONS.grid.rowHeight;
-  const detailCoverage = selection?.mode === 3
-    ? `${selection.triangles.length}/${selection.selectedTriangles} tris · ${selection.vertices.length}/${selection.affectedVertices} verts`
-    : selection?.mode === 2
-      ? `${selection.edges.length}/${selection.count} edges · ${selection.vertices.length}/${selection.affectedVertices} verts`
-      : `${selection?.vertices.length ?? 0}/${selection?.affectedVertices ?? 0} verts`;
-  const tagTone = selection?.count ? 'primary' : 'textFaint';
-
-  return (
-    <C.HW_Section>
-      <C.HW_SectionHead>
-        <C.HW_AccentBar style={{ backgroundColor: accentFor(tagTone) }} />
-        <C.HW_SectionTitle style={{ color: accentFor(tagTone) }}>SELECTION</C.HW_SectionTitle>
-        <C.HW_Spacer />
-        <C.HW_Tag style={{ backgroundColor: accentFor(tagTone) }}>
-          <C.HW_TagText>{`${mode.toUpperCase()} · ${selection?.count ?? 0}`}</C.HW_TagText>
-        </C.HW_Tag>
-      </C.HW_SectionHead>
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>selected</C.HW_FormLabel>
-        <C.HW_ReadValue>{countLabel}</C.HW_ReadValue>
-      </C.HW_ReadRow>
-      {selection && selection.count > 0 ? (
-        <>
-          <C.HW_ReadRow>
-            <C.HW_FormLabel>affected</C.HW_FormLabel>
-            <C.HW_ReadValue>{`${selection.affectedVertices} welded verts`}</C.HW_ReadValue>
-          </C.HW_ReadRow>
-          <C.HW_ReadRow>
-            <C.HW_FormLabel>pivot</C.HW_FormLabel>
-            <C.HW_ReadValue>{selection.pivot ? `${fmtSelectionVector(selection.pivot)} m` : '—'}</C.HW_ReadValue>
-          </C.HW_ReadRow>
-          <C.HW_ReadRow>
-            <C.HW_FormLabel>bounds min</C.HW_FormLabel>
-            <C.HW_ReadValue>{selection.bounds ? `${fmtSelectionVector(selection.bounds.slice(0, 3) as ModelSelectionVec3)} m` : '—'}</C.HW_ReadValue>
-          </C.HW_ReadRow>
-          <C.HW_ReadRow>
-            <C.HW_FormLabel>bounds max</C.HW_FormLabel>
-            <C.HW_ReadValue>{selection.bounds ? `${fmtSelectionVector(selection.bounds.slice(3, 6) as ModelSelectionVec3)} m` : '—'}</C.HW_ReadValue>
-          </C.HW_ReadRow>
-          {selection.truncated ? (
-            <C.HW_ReadRow>
-              <C.HW_FormLabel>detail</C.HW_FormLabel>
-              <C.HW_ReadValue style={{ color: accentFor('warning') }}>{`showing ${detailCoverage}`}</C.HW_ReadValue>
-            </C.HW_ReadRow>
-          ) : null}
-          {detailRows.length > 0 ? (
-            <ScrollView style={{ width: '100%', height: detailHeight }} showScrollbar>
-              {detailRows.map((row) => (
-                <C.HW_ReadRow key={row.key}>
-                  <C.HW_FormLabel>{row.label}</C.HW_FormLabel>
-                  <C.HW_ReadValue>{row.value}</C.HW_ReadValue>
-                </C.HW_ReadRow>
-              ))}
-            </ScrollView>
-          ) : null}
-        </>
-      ) : null}
-    </C.HW_Section>
-  );
-}
-
-// SHAPE — the old studio's count strip (req_2618 G): verts/faces/edges/uv'd/mounts as
-// five labeled numbers on ONE grid row, plus the bounds line. Everything shown is
-// already real cart-side (surface-vs-mock ruling): verts/edges come from the host
-// counts door and read '—' until it builds topology (vertex/edge mode) — never 0-faked;
-// uv'd is faces-with-atlas (whole-model atlas covers all once it exists); mounts is an
-// honest 0 until the rig slice lands.
-function ShapeSection({ shape, onSelectAudit }: {
-  shape: ModelFocusShape | null;
-  onSelectAudit: (kind: 'intersecting' | 'unreachable' | 'both') => void;
-}) {
-  const cells: [string, string][] = [
-    ['verts', shape && shape.verts > 0 ? fmtCount(shape.verts) : '—'],
-    ['faces', shape ? fmtCount(shape.faces) : '—'],
-    ['edges', shape && shape.edges > 0 ? fmtCount(shape.edges) : '—'],
-    ["uv'd", shape ? fmtCount(shape.uvd) : '—'],
-    ['mounts', shape ? fmtCount(shape.mounts) : '—'],
-  ];
-  // Bounds on TWO grid rows (center / radius) — one value per row so neither ever
-  // truncates against the panel's fixed inner width.
-  const centerLine = shape ? (shape.center ? `${shape.center.map((c) => c.toFixed(2)).join(', ')} u` : '—') : '—';
-  const radiusLine = shape ? `${shape.radius.toFixed(2)} u` : '—';
-  return (
-    <C.HW_Section>
-      <C.HW_SectionHead>
-        <C.HW_AccentBar />
-        <C.HW_SectionTitle>SHAPE</C.HW_SectionTitle>
-        <C.HW_Spacer />
-        {shape?.audited && (shape.intersecting > 0 || shape.unreachable > 0) ? (
-          <C.HW_MiniVerb
-            onPress={() => onSelectAudit('both')}
-            tooltip="Select every intersecting AND unreachable triangle at once"
-          >
-            <Icon name="Target" size={10} color={accentFor('warning')} />
-          </C.HW_MiniVerb>
-        ) : null}
-      </C.HW_SectionHead>
-      <C.HW_StatGrid>
-        {cells.map(([label, value]) => (
-          <C.HW_StatCell key={label}>
-            <C.HW_StatValue>{value}</C.HW_StatValue>
-            <C.HW_StatLabel>{label}</C.HW_StatLabel>
-          </C.HW_StatCell>
-        ))}
-      </C.HW_StatGrid>
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>bounds center</C.HW_FormLabel>
-        <C.HW_ReadValue>{centerLine}</C.HW_ReadValue>
-      </C.HW_ReadRow>
-      <C.HW_ReadRow>
-        <C.HW_FormLabel>bounds radius</C.HW_FormLabel>
-        <C.HW_ReadValue>{radiusLine}</C.HW_ReadValue>
-      </C.HW_ReadRow>
-      <GeometryFactRow
-        label="intersecting"
-        shape={shape}
-        count={shape?.intersecting ?? 0}
-        detail="tris through other tris"
-        onSelect={() => onSelectAudit('intersecting')}
-      />
-      <GeometryFactRow
-        label="unreachable"
-        shape={shape}
-        count={shape?.unreachable ?? 0}
-        detail="tris no camera can see"
-        onSelect={() => onSelectAudit('unreachable')}
-      />
-    </C.HW_Section>
-  );
-}
-
-// The two hard geometry facts, in the panel so a disaster is visible without going to
-// look for it (req_3750). Tinted only when the count is real: an over-budget mesh reads
-// "not measured", never a clean zero it did not earn.
-function GeometryFactRow(
-  { label, shape, count, detail, onSelect }: {
-    label: string; shape: ModelFocusShape | null; count: number; detail: string;
-    /** Select these exact triangles — a count you cannot locate is not actionable
-     *  (req_3883). Offered only when the audit is real and found something. */
-    onSelect: () => void;
-  },
-) {
-  // A count larger than the mesh cannot describe this mesh — it belongs to another one
-  // (req_3752). Show that, rather than a number the panel knows is impossible.
-  const inconsistent = !!shape && shape.audited && count > shape.tris;
-  const value = !shape ? '—'
-    : !shape.audited ? 'not measured'
-      : inconsistent ? `stale · ${fmtCount(count)} vs ${fmtCount(shape.tris)} tris`
-        : count === 0 ? `0 · ${detail}`
-          : `${fmtCount(count)} · ${detail}`;
-  const tone = inconsistent ? 'error' : shape?.audited && count > 0 ? 'warning' : 'textDim';
-  const locatable = !!shape && shape.audited && !inconsistent && count > 0;
-  return (
-    <C.HW_ReadRow>
-      <C.HW_FormLabel>{label}</C.HW_FormLabel>
-      <C.HW_ReadValue style={{ color: accentFor(tone) }}>{value}</C.HW_ReadValue>
-      {locatable ? (
-        <C.HW_MiniVerb onPress={onSelect} tooltip={`Select all ${fmtCount(count)} ${label} triangles — face mode, then press F to frame them`}>
-          <Icon name="Target" size={10} color={accentFor(tone)} />
-        </C.HW_MiniVerb>
-      ) : null}
-    </C.HW_ReadRow>
-  );
-}
+// SELECTION / SHAPE / PART / identity all moved to ModelFocusSections (req_4392,
+// the Model Focus Handoff design): boxed-cell editing, collapsible selection
+// groups, empty-section collapse. One import, no local twins.
 
 function SemanticsSection({ semantics, onRefresh, onOpenNames }: {
   semantics: ModelFocusSemantics;
@@ -489,22 +198,22 @@ function UvSection({
 // viewer's hot twig: it survives hot reloads and resets on a cold start.
 function ViewBookmarksSection({ bridge }: { bridge: ModelFocusBridge | null }) {
   const marks = bridge?.camMarks ?? [];
+  // Empty state is ONE header line (req_4392): the section never reserves body
+  // space it has nothing to say in — the + verb is the whole affordance.
   return (
     <C.HW_Section>
-      <C.HW_SectionHead>
-        <C.HW_AccentBar />
-        <C.HW_SectionTitle>VIEWS</C.HW_SectionTitle>
+      <C.HW_SectionHead style={marks.length === 0 ? { marginBottom: 0 } : {}}>
+        <C.HW_AccentBar style={marks.length === 0 ? { backgroundColor: accentFor('textFaint') } : {}} />
+        <C.HW_SectionTitle style={marks.length === 0 ? { color: accentFor('textFaint') } : {}}>VIEWS</C.HW_SectionTitle>
+        {marks.length === 0 ? (
+          <C.HW_ReadValue style={{ marginLeft: 4 }}>none</C.HW_ReadValue>
+        ) : null}
         <C.HW_Spacer />
         <C.HW_MiniVerb onPress={() => bridge?.camStore()} tooltip="Pin the current camera as a bookmark">
           <Icon name="BookmarkPlus" size={11} color={accentFor('textDim')} />
         </C.HW_MiniVerb>
       </C.HW_SectionHead>
-      {marks.length === 0 ? (
-        <C.HW_ReadRow>
-          <C.HW_FormLabel>bookmarks</C.HW_FormLabel>
-          <C.HW_ReadValue>none</C.HW_ReadValue>
-        </C.HW_ReadRow>
-      ) : marks.map((mark, index) => (
+      {marks.map((mark, index) => (
         <Row key={`view-mark-${index}`} style={{ alignItems: 'center', gap: 6, height: REGIONS.grid.rowHeight, width: '100%' }}>
           <Pressable
             onPress={() => bridge?.camRecallAt(index)}
@@ -1000,12 +709,6 @@ export default function Inspector(props: {
     // surface as '+N' in the UV header, and every member's row highlights.
     const selectedSet = (props.selectedPartIds ?? []).filter((sid) => modelParts?.some((p) => p.id === sid));
     const uvExtraCount = activePart ? Math.max(0, selectedSet.filter((sid) => sid !== activePart.id).length) : 0;
-    // Save-state chip (req_2620 T): loud until the model is a real directory on
-    // disk AND clean since the last materialize. One line, fixed rows — the name
-    // field and the save row sit on the region's standard control grid
-    // (REGIONS.grid.labelWidth label + REGIONS.grid.verbColWidth verb).
-    const saveChip = !props.modelOnDisk ? 'NOT ON DISK' : modelDirty ? 'UNSAVED EDITS' : 'ON DISK';
-    const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
     const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle
       : activePane === 'rig' ? (hasCharacterRig ? 'CHARACTER · RIG' : 'MODEL · RIG')
         : activePane === 'names' ? 'MODEL · NAMES'
@@ -1059,44 +762,31 @@ export default function Inspector(props: {
             {/* Identity + save state stay present across Model/Paint/Rig. UV Focus
                 replaces the tall rows with the compact header save verb above. */}
             {activePane !== 'recovery' && (uvWorkspace.showIdentity || activePane !== 'paint') ? (
-              <>
-                <C.HW_RenameBar>
-                  <C.HW_FormLabel>name</C.HW_FormLabel>
-                  <C.HW_RenameInput value={activeModel.name} onChange={(name: string) => props.onRenameModel(activeModel.id, name)} />
-                </C.HW_RenameBar>
-                <C.HW_RenameBar>
-                  <C.HW_Tag
-                    tooltip={modelDirty ? 'Changes are not on disk yet. This is save state only; it does not disable editing.' : 'The model on disk matches the live editor.'}
-                    style={{ backgroundColor: accentFor(saveChipTone) }}
-                  >
-                    <C.HW_TagText>{saveChip}</C.HW_TagText>
-                  </C.HW_Tag>
-                  <C.HW_Spacer />
-                  <C.HW_VerbFixed tooltip="Capture the native-resident mesh without invoking Save" onPress={quickRecoveryEnabled ? quickRecoverySnapshot : undefined}>
-                    <Icon name="DatabaseBackup" size={12} color={accentFor(quickRecoveryEnabled ? 'warning' : 'textFaint')} />
-                    <C.HW_VerbText>Recover</C.HW_VerbText>
-                  </C.HW_VerbFixed>
-                  <C.HW_VerbFixed onPress={props.onSaveModel}>
-                    <Icon name="Save" size={12} color={accentFor('textDim')} />
-                    <C.HW_VerbText>Save</C.HW_VerbText>
-                  </C.HW_VerbFixed>
-                </C.HW_RenameBar>
-              </>
+              <ModelIdentityHeader
+                model={activeModel}
+                onRename={props.onRenameModel}
+                onStageThumbnail={props.modelOnDisk ? props.onStageThumbnail : undefined}
+                onDisk={props.modelOnDisk}
+                dirty={modelDirty}
+                revision={blobExplorer.service.repository.revision}
+                recoverEnabled={quickRecoveryEnabled}
+                onRecover={quickRecoverySnapshot}
+                onSave={props.onSaveModel}
+              />
             ) : null}
             {activePane === 'recovery' ? (
               <BlobExplorerSurface {...blobExplorer} />
             ) : activePane === 'inspector' ? (
               <>
-                <ModelDetailBody
-                  model={activeModel}
-                  onStageThumbnail={props.modelOnDisk ? props.onStageThumbnail : undefined}
-                />
                 <SelectionSection
                   selection={focusBridge?.readSelection() ?? null}
                   semantics={focusBridge?.semantics ?? null}
+                  bridge={focusBridge}
+                  onOpenNames={() => props.onPane('names')}
                 />
                 <ShapeSection
                   shape={focusBridge?.shape ?? null}
+                  bridge={focusBridge}
                   onSelectAudit={(kind) => focusBridge?.selectAuditFaces(kind)}
                 />
                 {focusBridge ? (
@@ -1105,6 +795,9 @@ export default function Inspector(props: {
                     onRefresh={focusBridge.refreshSemantics}
                     onOpenNames={() => props.onPane('names')}
                   />
+                ) : null}
+                {activePart ? (
+                  <PartSection modelId={activeModel.id} part={activePart} bridge={focusBridge} />
                 ) : null}
                 {/* The OUTLINER is geometry/selection focus, not rig or paint state. */}
                 {modelParts ? (
@@ -1137,6 +830,9 @@ export default function Inspector(props: {
                   />
                 ) : null}
                 <ViewBookmarksSection bridge={focusBridge} />
+                {/* Authored atlas sets keep their surface below the fold; the
+                    identity header above already owns the thumb/name card. */}
+                <ModelDetailBody model={activeModel} headerless />
               </>
             ) : activePane === 'paint' ? (
               <>

@@ -27,13 +27,18 @@ function atlasListHeight(count: number): number {
 export default function ModelDetailBody({
   model,
   onStageThumbnail,
+  headerless,
 }: {
   model: ModelPackage;
   /** Present only while the model is on disk to hold the shot (req_4044). */
   onStageThumbnail?: () => void;
+  /** The Model Focus pane owns its own identity header (req_4392): render only
+   *  the atlas-set slice, skip the thumb/name card entirely. */
+  headerless?: boolean;
 }) {
   return (
     <>
+      {headerless ? null : (
       <C.HW_ModelTop>
         <C.HW_ModelThumb style={{ backgroundColor: model.color }}>
           <ModelThumbnail model={model} />
@@ -61,6 +66,7 @@ export default function ModelDetailBody({
           ) : null}
         </C.HW_ModelCardMain>
       </C.HW_ModelTop>
+      )}
 
       {model.atlases.length > 0 ? (
         <C.HW_ModelSection>

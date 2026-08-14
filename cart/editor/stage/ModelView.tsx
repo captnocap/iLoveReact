@@ -280,6 +280,17 @@ export type ModelFocusShape = {
   intersecting: number;
   unreachable: number;
 };
+// Numeric scope transforms (req_4392): the Model Focus panel's boxed PART/SHAPE
+// cells write geometry through these — the scope is selected through the same
+// native selector door the Seat's move/rotate/scale compile to, then ONE exact
+// host-journaled transform lands. 'model' selects every visible group;
+// 'selection' applies to whatever is already selected (the pivot cell's lane).
+export type ModelTransformScope = 'model' | 'selection' | { lo: number; hi: number };
+export type ModelScopeTransformOp =
+  | { kind: 'translate'; delta: [number, number, number] }
+  | { kind: 'rotate'; axis: 0 | 1 | 2; degrees: number }
+  | { kind: 'scale'; axis: 0 | 1 | 2; factor: number }
+  | { kind: 'scale-uniform'; factor: number };
 // View bookmarks on the bridge (req_3074): the focus panel lists them below the UV
 // card — row click recalls, the trash verb removes, the + verb pins the current view.
 export type ModelFocusBridge = {
@@ -328,6 +339,10 @@ export type ModelFocusBridge = {
   /** Rename a region, or remove it entirely (req_3894). */
   editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
   editEdgeRegion: (id: number, edit: MeshEdgeRegionEdit) => { changed: number } | null;
+  /** One exact, host-journaled numeric transform over a part range or the whole
+   *  model (req_4392). Returns false when the host refuses — no live mesh, an
+   *  empty range, or a scope partially hidden/clipped (never a half-transform). */
+  transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp) => boolean;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
   camRecallAt: (index: number) => void;
@@ -342,6 +357,7 @@ export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
   scaleBy: (factor: number) => boolean;
+  transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp) => boolean;
   alignLoop: () => number;
   // The cart half of the integrity roll call (req_3484): re-read key, selection,
   // and part ranges from host truth after the host reports (or heals) a ledger
@@ -416,6 +432,7 @@ export type ModelToolApi = {
   detachSelection: () => { lo: number; hi: number } | null;
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   mergeFaces: () => boolean;
+  edgeSplit: () => boolean;
   assignUvZone: (zone: number) => boolean;
   trisToQuads: () => boolean;
   glassSelection: () => boolean;
@@ -895,6 +912,7 @@ const meshDetach = () => readTopoResult(host.__mesh_topo_detach?.());
 const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) =>
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
+const meshEdgeSplit = () => readTopoResult(host.__mesh_topo_edge_split?.());
 // UV MASK ZONES (req_4152): assign the face selection to one unfold chart WITHOUT
 // touching the authored face distribution. op 1 = assign.
 const meshUvZoneAssign = (zone: number): { ok?: number; changed?: number } | null => {
@@ -3112,6 +3130,53 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setError('copy sel: select the faces to stamp onto the other side first (face mode)');
   };
 
+  // ── Numeric scope transforms (req_4392) ────────────────────────────────────
+  // The focus panel's boxed PART/SHAPE cells write geometry through the SAME
+  // doors the Seat's move/rotate/scale verbs use: select the scope with the
+  // native selector query, land one exact host-journaled transform. The
+  // selection deliberately stays on the scope afterwards — the edit focused
+  // that geometry in every other sense already.
+  const transformScope = (scope: ModelTransformScope, op: ModelScopeTransformOp): boolean => {
+    let pivot: [number, number, number] = [0, 0, 0];
+    if (scope === 'selection') {
+      // Whatever is already selected — the door itself refuses an empty set.
+      const snapshot = readModelSelection();
+      if (!snapshot || snapshot.count === 0) return false;
+      if (snapshot.pivot) pivot = snapshot.pivot;
+    } else {
+      const query = scope === 'model' ? { kind: 'all' } : { kind: 'part', lo: scope.lo, hi: scope.hi };
+      chooseSelMode(3);
+      let receipt: { ok?: boolean; faces?: number; actionableFaces?: number; bbox?: number[] } | null = null;
+      try {
+        const raw = host.__mesh_select_query?.(JSON.stringify(query));
+        receipt = typeof raw === 'string' && raw ? JSON.parse(raw) : null;
+      } catch { return false; }
+      if (receipt?.ok !== true || !(Number(receipt.faces) > 0)) return false;
+      // A scope-clipped selection would transform half the target and read as done.
+      const actionable = Number(receipt.actionableFaces ?? receipt.faces);
+      if (actionable < Number(receipt.faces)) {
+        setError('transform refused — part of the target is hidden or outside the edit scope');
+        return false;
+      }
+      adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: Number(receipt.faces) || 0 });
+      const bbox = Array.isArray(receipt.bbox) && receipt.bbox.length === 6 && receipt.bbox.every(Number.isFinite)
+        ? receipt.bbox : null;
+      if (bbox) pivot = [(bbox[0]! + bbox[3]!) / 2, (bbox[1]! + bbox[4]!) / 2, (bbox[2]! + bbox[5]!) / 2];
+    }
+    const axisVec = (axis: 0 | 1 | 2): [number, number, number] =>
+      axis === 0 ? [1, 0, 0] : axis === 1 ? [0, 1, 0] : [0, 0, 1];
+    const ok = op.kind === 'translate' ? host.__mesh_transform_translate?.(...op.delta) === 1
+      : op.kind === 'rotate' ? host.__mesh_transform_rotate_axis?.(...axisVec(op.axis), ...pivot, op.degrees * Math.PI / 180) === 1
+        : op.kind === 'scale' ? host.__mesh_transform_scale_axis?.(...axisVec(op.axis), ...pivot, op.factor) === 1
+          : host.__mesh_gizmo_scale_by?.(op.factor) === 1;
+    if (ok) {
+      setError(null);
+      onDocumentMutated?.();
+      setSemanticRevision((value) => value + 1);
+    }
+    return ok;
+  };
+
   // ── Editor bridge ──────────────────────────────────────────────────────────
   // Hand the tool handlers out (once) and mirror the live tool state back, so an
   // embedding shell can drive the SAME tools its toolbar/context-menu present.
@@ -3122,6 +3187,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     selMode: chooseSelMode,
     gizmo: chooseGizmoTool,
     scaleBy: meshScaleBy,
+    transformScope,
     alignLoop,
     resyncFromHost: () => {
       const session = readModelSession();
@@ -3418,6 +3484,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return { lo: r.lo, hi: r.hi };
     },
     mergeFaces: () => adoptMesh(meshMergeFaces()),
+    edgeSplit: () => adoptMesh(meshEdgeSplit()),
     assignUvZone: (zone: number) => {
       const result = meshUvZoneAssign(zone);
       if (!result || result.ok !== 1 || (result.changed ?? 0) < 1) return false;
@@ -3934,6 +4001,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       selectEdgeRegion: (id, additive) => toolApiRef.current?.selectEdgeRegion(id, additive) ?? null,
       editRegion: (id, edit) => toolApiRef.current?.editRegion(id, edit) ?? null,
       editEdgeRegion: (id, edit) => toolApiRef.current?.editEdgeRegion(id, edit) ?? null,
+      transformScope: (scope, op) => toolApiRef.current?.transformScope(scope, op) ?? false,
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
       // Route through the api ref so the bridge's verbs always close over fresh state,
       // exactly like the shell's tool dispatch.
@@ -5346,6 +5414,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Loop Cut</Text>
                     </Pressable>
                   )}
+                  <Pressable
+                    onPress={() => applyTopo(meshEdgeSplit(), 'Edge Split needs one or more selected interior edges from one part')}
+                    tooltip="Split vertex sharing across the selected edges without creating another Outliner part (D)"
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                    }}
+                  >
+                    <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Edge Split</Text>
+                  </Pressable>
                   {selInfo.sel >= 2 && (
                     <Pressable
                       onPress={alignLoop}
