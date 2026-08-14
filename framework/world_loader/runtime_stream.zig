@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const c = @import("../c.zig").imports;
-const scene3d = @import("../gpu/3d.zig");
+const scene3d = @import("../gpu/3d_refactor_2nd_attempt/3d.zig");
 const constructor = @import("../world/constructor.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;

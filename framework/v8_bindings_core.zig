@@ -25,7 +25,7 @@ const animations = @import("gpu/animations.zig");
 const scene3d = if (build_options.dev_native_modules and !build_options.dev_scene3d_module)
     struct {}
 else
-    @import("gpu/3d.zig");
+    @import("gpu/3d_refactor_2nd_attempt/3d.zig");
 const scene3d_runtime = @import("dev_modules/scene3d_runtime.zig");
 const mesh_edit = @import("gpu/mesh_edit.zig");
 const indexed_edit_mesh = @import("gpu/indexed_edit_mesh.zig");

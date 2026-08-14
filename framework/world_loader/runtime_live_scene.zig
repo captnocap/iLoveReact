@@ -3,8 +3,8 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
-const material_tex = @import("../gpu/material_tex.zig");
-const scene3d = @import("../gpu/3d.zig");
+const material_tex = @import("../dev_modules/material_api.zig");
+const scene3d = @import("../gpu/3d_refactor_2nd_attempt/3d.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const constructor = @import("../world/constructor.zig");
