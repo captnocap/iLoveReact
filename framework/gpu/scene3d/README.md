@@ -10,9 +10,9 @@ every body byte of the source lands in exactly one output file.
 **This tree is LIVE (req_4378):** every former importer of `gpu/3d.zig` now
 imports this orchestrator — v8_bindings_core, the scene3d dev modules, the
 world_loader runtime, and the headless scene3d unit suites. The original
-`gpu/3d.zig` is unreferenced and kept only as the source the split was
-generated from; regenerating from it after it drifts would be wrong — the
-split files are now the live code.
+`gpu/3d.zig` monolith has been DELETED (req_4383) so nobody edits dead code —
+it lives in git history (last at the req_4378 cutover commit). The split
+files are the live code; the _tool/ splitter is provenance, not a path back.
 
 ## Layout
 
