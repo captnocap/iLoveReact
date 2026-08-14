@@ -5585,9 +5585,9 @@ pub fn run(config_in: AppConfig) !void {
                             false;
                         if (input_consumed) stampInputLatency(config.host.io, "key");
                         // Studio navigation is a native capture mode: once Tab enables it,
-                        // WASD updates host-held axes and never reaches the model command
-                        // keymap (W wireframe, A align, S scale, D detach). Text inputs still
-                        // win above, and the shell owns Tab so modal discipline stays intact.
+                        // WASD + Z/X update host-held axes and never reach the model command
+                        // keymap while navigation is active. Text inputs still win above,
+                        // and the shell owns Tab so modal discipline stays intact.
                         // The physical modifier edge wins over SDL's aggregate mask:
                         // on some backends a Shift/Ctrl key-up still reports that bit,
                         // which otherwise leaves navigation latched at its old speed.
@@ -5792,6 +5792,8 @@ pub fn run(config_in: AppConfig) !void {
                     _ = r3d.orbitNavigationKey('a', false, false, false);
                     _ = r3d.orbitNavigationKey('s', false, false, false);
                     _ = r3d.orbitNavigationKey('d', false, false, false);
+                    _ = r3d.orbitNavigationKey('z', false, false, false);
+                    _ = r3d.orbitNavigationKey('x', false, false, false);
                     if (world_loader_paint_node_id != 0) {
                         world_loader.paintPointer(io, world_loader_paint_node_id, .up, 0, 0);
                         world_loader_paint_node_id = 0;

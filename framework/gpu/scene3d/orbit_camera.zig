@@ -102,6 +102,8 @@ const NAV_FORWARD: u8 = 1 << 0;
 const NAV_BACK: u8 = 1 << 1;
 const NAV_LEFT: u8 = 1 << 2;
 const NAV_RIGHT: u8 = 1 << 3;
+const NAV_UP: u8 = 1 << 4;
+const NAV_DOWN: u8 = 1 << 5;
 
 pub fn orbitNavigationEnabled() bool {
     return z3d.g_orbit.navigation_enabled;
@@ -123,11 +125,13 @@ fn navigationKeyMask(sym: i32) u8 {
         's', 'S' => NAV_BACK,
         'a', 'A' => NAV_LEFT,
         'd', 'D' => NAV_RIGHT,
+        'z', 'Z' => NAV_UP,
+        'x', 'X' => NAV_DOWN,
         else => 0,
     };
 }
 
-/// Capture one physical WASD edge while navigation is enabled. Returning true is
+/// Capture one physical WASD/Z/X edge while navigation is enabled. Returning true is
 /// the engine's instruction not to forward that edge to Studio's command keymap.
 pub fn orbitNavigationKey(sym: i32, down: bool, shift: bool, ctrl: bool) bool {
     if (!z3d.g_orbit.navigation_enabled) return false;
@@ -140,7 +144,8 @@ pub fn orbitNavigationKey(sym: i32, down: bool, shift: bool, ctrl: bool) bool {
 }
 
 /// Host-side held-key integrator. The orbit eye and target translate together,
-/// retaining the current yaw/pitch/dolly while WASD walks over the XZ work plane.
+/// retaining the current yaw/pitch/dolly while WASD moves over the XZ work plane
+/// and Z/X rise or descend on world Y.
 pub fn orbitNavigationTick(dt_raw: f32) bool {
     if (!z3d.g_me_capture or !z3d.g_orbit.navigation_enabled or z3d.g_orbit.locked or
         z3d.g_orbit.navigation_keys == 0 or !std.math.isFinite(dt_raw) or dt_raw <= 0)
@@ -148,14 +153,18 @@ pub fn orbitNavigationTick(dt_raw: f32) bool {
 
     var forward: f32 = 0;
     var strafe: f32 = 0;
+    var vertical: f32 = 0;
     if (z3d.g_orbit.navigation_keys & NAV_FORWARD != 0) forward += 1;
     if (z3d.g_orbit.navigation_keys & NAV_BACK != 0) forward -= 1;
     if (z3d.g_orbit.navigation_keys & NAV_RIGHT != 0) strafe += 1;
     if (z3d.g_orbit.navigation_keys & NAV_LEFT != 0) strafe -= 1;
-    const input_length = @sqrt(forward * forward + strafe * strafe);
+    if (z3d.g_orbit.navigation_keys & NAV_UP != 0) vertical += 1;
+    if (z3d.g_orbit.navigation_keys & NAV_DOWN != 0) vertical -= 1;
+    const input_length = @sqrt(forward * forward + strafe * strafe + vertical * vertical);
     if (input_length <= 0) return false;
     forward /= input_length;
     strafe /= input_length;
+    vertical /= input_length;
 
     const yaw = z3d.g_orbit.yaw;
     const view_forward = [3]f32{ -@sin(yaw), 0, -@cos(yaw) };
@@ -174,9 +183,9 @@ pub fn orbitNavigationTick(dt_raw: f32) bool {
         1.0;
     const speed = base_speed * speed_multiplier;
     const step = speed * @min(dt_raw, ORBIT_NAVIGATION_TUNING.maximum_step_seconds);
-    for (0..3) |axis| {
-        z3d.g_orbit.target[axis] += (view_forward[axis] * forward + view_right[axis] * strafe) * step;
-    }
+    z3d.g_orbit.target[0] += (view_forward[0] * forward + view_right[0] * strafe) * step;
+    z3d.g_orbit.target[1] += vertical * step;
+    z3d.g_orbit.target[2] += (view_forward[2] * forward + view_right[2] * strafe) * step;
     return true;
 }
 
@@ -324,7 +333,7 @@ test "Studio orbit navigation exclusively captures held WASD and moves camera-re
 
     try std.testing.expect(orbitNavigationSet(true));
     try std.testing.expect(orbitNavigationKey('w', true, false, false));
-    try std.testing.expect(!orbitNavigationKey('x', true, false, false));
+    try std.testing.expect(!orbitNavigationKey('q', true, false, false));
     try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
     try std.testing.expectApproxEqAbs(@as(f32, 0), z3d.g_orbit.target[0], 0.00001);
     try std.testing.expectApproxEqAbs(@as(f32, -0.35), z3d.g_orbit.target[2], 0.00001);
@@ -338,7 +347,7 @@ test "Studio orbit navigation exclusively captures held WASD and moves camera-re
     try std.testing.expect(!orbitNavigationKey('w', true, false, false));
 }
 
-test "Studio orbit navigation normalizes diagonals and respects camera lock" {
+test "Studio orbit navigation normalizes three-axis diagonals and respects camera lock" {
     const saved_orbit = z3d.g_orbit;
     const saved_capture = z3d.g_me_capture;
     defer {
@@ -350,8 +359,13 @@ test "Studio orbit navigation normalizes diagonals and respects camera lock" {
     _ = orbitNavigationSet(true);
     _ = orbitNavigationKey('w', true, false, false);
     _ = orbitNavigationKey('d', true, false, false);
+    _ = orbitNavigationKey('z', true, false, false);
     try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
-    const traveled = @sqrt(z3d.g_orbit.target[0] * z3d.g_orbit.target[0] + z3d.g_orbit.target[2] * z3d.g_orbit.target[2]);
+    const traveled = @sqrt(
+        z3d.g_orbit.target[0] * z3d.g_orbit.target[0] +
+            z3d.g_orbit.target[1] * z3d.g_orbit.target[1] +
+            z3d.g_orbit.target[2] * z3d.g_orbit.target[2],
+    );
     try std.testing.expectApproxEqAbs(@as(f32, 0.35), traveled, 0.00001);
 
     z3d.g_orbit.locked = true;
@@ -392,19 +406,42 @@ test "Studio orbit navigation modifiers provide traverse and precision speeds" {
     z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
     _ = orbitNavigationSet(true);
     _ = orbitNavigationKey('w', true, true, false);
-    try std.testing.expect(!orbitNavigationKey('x', false, false, false));
+    try std.testing.expect(!orbitNavigationKey('q', false, false, false));
     try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
     try std.testing.expectApproxEqAbs(@as(f32, 0.35), -z3d.g_orbit.target[2], 0.00001);
 
     // Tab's mode boundary clears every axis/modifier. Normal middle-drag orbit
     // keeps its original pixel rate after fast navigation has been disabled.
-    _ = orbitNavigationKey('x', true, true, false);
+    _ = orbitNavigationKey('q', true, true, false);
     try std.testing.expect(!orbitNavigationSet(false));
     try std.testing.expectEqual(@as(u8, 0), z3d.g_orbit.navigation_keys);
     try std.testing.expect(!z3d.g_orbit.navigation_shift);
     const yaw_before = z3d.g_orbit.yaw;
     orbitDrag(10, 0);
     try std.testing.expectApproxEqAbs(yaw_before - 0.1, z3d.g_orbit.yaw, 0.00001);
+}
+
+test "Studio orbit navigation Z rises and X descends on world Y" {
+    const saved_orbit = z3d.g_orbit;
+    const saved_capture = z3d.g_me_capture;
+    defer {
+        z3d.g_orbit = saved_orbit;
+        z3d.g_me_capture = saved_capture;
+    }
+    z3d.g_orbit = .{ .yaw = 1.2, .pitch = 0.8, .dist = 10, .radius = 1 };
+    z3d.g_me_capture = true;
+    _ = orbitNavigationSet(true);
+
+    try std.testing.expect(orbitNavigationKey('z', true, false, false));
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), z3d.g_orbit.target[1], 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), z3d.g_orbit.target[0], 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), z3d.g_orbit.target[2], 0.00001);
+
+    _ = orbitNavigationKey('z', false, false, false);
+    try std.testing.expect(orbitNavigationKey('x', true, false, false));
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    try std.testing.expectApproxEqAbs(@as(f32, 0), z3d.g_orbit.target[1], 0.00001);
 }
 
 test "Studio automatic far plane follows translated camera distance from mesh" {
