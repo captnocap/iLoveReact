@@ -30,6 +30,9 @@ pub fn build(b: *std.Build) void {
     const dev_bundle_path = b.option([]const u8, "dev-bundle-path", "Bundle path polled by dev-mode hot reload") orelse "bundle.js";
     const dev_native_modules = b.option(bool, "dev-native-modules", "Build the development host against replaceable Scene3D/Game libraries") orelse false;
     const dev_scene3d_module = b.option(bool, "dev-scene3d-module", "Compile the Scene3D implementation library instead of the cold host") orelse false;
+    // Compile-probe the staged chaptered implementation through the exact
+    // replaceable-module call surface without changing the default live import.
+    const scene3d_refactor = b.option(bool, "scene3d-refactor", "Build the Scene3D development module against gpu/3d_refactor/root.zig") orelse false;
     const dev_game_module = b.option(bool, "dev-game-module", "Compile the Game implementation library instead of the cold host") orelse false;
     const dev_scene3d_path = b.option([]const u8, "dev-scene3d-path", "Initial Scene3D development library loaded by the modular host") orelse b.pathFromRoot("zig-out/dev-modules/scene3d/staging/librjit_scene3d-dev.so");
     const dev_scene3d_hash = b.option([]const u8, "dev-scene3d-hash", "Content hash of the initial Scene3D development library") orelse "staging";
@@ -150,6 +153,7 @@ pub fn build(b: *std.Build) void {
     options.addOption([]const u8, "dev_bundle_path", dev_bundle_path);
     options.addOption(bool, "dev_native_modules", dev_native_modules);
     options.addOption(bool, "dev_scene3d_module", dev_scene3d_module);
+    options.addOption(bool, "scene3d_refactor", scene3d_refactor);
     options.addOption(bool, "dev_game_module", dev_game_module);
     options.addOption([]const u8, "dev_scene3d_path", dev_scene3d_path);
     options.addOption([]const u8, "dev_scene3d_hash", dev_scene3d_hash);
@@ -912,6 +916,46 @@ pub fn build(b: *std.Build) void {
     const run_scene3d_mesh_drag_test = b.addRunArtifact(scene3d_mesh_drag_test);
     b.step("test-scene3d-mesh-drag", "Run the headless retained-cache two-drag regression")
         .dependOn(&run_scene3d_mesh_drag_test.step);
+
+    // Semantic gate for the req_4375 verbatim split of gpu/3d.zig. Additive
+    // only: nothing in the shipping graph imports 3d_refactor_2nd_attempt/.
+    const split3d_check_mod = b.createModule(.{
+        .root_source_file = b.path("framework/split3d_check_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    split3d_check_mod.addOptions("build_options", options);
+    split3d_check_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    split3d_check_mod.addImport("wgpu", wgpu_mod);
+    split3d_check_mod.addImport("tls", tls_mod);
+    split3d_check_mod.addImport("pg", pg_dep.module("pg"));
+    split3d_check_mod.addImport("v8", v8_headers_mod);
+    split3d_check_mod.addIncludePath(b.path("."));
+    split3d_check_mod.addIncludePath(b.path("framework/ffi"));
+    split3d_check_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
+    split3d_check_mod.addIncludePath(b.path("deps/libfvad/include"));
+    if (os_tag == .linux) {
+        split3d_check_mod.addIncludePath(.{ .cwd_relative = "/usr/include/luajit-2.1" });
+        split3d_check_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+        split3d_check_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+    } else if (os_tag == .macos) {
+        split3d_check_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
+        split3d_check_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
+        split3d_check_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
+    split3d_check_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
+    split3d_check_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
+    // The recursive decl ref reaches the text-overlay paths, so link what they need.
+    split3d_check_mod.linkSystemLibrary("freetype", .{});
+    const split3d_check = b.addTest(.{
+        .name = "split3d-check",
+        .root_module = split3d_check_mod,
+    });
+    const run_split3d_check = b.addRunArtifact(split3d_check);
+    b.step("check-3d-split", "Analyze the 3d_refactor_2nd_attempt split tree (req_4375)")
+        .dependOn(&run_split3d_check.step);
 
     const game_module_mod = b.createModule(.{
         .root_source_file = b.path("framework/dev_game_module_root.zig"),
@@ -1748,6 +1792,38 @@ pub fn build(b: *std.Build) void {
     const mesh_edge_semantics_test_step = b.step("test-mesh-edge-semantics", "Run durable named-edge semantic path tests");
     mesh_edge_semantics_test_step.dependOn(&run_mesh_edge_semantics_test.step);
 
+    // ── staged Scene3D decomposition leaves and cross-owner contracts ───────
+    // The implementation-root test runs inline tests in the extracted files;
+    // tests do not cross an addImport module boundary. The unit root then pins
+    // relationships between those owners without importing the staged facade.
+    const scene3d_refactor_leaves_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_3d_refactor.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const scene3d_refactor_leaves_test = b.addTest(.{
+        .name = "scene3d-refactor-leaves-test",
+        .root_module = scene3d_refactor_leaves_mod,
+    });
+    scene3d_refactor_leaves_mod.addImport("wgpu", wgpu_mod);
+    const run_scene3d_refactor_leaves_test = b.addRunArtifact(scene3d_refactor_leaves_test);
+    const scene3d_refactor_unit_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/scene3d_refactor.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    scene3d_refactor_unit_mod.addImport("scene3d_refactor_leaves", scene3d_refactor_leaves_mod);
+    const scene3d_refactor_unit_test = b.addTest(.{
+        .name = "scene3d-refactor-unit-test",
+        .root_module = scene3d_refactor_unit_mod,
+    });
+    const run_scene3d_refactor_unit_test = b.addRunArtifact(scene3d_refactor_unit_test);
+    const scene3d_refactor_test_step = b.step("test-scene3d-refactor", "Run staged Scene3D chapter and cross-owner tests");
+    scene3d_refactor_test_step.dependOn(&run_scene3d_refactor_leaves_test.step);
+    scene3d_refactor_test_step.dependOn(&run_scene3d_refactor_unit_test.step);
+
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
     const mesh_edit_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
@@ -2156,6 +2232,23 @@ pub fn build(b: *std.Build) void {
         .root_module = model_source_recovery_test_mod,
     });
     const run_model_source_recovery_test = b.addRunArtifact(model_source_recovery_test);
+    const model_source_session_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/model_source_session.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_source_session_test_mod.addImport("model_source", model_source_recovery_test_mod);
+    const model_source_session_test = b.addTest(.{
+        .name = "model-source-session-test",
+        .root_module = model_source_session_test_mod,
+    });
+    const run_model_source_session_test = b.addRunArtifact(model_source_session_test);
+    const model_source_session_test_step = b.step(
+        "test-model-source-session",
+        "Run parked model-source ownership tests",
+    );
+    model_source_session_test_step.dependOn(&run_model_source_session_test.step);
     const historical_preview_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/historical_preview.zig"),
         .target = target,
@@ -2178,6 +2271,7 @@ pub fn build(b: *std.Build) void {
     mesh_face_table_test_step.dependOn(&run_mesh_face_diff_test.step);
     mesh_face_table_test_step.dependOn(&run_mesh_face_restore_proof_test.step);
     mesh_face_table_test_step.dependOn(&run_model_source_recovery_test.step);
+    mesh_face_table_test_step.dependOn(&run_model_source_session_test.step);
     mesh_face_table_test_step.dependOn(&run_historical_preview_test.step);
 
     // ── Game pathing behavior tests (V5 capture, P4) ───────────────
@@ -3127,6 +3221,24 @@ pub fn build(b: *std.Build) void {
     const dev_reload_policy_test = b.addTest(.{ .name = "dev-reload-policy-test", .root_module = dev_reload_policy_test_mod });
     b.step("test-dev-reload-policy", "Run development reload policy tests")
         .dependOn(&b.addRunArtifact(dev_reload_policy_test).step);
+
+    const dev_ipc_queue_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/diag/dev_ipc_queue.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const dev_ipc_queue_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/dev_ipc_queue.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dev_ipc_queue_test_mod.addImport("dev_ipc_queue", dev_ipc_queue_mod_for_tests);
+    const dev_ipc_queue_test = b.addTest(.{
+        .name = "dev-ipc-queue-test",
+        .root_module = dev_ipc_queue_test_mod,
+    });
+    b.step("test-dev-ipc-queue", "Run development IPC ownership-transfer tests")
+        .dependOn(&b.addRunArtifact(dev_ipc_queue_test).step);
 
     const dev_module_abi_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/dev_module_abi.zig"),
