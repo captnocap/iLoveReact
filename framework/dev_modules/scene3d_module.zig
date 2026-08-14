@@ -3,13 +3,9 @@
 const std = @import("std");
 const wgpu = @import("wgpu");
 const abi = @import("dev_module_abi");
-const build_options = @import("build_options");
 const Node = @import("../layout.zig").Node;
 const HostContext = @import("../host_context.zig");
-const scene3d = if (build_options.scene3d_refactor)
-    @import("../gpu/3d_refactor/root.zig")
-else
-    @import("../gpu/3d_refactor_2nd_attempt/3d.zig");
+const scene3d = @import("../gpu/scene3d/root.zig");
 const meshdoc_format = @import("../gpu/meshdoc_format.zig");
 const bindings = @import("../v8_bindings_scene3d.zig");
 const gpu_api = @import("gpu_api.zig");
@@ -138,18 +134,12 @@ fn deinitScene() callconv(.c) void {
     scene3d.deinit();
 }
 fn textureBindGroupLayout() callconv(.c) ?*anyopaque {
-    if (comptime build_options.scene3d_refactor)
-        return scene3d.getTexBindGroupLayout() catch null;
     return scene3d.getTexBindGroupLayout();
 }
 fn diffuseSampler() callconv(.c) ?*anyopaque {
-    if (comptime build_options.scene3d_refactor)
-        return scene3d.getDiffuseSampler() catch null;
     return scene3d.getDiffuseSampler();
 }
 fn uvSamplingUniform(finite_atlas: bool) callconv(.c) ?*anyopaque {
-    if (comptime build_options.scene3d_refactor)
-        return scene3d.getUvSamplingUniform(finite_atlas) catch null;
     return scene3d.getUvSamplingUniform(finite_atlas);
 }
 fn meshEditCapturing() callconv(.c) bool {

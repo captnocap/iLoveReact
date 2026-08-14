@@ -12,7 +12,7 @@ const Node = @import("../layout.zig").Node;
 const meshdoc_format = @import("../gpu/meshdoc_format.zig");
 
 const modular_core = build_options.dev_native_modules and !build_options.dev_scene3d_module;
-const implementation = if (!modular_core) @import("../gpu/3d_refactor_2nd_attempt/3d.zig") else struct {};
+const implementation = if (!modular_core) @import("../gpu/scene3d/root.zig") else struct {};
 
 var active_api: ?*const abi.Scene3dApiV1 = null;
 

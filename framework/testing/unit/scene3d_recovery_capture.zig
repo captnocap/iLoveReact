@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const scene3d = @import("../../gpu/3d_refactor_2nd_attempt/3d.zig");
+const scene3d = @import("../../gpu/scene3d/root.zig");
 const model_source = @import("../../gpu/model_source.zig");
 const meshdoc_format = @import("../../gpu/meshdoc_format.zig");
 

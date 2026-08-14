@@ -1,0 +1,43 @@
+# Grouping manifest for the verbatim split of framework/gpu/3d.zig (req_4375).
+# Boundaries sit on the file's own section banners / thematic seams.
+# Every top-level `var` is pinned into the orchestrator (3d.zig) automatically;
+# the pin below additionally roots the DocState @This()-reflection quartet.
+
+header_end_line 55
+
+file formats.zig 56
+file geometry_intern_cache.zig 255
+file mesh_stash.zig 375
+file orbit_camera.zig 454
+file resident_mesh.zig 649
+file soup_logical.zig 1302
+file topo_extrude.zig 2321
+file part_ranges.zig 4240
+file topo_cuts.zig 4384
+file bevel.zig 5335
+file topo_weld_delete.zig 5877
+file groups.zig 6645
+file document_snapshot.zig 6941
+file hidden_groups.zig 7453
+file journal.zig 7947
+file part_ops.zig 9428
+file quadify_glass.zig 10611
+file curve_pull.zig 11483
+file edit_session.zig 11848
+file rig_inspect.zig 12377
+file gizmo.zig 13106
+file gizmo_drag.zig 13711
+file stage_overlays.zig 14029
+file edit_semantics.zig 15079
+file paint.zig 16533
+file dynamic_region.zig 17402
+file live_regions.zig 17624
+file render_targets.zig 17948
+file pipeline_init.zig 18109
+file textures.zig 19236
+file geometry_upload.zig 19549
+file heightfield.zig 19852
+file frame_render.zig 20099
+file doc_sessions.zig 22074
+
+pin 22074 22151

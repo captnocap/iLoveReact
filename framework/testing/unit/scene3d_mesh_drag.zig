@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const scene3d = @import("../../gpu/3d_refactor_2nd_attempt/3d.zig");
+const scene3d = @import("../../gpu/scene3d/root.zig");
 const indexed_edit_mesh = @import("../../gpu/indexed_edit_mesh.zig");
 const mesh_edit = @import("../../gpu/mesh_edit.zig");
 const mesh_edge_semantics = @import("../../gpu/mesh_edge_semantics.zig");

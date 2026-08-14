@@ -22,5 +22,5 @@ fn refAllDeclsRecursive(comptime T: type) void {
 }
 
 test "3d split tree fully analyzes" {
-    refAllDeclsRecursive(@import("gpu/3d_refactor_2nd_attempt/3d.zig"));
+    refAllDeclsRecursive(@import("gpu/scene3d/root.zig"));
 }
