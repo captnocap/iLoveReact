@@ -154,26 +154,31 @@ targets 90 ms between ingested frames. Bone-local translations never cross this 
 | `__compiled_world_set_player_character` | stages one already-bound saved character (RJMD/RJSK reopened + hash-checked natively); returns the bone-ID palette |
 | `__compiled_world_set_player_pose` | publishes one complete v1 frame as owner `compiled-world-host`; empty bytes release the override so clips resume; refused with `CharacterPoseOwnedByCapture` while a capture session owns the target |
 | `__compiled_world_npc_character_session` | explicit NPC instances over the same CharacterAsset path |
-| `__capture_session` | the native capture/retarget session (openTarget / calibrate / freeze / resume / setDepthSign / snapshot / close) |
-| `__pose_estimate_async` / `__pose_camera_devices` | MoveNet inference over a cam:N surface via the ONNX worker (off the V8 thread) |
+| `__capture_session` | the native capture/retarget session (openTarget / calibrate / freeze / resume / record / recordStop / poseKey / snapshot / close) |
+| `__pose_estimate_async` / `__pose_camera_devices` | legacy MoveNet inference over a cam:N surface (ground-truth probe + pre-calibration preview); capture itself runs the BlazePose lane (req_4387) |
 
 Ownership law: pose ownership is a single named owner (`OwnerId`, 64 bytes). Capture
 activation and the direct host door cannot fight — whoever owns, owns all bones, and a
 replaced session's late close cannot tear down a newer session's pose.
 
-## 5. The motion-capture portion — exists, drives live, records NOTHING
+## 5. The motion-capture portion — drives live, records RJAN takes (req_4285)
 
-The chain, end to end:
+The chain, end to end (req_4387 — the MoveNet/depth-recovery era is over):
 
 ```
 V4L2 camera (cam:N only — SELFSHOT law, no desktop capture)
   → live feed surface (RenderTarget keeps it mounted)
-  → __pose_estimate_async: MoveNet SinglePose, COCO-17 keypoints, ~30 Hz pipelined
-      (runtime/capture/pose.ts — importing it gates the has-onnx build flag)
+  → framework/ml/blazepose.zig: BlazePose GHUM full, two ONNX sessions
+      (detector 224² + landmarks 256²), 33 landmarks with REAL metric 3D
+      world output (metres, hip-centred) + sigmoid visibility; MediaPipe
+      tracking mode (aux-landmark ROI, detector only on presence loss);
+      models vendored via scripts/fetch-pose-models
   → __capture_session (framework/skeleton/capture_session.zig)
-  → source_skeleton.zig: calibration = median of 30 fully-valid frames
-      (min keypoint confidence 0.25, 10 s deadline; 16 joints / 12 segments;
-       monocular depth SIGN is an explicit input, never guessed)
+  → source_skeleton.zig: world landmarks land as metric 3D joints directly
+      (SOURCE space y-up/z-toward-camera); calibration = median of 30 valid
+      frames, core gate = presence + shoulders + hips only (the facial-pair
+      lottery and the DepthSign guess are DELETED); head orientation from
+      real 3D eye/ear geometry; root translation bridged from screen hips
   → humanoid_retarget.zig: per-segment drive gate (confidence ≥ 0.35,
       hold 150 ms / fade 350 ms on dropout); share splits (clavicle 0.25,
       spine 0.45/1.0, neck 0.40/head 1.0)
@@ -188,15 +193,13 @@ saved-character contract as /play (`cart/editor/skeleton/captureTarget.ts`). Cap
 also claim the **mounted /play player** as its target
 (`framework/world_loader.zig:380-457`).
 
-**What it attributes to: nothing durable.** Confirmed by sweep:
+**What it attributes to:** the record/recordStop ops (req_4285) accumulate promoted
+target frames as bind-relative deltas per driven role channel and persist a take as one
+RJAN motion document — capture attributes to something durable. Outside a recording:
 
-- No pose frame is ever recorded — the wire format is transport-only; no file format
-  for captured motion exists anywhere in the slice.
-- No clip is ever authored from capture — the five clips are hand-authored procedural
-  tables; there is no path from a capture session into `ClipTuning` or any keyframe store.
 - Session close (`closeMountedPlayerCharacterTarget`) clears the pose and the character
-  reverts to clips/bind. The motion evaporates with the session.
-- The capture retarget is **also canonical-coupled**: its channel table maps MoveNet
+  reverts to clips/bind. Un-recorded motion evaporates with the session.
+- The capture retarget is **also canonical-coupled**: its channel table maps source
   segments to bones by canonical ID string (`humanoid_retarget.zig:71-85` — "pelvis",
   "upper_arm_left", …) and requires bones literally named `pelvis` and `head`
   (`humanoid_retarget.zig:218-220`). Against a SkinTokens rig (`external_joint_N`) it
