@@ -59,6 +59,8 @@ export default function LibraryPanel(props: {
   onRename: (assetId: string, name: string) => void;
   onPage: (delta: number, maxPage: number) => void;
   onFocusMaterial: (variant?: number) => void;
+  /** Opens a recipe asset's Material Lab document (req_4406) — the tree path in. */
+  onOpenRecipe: (asset: Asset) => void;
   onModel: (model: ModelPackage) => void;
   contentTree: ContentNode[];
   models: ModelPackage[];
@@ -237,6 +239,7 @@ export default function LibraryPanel(props: {
           active={props.state.activeAssetId === asset.id}
           onAsset={props.onAsset}
           onFavorite={props.onFavorite}
+          onOpenLab={asset.sourceKind === 'shader-recipe' ? props.onOpenRecipe : undefined}
         />
       ))}
     </C.HW_LibMaterialGrid>

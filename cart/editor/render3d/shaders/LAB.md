@@ -50,6 +50,31 @@ palette/param counts — the counts are the only fence between rows.
 composed recipe sets them around each call site so every layer's colors and
 knobs land in the recipe's own flat tables.
 
+## The bench (rail-mounted, req_4406)
+
+The Lab mounts its panels on the editor's REAL gutters through the one panel
+registry (`cart/editor/data/panelSystem.ts`), never as pseudo-columns inside
+the stage. A recipe-backed `'material'` document is a LAB document: its left
+rail gains the STACK button (`'lab-stack'` → `shell/LabStackPanel.tsx` — add
+verbs pinned top, layer list scrolling, base as the ground-floor row) and its
+right rail carries the Lab inspector (`'lab'` → `inspector/LabInspectorPanel.tsx`
+— DIALS/PALETTE from the top, RECIPE FACTS + SAVE TO CATALOG pinned bottom).
+Both auto-select when the document gains focus, exactly like the Paint and
+Model panes; the world-tile Focus panel is NOT in the Lab's rail set and
+returns with world focus. Non-recipe material documents keep the ordinary
+Focus rail and the palette-slot fallback.
+
+The center (`stage/MaterialLabSurface.tsx`) is a full-bleed viewport: the
+material tiles edge-to-edge at the 1×/2×/4×/6× density the HUD picks (cells
+sized from the short edge, overflow-filling the long one), the STAGES strip
+docks along the top edge (≥96px live thumbs labeled base → each layer, click
+solos), and scale/seed/quality dock to the bottom edge as a compact HUD bar.
+Slider drags ride `material/labDraft.ts` — a tiny subscription store the
+inspector writes and the stage reads — so previews stay data-speed without
+re-rendering the app shell per mousemove. Entry: recipe rows in the Assets
+tree (Global Materials → Recipes) carry a flask verb that opens/focuses the
+recipe's Lab document; the world-view toolbar button remains a shortcut.
+
 ## The recipe (data → one WGSL fn)
 
 `recipe.ts` owns the schema and the ONLY emitter. A `MaterialRecipe` is

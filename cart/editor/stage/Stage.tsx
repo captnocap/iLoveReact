@@ -92,7 +92,6 @@ export default function Stage(props: {
   onDeleteColorSet: (index: number) => void;
   labRecipe: import('../render3d/shaders/recipe').MaterialRecipe | null;
   labHandlers: import('./MaterialLabSurface').LabHandlers;
-  labUsage: { world: number; models: number };
   onOpenInLab: (specId: string) => void;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
@@ -226,7 +225,6 @@ export default function Stage(props: {
             activeAsset={props.activeAsset}
             labRecipe={props.labRecipe}
             labHandlers={props.labHandlers}
-            labUsage={props.labUsage}
             onExit={props.onExitMaterialFocus}
             onSelectMaterial={props.onSelectColorStudioMaterial}
             onVariant={props.onColorStudioVariant}

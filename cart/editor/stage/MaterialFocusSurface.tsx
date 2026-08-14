@@ -47,7 +47,6 @@ export default function MaterialFocusSurface(props: {
   /** The active Lab recipe — null = single-material fallback (non-registry spec). */
   labRecipe: MaterialRecipe | null;
   labHandlers: LabHandlers;
-  labUsage: { world: number; models: number };
   onExit: () => void;
   onSelectMaterial: (specId: string) => void;
   onVariant: (variant: number) => void;
@@ -129,7 +128,6 @@ export default function MaterialFocusSurface(props: {
           <MaterialLabSurface
             state={props.state}
             recipe={props.labRecipe}
-            usage={props.labUsage}
             handlers={props.labHandlers}
           />
         ) : (

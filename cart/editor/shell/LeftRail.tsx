@@ -9,11 +9,12 @@ import type { WorkspaceDocumentKind } from '../data/types';
 export default function LeftRail(props: {
   documentKind: WorkspaceDocumentKind;
   paintActive: boolean;
+  labActive: boolean;
   activePane: string;
   collapsed: boolean;
   onPane: (pane: LeftPanelId) => void;
 }) {
-  const panes = leftPanelsFor(props.documentKind, props.paintActive);
+  const panes = leftPanelsFor(props.documentKind, props.paintActive, props.labActive);
   const activePane = resolvedPanelId(panes, props.activePane);
   return (
     <C.HW_LeftRail>

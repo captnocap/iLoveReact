@@ -9,8 +9,8 @@
 // again collapses its adjacent panel; another button selects and opens it.
 import type { ContentFolderId, WorkspaceDocumentKind } from './types';
 
-export type LeftPanelId = 'assets' | 'paint' | 'world-bible';
-export type RightPanelId = 'inspector' | 'paint' | 'rig' | 'names' | 'recovery';
+export type LeftPanelId = 'assets' | 'paint' | 'lab-stack' | 'world-bible';
+export type RightPanelId = 'inspector' | 'paint' | 'rig' | 'names' | 'recovery' | 'lab';
 
 export type PanelButton<Id extends string> = {
   id: Id;
@@ -20,16 +20,20 @@ export type PanelButton<Id extends string> = {
 
 export type LeftPanelButton =
   | (PanelButton<LeftPanelId> & { renderer: 'library' })
-  | (PanelButton<LeftPanelId> & { renderer: 'paint' | 'world-bible' });
+  | (PanelButton<LeftPanelId> & { renderer: 'paint' | 'lab-stack' | 'world-bible' });
 
 export type RightPanelButton = PanelButton<RightPanelId>;
 
 const ASSETS = { id: 'assets', label: 'All assets', icon: 'FolderTree', renderer: 'library' } as const;
 const PAINT = { id: 'paint', label: 'Paint', icon: 'Paintbrush', renderer: 'paint' } as const;
+// The Material Lab's STACK is a left-rail peer exactly like Paint (req_4406):
+// it joins while a Lab document (recipe-backed material) is focused.
+const LAB_STACK = { id: 'lab-stack', label: 'The Stack', icon: 'Layers', renderer: 'lab-stack' } as const;
 const WORLD_BIBLE = { id: 'world-bible', label: 'World Bible index', icon: 'BookOpen', renderer: 'world-bible' } as const;
 
 const ASSET_LEFT = [ASSETS] as const;
 const PAINT_LEFT = [PAINT, ASSETS] as const;
+const LAB_LEFT = [LAB_STACK, ASSETS] as const;
 const KNOWLEDGE_LEFT = [WORLD_BIBLE] as const;
 
 const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal' } as const;
@@ -43,16 +47,24 @@ const MODEL_RIGHT = [
   { id: 'recovery', label: 'Recovery', icon: 'DatabaseBackup' },
 ] as const;
 const FOCUS_RIGHT = [INSPECTOR] as const;
+// The Lab document's right rail is the Lab inspector — the world-tile Focus
+// panel is deliberately NOT in this set (req_4406): it returns with world focus.
+const LAB_RIGHT = [
+  { id: 'lab', label: 'Lab inspector', icon: 'FlaskConical' },
+] as const;
 
-export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false): readonly LeftPanelButton[] {
+export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false, labActive = false): readonly LeftPanelButton[] {
   if (kind === 'knowledge') return KNOWLEDGE_LEFT;
   if (paintActive && (kind === 'model' || kind === 'facade')) return PAINT_LEFT;
+  if (labActive && kind === 'material') return LAB_LEFT;
   return ASSET_LEFT;
 }
 
-export function rightPanelsFor(kind: WorkspaceDocumentKind): readonly RightPanelButton[] {
+export function rightPanelsFor(kind: WorkspaceDocumentKind, labActive = false): readonly RightPanelButton[] {
   if (kind === 'knowledge') return [];
-  return kind === 'model' ? MODEL_RIGHT : FOCUS_RIGHT;
+  if (kind === 'model') return MODEL_RIGHT;
+  if (labActive && kind === 'material') return LAB_RIGHT;
+  return FOCUS_RIGHT;
 }
 
 export function resolvedPanelId<Id extends string>(buttons: readonly PanelButton<Id>[], requested: string): Id {
@@ -102,13 +114,13 @@ export function normalizeLeftPanelId(value: string): LeftPanelId {
   if (value === 'grid' || value === 'pieces' || value === 'actors' || value === 'data') return 'assets';
   if (value === 'world' || value === 'pipeline' || value === 'build' || value === 'models' || value === 'materials' || value === 'characters' || value === 'missions') return 'assets';
   if (value === 'tool-options' || value === 'ink') return 'paint';
-  return (['assets', 'paint', 'world-bible'] as const).includes(value as LeftPanelId)
+  return (['assets', 'paint', 'lab-stack', 'world-bible'] as const).includes(value as LeftPanelId)
     ? value as LeftPanelId
     : 'assets';
 }
 
 export function normalizeRightPanelId(value: string): RightPanelId {
-  return value === 'paint' || value === 'rig' || value === 'names' || value === 'recovery'
+  return value === 'paint' || value === 'rig' || value === 'names' || value === 'recovery' || value === 'lab'
     ? value
     : 'inspector';
 }

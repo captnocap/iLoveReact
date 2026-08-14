@@ -54,6 +54,18 @@ test('non-model documents never advertise unimplemented right panes', () => {
   }
 });
 
+test('a Lab document mounts the Stack and the Lab inspector on the rails', () => {
+  const left = leftPanelsFor('material', false, true);
+  assert(left.map((button) => button.id).join(',') === 'lab-stack,assets', 'lab left rail drifted');
+  assert(left[0]!.renderer === 'lab-stack', 'the Stack pane renderer is not explicit');
+  assert(rightPanelsFor('material', true).map((button) => button.id).join(',') === 'lab', 'lab right rail drifted — the world-tile Focus panel must NOT be in the Lab set');
+  assert(rightPanelsFor('material').map((button) => button.id).join(',') === 'inspector', 'non-recipe material document lost its Focus panel');
+  assert(resolvedPanelId(rightPanelsFor('material', true), 'inspector') === 'lab', 'lab right rail did not auto-select from a world pane id');
+  assert(resolvedPanelId(rightPanelsFor('world'), 'lab') === 'inspector', 'lab pane escaped the material-only renderer');
+  assert(normalizeLeftPanelId('lab-stack') === 'lab-stack', 'Stack pane did not survive hot reload');
+  assert(normalizeRightPanelId('lab') === 'lab', 'Lab pane did not survive hot reload');
+});
+
 test('World Bible owns one explicit index pane and no generic world inspector', () => {
   const left = leftPanelsFor('knowledge');
   assert(left.length === 1 && left[0]!.id === 'world-bible' && left[0]!.renderer === 'world-bible', 'knowledge fell into the world asset browser');

@@ -42,6 +42,7 @@ import { blobViewportFaceSelection } from '../model/blobExplorerState';
 import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
 import { ModelIdentityHeader, PartSection, SelectionSection, ShapeSection } from './ModelFocusSections';
+import LabInspectorPanel from './LabInspectorPanel';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -311,11 +312,12 @@ function WorldViewsSection({ handlers }: { handlers: WorldViewHandlers }) {
 // branch: the rail is part of the region, not of any one panel mode.
 function FocusRail(props: {
   documentKind: WorkspaceDocumentKind;
+  labActive: boolean;
   activePane: string;
   collapsed: boolean;
   onPane: (pane: RightPanelId) => void;
 }) {
-  const panes = rightPanelsFor(props.documentKind);
+  const panes = rightPanelsFor(props.documentKind, props.labActive);
   const activePane = resolvedPanelId(panes, props.activePane);
   return (
     <C.HW_RightRail>
@@ -460,6 +462,13 @@ export default function Inspector(props: {
   onBrowseMaterials: () => void;
   // Saved camera views (req_4168) — the world surface's VIEWS card.
   worldViews: WorldViewHandlers;
+  // The Material Lab document's inspector (req_4406): recipe null = not a Lab
+  // document (single-material fallback keeps the ordinary Focus panel).
+  lab: {
+    recipe: import('../render3d/shaders/recipe').MaterialRecipe | null;
+    usage: { world: number; models: number };
+    handlers: import('../stage/MaterialLabSurface').LabHandlers;
+  };
   // World-globals tuning (GLOBALS req_2770) — the playtest tab's focus panel.
   onSetGlobal: (field: string, value: number) => void;
   onResetGlobal: (field: string) => void;
@@ -572,7 +581,10 @@ export default function Inspector(props: {
     : null;
   const activeCommand = commandById(props.state.activeCommandId);
   const documentKind = activeDocument?.kind ?? 'world';
-  const activePane = resolvedPanelId(rightPanelsFor(documentKind), props.state.rightPane);
+  // A Lab document (recipe-backed material) swaps the rail set entirely
+  // (req_4406): the world-tile Focus panel is NOT in its set.
+  const labUiActive = documentKind === 'material' && !!props.lab.recipe;
+  const activePane = resolvedPanelId(rightPanelsFor(documentKind, labUiActive), props.state.rightPane);
   // Focus belongs to one model's Paint pane. Leaving that context makes the
   // next Paint visit predictable instead of reviving a workspace from another
   // document or panel.
@@ -590,7 +602,23 @@ export default function Inspector(props: {
   // Collapse removes only the body. The rail remains at the stage edge so the
   // same active button can restore it without a separate hidden affordance.
   if (props.state.rightPanelCollapsed) {
-    return <FocusRail documentKind={documentKind} activePane={activePane} collapsed onPane={props.onPane} />;
+    return <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed onPane={props.onPane} />;
+  }
+  // Material Lab document (req_4406): the right rail's one pane is the Lab
+  // inspector — DIALS/PALETTE from the top, FACTS + SAVE pinned to the bottom.
+  if (labUiActive && props.lab.recipe) {
+    return (
+      <C.HW_RightPanel>
+        <LabInspectorPanel
+          state={props.state}
+          recipe={props.lab.recipe}
+          usage={props.lab.usage}
+          handlers={props.lab.handlers}
+          onCollapse={props.onCollapse}
+        />
+        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
+      </C.HW_RightPanel>
+    );
   }
   const pathRows = props.activeObject.kind === 'TILE'
     ? [
@@ -642,7 +670,7 @@ export default function Inspector(props: {
             <GcStressSection />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
+        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
   }
@@ -680,7 +708,7 @@ export default function Inspector(props: {
             <WorldViewsSection handlers={props.worldViews} />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
+        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
   }
@@ -899,7 +927,7 @@ export default function Inspector(props: {
             )}
           </C.HW_InspectorBodyFixed>
         </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
+        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
   }
@@ -950,7 +978,7 @@ export default function Inspector(props: {
         <ReadOnlySection title="PLACEMENT" color="primary" rows={pathRows} />
         <ReadOnlySection title="VISIBILITY" color="primary" rows={visibilityRows} />
       </C.HW_Inspector>
-      <FocusRail documentKind={documentKind} activePane={activePane} collapsed={false} onPane={props.onPane} />
+      <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
     </C.HW_RightPanel>
   );
 }

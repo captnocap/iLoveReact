@@ -10,6 +10,7 @@ import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/com
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
 import LeftRail from './LeftRail';
+import LabStackPanel from './LabStackPanel';
 import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
@@ -3210,7 +3211,10 @@ export default function AppFrame() {
   const activeDocumentKind = activeWorkspaceDocument.kind;
   const paintUiActive = activeDocumentKind === 'facade'
     || (activeDocumentKind === 'model' && state.modelTool.paint);
-  const contextualLeftPanels = leftPanelsFor(activeDocumentKind, paintUiActive);
+  // A recipe-backed material document is a LAB document (req_4406): its rails
+  // carry the Stack (left) and the Lab inspector (right).
+  const labUiActive = activeDocumentKind === 'material' && !!state.labActiveRecipeId;
+  const contextualLeftPanels = leftPanelsFor(activeDocumentKind, paintUiActive, labUiActive);
   const activeLeftPanel = resolvedPanelId(contextualLeftPanels, state.activeDomain);
   const activeLeftPanelDefinition = contextualLeftPanels.find((pane) => pane.id === activeLeftPanel)!;
   // The Asset Explorer is one pane, so document/tool context changes never
@@ -4983,7 +4987,8 @@ export default function AppFrame() {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
       const paintActive = documentKind === 'facade' || (documentKind === 'model' && prev.modelTool.paint);
-      const panes = leftPanelsFor(documentKind, paintActive);
+      const labActive = documentKind === 'material' && !!prev.labActiveRecipeId;
+      const panes = leftPanelsFor(documentKind, paintActive, labActive);
       const active = resolvedPanelId(panes, prev.activeDomain);
       const result = pressPanelButton(active, pressed, prev.leftPanelCollapsed);
       const changedPane = prev.activeDomain !== pressed;
@@ -5028,7 +5033,8 @@ export default function AppFrame() {
   const pressRightPanel = (pressed: RightPanelId) => {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
-      const active = resolvedPanelIdOrNull(rightPanelsFor(documentKind), prev.rightPane);
+      const labActive = documentKind === 'material' && !!prev.labActiveRecipeId;
+      const active = resolvedPanelIdOrNull(rightPanelsFor(documentKind, labActive), prev.rightPane);
       if (active === null) return {
         ...prev,
         rightPanelCollapsed: true,
@@ -5618,9 +5624,9 @@ export default function AppFrame() {
     return { world, models };
   };
 
-  const focusMaterialDocument = (variant?: number) => {
+  const focusMaterialDocument = (variant?: number, assetId?: string) => {
     const previous = stateRef.current;
-    const asset = assetById(previous.activeAssetId, previous.assetOverrides);
+    const asset = assetById(assetId ?? previous.activeAssetId, previous.assetOverrides);
     const doc = materialDocument(asset);
     const spec = asset.recipe ? shaderSpec(asset.recipe) : undefined;
     selectNativeModelSession(doc);
@@ -5630,7 +5636,16 @@ export default function AppFrame() {
     const next: EditorState = {
       ...previous,
       ...labPatch,
+      // Rail auto-select (req_4406): a Lab document brings its Stack + Lab
+      // inspector panes forward the way paint entry brings Paint forward.
+      ...(labPatch.labActiveRecipeId ? {
+        activeDomain: 'lab-stack',
+        leftPanelCollapsed: false,
+        rightPane: 'lab',
+        rightPanelCollapsed: false,
+      } : null),
       materialFocused: true,
+      activeAssetId: asset.id,
       workspaceDocuments: upsertDocument(previous.workspaceDocuments, doc),
       activeWorkspaceDocumentId: doc.id,
       colorStudioView: spec ? 'materialPalette' : previous.colorStudioView,
@@ -5658,6 +5673,12 @@ export default function AppFrame() {
     const next: EditorState = {
       ...previous,
       ...labPatch,
+      ...(labPatch.labActiveRecipeId ? {
+        activeDomain: 'lab-stack',
+        leftPanelCollapsed: false,
+        rightPane: 'lab',
+        rightPanelCollapsed: false,
+      } : null),
       materialFocused: true,
       activeAssetId: match ? match.id : previous.activeAssetId,
       workspaceDocuments: upsertDocument(previous.workspaceDocuments, doc),
@@ -9534,11 +9555,31 @@ export default function AppFrame() {
     if (autosave && !autosave.ok) return;
     const autosaved = autosave?.ok ? autosave : null;
     if (state.activeWorkspaceDocumentId !== activeWorkspaceDocumentId) selectNativeModelSession(nextDoc);
+    // A material tab gaining focus re-arms ITS recipe (req_4406): the active
+    // lab recipe follows the focused document — two open Lab tabs must not
+    // share one recipe — and the rails follow the document like Paint's do.
+    const nextMaterialSpec = nextDoc.kind === 'material' && nextDoc.sourceId
+      ? (() => {
+        const asset = assetById(nextDoc.sourceId!, state.assetOverrides);
+        return asset.recipe ? shaderSpec(asset.recipe) : undefined;
+      })()
+      : undefined;
+    const labPatch: Partial<EditorState> = nextDoc.kind === 'material'
+      ? (nextMaterialSpec?.fillFn ? ensureLabRecipeFor(nextMaterialSpec.fillFn, nextMaterialSpec.label) : { labActiveRecipeId: null })
+      : {};
     setState((prev) => {
       const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
       if (!doc) return prev;
+      const gainingFocus = prev.activeWorkspaceDocumentId !== activeWorkspaceDocumentId;
       return {
         ...prev,
+        ...labPatch,
+        ...(gainingFocus && doc.kind === 'material' && labPatch.labActiveRecipeId ? {
+          activeDomain: 'lab-stack',
+          leftPanelCollapsed: false,
+          rightPane: 'lab',
+          rightPanelCollapsed: false,
+        } : null),
         activeWorkspaceDocumentId,
         materialFocused: doc.kind === 'material',
         activeAssetId: doc.kind === 'material' && doc.sourceId ? doc.sourceId : prev.activeAssetId,
@@ -10021,6 +10062,12 @@ export default function AppFrame() {
   const activeWorldBibleSidePanel = activeLeftPanelDefinition.renderer === 'world-bible'
     ? <WorldBibleIndexPanel />
     : null;
+  // The Material Lab's STACK panel (req_4406) — Section C's body while the
+  // 'lab-stack' rail button is selected on a Lab document.
+  const activeLabRecipeNow = activeLabRecipe(state);
+  const activeLabSidePanel = activeLeftPanelDefinition.renderer === 'lab-stack' && activeLabRecipeNow
+    ? <LabStackPanel recipe={activeLabRecipeNow} selected={state.labSelectedLayer} handlers={labHandlers} />
+    : null;
 
   // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
   // track edits while the menu stays open — Rotate keeps it open) + the RANKED
@@ -10134,13 +10181,14 @@ export default function AppFrame() {
           <LeftRail
             documentKind={activeDocumentKind}
             paintActive={paintUiActive}
+            labActive={labUiActive}
             activePane={activeLeftPanel}
             collapsed={state.leftPanelCollapsed}
             onPane={pressLeftPanel}
           />
         </RenderProbe>
-        {!state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
-          {activeWorldBibleSidePanel ?? activePaintSidePanel ?? <LibraryPanel
+        {!state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activeLabSidePanel ? 'Lab Stack Panel' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
+          {activeWorldBibleSidePanel ?? activeLabSidePanel ?? activePaintSidePanel ?? <LibraryPanel
             state={state}
             catalogAssets={catalogAssets}
             assets={filteredAssets}
@@ -10168,6 +10216,7 @@ export default function AppFrame() {
               assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)),
             }))}
             onFocusMaterial={focusMaterialDocument}
+            onOpenRecipe={(asset) => focusMaterialDocument(undefined, asset.id)}
             onModel={openModelDocument}
             contentTree={contentTreeNodes}
             models={visibleModels}
@@ -10307,7 +10356,6 @@ export default function AppFrame() {
             onDeleteColorSet={deleteColorSet}
             labRecipe={activeLabRecipe(state)}
             labHandlers={labHandlers}
-            labUsage={labUsageFor(activeLabRecipe(state))}
             onOpenInLab={openColorStudioForSpec}
           />
         </RenderProbe>
@@ -10360,6 +10408,11 @@ export default function AppFrame() {
               onRecall: recallWorldViewById,
               onRename: renameWorldViewById,
               onRemove: removeWorldViewById,
+            }}
+            lab={{
+              recipe: activeLabRecipe(state),
+              usage: labUsageFor(activeLabRecipe(state)),
+              handlers: labHandlers,
             }}
             onBrowseMaterials={browseMaterials}
             // PIECE FOCUS instance editing (req_3442, stale-proofed req_3449):
