@@ -805,6 +805,8 @@ export default function Inspector(props: {
                     parts={modelParts}
                     activeId={props.state.modelActivePartId}
                     selectedIds={selectedSet}
+                    semantics={focusBridge?.semantics ?? null}
+                    bridge={focusBridge}
                     stageFocusEnabled={props.stagePartFocusEnabled}
                     onToggleStageFocus={props.onToggleStagePartFocus}
                     onSelect={props.outlinerHandlers.onSelectPart}

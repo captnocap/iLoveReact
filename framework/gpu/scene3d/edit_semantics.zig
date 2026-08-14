@@ -533,6 +533,11 @@ pub const SemanticPerceptAggregate = struct {
     instances: u32 = 0,
     min: [3]f32 = .{ std.math.inf(f32), std.math.inf(f32), std.math.inf(f32) },
     max: [3]f32 = .{ -std.math.inf(f32), -std.math.inf(f32), -std.math.inf(f32) },
+    // Authored-group span of the region's faces (req_4392): [lo, hi) group
+    // indices let the cart attribute a region to the Outliner part whose range
+    // contains it — the join the merged outliner tree nests regions with.
+    group_lo: u32 = std.math.maxInt(u32),
+    group_hi: u32 = 0,
 };
 /// The mesh the cached facts actually describe. Generation ALONE is not an identity:
 /// replaceActiveEditMesh resets g_edit_generation to 1 on every load, quality re-mesh
@@ -607,6 +612,9 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
             const gop = aggregates.getOrPut(allocator, region) catch return null;
             if (!gop.found_existing) gop.value_ptr.* = .{};
             gop.value_ptr.faces += 1;
+            const group = face_groups[face];
+            gop.value_ptr.group_lo = @min(gop.value_ptr.group_lo, group);
+            gop.value_ptr.group_hi = @max(gop.value_ptr.group_hi, group + 1);
             const instance_key = (@as(u64, region) << 32) | instance;
             const instance_gop = instance_keys.getOrPut(allocator, instance_key) catch return null;
             if (!instance_gop.found_existing) gop.value_ptr.instances += 1;
@@ -670,8 +678,8 @@ pub fn meshSemanticStateJson(allocator: std.mem.Allocator) ?[]u8 {
         var row_buf: [320]u8 = undefined;
         const row = std.fmt.bufPrint(
             &row_buf,
-            "{s}{{\"id\":{d},\"faces\":{d},\"instances\":{d},\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
-            .{ if (index == 0) "" else ",", id, aggregate.faces, aggregate.instances, aggregate.min[0], aggregate.min[1], aggregate.min[2], aggregate.max[0], aggregate.max[1], aggregate.max[2] },
+            "{s}{{\"id\":{d},\"faces\":{d},\"instances\":{d},\"groups\":[{d},{d}],\"bbox\":[{d},{d},{d},{d},{d},{d}]}}",
+            .{ if (index == 0) "" else ",", id, aggregate.faces, aggregate.instances, aggregate.group_lo, aggregate.group_hi, aggregate.min[0], aggregate.min[1], aggregate.min[2], aggregate.max[0], aggregate.max[1], aggregate.max[2] },
         ) catch return null;
         out.appendSlice(allocator, row) catch return null;
     }

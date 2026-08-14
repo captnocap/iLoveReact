@@ -91,7 +91,8 @@ export type SeatPercept = {
   faces: number;
   /** Distinct authored face groups: the quads and n-gons the modeller actually made.
    * `faces === authoredFaces` means every quad has been split into loose triangles.
-   * Null when no atlas is readable yet and the grouping cannot be observed. */
+   * Current hosts read this from the resident face-group table. Null is retained for
+   * compatibility with older hosts when neither that field nor an atlas is readable. */
   authoredFaces: number | null;
   /** Did the host measure the geometry facts below? False means the mesh was over
    * budget, so the counts are UNMEASURED, not zero. Undefined on a pre-audit host. */
@@ -117,7 +118,7 @@ export type SeatPercept = {
   hiddenFaces?: number;
   hiddenNamedFaces?: number;
   hiddenRegions?: number;
-  regions: { id: number; faces: number; instances: number; bbox: [number, number, number, number, number, number] }[];
+  regions: { id: number; faces: number; instances: number; groups?: number[]; bbox: [number, number, number, number, number, number] }[];
   table: SemanticTable;
   /** Ambient workflow position (req_4053). Present on EVERY reply once a plan is
    * running, so an agent is reminded where it is and how much debt stands between it
@@ -563,12 +564,18 @@ export function readSeatPercept(): SeatPercept | null {
     atlas?.triangles,
     atlas?.cornerVertices,
   ));
+  // Current hosts publish this from the resident face-group table. The atlas is
+  // deliberately allowed to stay stale across structural edits, so its opening
+  // groups are only a compatibility fallback for a host that lacks the live field.
+  const liveAuthoredFaces = Number.isSafeInteger(value.authoredFaces) && value.authoredFaces! >= 0
+    ? value.authoredFaces
+    : null;
   return {
     ...value,
     model: null,
     islands,
     footprints,
-    authoredFaces: countAuthoredFaces(atlas?.triangles),
+    authoredFaces: liveAuthoredFaces ?? countAuthoredFaces(atlas?.triangles),
     ...measurePlaceholderRegions(value.regions, value.table),
     activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
     parts: Array.isArray(value.parts) ? value.parts : [],
@@ -2302,7 +2309,7 @@ export function backgroundSeatRefusal(action: string, args: Record<string, unkno
 const SEAT_READ_ACTIONS = new Set([
   'look', 'semantic-status', 'rig-status', 'face-table', 'elements', 'selection', 'boundary-continuation', 'uv-state',
   'topo-refusal',
-  'recipe-list', 'shot', 'claims', 'lore',
+  'recipe-list', 'shot', 'claims',
   // The host's part-ownership truth is a pure read of the journal log's `current`
   // view. It is the ONLY way an agent can see the shell's Outliner rows disagree
   // with the native range table (req_4189), so a supervisor must be able to run it
@@ -2327,6 +2334,10 @@ const SEAT_READ_ACTIONS = new Set([
 
 const seatRequestReads = (request: SeatRequest): boolean => {
   if (request.action === 'auto-rig' && request.args?.operation === 'status') return true;
+  // Lore history/status/capture metadata do not mutate the resident mesh. Restore
+  // does, and must therefore pass through the same model claim as every structural
+  // edit instead of inheriting the broad Lore read exemption (req_4282).
+  if (request.action === 'lore') return String(request.args?.operation ?? 'history') !== 'restore';
   if (SEAT_READ_ACTIONS.has(request.action)) return true;
   const operation = String((request.args ?? {}).operation ?? '');
   if (operation === 'read') return true;

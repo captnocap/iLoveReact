@@ -1,9 +1,17 @@
-export const NO_SEMANTIC_ID = 0xffffffff;
+import {
+  NO_SEMANTIC_ID,
+  parseMeshSemanticTable,
+  type MeshEdgeRegion,
+  type MeshSemanticRegion,
+  type MeshSemanticTable,
+} from './meshSemantics';
+
+export { NO_SEMANTIC_ID } from './meshSemantics';
 
 export type SavedModelSemantics = {
   regions?: Uint32Array | number[];
   instances?: Uint32Array | number[];
-  table?: { version: 1; regions: unknown[]; [key: string]: unknown } | null;
+  table?: MeshSemanticTable | null;
 };
 
 export type ResidentModelSemantics = {
@@ -12,11 +20,14 @@ export type ResidentModelSemantics = {
   hiddenFaces?: number;
   hiddenNamedFaces?: number;
   hiddenRegions?: number;
-  regions: { id: number; faces: number; instances: number }[];
-  table: { version: 1; regions: unknown[]; [key: string]: unknown };
+  // `groups` is the region's authored-group span [lo, hi) from the percept
+  // (req_4392) — absent on hosts predating the field.
+  regions: { id: number; faces: number; instances: number; groups?: number[] }[];
+  table: MeshSemanticTable;
 } | null;
 
-export type ModelFocusSemanticRow = {
+export type ModelFocusFaceSemanticRow = {
+  kind: 'face';
   id: number;
   name: string;
   role: string;
@@ -24,7 +35,51 @@ export type ModelFocusSemanticRow = {
   faces: number;
   instances: number;
   presence: 'resident' | 'not-visible' | 'mount-only' | 'saved-only';
+  /** Authored-group span [lo, hi) of the region's resident faces (req_4392) —
+   *  the join the Outliner nests regions under parts with. Null when the host
+   *  percept predates the field or the region is not resident. */
+  groupSpan: [number, number] | null;
 };
+
+export type ModelFocusEdgeSemanticRow = {
+  kind: 'edge';
+  id: number;
+  name: string;
+  role: MeshEdgeRegion['role'];
+  objectId: string;
+  closed: boolean;
+  vertices: number;
+  edges: number;
+  presence: 'resident' | 'not-visible' | 'mount-only' | 'saved-only';
+};
+
+export type ModelFocusSemanticRow = ModelFocusFaceSemanticRow | ModelFocusEdgeSemanticRow;
+
+export type ModelFocusSemanticRowGroups = {
+  faces: ModelFocusFaceSemanticRow[];
+  edges: ModelFocusEdgeSemanticRow[];
+};
+
+/** Search the shared semantic namespace, then retain an explicit geometry-kind
+ *  split for UI consumers. Edge object identity is searchable because it is part
+ *  of the durable rigging meaning even though the narrow Names pane does not print
+ *  the full id beside every row. */
+export function filterModelFocusSemanticRows(
+  rows: ModelFocusSemanticRow[],
+  filter: string,
+): ModelFocusSemanticRowGroups {
+  const needle = filter.trim().toLowerCase();
+  const shown = needle ? rows.filter((row) => {
+    const searchable = row.kind === 'edge'
+      ? `${row.name} ${row.role} ${row.objectId}`
+      : `${row.name} ${row.role}`;
+    return searchable.toLowerCase().includes(needle);
+  }) : rows;
+  return {
+    faces: shown.filter((row): row is ModelFocusFaceSemanticRow => row.kind === 'face'),
+    edges: shown.filter((row): row is ModelFocusEdgeSemanticRow => row.kind === 'edge'),
+  };
+}
 
 export type ModelFocusSemantics = {
   status: 'healthy' | 'visibility-filtered' | 'mount-mismatch' | 'load-mismatch' | 'resident-only' | 'none';
@@ -44,25 +99,17 @@ export type ModelFocusSemantics = {
   residentHiddenFaces: number;
   residentHiddenNamedFaces: number;
   residentHiddenRegions: number;
+  savedEdgeRegions: number;
+  mountEdgeRegions: number;
+  residentEdgeRegions: number;
   rows: ModelFocusSemanticRow[];
 };
 
 type Region = { id: number; name: string; role: string; parent: number | null };
 
-function regionsFrom(value: unknown): Region[] {
-  const table = value as { version?: unknown; regions?: unknown } | null;
-  if (!table || table.version !== 1 || !Array.isArray(table.regions)) return [];
-  return table.regions.flatMap((value: unknown) => {
-    const row = value as { id?: unknown; name?: unknown; role?: unknown; parent?: unknown } | null;
-    if (!row || !Number.isInteger(row.id) || typeof row.name !== 'string' || row.name.length === 0) return [];
-    return [{
-      id: row.id as number,
-      name: row.name,
-      role: typeof row.role === 'string' ? row.role : '',
-      parent: Number.isInteger(row.parent) ? row.parent as number : null,
-    }];
-  });
-}
+function tableFrom(value: unknown): MeshSemanticTable | null { return parseMeshSemanticTable(value); }
+function faceRegionsFrom(value: unknown): MeshSemanticRegion[] { return tableFrom(value)?.regions ?? []; }
+function edgeRegionsFrom(value: unknown): MeshEdgeRegion[] { return tableFrom(value)?.edgeRegions ?? []; }
 
 /** Compare durable RJMD semantics to the resident native mesh without inferring either. */
 export function modelFocusSemantics(
@@ -72,15 +119,21 @@ export function modelFocusSemantics(
   context: Pick<ModelFocusSemantics, 'documentId' | 'packageDir' | 'mountSource'> = {},
 ): ModelFocusSemantics {
   const savedRows = Array.from(saved.regions ?? []);
-  const savedTable = regionsFrom(saved.table);
+  const savedTable = faceRegionsFrom(saved.table);
+  const savedEdges = edgeRegionsFrom(saved.table);
   const mountRows = Array.from(mount.regions ?? []);
-  const mountTable = regionsFrom(mount.table);
-  const residentTable = regionsFrom(resident?.table ?? null);
+  const mountTable = faceRegionsFrom(mount.table);
+  const mountEdges = edgeRegionsFrom(mount.table);
+  const residentTable = faceRegionsFrom(resident?.table ?? null);
+  const residentEdges = edgeRegionsFrom(resident?.table ?? null);
   const residentCounts = new Map((resident?.regions ?? []).map((row) => [row.id, row]));
   const names = new Map<number, Region>();
-  for (const row of savedTable) names.set(row.id, row);
-  for (const row of mountTable) names.set(row.id, row);
-  for (const row of residentTable) names.set(row.id, row);
+  const toRegion = (row: MeshSemanticRegion): Region => ({
+    id: row.id, name: row.name, role: row.role ?? '', parent: Number.isInteger(row.parent) ? row.parent as number : null,
+  });
+  for (const row of savedTable) names.set(row.id, toRegion(row));
+  for (const row of mountTable) names.set(row.id, toRegion(row));
+  for (const row of residentTable) names.set(row.id, toRegion(row));
   const savedNamedFaces = savedRows.filter((id) => id !== NO_SEMANTIC_ID).length;
   const mountNamedFaces = mountRows.filter((id) => id !== NO_SEMANTIC_ID).length;
   const residentNamedFaces = resident ? Math.max(0, resident.faces - resident.unnamed) : 0;
@@ -88,26 +141,53 @@ export function modelFocusSemantics(
   const residentHiddenNamedFaces = resident?.hiddenNamedFaces ?? 0;
   const residentHiddenRegions = resident?.hiddenRegions ?? 0;
   const visibilityFiltered = residentHiddenFaces > 0 && residentNamedFaces + residentHiddenNamedFaces === mountNamedFaces;
-  const rows = [...names.values()].map((row): ModelFocusSemanticRow => {
+  const faceRows = [...names.values()].map((row): ModelFocusFaceSemanticRow => {
     const counts = residentCounts.get(row.id);
+    const span = counts?.groups;
     return {
+      kind: 'face',
       ...row,
       faces: counts?.faces ?? 0,
       instances: counts?.instances ?? 0,
+      groupSpan: Array.isArray(span) && span.length === 2
+        && Number.isInteger(span[0]) && Number.isInteger(span[1]) && span[1]! > span[0]!
+        ? [span[0]!, span[1]!]
+        : null,
       presence: counts ? 'resident'
         : visibilityFiltered && residentTable.some((candidate) => candidate.id === row.id) ? 'not-visible'
         : mountTable.some((candidate) => candidate.id === row.id) ? 'mount-only'
           : 'saved-only',
     };
-  }).sort((a, b) => a.id - b.id);
+  });
+  const edges = new Map<number, MeshEdgeRegion>();
+  for (const row of savedEdges) edges.set(row.id, row);
+  for (const row of mountEdges) edges.set(row.id, row);
+  for (const row of residentEdges) edges.set(row.id, row);
+  const edgeRows = [...edges.values()].map((row): ModelFocusEdgeSemanticRow => ({
+    kind: 'edge',
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    objectId: row.objectId,
+    closed: row.closed,
+    vertices: row.vertices.length,
+    edges: row.vertices.length - 1 + (row.closed ? 1 : 0),
+    presence: residentEdges.some((candidate) => candidate.id === row.id) ? 'resident'
+      : mountEdges.some((candidate) => candidate.id === row.id) ? 'mount-only'
+        : 'saved-only',
+  }));
+  const rows: ModelFocusSemanticRow[] = [...faceRows, ...edgeRows].sort((a, b) => a.id - b.id);
   const savedRegions = savedTable.length;
   const mountRegions = mountTable.length;
   const residentRegions = resident?.regions.length ?? 0;
-  const status = savedRegions > 0 && mountRegions === 0 ? 'mount-mismatch'
-    : mountRegions > 0
+  const savedSemanticRows = savedRegions + savedEdges.length;
+  const mountSemanticRows = mountRegions + mountEdges.length;
+  const residentSemanticRows = residentRegions + residentEdges.length;
+  const status = savedSemanticRows > 0 && mountSemanticRows === 0 ? 'mount-mismatch'
+    : mountSemanticRows > 0
       ? (visibilityFiltered ? 'visibility-filtered'
-        : residentRegions > 0 && residentNamedFaces === mountNamedFaces ? 'healthy' : 'load-mismatch')
-    : residentRegions > 0 ? 'resident-only' : 'none';
+        : residentSemanticRows > 0 && residentNamedFaces === mountNamedFaces && residentEdges.length === mountEdges.length ? 'healthy' : 'load-mismatch')
+    : residentSemanticRows > 0 ? 'resident-only' : 'none';
   return {
     ...context,
     status,
@@ -124,6 +204,9 @@ export function modelFocusSemantics(
     residentHiddenFaces,
     residentHiddenNamedFaces,
     residentHiddenRegions,
+    savedEdgeRegions: savedEdges.length,
+    mountEdgeRegions: mountEdges.length,
+    residentEdgeRegions: residentEdges.length,
     rows,
   };
 }
