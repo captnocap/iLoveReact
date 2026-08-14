@@ -23,6 +23,7 @@
 //! and drives this module; the math + paint buffer live here so they stay testable.
 
 const std = @import("std");
+const log = @import("../diag/log.zig");
 const model_source = @import("model_source.zig");
 pub const paint_islands = @import("paint_islands.zig");
 
@@ -2704,7 +2705,10 @@ pub fn setDetail(new_density: u32, verts: []f32, vert_count: u32) void {
     rebuildLayoutInner(verts, vert_count, true);
     if (g_layout) |lay| {
         if (lay.density < req) {
-            std.debug.print("[model_paint] density {d} texels/m exceeds the atlas limits ({d}px dim / {d}MB) — clamped to {d}.\n", .{ nd, MAX_ATLAS_DIM, ATLAS_BUDGET / (1024 * 1024), detail() });
+            // log.warn, NOT std.debug.print: the clamp test exercises this line, and
+            // raw stderr from a passing test makes the Zig 0.16 build runner render
+            // the whole step as a red "failed command" block (req_4377).
+            log.warn(.gpu, "[model_paint] density {d} texels/m exceeds the atlas limits ({d}px dim / {d}MB) — clamped to {d}.", .{ nd, MAX_ATLAS_DIM, ATLAS_BUDGET / (1024 * 1024), detail() });
         }
     }
 }
@@ -2970,6 +2974,10 @@ test "density clamps: a huge face at high density stays inside the GPU limits" {
     // A 100m×100m face at 128 texels/m wants a 12800² atlas — build() must HALVE the
     // density until it fits, never hand the GPU an illegal texture (the "imported a
     // bus while in paint mode" panic class).
+    // The clamp warning rides diag/log into the event bus (lazy-initing it);
+    // leave the bus de-inited so later bus/log tests start from a full reset.
+    const event_bus = @import("../diag/event_bus.zig");
+    defer event_bus.deinit();
     var verts: [6 * 8]f32 = std.mem.zeroes([6 * 8]f32);
     const q = [4][3]f32{ .{ 0, 0, 0 }, .{ 100, 0, 0 }, .{ 100, 0, 100 }, .{ 0, 0, 100 } };
     const tri = [6]u32{ 0, 1, 2, 0, 2, 3 };
@@ -3411,4 +3419,72 @@ pub fn sessionReset() void {
     advanceGeometryRevision();
     // Deliberately frees NOTHING: ownership of the previous state lives in the
     // record the coordinator just parked.
+}
+
+fn optionalSlicesAlias(comptime T: type, parked: ?[]T, active: ?[]T) bool {
+    const parked_slice = parked orelse return false;
+    const active_slice = active orelse return false;
+    return parked_slice.ptr == active_slice.ptr;
+}
+
+fn layoutAliasesActive(parked: ?paint_islands.Layout) bool {
+    const parked_layout = parked orelse return false;
+    const active_layout = g_layout orelse return false;
+    return parked_layout.islands.ptr == active_layout.islands.ptr or
+        parked_layout.tri_island.ptr == active_layout.tri_island.ptr or
+        parked_layout.corner_uv.ptr == active_layout.corner_uv.ptr;
+}
+
+/// A record loaded into the module remains a by-value mirror of the active globals
+/// until the next park overwrites it. Destruction is valid only after the registry has
+/// parked the active document and reset the globals, but keep this boundary defensive:
+/// one shared owner means the whole record is active, so freeing only the other fields
+/// would create a half-destroyed document just as surely as freeing the shared pointer.
+fn sessionAliasesActive(session: *const Session) bool {
+    return optionalSlicesAlias(f32, session.g_positions, g_positions) or
+        optionalSlicesAlias(u8, session.g_face_alpha, g_face_alpha) or
+        layoutAliasesActive(session.g_layout) or
+        optionalSlicesAlias(u32, session.g_isl_start, g_isl_start) or
+        optionalSlicesAlias(u32, session.g_isl_tris, g_isl_tris) or
+        optionalSlicesAlias(u8, session.g_rgba, g_rgba) or
+        optionalSlicesAlias(CarryIsle, session.g_carry_isles, g_carry_isles) or
+        optionalSlicesAlias(u8, session.g_carry_rgba, g_carry_rgba) or
+        optionalSlicesAlias(u8, session.g_mat_rgba, g_mat_rgba);
+}
+
+fn deinitOptionalSlice(comptime T: type, owned: *?[]T) void {
+    if (owned.*) |slice| alloc.free(slice);
+    owned.* = null;
+}
+
+/// Destroy one genuinely parked paint target after the model-session registry has
+/// reset the module globals. Ownership is deliberately enumerated here rather than
+/// inferred from every pointer-shaped Session field:
+///
+///   * `g_layout` owns its islands, triangle map, and corner-UV slices through
+///     `paint_islands.Layout.deinit`;
+///   * positions, face alpha, the two island-CSR arrays, and atlas RGBA are independent
+///     live-target allocations;
+///   * the carry island table/pixels and material-ink pixels are independent one-shot
+///     allocations, even when no live target remains;
+///   * scalar dimensions, revisions, dirty bounds, base settings, and the neutral
+///     placeholder own no memory. `g_geometry_revision` is intentionally absent from
+///     Session because it is the process-global identity that makes a tab swap visible.
+///
+/// The active-alias guard is all-or-nothing, and resetting the released record makes
+/// a second teardown harmless.
+pub fn sessionDeinitParked(session: *Session) void {
+    if (sessionAliasesActive(session)) return;
+
+    deinitOptionalSlice(f32, &session.g_positions);
+    deinitOptionalSlice(u8, &session.g_face_alpha);
+    if (session.g_layout) |*layout| layout.deinit(alloc);
+    session.g_layout = null;
+    deinitOptionalSlice(u32, &session.g_isl_start);
+    deinitOptionalSlice(u32, &session.g_isl_tris);
+    deinitOptionalSlice(u8, &session.g_rgba);
+    deinitOptionalSlice(CarryIsle, &session.g_carry_isles);
+    deinitOptionalSlice(u8, &session.g_carry_rgba);
+    deinitOptionalSlice(u8, &session.g_mat_rgba);
+    session.* = .{};
 }
