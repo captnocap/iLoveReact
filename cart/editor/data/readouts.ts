@@ -10,7 +10,10 @@ export function buildStatusLabel(state: EditorState): string {
   return state.history.some((event) => event.undoable) ? 'dirty' : 'unbuilt';
 }
 
-export function selectionPosition(state: EditorState, object: WorldObject = selectedObject(state)) {
+/** Null when nothing is selected — the caller renders dashes rather than
+ *  zeros, on the same law as selectedPieceReadout below (req_4435). */
+export function selectionPosition(state: EditorState, object: WorldObject | null = selectedObject(state)) {
+  if (!object) return null;
   return {
     x: Math.round(object.left),
     y: state.floorIndex,
@@ -32,7 +35,7 @@ export function selectedPieceReadout(state: EditorState) {
 }
 
 export function objectMetricRows(state: EditorState, object: WorldObject): Array<[string, string]> {
-  const pos = selectionPosition(state, object);
+  const pos = selectionPosition(state, object)!;
   return [
     ['x', String(pos.x)],
     ['floor', String(pos.y)],

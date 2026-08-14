@@ -10,14 +10,15 @@ import { REGIONS } from '../shell/regions';
 import type { ModelFocusBridge } from '../stage/ModelView';
 import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, SNAP_MODES, effectiveModelPackage } from '../data/content';
-import { resolvedPanelId, rightPanelsFor, type RightPanelId } from '../data/panelSystem';
+import { resolvedPanelId, resolvedPanelIdOrNull, rightPanelsFor, type RightPanelId } from '../data/panelSystem';
 import { WORLD_VIEW_SLOT_COUNT } from '../data/keymap';
 import { objectMetricRows } from '../data/readouts';
 import type { Asset, EditorState, ModelTextureSlot, WorkspaceDocumentKind, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
 import type { WorldView } from '../world/worldViews';
-import { assetById, resolveMaterialRef } from '../data/catalog';
+import { assetByIdOrNull, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
+import FocusEmpty from './FocusEmpty';
 import RigSection from './RigSection';
 import CharacterRigSection from './CharacterRigSection';
 import { skeletonToPropRig, type CharacterRigApi, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig } from '../../../runtime/skeleton';
@@ -43,6 +44,7 @@ import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSe
 import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
 import { ModelIdentityHeader, PartSection, SelectionSection, ShapeSection } from './ModelFocusSections';
 import LabInspectorPanel from './LabInspectorPanel';
+import { AnimationGenerateInspector } from '../animation/AnimationSidePanels';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -271,7 +273,7 @@ function WorldViewsSection({ handlers }: { handlers: WorldViewHandlers }) {
       {handlers.views.length === 0 ? (
         <C.HW_ReadRow>
           <C.HW_FormLabel>saved</C.HW_FormLabel>
-          <C.HW_ReadValue>none — Store View pins this spot</C.HW_ReadValue>
+          <C.HW_ReadValue>none yet — pin one above</C.HW_ReadValue>
         </C.HW_ReadRow>
       ) : handlers.views.map((view, index) => {
         const active = view.id === handlers.activeId;
@@ -420,8 +422,11 @@ function unavailableBlobExplorerProps(modelId: string): BlobExplorerSurfaceProps
 
 export default function Inspector(props: {
   state: EditorState;
-  activeObject: WorldObject;
-  activeAsset: Asset;
+  /** The selected world object / material, or NULL when the user has selected
+   *  nothing. Panels render their designed empty state on null; they never
+   *  invent a subject (req_4435). */
+  activeObject: WorldObject | null;
+  activeAsset: Asset | null;
   onPane: (pane: RightPanelId) => void;
   onCollapse: () => void;
   onPreset: () => void;
@@ -584,7 +589,11 @@ export default function Inspector(props: {
   // A Lab document (recipe-backed material) swaps the rail set entirely
   // (req_4406): the world-tile Focus panel is NOT in its set.
   const labUiActive = documentKind === 'material' && !!props.lab.recipe;
-  const activePane = resolvedPanelId(rightPanelsFor(documentKind, labUiActive), props.state.rightPane);
+  // AppFrame only mounts the Inspector for kinds that HAVE a focus rail; this
+  // stays defensive so a new document kind cannot crash the shell before its
+  // panes exist (req_4435).
+  const focusPanes = rightPanelsFor(documentKind, labUiActive);
+  const activePane = resolvedPanelIdOrNull(focusPanes, props.state.rightPane) ?? 'inspector';
   // Focus belongs to one model's Paint pane. Leaving that context makes the
   // next Paint visit predictable instead of reviving a workspace from another
   // document or panel.
@@ -599,6 +608,9 @@ export default function Inspector(props: {
       props.state.modelParts[activeModel.id] ?? [],
     ));
   }, [focusBridge, activePane, activeModel?.id, props.state.modelParts, props.blobExplorer?.modelId]);
+  // Below every hook, so the rules of hooks hold: a document kind with no focus
+  // panes renders no panel at all rather than an empty rail stub.
+  if (focusPanes.length === 0) return null;
   // Collapse removes only the body. The rail remains at the stage edge so the
   // same active button can restore it without a separate hidden affordance.
   if (props.state.rightPanelCollapsed) {
@@ -620,13 +632,22 @@ export default function Inspector(props: {
       </C.HW_RightPanel>
     );
   }
-  const pathRows = props.activeObject.kind === 'TILE'
+  if (activeDocument?.kind === 'animation') {
+    return (
+      <C.HW_RightPanel>
+        <AnimationGenerateInspector />
+        <FocusRail documentKind={documentKind} labActive={false} activePane={activePane} collapsed={false} onPane={props.onPane} />
+      </C.HW_RightPanel>
+    );
+  }
+  const fallbackKind = props.activeObject?.kind ?? 'TILE';
+  const pathRows = fallbackKind === 'TILE'
     ? [
       ['walkable', '—'],
       ['surface preset', props.state.surfacePreset],
       ['floor', FLOORS[props.state.floorIndex]!],
     ]
-    : props.activeObject.kind === 'PIECE' || props.activeObject.kind === 'PREFAB'
+    : fallbackKind === 'PIECE' || fallbackKind === 'PREFAB'
       ? [
         ['collision', 'solid'],
         ['snap domain', SNAP_MODES[props.state.snapIndex]!],
@@ -634,14 +655,14 @@ export default function Inspector(props: {
       ]
       : [
         ['snap domain', SNAP_MODES[props.state.snapIndex]!],
-        ['placement', props.activeObject.kind.toLowerCase()],
+        ['placement', fallbackKind.toLowerCase()],
         ['floor', FLOORS[props.state.floorIndex]!],
       ];
-  const visibilityRows = props.activeObject.kind === 'PROP'
+  const visibilityRows = fallbackKind === 'PROP'
     ? [
       ['occlusion', '—'],
       ['bake', '—'],
-      ['channel', props.activeObject.kind.toLowerCase()],
+      ['channel', fallbackKind.toLowerCase()],
     ]
     : [
       ['conceal', '—'],
@@ -680,31 +701,40 @@ export default function Inspector(props: {
   if (activeDocument?.kind === 'world') {
     const selectedPiece = props.state.worldPieces.find((p) => p.id === props.state.selectedPieceId) ?? null;
     const resolveMaterial = (ref: MaterialRef) => resolveMaterialRef(ref, props.state.assetOverrides);
-    const activeMaterialAsset = assetById(props.state.activeAssetId, props.state.assetOverrides);
+    const activeMaterialAsset = assetByIdOrNull(props.state.activeAssetId, props.state.assetOverrides);
+    // Neither a placed piece selected nor a palette piece armed: there is no
+    // subject, so the panel says what it shows and how to fill it (req_4435).
+    const worldFocusEmpty = !selectedPiece && !props.state.armedPieceId;
     return (
       <C.HW_RightPanel>
         <C.HW_Inspector>
           <C.HW_PanelHead>
-            <C.HW_Kicker>{selectedPiece ? 'PIECE FOCUS' : 'BUILD'}</C.HW_Kicker>
+            <C.HW_Kicker>{selectedPiece ? 'PIECE FOCUS' : worldFocusEmpty ? 'WORLD FOCUS' : 'BUILD'}</C.HW_Kicker>
             <C.HW_Spacer />
             <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
               <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
             </C.HW_PanelHeadButton>
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
-            <PieceBody
+            {worldFocusEmpty ? (
+              <FocusEmpty
+                shows="Piece focus"
+                fill="click a placed piece, or arm one from the build bar"
+                icon="Boxes"
+              />
+            ) : <PieceBody
               armedPieceId={props.state.armedPieceId}
               selected={selectedPiece}
               onAssignSlot={props.onAssignSlot}
               onClearSlot={props.onClearSlot}
               resolveMaterial={resolveMaterial}
-              activeMaterial={{ name: activeMaterialAsset.name, color: activeMaterialAsset.color }}
+              activeMaterial={activeMaterialAsset ? { name: activeMaterialAsset.name, color: activeMaterialAsset.color } : null}
               onBrowseMaterials={props.onBrowseMaterials}
               edit={props.pieceEdit}
               // Session renames/dupes resolve here so the model row names what
               // the library shows NOW, not a stale synthesized id.
               modelNameFor={(pkgId) => effectiveModelPackage(pkgId, props.state.modelOverrides, props.state.modelDupes)?.name ?? null}
-            />
+            />}
             <WorldViewsSection handlers={props.worldViews} />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
@@ -931,6 +961,13 @@ export default function Inspector(props: {
       </C.HW_RightPanel>
     );
   }
+  // The FALLBACK branch — a document kind with no focus panel of its own
+  // (a plain material document, a facade). It used to render a synthetic TILE
+  // object full of em-dash filler rows, driven by the placeholder that
+  // selectedObject() invented when nothing was selected. With no subject there
+  // is nothing to describe, so it says so (req_4435).
+  const fallbackObject = props.activeObject;
+  const fallbackAsset = props.activeAsset;
   return (
     <C.HW_RightPanel>
       <C.HW_Inspector>
@@ -941,42 +978,51 @@ export default function Inspector(props: {
             <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
           </C.HW_PanelHeadButton>
         </C.HW_PanelHead>
-        <C.HW_ObjectHead>
-          <C.HW_Tag><C.HW_TagText>{props.activeObject.kind}</C.HW_TagText></C.HW_Tag>
-          <C.HW_ObjectTitle>{props.activeObject.name}</C.HW_ObjectTitle>
-          <C.HW_Spacer />
-          <C.HW_Swatch style={{ backgroundColor: props.activeAsset.color }} />
-        </C.HW_ObjectHead>
-        <C.HW_MetricRow>
-          {objectMetricRows(props.state, props.activeObject).map(([label, value]) => (
-            <C.HW_Metric key={label}>
-              <C.HW_MetricValue>{value}</C.HW_MetricValue>
-              <C.HW_MetricLabel>{label}</C.HW_MetricLabel>
-            </C.HW_Metric>
-          ))}
-        </C.HW_MetricRow>
-        <ReadOnlySection title={`${props.activeObject.kind} FACTS`} color="primary" rows={[
-          ['asset', props.activeAsset.name],
-          ['tool', activeCommand.name],
-          ['key', activeCommand.key],
-        ]} />
-        {props.activeObject.kind === 'TILE' ? (
-          <PresetSection
-            title="SURFACE DEFAULTS"
-            color="warning"
-            active={props.state.surfacePreset}
-            options={PRESETS}
-            open={props.state.presetMenuOpen}
-            onPreset={props.onPreset}
-            onOption={props.onPresetOption}
-            rows={[
-              ['actual friction', '—'],
-              ['actual speed factor', '—'],
-            ]}
+        {!fallbackObject ? (
+          <FocusEmpty
+            shows={`${documentKind} focus`}
+            fill="select something on the stage, or pick an asset in the drawer"
           />
-        ) : null}
-        <ReadOnlySection title="PLACEMENT" color="primary" rows={pathRows} />
-        <ReadOnlySection title="VISIBILITY" color="primary" rows={visibilityRows} />
+        ) : (
+          <>
+            <C.HW_ObjectHead>
+              <C.HW_Tag><C.HW_TagText>{fallbackObject.kind}</C.HW_TagText></C.HW_Tag>
+              <C.HW_ObjectTitle>{fallbackObject.name}</C.HW_ObjectTitle>
+              <C.HW_Spacer />
+              {fallbackAsset ? <C.HW_Swatch style={{ backgroundColor: fallbackAsset.color }} /> : null}
+            </C.HW_ObjectHead>
+            <C.HW_MetricRow>
+              {objectMetricRows(props.state, fallbackObject).map(([label, value]) => (
+                <C.HW_Metric key={label}>
+                  <C.HW_MetricValue>{value}</C.HW_MetricValue>
+                  <C.HW_MetricLabel>{label}</C.HW_MetricLabel>
+                </C.HW_Metric>
+              ))}
+            </C.HW_MetricRow>
+            <ReadOnlySection title={`${fallbackObject.kind} FACTS`} color="primary" rows={[
+              ['asset', fallbackAsset ? fallbackAsset.name : 'none selected'],
+              ['tool', activeCommand.name],
+              ['key', activeCommand.key],
+            ]} />
+            {fallbackObject.kind === 'TILE' ? (
+              <PresetSection
+                title="SURFACE DEFAULTS"
+                color="warning"
+                active={props.state.surfacePreset}
+                options={PRESETS}
+                open={props.state.presetMenuOpen}
+                onPreset={props.onPreset}
+                onOption={props.onPresetOption}
+                rows={[
+                  ['actual friction', '—'],
+                  ['actual speed factor', '—'],
+                ]}
+              />
+            ) : null}
+            <ReadOnlySection title="PLACEMENT" color="primary" rows={pathRows} />
+            <ReadOnlySection title="VISIBILITY" color="primary" rows={visibilityRows} />
+          </>
+        )}
       </C.HW_Inspector>
       <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
     </C.HW_RightPanel>

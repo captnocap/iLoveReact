@@ -21,13 +21,17 @@ export function librarySearchHitKey(hit: LibrarySearchHit): string {
 export function resolveLibrarySearchSelection(
   hits: readonly LibrarySearchHit[],
   preferredKey: string | null,
-  activeAssetId: string,
+  /** Null when nothing is selected — then no hit is pre-selected by an asset
+   *  the user never picked (req_4435). */
+  activeAssetId: string | null,
   activeDocumentId: string,
 ): string | null {
   const available = new Set(hits.map(librarySearchHitKey));
   if (preferredKey && available.has(preferredKey)) return preferredKey;
-  const assetKey = `asset:${activeAssetId}`;
-  if (available.has(assetKey)) return assetKey;
+  if (activeAssetId) {
+    const assetKey = `asset:${activeAssetId}`;
+    if (available.has(assetKey)) return assetKey;
+  }
   if (activeDocumentId.startsWith('model:')) {
     const modelKey = `model:${activeDocumentId.slice('model:'.length)}`;
     if (available.has(modelKey)) return modelKey;

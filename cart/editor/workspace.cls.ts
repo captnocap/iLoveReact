@@ -5,6 +5,11 @@ import { EDITOR_COLORS, EDITOR_STYLES } from './theme';
 // (chrome/action bar/content browser/focus panel/status bar) comes from
 // REGIONS — one source of truth, imported by panel content too.
 import { REGIONS } from './shell/regions';
+// The overflow policy (req_4435): every single-line panel string is declared
+// through oneLine/oneLineColumn, which stamp BOTH halves of "never clips" —
+// the no-wrap elision props and the min-width-0 that lets flex actually shrink
+// it. A bare `noWrap: true` in this sheet is the VIEWS-row bug re-entering.
+import { oneLine, oneLineColumn } from './panelText';
 
 setTokens(EDITOR_COLORS);
 setStyleTokens(EDITOR_STYLES);
@@ -35,8 +40,8 @@ classifier({
   HW_Pill: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_PillOn: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
   // Button labels NEVER wrap (req_2626 II) — truncate loudly instead.
-  HW_PillText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_PillTextOn: { type: 'Text', fontSize: 10, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_PillText: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 700 }),
+  HW_PillTextOn: oneLine(10, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 800 }),
   HW_WindowControls: { type: 'Box', style: { height: '100%', flexDirection: 'row', alignItems: 'center', marginRight: -10 } },
   HW_WindowButton: { type: 'Pressable', style: { width: 38, height: '100%', alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_WindowClose: { type: 'Pressable', style: { width: 38, height: '100%', alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:error' } },
@@ -83,10 +88,10 @@ classifier({
   HW_DockHistoryRow: { type: 'Box', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
   HW_EventRow: { type: 'Box', style: { height: 46, flexDirection: 'column', justifyContent: 'center', gap: 4, paddingLeft: 12, paddingRight: 12, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
   HW_EventTop: { type: 'Box', style: { height: 15, flexDirection: 'row', alignItems: 'center', gap: 8 } },
-  HW_EventTitle: { type: 'Text', fontSize: 11, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { flexGrow: 1, minWidth: 0, fontFamily: MONO, fontWeight: 800 } },
-  HW_EventDetail: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO } },
-  HW_EventType: { type: 'Text', fontSize: 9, color: 'theme:primary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
-  HW_EventTime: { type: 'Text', fontSize: 9, color: 'theme:valNum', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_EventTitle: oneLine(11, 'theme:text', { flexGrow: 1, fontFamily: MONO, fontWeight: 800 }),
+  HW_EventDetail: oneLine(9, 'theme:textDim', { fontFamily: MONO }),
+  HW_EventType: oneLine(9, 'theme:primary', { fontFamily: MONO, fontWeight: 800 }),
+  HW_EventTime: oneLine(9, 'theme:valNum', { fontFamily: MONO, fontWeight: 800 }),
   HW_DialogScrim: { type: 'Box', blocksPointerEvents: true, style: { position: 'absolute', left: 0, right: 0, top: 0, bottom: REGIONS.statusBar.height, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.48)' } },
   HW_BuildDialog: { type: 'Box', style: { width: 900, height: 620, flexDirection: 'column', borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
   HW_DialogHead: { type: 'Box', style: { height: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 12, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
@@ -96,7 +101,7 @@ classifier({
   HW_StlConversionDialog: { type: 'Box', style: { width: 460, flexDirection: 'column', borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
   HW_StlConversionHead: { type: 'Box', style: { height: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 12, paddingRight: 12, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_StlConversionBody: { type: 'Box', style: { flexDirection: 'column', gap: 10, padding: 14 } },
-  HW_StlConversionName: { type: 'Text', fontSize: 12, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_StlConversionName: oneLine(12, 'theme:text', { fontFamily: MONO, fontWeight: 800 }),
   HW_StlConversionTrack: { type: 'Box', style: { height: 6, borderRadius: 3, backgroundColor: 'theme:track', overflow: 'hidden' } },
   HW_StlConversionActivity: { type: 'Box', style: { width: '62%', height: '100%', borderRadius: 3, backgroundColor: 'theme:primary' } },
   HW_StlConversionHint: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, lineHeight: 15 } },
@@ -131,14 +136,14 @@ classifier({
   HW_LibSearchInput: { type: 'TextInput', style: { flexGrow: 1, minWidth: 0, height: 22, borderWidth: 0, backgroundColor: 'transparent', color: 'theme:textSecondary', fontSize: 11 } },
   HW_QuickRow: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 7, marginLeft: 7, marginRight: 7, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_QuickRowOn: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 7, marginLeft: 7, marginRight: 7, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
-  HW_QuickLabel: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontWeight: 700 } },
+  HW_QuickLabel: oneLine(10, 'theme:textSecondary', { fontWeight: 700 }),
   HW_LibBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row' } },
   HW_LibTreeCol: { type: 'Box', style: { width: REGIONS.contentBrowser.treeWidth, height: '100%', flexDirection: 'column', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_LibGridCol: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column' } },
   HW_LibCrumb: { type: 'Box', style: { height: 28, flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: 10, paddingRight: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
   HW_CrumbSeg: { type: 'Pressable', style: { height: 20, alignItems: 'center', justifyContent: 'center', paddingLeft: 4, paddingRight: 4, borderRadius: 'theme:radiusSm' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
-  HW_CrumbText: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_CrumbTextOn: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_CrumbText: oneLine(9, 'theme:textDim', { fontFamily: MONO, fontWeight: 700 }),
+  HW_CrumbTextOn: oneLine(9, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 800 }),
   HW_LibFoot: { type: 'Box', style: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 10, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft' } },
   // Expanded grid-area variants: same tiles/cells as the tucked panel, but the
   // column flexes; page sizes (catalog/content) keep rows from half-clipping.
@@ -155,9 +160,9 @@ classifier({
   HW_DetailThumb: { type: 'Box', style: { width: 68, height: 68, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
   HW_DetailText: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 4 } },
   HW_DetailNameRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6 } },
-  HW_DetailMeta: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO } },
+  HW_DetailMeta: oneLine(9, 'theme:textDim', { fontFamily: MONO }),
   HW_PanelHead: { type: 'Box', style: { height: 30, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 12, paddingRight: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
-  HW_Kicker: { type: 'Text', fontSize: 9, color: 'theme:textFaint', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.5 } },
+  HW_Kicker: oneLine(9, 'theme:textFaint', { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.5 }),
   HW_HeadTitle: { type: 'Text', fontSize: 12, color: 'theme:text', style: { fontWeight: 800 } },
   HW_Search: { type: 'TextInput', style: { height: 25, marginLeft: 10, marginRight: 10, marginTop: 7, marginBottom: 5, paddingLeft: 9, paddingRight: 8, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:textSecondary', fontSize: 11 } },
   HW_ContentTree: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minHeight: 0, flexDirection: 'column', paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 3, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border', overflow: 'scroll' } },
@@ -217,7 +222,7 @@ classifier({
   HW_VerbRow: { type: 'Box', style: { height: REGIONS.grid.verbRowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 } },
   HW_VerbPrimary: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_VerbFixed: { type: 'Pressable', style: { width: REGIONS.grid.verbColWidth, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
-  HW_VerbText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_VerbText: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 800 }),
   HW_MaterialGrid: { type: 'Box', style: { height: 284, flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', justifyContent: 'space-between', gap: 4, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, overflow: 'hidden' } },
   HW_MaterialTile: { type: 'Pressable', style: { width: 68, height: 68, position: 'relative', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg', overflow: 'hidden' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_MaterialTileOn: { type: 'Pressable', style: { width: 68, height: 68, position: 'relative', borderRadius: 'theme:radiusMd', borderWidth: 2, borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg', overflow: 'hidden' } },
@@ -234,13 +239,19 @@ classifier({
   HW_MaterialSwatch: { type: 'Box', style: { width: 43, height: 50, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_MaterialInfo: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 3 } },
   HW_MaterialTitleRow: { type: 'Box', style: { height: 15, flexDirection: 'row', alignItems: 'center', gap: 6 } },
-  HW_MaterialName: { type: 'Text', fontSize: 11, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_MaterialName: oneLine(11, 'theme:text', { fontFamily: MONO, fontWeight: 900 }),
   HW_MaterialStatsRow: { type: 'Box', style: { height: 11, flexDirection: 'row', gap: 8, alignItems: 'center' } },
   HW_MaterialStat: { type: 'Text', fontSize: 8, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_VariantStrip: { type: 'Box', style: { flexDirection: 'row', gap: 5 } },
-  HW_VariantPill: { type: 'Pressable', style: { flexGrow: 1, height: 20, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
-  HW_VariantSwatch: { type: 'Box', style: { width: 13, height: 12, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
-  HW_VariantLabel: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800 } },
+  // VARIANT TAKES (req_4435): one ROW per take, not three pills abreast. Three
+  // pills sharing ~236px of card width gave each take ~75px for a swatch, a
+  // name and its role tag — the names and tags overlapped and neither was
+  // legible. A take's name and its role are both facts worth reading, so each
+  // take gets a full row: swatch, name (elides), role tag on the right.
+  HW_VariantStrip: { type: 'Box', style: { flexDirection: 'column', gap: 3 } },
+  HW_VariantPill: { type: 'Pressable', style: { width: '100%', height: 20, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 6, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_VariantSwatch: { type: 'Box', style: { width: 13, height: 12, flexShrink: 0, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
+  HW_VariantLabel: oneLine(9, 'theme:textSecondary', { flexGrow: 1, fontFamily: MONO, fontWeight: 800 }),
+  HW_VariantRole: oneLineColumn(8, 'theme:textFaint', 44, { fontFamily: MONO, textAlign: 'right' }),
   HW_MaterialActions: { type: 'Box', style: { width: 26, alignItems: 'center' } },
   HW_IconMiniButton: { type: 'Pressable', style: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_ToolPanel: { type: 'Box', style: { borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', paddingTop: 6, paddingBottom: 6 } },
@@ -256,15 +267,15 @@ classifier({
   HW_SelectedVariant: { type: 'Pressable', style: { flexGrow: 1, height: 49, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_SelectedVariantSwatch: { type: 'Box', style: { width: 43, height: 17, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
   HW_ToolRow: { type: 'Box', style: { minHeight: 21, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
-  HW_ToolLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, minWidth: 74 } },
-  HW_ToolValue: { type: 'Text', fontSize: 10, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_ToolLabel: oneLineColumn(9, 'theme:textDim', 74, { fontFamily: MONO }),
+  HW_ToolValue: oneLine(10, 'theme:text', { fontFamily: MONO, fontWeight: 800 }),
   HW_ToolHint: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO } },
   HW_MiniBar: { type: 'Box', style: { flexGrow: 1, height: 4, backgroundColor: 'theme:track', borderRadius: 2, overflow: 'hidden' } },
   HW_MiniFill: { type: 'Box', style: { height: '100%', backgroundColor: 'theme:primary', borderRadius: 2 } },
   HW_ChipRow: { type: 'Box', style: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' } },
   HW_Group: { type: 'Box', style: { borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft', paddingTop: 8, paddingBottom: 8 } },
   HW_GroupTitle: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, marginBottom: 7 } },
-  HW_GroupText: { type: 'Text', fontSize: 10, color: 'theme:primary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.1 } },
+  HW_GroupText: oneLine(10, 'theme:primary', { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.1 }),
   HW_MemoryRow: { type: 'Pressable', style: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 24, paddingLeft: 12, paddingRight: 12 }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_MemoryLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, minWidth: 72 } },
   HW_MemoryValue: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontWeight: 700 } },
@@ -279,6 +290,49 @@ classifier({
   HW_Stage: { type: 'Pressable', style: { flexGrow: 1, minHeight: 0, position: 'relative', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_StagePanel: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_StageViewport: { type: 'Box', style: { flexGrow: 1, minHeight: 0, position: 'relative', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
+
+  // A stage with genuinely nothing staged says so (req_4435).
+  HW_StageEmpty: { type: 'Box', style: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', paddingLeft: 40, paddingRight: 40 } },
+  HW_StageEmptyLine: { type: 'Text', fontSize: 11, color: 'theme:textFaint', style: { fontFamily: MONO, textAlign: 'center' } },
+
+  // ── HOME, the boot surface (req_4435) ──────────────────────────────────
+  // Reads as a workbench door, not a splash screen: a masthead, two cards, the
+  // real map list, one joke. Everything here is either an action or a fact.
+  HW_Home: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', gap: 12, paddingLeft: 22, paddingRight: 22, paddingTop: 16, paddingBottom: 12, backgroundColor: 'theme:bg', overflow: 'hidden' } },
+  HW_HomeMasthead: { type: 'Box', style: { position: 'relative', flexDirection: 'column', gap: 4, paddingBottom: 12, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HW_HomeBrandRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 9 } },
+  HW_HomeBrand: oneLine(13, 'theme:text', { fontFamily: MONO, fontWeight: 900, letterSpacing: 2.4 }),
+  HW_HomeLaunch: oneLine(9, 'theme:textFaint', { fontFamily: MONO, fontWeight: 700 }),
+  HW_HomeMilestone: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 19, paddingLeft: 7, paddingRight: 8, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:warning', backgroundColor: 'theme:controlBg' } },
+  HW_HomeMilestoneText: oneLine(9, 'theme:warning', { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.6 }),
+  // The quote WRAPS — it is the one string here long enough to need two lines,
+  // and truncating a quotation would be worse than giving it the room.
+  HW_HomeQuote: { type: 'Text', fontSize: 11, color: 'theme:textSecondary', style: { fontFamily: MONO, lineHeight: 17, maxWidth: 720 } },
+  HW_HomeQuoteWho: oneLine(9, 'theme:textFaint', { fontFamily: MONO, fontWeight: 700 }),
+
+  HW_HomeColumns: { type: 'Box', style: { flexDirection: 'row', gap: 12 } },
+  HW_HomeCard: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minWidth: 0, height: 128, flexDirection: 'column', gap: 5, padding: 12, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg' } },
+  HW_HomeCardHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 } },
+  HW_HomeCardTitle: oneLine(9, 'theme:primary', { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.4 }),
+  HW_HomeResumeName: oneLine(14, 'theme:text', { fontFamily: MONO, fontWeight: 900 }),
+  HW_HomeResumeMeta: oneLine(9, 'theme:textDim', { fontFamily: MONO }),
+  HW_HomeNameInput: { type: 'TextInput', style: { width: '100%', height: 27, paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11, fontFamily: MONO, fontWeight: 800 } },
+  HW_HomePrimaryVerb: { type: 'Pressable', style: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:primary' }, hoverStyle: { backgroundColor: 'theme:primaryHover' } },
+  HW_HomePrimaryVerbText: oneLine(10, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 900 }),
+  HW_HomeVerb: { type: 'Pressable', style: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_HomeVerbText: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 800 }),
+
+  HW_HomeSectionHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 } },
+  HW_HomeMapList: { type: 'ScrollView', style: { flexGrow: 1, flexShrink: 1, minHeight: 0 }, contentContainerStyle: { flexDirection: 'column', gap: 4, paddingBottom: 4 } },
+  HW_HomeMapRow: { type: 'Pressable', style: { width: '100%', height: 27, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 10, paddingRight: 11, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_HomeMapRowOn: { type: 'Pressable', style: { width: '100%', height: 27, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 10, paddingRight: 11, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
+  HW_HomeMapName: oneLine(11, 'theme:text', { fontFamily: MONO, fontWeight: 800 }),
+  HW_HomeMapFact: oneLineColumn(9, 'theme:textDim', 74, { fontFamily: MONO, textAlign: 'right' }),
+  HW_HomeMapStamp: oneLineColumn(9, 'theme:textFaint', 118, { fontFamily: MONO, textAlign: 'right' }),
+
+  HW_HomeFooter: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 26, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', paddingTop: 8 } },
+  HW_HomeJoke: oneLine(10, 'theme:textDim', { flexGrow: 1, fontFamily: MONO }),
+  HW_HomeDice: { type: 'Pressable', style: { width: 24, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_WorldEditorSurface: { type: 'Box', style: { width: '100%', height: '100%', minHeight: 0, position: 'relative', backgroundColor: '#0d141f', overflow: 'hidden' } },
   // Map Paint split: the tool toggle + brush footprint controls live in the
   // workspace ACTION BAR; channel palettes/options now use the viewport bottom
@@ -310,8 +364,8 @@ classifier({
   HW_BuildPieceTileOn: { type: 'Pressable', style: { width: 64, height: 60, flexDirection: 'column', alignItems: 'center', gap: 2, paddingTop: 3, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
   HW_BuildPieceThumb: { type: 'Box', style: { width: 42, height: 42, borderRadius: 'theme:radiusSm', overflow: 'hidden' } },
   HW_BuildPieceTileLabelBox: { type: 'Box', style: { width: 58, height: 11, flexDirection: 'row', justifyContent: 'center', overflow: 'hidden' } },
-  HW_BuildPieceTileLabel: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_BuildPieceTileLabelOn: { type: 'Text', fontSize: 8, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_BuildPieceTileLabel: oneLine(8, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 700 }),
+  HW_BuildPieceTileLabelOn: oneLine(8, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 800 }),
   HW_StageTabStrip: { type: 'Box', style: { height: 31, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 8, paddingRight: 8, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', overflow: 'hidden' } },
   HW_StageWorldTab: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
   HW_StageWorldTabOn: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
@@ -493,7 +547,7 @@ classifier({
   // Context rows are fixed-height actions. A wrapped label silently consumes
   // menu space and can push later actions beyond the viewport, so labels obey
   // the same one-line law as every other editor button.
-  HW_ContextText: { type: 'Text', fontSize: 11, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { flexShrink: 1, minWidth: 0, overflow: 'hidden' } },
+  HW_ContextText: oneLine(11, 'theme:textSecondary', { overflow: 'hidden' }),
   HW_KeyText: { type: 'Text', fontSize: 9, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_FloatingCard: { type: 'Box', style: { position: 'absolute', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:surface', overflow: 'hidden' } },
   HW_MiniMap: { type: 'Box', style: { width: 278, height: 166, position: 'relative', backgroundColor: 'theme:miniMapBg' } },
@@ -539,25 +593,31 @@ classifier({
   HW_RigModeRow: { type: 'Box', style: { minWidth: 0, flexDirection: 'row', gap: 5 } },
   HW_RigModeButton: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 23, alignItems: 'center', justifyContent: 'center', paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_RigModeButtonOn: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 23, alignItems: 'center', justifyContent: 'center', paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
-  HW_RigModeText: { type: 'Text', fontSize: 8, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { minWidth: 0, fontFamily: MONO, fontWeight: 800 } },
-  HW_RigModeTextOn: { type: 'Text', fontSize: 8, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { minWidth: 0, fontFamily: MONO, fontWeight: 900 } },
+  HW_RigModeText: oneLine(8, 'theme:textDim', { fontFamily: MONO, fontWeight: 800 }),
+  HW_RigModeTextOn: oneLine(8, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 900 }),
   HW_RigSliderRow: { type: 'Box', style: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
   HW_RigSliderValue: { type: 'Text', fontSize: 10, color: 'theme:valNum', style: { width: 52, fontFamily: MONO, fontWeight: 800, textAlign: 'right' } },
   HW_RigLimitCard: { type: 'Box', style: { flexDirection: 'column', gap: 2, marginLeft: 12, marginRight: 12, marginBottom: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
   HW_RigLimitTitle: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', style: { paddingLeft: 8, paddingRight: 8, paddingBottom: 2, fontFamily: MONO, fontWeight: 900 } },
   HW_RigLimitEdgeRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8 } },
-  HW_RigLimitEdgeLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { width: 58, fontFamily: MONO, fontWeight: 700 } },
+  HW_RigLimitEdgeLabel: oneLineColumn(9, 'theme:textDim', 58, { width: 58, fontFamily: MONO, fontWeight: 700 }),
   HW_RigPoseCard: { type: 'Box', style: { flexDirection: 'column', gap: 5, marginLeft: 12, marginRight: 12, marginBottom: 6, padding: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
   HW_RigPoseLabel: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800 } },
   HW_RigSideButton: { type: 'Pressable', style: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
-  HW_RigSideButtonText: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_RigSideButtonText: oneLine(8, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 900 }),
   HW_RigWrapRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 3, paddingBottom: 3 } },
-  HW_RigReadinessLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { width: 58, fontFamily: MONO, fontWeight: 900 } },
+  HW_RigReadinessLabel: oneLineColumn(9, 'theme:textDim', 58, { width: 58, fontFamily: MONO, fontWeight: 900 }),
   HW_RightRail: { type: 'Box', blocksPointerEvents: true, style: { width: REGIONS.focusPanel.railWidth, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_ObjectHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Tag: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:success' } },
   HW_TagText: { type: 'Text', fontSize: 8, color: '#061015', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1 } },
-  HW_ObjectTitle: { type: 'Text', fontSize: 16, color: 'theme:text', style: { fontWeight: 800 } },
+  HW_ObjectTitle: { type: 'Text', fontSize: 16, color: 'theme:text', style: { flexShrink: 1, minWidth: 0, fontWeight: 800 } },
+  // The designed NOTHING-SELECTED state (req_4435) — see inspector/FocusEmpty.tsx.
+  // Deliberately quiet and centred: an empty panel is a resting state, not an
+  // error, and it must never be mistakable for a panel showing real values.
+  HW_FocusEmpty: { type: 'Box', style: { width: '100%', flexGrow: 1, minHeight: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 7, paddingLeft: 18, paddingRight: 18 } },
+  HW_FocusEmptyTitle: oneLine(11, 'theme:textDim', { fontFamily: MONO, fontWeight: 800, letterSpacing: 1 }),
+  HW_FocusEmptyLine: { type: 'Text', fontSize: 10, color: 'theme:textFaint', style: { fontFamily: MONO, textAlign: 'center', lineHeight: 15 } },
   HW_Swatch: { type: 'Box', style: { width: 22, height: 22, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_MetricRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', paddingLeft: 12, paddingRight: 12, paddingTop: 9, paddingBottom: 8, gap: 15 } },
   HW_Metric: { type: 'Box', style: { flexGrow: 1, flexDirection: 'column', gap: 2 } },
@@ -568,16 +628,20 @@ classifier({
   HW_AccentBar: { type: 'Box', style: { width: 3, height: 12, backgroundColor: 'theme:primary' } },
   // Section headers sit on the grid and NEVER wrap (req_2626 II) — a too-long
   // title truncates LOUDLY with … instead of folding mid-word.
-  HW_SectionTitle: { type: 'Text', fontSize: 10, color: 'theme:primary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.2 } },
+  HW_SectionTitle: oneLine(10, 'theme:primary', { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.2 }),
   HW_FormRow: { type: 'Box', style: { height: 25, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
-  HW_ReadRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
+  // hoverable so an ELIDED value in this row can reveal itself (req_4435). The
+  // host shows the full text only when the label actually did not fit, so a row
+  // whose value is fully readable produces no tooltip at all. A Pressable
+  // inside the row still wins the hit test, so hover styles are untouched.
+  HW_ReadRow: { type: 'Box', hoverable: true, style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
   // The shared LABEL column (req_2626 II): one fixed-width column, one baseline.
-  HW_FormLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, minWidth: REGIONS.grid.labelWidth } },
+  HW_FormLabel: oneLineColumn(10, 'theme:textDim', REGIONS.grid.labelWidth, { fontFamily: MONO }),
   HW_FormValue: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_ReadValue: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  HW_ReadValue: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 700 }),
   // The saved-view row's slot digit (req_4172) — the 1..9 key that jumps to it.
   // Fixed width so every name in the VIEWS list starts on the same column.
-  HW_ViewSlotKey: { type: 'Text', fontSize: 9, color: 'theme:textFaint', noWrap: true, numberOfLines: 1, style: { width: 8, fontFamily: MONO, fontWeight: 800 } },
+  HW_ViewSlotKey: oneLineColumn(9, 'theme:textFaint', 8, { width: 8, fontFamily: MONO, fontWeight: 800 }),
   // A named face-texture role gets its own two-row budget: the editable name
   // never competes with verbs, and the verbs split the full inspector width.
   HW_TextureRole: { type: 'Box', style: { flexDirection: 'column', gap: 3, paddingTop: 4, paddingBottom: 5, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft' } },
@@ -586,7 +650,7 @@ classifier({
   // ── Per-instance override fields (req_2563 Phase 3): a num stepper / bool
   // toggle with a reset rider, folded from the last editor's tile-override panel.
   HW_OvBtn: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn, height: REGIONS.grid.stepBtn, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
-  HW_OvBtnText: { type: 'Text', fontSize: 12, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_OvBtnText: oneLine(12, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 900 }),
   HW_OvVal: { type: 'Text', fontSize: 10, color: 'theme:valNum', style: { fontFamily: MONO, fontWeight: 800, minWidth: REGIONS.grid.valueWidth, textAlign: 'center' } },
   HW_OvValIdle: { type: 'Text', fontSize: 10, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700, minWidth: REGIONS.grid.valueWidth, textAlign: 'center' } },
   // Bool toggle spans the SAME fixed column block as the [−] value [+] stepper
@@ -594,8 +658,8 @@ classifier({
   // one control column and one right edge (req_2626 II).
   HW_OvToggle: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn * 2 + REGIONS.grid.valueWidth + 16, height: REGIONS.grid.stepBtn, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_OvToggleOn: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn * 2 + REGIONS.grid.valueWidth + 16, height: REGIONS.grid.stepBtn, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
-  HW_OvToggleText: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
-  HW_OvToggleTextOn: { type: 'Text', fontSize: 9, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_OvToggleText: oneLine(9, 'theme:textDim', { fontFamily: MONO, fontWeight: 800 }),
+  HW_OvToggleTextOn: oneLine(9, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 900 }),
   // The reset-rider END column: ALWAYS reserved (set or idle) so every row
   // shares the same right edge — no squeezing when an override appears.
   HW_OvReset: { type: 'Pressable', style: { width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'transparent' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
@@ -694,7 +758,7 @@ classifier({
   // region contract (REGIONS.focusPanel) — never measured, never wrapped.
   HW_UvFrame: { type: 'Box', style: { alignSelf: 'center', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_UvImage: { type: 'Image', style: { width: '100%', height: '100%' } },
-  HW_UvNote: { type: 'Text', fontSize: 9, color: 'theme:warning', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  HW_UvNote: oneLine(9, 'theme:warning', { fontFamily: MONO, fontWeight: 700 }),
   // Focus remains a full-height workspace even before an atlas exists. A fixed
   // one-line read row made the transition look vertically broken on new meshes.
   HW_UvEmptyWorkspace: { type: 'Box', style: { flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:stageBg' } },
@@ -704,7 +768,7 @@ classifier({
   // labeled affordance remains obvious in both the compact and focused shapes.
   HW_UvFocusVerb: { type: 'Pressable', style: { height: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_UvFocusVerbOn: { type: 'Pressable', style: { height: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' }, hoverStyle: { borderColor: 'theme:primary' } },
-  HW_UvFocusVerbText: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.8 } },
+  HW_UvFocusVerbText: oneLine(8, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.8 }),
   // A section header's tiny inline verb (e.g. UV refresh) — present but never REQUIRED.
   HW_MiniVerb: { type: 'Pressable', style: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
 });

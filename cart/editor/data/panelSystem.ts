@@ -9,8 +9,8 @@
 // again collapses its adjacent panel; another button selects and opens it.
 import type { ContentFolderId, WorkspaceDocumentKind } from './types';
 
-export type LeftPanelId = 'assets' | 'paint' | 'lab-stack' | 'world-bible';
-export type RightPanelId = 'inspector' | 'paint' | 'rig' | 'names' | 'recovery' | 'lab';
+export type LeftPanelId = 'assets' | 'paint' | 'lab-stack' | 'animation-capture' | 'world-bible';
+export type RightPanelId = 'inspector' | 'paint' | 'rig' | 'names' | 'recovery' | 'lab' | 'animation-generate';
 
 export type PanelButton<Id extends string> = {
   id: Id;
@@ -20,20 +20,22 @@ export type PanelButton<Id extends string> = {
 
 export type LeftPanelButton =
   | (PanelButton<LeftPanelId> & { renderer: 'library' })
-  | (PanelButton<LeftPanelId> & { renderer: 'paint' | 'lab-stack' | 'world-bible' });
+  | (PanelButton<LeftPanelId> & { renderer: 'paint' | 'lab-stack' | 'animation-capture' | 'world-bible' });
 
 export type RightPanelButton = PanelButton<RightPanelId>;
 
 const ASSETS = { id: 'assets', label: 'All assets', icon: 'FolderTree', renderer: 'library' } as const;
 const PAINT = { id: 'paint', label: 'Paint', icon: 'Paintbrush', renderer: 'paint' } as const;
-// The Material Lab's STACK is a left-rail peer exactly like Paint (req_4406):
+// The Material Lab's Layers panel is a left-rail peer exactly like Paint (req_4406):
 // it joins while a Lab document (recipe-backed material) is focused.
-const LAB_STACK = { id: 'lab-stack', label: 'The Stack', icon: 'Layers', renderer: 'lab-stack' } as const;
+const LAB_STACK = { id: 'lab-stack', label: 'Layers', icon: 'Layers', renderer: 'lab-stack' } as const;
+const ANIMATION_CAPTURE = { id: 'animation-capture', label: 'Capture', icon: 'ScanLine', renderer: 'animation-capture' } as const;
 const WORLD_BIBLE = { id: 'world-bible', label: 'World Bible index', icon: 'BookOpen', renderer: 'world-bible' } as const;
 
 const ASSET_LEFT = [ASSETS] as const;
 const PAINT_LEFT = [PAINT, ASSETS] as const;
 const LAB_LEFT = [LAB_STACK, ASSETS] as const;
+const ANIMATION_LEFT = [ANIMATION_CAPTURE, ASSETS] as const;
 const KNOWLEDGE_LEFT = [WORLD_BIBLE] as const;
 
 const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal' } as const;
@@ -52,18 +54,25 @@ const FOCUS_RIGHT = [INSPECTOR] as const;
 const LAB_RIGHT = [
   { id: 'lab', label: 'Lab inspector', icon: 'FlaskConical' },
 ] as const;
+const ANIMATION_RIGHT = [
+  { id: 'animation-generate', label: 'Generate motion', icon: 'Sparkles' },
+] as const;
 
 export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false, labActive = false): readonly LeftPanelButton[] {
+  // Home owns the whole stage: it IS the navigation, so it borrows no rails.
+  if (kind === 'home') return [];
   if (kind === 'knowledge') return KNOWLEDGE_LEFT;
   if (paintActive && (kind === 'model' || kind === 'facade')) return PAINT_LEFT;
   if (labActive && kind === 'material') return LAB_LEFT;
+  if (kind === 'animation') return ANIMATION_LEFT;
   return ASSET_LEFT;
 }
 
 export function rightPanelsFor(kind: WorkspaceDocumentKind, labActive = false): readonly RightPanelButton[] {
-  if (kind === 'knowledge') return [];
+  if (kind === 'home' || kind === 'knowledge') return [];
   if (kind === 'model') return MODEL_RIGHT;
   if (labActive && kind === 'material') return LAB_RIGHT;
+  if (kind === 'animation') return ANIMATION_RIGHT;
   return FOCUS_RIGHT;
 }
 
@@ -114,13 +123,13 @@ export function normalizeLeftPanelId(value: string): LeftPanelId {
   if (value === 'grid' || value === 'pieces' || value === 'actors' || value === 'data') return 'assets';
   if (value === 'world' || value === 'pipeline' || value === 'build' || value === 'models' || value === 'materials' || value === 'characters' || value === 'missions') return 'assets';
   if (value === 'tool-options' || value === 'ink') return 'paint';
-  return (['assets', 'paint', 'lab-stack', 'world-bible'] as const).includes(value as LeftPanelId)
+  return (['assets', 'paint', 'lab-stack', 'animation-capture', 'world-bible'] as const).includes(value as LeftPanelId)
     ? value as LeftPanelId
     : 'assets';
 }
 
 export function normalizeRightPanelId(value: string): RightPanelId {
-  return value === 'paint' || value === 'rig' || value === 'names' || value === 'recovery' || value === 'lab'
+  return value === 'paint' || value === 'rig' || value === 'names' || value === 'recovery' || value === 'lab' || value === 'animation-generate'
     ? value
     : 'inspector';
 }

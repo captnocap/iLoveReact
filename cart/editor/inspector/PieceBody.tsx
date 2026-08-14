@@ -156,8 +156,10 @@ export default function PieceBody(props: {
   onClearSlot: (role: string) => void;
   /** resolve a slot's MaterialRef to a display label + swatch colour. */
   resolveMaterial: (ref: MaterialRef) => { label: string; color: string };
-  /** the content browser's currently selected material (the one a slot click binds). */
-  activeMaterial: { name: string; color: string };
+  /** the content browser's currently selected material (the one a slot click
+   *  binds), or NULL when the user has picked none — then the slot rows say
+   *  what is missing instead of naming a catalog default (req_4435). */
+  activeMaterial: { name: string; color: string } | null;
   /** open the left panel on the Materials library — where the selection is made
    *  (req_3446: the panel must POINT AT the picker, not just name its result). */
   onBrowseMaterials: () => void;
@@ -267,16 +269,21 @@ export default function PieceBody(props: {
     );
   }
 
-  if (!row || !pieceId) {
+  // "Nothing selected and nothing armed" is the Inspector's to render — one
+  // FocusEmpty, one wording, every panel (req_4435). What is left here is the
+  // genuinely odd case: an id that names no catalog row and no authored
+  // placeable, which is a stale reference rather than an empty state.
+  if (!pieceId) return null;
+  if (!row) {
     return (
       <>
         <C.HW_ObjectHead>
           <C.HW_Tag><C.HW_TagText>WORLD</C.HW_TagText></C.HW_Tag>
-          <C.HW_ObjectTitle>No piece</C.HW_ObjectTitle>
+          <C.HW_ObjectTitle>Unknown piece</C.HW_ObjectTitle>
         </C.HW_ObjectHead>
-        <ReadOnlySection title="BUILD" color="textDim" rows={[
-          ['pick', 'a piece from the build bar'],
-          ['or', 'select a placed piece'],
+        <ReadOnlySection title="BUILD" color="warning" rows={[
+          ['id', pieceId],
+          ['state', 'no catalog row and no exported model'],
         ]} />
       </>
     );
@@ -326,9 +333,14 @@ export default function PieceBody(props: {
           </C.HW_SectionHead>
           <C.HW_ReadRow>
             <C.HW_FormLabel>selected</C.HW_FormLabel>
-            <C.HW_SelectControl tooltip="the material a slot click binds — press to pick a different one in the Materials library" onPress={props.onBrowseMaterials}>
-              <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: props.activeMaterial.color }} />
-              <C.HW_ReadValue>{props.activeMaterial.name}</C.HW_ReadValue>
+            <C.HW_SelectControl
+              tooltip={props.activeMaterial
+                ? `${props.activeMaterial.name} is what a slot click binds — press to pick a different one in the Materials library`
+                : 'no material selected — press to pick one in the Materials library'}
+              onPress={props.onBrowseMaterials}
+            >
+              <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: props.activeMaterial?.color ?? '#0a1118' }} />
+              <C.HW_ReadValue>{props.activeMaterial ? props.activeMaterial.name : 'none — pick a material'}</C.HW_ReadValue>
               <C.HW_Spacer />
               <Icon name="ExternalLink" size={10} color={accentFor('textDim')} />
             </C.HW_SelectControl>
@@ -340,9 +352,14 @@ export default function PieceBody(props: {
             return (
               <C.HW_ReadRow key={role.id}>
                 <C.HW_FormLabel>{role.label}</C.HW_FormLabel>
-                <C.HW_SelectControl tooltip={`bind ${props.activeMaterial.name} to the ${role.label} slot`} onPress={() => props.onAssignSlot(role.id)}>
+                <C.HW_SelectControl
+                  tooltip={props.activeMaterial
+                    ? `bind ${props.activeMaterial.name} to the ${role.label} slot`
+                    : `pick a material first, then bind it to the ${role.label} slot`}
+                  onPress={() => props.onAssignSlot(role.id)}
+                >
                   <C.HW_BuildPieceChip style={{ width: 12, height: 12, backgroundColor: mat ? mat.color : '#0a1118' }} />
-                  <C.HW_ReadValue>{mat ? mat.label : `+ ${props.activeMaterial.name}`}</C.HW_ReadValue>
+                  <C.HW_ReadValue>{mat ? mat.label : props.activeMaterial ? `+ ${props.activeMaterial.name}` : 'empty'}</C.HW_ReadValue>
                 </C.HW_SelectControl>
                 {ref
                   ? <C.HW_OvReset tooltip="clear this slot" onPress={() => props.onClearSlot(role.id)}><C.HW_OvResetText>↺</C.HW_OvResetText></C.HW_OvReset>

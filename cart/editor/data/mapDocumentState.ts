@@ -52,7 +52,9 @@ export function mapAuthoringSlicesFor(
     selectedPieceId: null,
     selectedPieceIds: [],
     armedStamp: null,
-    armedPieceId: 'floor.concrete.common',
+    // Nothing is armed until the user arms something. Opening a map does not
+    // decide what they are about to build (req_4435).
+    armedPieceId: null,
     armedYawDegrees: 0,
     worldUndo: [],
     worldRedo: [],

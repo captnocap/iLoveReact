@@ -7,7 +7,6 @@ import { allocateBuildStarterModelId, allocatePrimitiveModelId, BUILD_STARTER_MO
 import { PRIMITIVE_MESHES } from './commands';
 import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
 import { mintedModelIds } from '../model/docSession';
-import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
 import type { BuildKind } from '../world/buildCatalog';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
@@ -317,15 +316,22 @@ function materialSourceRank(asset: Asset): number {
   return 4;
 }
 
-export function selectedObject(state: EditorState): WorldObject {
+/** The selected world object, or NULL when nothing is selected (req_4435).
+ *  This used to fall back to a synthetic placeholder tile so callers could
+ *  treat it as non-nullable — which meant a panel could not tell "the user
+ *  picked this" apart from "the app made one up". Panels render their
+ *  designed empty state on null; they do not invent a subject. */
+export function selectedObject(state: EditorState): WorldObject | null {
   return state.objects.find((object) => object.id === state.selectedObjectId && !object.hidden)
     ?? state.objects.find((object) => !object.hidden)
-    ?? INITIAL_OBJECTS[0]!;
+    ?? null;
 }
 
-export function panelModeFor(state: EditorState, object: WorldObject): LibraryTab {
+export function panelModeFor(state: EditorState, object: WorldObject | null): LibraryTab {
+  if (state.activeCommandId === 'place-piece') return 'Build';
+  if (!object) return state.activeTab;
   if (object.kind === 'TILE' || object.kind === 'CUTOUT') return 'Skins';
   if (object.kind === 'PROP') return 'Props';
-  if (state.activeCommandId === 'place-piece' || object.kind === 'PIECE' || object.kind === 'PREFAB') return 'Build';
+  if (object.kind === 'PIECE' || object.kind === 'PREFAB') return 'Build';
   return state.activeTab;
 }

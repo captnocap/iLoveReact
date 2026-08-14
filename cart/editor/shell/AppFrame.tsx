@@ -11,6 +11,7 @@ import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
 import LeftRail from './LeftRail';
 import LabStackPanel from './LabStackPanel';
+import { AnimationCaptureSidePanel } from '../animation/AnimationSidePanels';
 import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
@@ -88,6 +89,7 @@ import {
   storeWorldView,
   worldViewPoseFrom,
   WORLD_VIEW_LIMITS,
+  type WorldView,
 } from '../world/worldViews';
 import { liveIsoPose } from '../world/WorldViewport';
 import { generateCoastalCity } from '../data/coastalCity';
@@ -102,6 +104,17 @@ import {
   setActiveMapDocumentStem,
 } from '../data/mapDocuments';
 import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
+// The durable working session (req_4435): what a cold start restores, and the
+// record the Home surface's Continue card reads.
+import {
+  bootLaunchNumber,
+  flushSessionSave,
+  loadSession,
+  scheduleSessionSave,
+  sessionDocumentsFrom,
+  type EditorSession,
+} from '../data/sessionStore';
+import HomeSurface from '../home/HomeSurface';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, type CharacterRigBoundaryAudit, type CharacterRigSnapshot, type HumanoidSemanticMembership, type PropRig, type SkinBindingRef } from '../../../runtime/skeleton';
 import { createCharacterRigApi, type NativeCharacterRigApi } from '../skeleton/characterRigSession';
@@ -131,7 +144,7 @@ import MapTexturePicker from '../stage/MapTexturePicker';
 import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
-import { commandById, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { commandById, commandExists, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { characterRigHistoryShouldOwnInput } from '../stage/characterRigViewport';
 import { readSeatCorpusDoc } from '../agent/seatCorpus';
 import { readSeatNotes, seatCorpusAdapter, writeSeatNotes } from '../agent/seatCorpusStore';
@@ -311,13 +324,16 @@ import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState, useHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from '../model/docSession';
-import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
+import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, assetByIdOrNull, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, nextBuildStarterDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import { assetMatchesLibrarySearch } from '../data/librarySearch';
 import { isLibraryCollectionFolder, navigateLibraryCollection, rememberRecentLibraryItem } from '../data/libraryCollections';
 import {
   leftPanelForFolder,
   leftPanelsFor,
+  normalizeContentFolderId,
+  normalizeLeftPanelId,
+  normalizeRightPanelId,
   pressPanelButton,
   resolvedPanelId,
   resolvedPanelIdOrNull,
@@ -364,7 +380,7 @@ import { hexToOklch, oklchToHex, type OklchColor } from '../../../runtime/paint/
 import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
-import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
+import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, HOME_DOCUMENT, HOME_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument, worldDocument } from '../data/documents';
 import { cancelGlobalsSave, saveGlobalsNow, scheduleGlobalsSave } from '../data/globalsStore';
 import { editorPersistenceSettings, editorSettings } from '../data/editorSettings';
 import { discardModelWorkingCopyState, upsertModelPackageProjection } from '../data/persistenceLifecycle';
@@ -690,8 +706,6 @@ export default function AppFrame() {
   const mapSwitchSerialRef = useRef(0);
   const [modelMutationRevision, setModelMutationRevision] = useState(0);
   const [modelReloadRevision, setModelReloadRevision] = useState(0);
-  const retopoGhostVisibleRef = useRef(state.modelTool.retopoGhostVisible);
-  retopoGhostVisibleRef.current = state.modelTool.retopoGhostVisible;
   // Destructive part-count changes require a one-shot capability tied to the exact
   // resulting row count. Hydration and autosave cannot mint it, so a fallback one-row
   // projection can never overwrite a multi-part document (req_3234).
@@ -899,8 +913,10 @@ export default function AppFrame() {
             status = 'Focus armed — click a placed piece to frame it';
             break;
           case 'paint-faces': {
-            const material = assetById(previous.activeAssetId, previous.assetOverrides);
-            status = `Paint Faces armed — touch a piece face to apply ${material.name}; each face slot paints separately (drag to sweep)`;
+            const material = assetByIdOrNull(previous.activeAssetId, previous.assetOverrides);
+            status = material
+              ? `Paint Faces armed — touch a piece face to apply ${material.name}; each face slot paints separately (drag to sweep)`
+              : 'Paint Faces armed — pick a material in the Asset Explorer first; nothing is selected to paint with';
             break;
           }
           case 'place-sticker':
@@ -1649,6 +1665,7 @@ export default function AppFrame() {
     const checkpoint = setTimeout(() => persistState(state), 60);
     return () => clearTimeout(checkpoint);
   }, [state]);
+
 
   // Micro-save the color library (req_3097/req_4395): SAVED tray + RECENT
   // use-history + named SETS go to their per-concern disk file on every
@@ -3212,16 +3229,24 @@ export default function AppFrame() {
   const paintUiActive = activeDocumentKind === 'facade'
     || (activeDocumentKind === 'model' && state.modelTool.paint);
   // A recipe-backed material document is a LAB document (req_4406): its rails
-  // carry the Stack (left) and the Lab inspector (right).
+  // carry Layers (left) and the Lab inspector (right).
   const labUiActive = activeDocumentKind === 'material' && !!state.labActiveRecipeId;
   const contextualLeftPanels = leftPanelsFor(activeDocumentKind, paintUiActive, labUiActive);
-  const activeLeftPanel = resolvedPanelId(contextualLeftPanels, state.activeDomain);
-  const activeLeftPanelDefinition = contextualLeftPanels.find((pane) => pane.id === activeLeftPanel)!;
+  // A document may legitimately claim NO left rail — Home owns the whole stage
+  // and borrows nothing. resolvedPanelId's buttons[0]! would crash on that
+  // empty set, so both rails resolve through the nullable door (req_4435).
+  const activeLeftPanel = resolvedPanelIdOrNull(contextualLeftPanels, state.activeDomain);
+  const activeLeftPanelDefinition = activeLeftPanel
+    ? contextualLeftPanels.find((pane) => pane.id === activeLeftPanel) ?? null
+    : null;
+  const leftGutterPresent = activeLeftPanelDefinition !== null;
   // The Asset Explorer is one pane, so document/tool context changes never
   // project category-specific roots over its remembered tree navigation.
   const effectiveContentFolder = state.contentFolder;
   const catalogAssets = useMemo(() => applyAssetOverrides(ASSETS, state.assetOverrides), [state.assetOverrides]);
-  const activeAsset = assetById(state.activeAssetId, state.assetOverrides);
+  // NULL when the user has selected nothing (req_4435). Every consumer renders
+  // a designed empty state rather than the catalog's first entry.
+  const activeAsset = assetByIdOrNull(state.activeAssetId, state.assetOverrides);
   const contextPanelMode = panelModeFor(state, activeObject);
   const panelMode = tabForContentFolder(effectiveContentFolder) ?? contextPanelMode;
 
@@ -3407,6 +3432,186 @@ export default function AppFrame() {
       return;
     }
     void switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created', mapDocumentName(stem), currentTriangles);
+  };
+
+  // ── The durable working session (req_4435) ────────────────────────────────
+  //
+  // persistState above is the HOT-RELOAD checkpoint: Zig-owned memory that dies
+  // with the process. This is its cold-start twin — one per-concern file that
+  // remembers which map, which tabs, which panes, which floor and which camera,
+  // so a real restart can offer to put you back instead of opening an arbitrary
+  // world with nothing selected. It records WHERE YOU WERE; the map document
+  // still owns the authored bytes.
+  const bootSessionRef = useRef<EditorSession | null | undefined>(undefined);
+  if (bootSessionRef.current === undefined) bootSessionRef.current = loadSession();
+  const bootSession = bootSessionRef.current;
+  const launchNumberRef = useRef(0);
+  if (launchNumberRef.current === 0) launchNumberRef.current = bootLaunchNumber(bootSession);
+  // Home's map list is read once per mount: listMapDocuments() stats every
+  // document directory, and re-running it on every keystroke would put a disk
+  // walk in the render path. Map create/open both bump this.
+  const [mapListRevision, setMapListRevision] = useState(0);
+  const homeMapDocuments = useMemo(() => listMapDocuments(), [mapListRevision, state.activeMapStem, state.activeMapName]);
+  // A camera pose restored from the session rides the SAME recall path a saved
+  // view uses, as a transient pin that never joins the map's view list.
+  const [sessionCameraRecall, setSessionCameraRecall] = useState<{ view: WorldView; nonce: number } | null>(null);
+
+  useEffect(() => {
+    // Home is a place to leave, not a place to record. Writing a session while
+    // Home is the active tab would overwrite yesterday's arrangement with
+    // "you were looking at the resume board".
+    if (activeDocumentKind === 'home') return;
+    const checkpoint = setTimeout(() => scheduleSessionSave({
+      version: 1,
+      savedMs: Date.now(),
+      launch: launchNumberRef.current,
+      mapStem: state.activeMapStem,
+      mapName: state.activeMapName,
+      documents: sessionDocumentsFrom(state.workspaceDocuments),
+      activeDocumentId: state.activeWorkspaceDocumentId,
+      rightPane: state.rightPane,
+      rightPanelCollapsed: state.rightPanelCollapsed,
+      activeDomain: state.activeDomain,
+      leftPanelCollapsed: state.leftPanelCollapsed,
+      libraryExpanded: state.libraryExpanded,
+      contentFolder: state.contentFolder,
+      activeCommandId: state.activeCommandId,
+      activeAssetId: state.activeAssetId,
+      selectedPieceId: state.selectedPieceId,
+      floorIndex: state.floorIndex,
+      camera: (() => {
+        const pose = liveIsoPose();
+        return pose ? worldViewPoseFrom(pose, state.floorIndex) : null;
+      })(),
+    }), 400);
+    return () => clearTimeout(checkpoint);
+  }, [
+    activeDocumentKind,
+    state.activeMapStem,
+    state.activeMapName,
+    state.workspaceDocuments,
+    state.activeWorkspaceDocumentId,
+    state.rightPane,
+    state.rightPanelCollapsed,
+    state.activeDomain,
+    state.leftPanelCollapsed,
+    state.libraryExpanded,
+    state.contentFolder,
+    state.activeCommandId,
+    state.activeAssetId,
+    state.selectedPieceId,
+    state.floorIndex,
+  ]);
+
+  useEffect(() => flushSessionSave, []);
+
+  /** Drop the Home tab. Home is a door: once you have gone somewhere it stops
+   *  standing in the room. `fallback` is where the stage lands only if Home was
+   *  the tab in front — a resume that already chose its own tab keeps it. */
+  const withoutHomeTab = (prev: EditorState, fallback: string): EditorState => {
+    const documents = prev.workspaceDocuments.filter((doc) => doc.kind !== 'home');
+    const stillOpen = documents.some((doc) => doc.id === prev.activeWorkspaceDocumentId);
+    return {
+      ...prev,
+      workspaceDocuments: documents.length ? documents : [worldDocument(prev.activeMapName)],
+      activeWorkspaceDocumentId: stillOpen ? prev.activeWorkspaceDocumentId : fallback,
+    };
+  };
+
+  /** The arrangement half of a resume: tabs, panes, folder, selection, floor.
+   *  Runs only once the session's MAP is the live one, so it never lands on
+   *  another map's world. */
+  const applyResumedArrangement = (session: EditorSession) => {
+    setState((prev0) => {
+      const prev = withoutHomeTab(prev0, WORLD_DOCUMENT_ID);
+      // A recorded tab whose model or material has since been deleted is
+      // dropped rather than reopened as an empty document.
+      const restored = session.documents
+        .map((doc) => {
+          if (doc.id === WORLD_DOCUMENT_ID) return worldDocument(prev.activeMapName);
+          if (doc.kind === 'model' && doc.sourceId) {
+            const model = effectiveModelPackage(doc.sourceId, prev.modelOverrides, prev.modelDupes);
+            return model ? modelDocument(model) : null;
+          }
+          if (doc.kind === 'material' && doc.sourceId) {
+            const asset = assetByIdOrNull(doc.sourceId, prev.assetOverrides);
+            return asset ? materialDocument(asset) : null;
+          }
+          if (doc.id === PLAYTEST_DOCUMENT.id) return PLAYTEST_DOCUMENT;
+          if (doc.id === ANIMATION_DOCUMENT.id) return ANIMATION_DOCUMENT;
+          if (doc.id === WORLD_BIBLE_DOCUMENT_ID) return WORLD_BIBLE_DOCUMENT;
+          return null;
+        })
+        .filter((doc): doc is WorkspaceDocument => doc !== null);
+      const documents = restored.length ? restored : [worldDocument(prev.activeMapName)];
+      const dropped = session.documents.length - restored.length;
+      const active = documents.some((doc) => doc.id === session.activeDocumentId)
+        ? session.activeDocumentId
+        : documents[0]!.id;
+      return {
+        ...prev,
+        workspaceDocuments: documents,
+        activeWorkspaceDocumentId: active,
+        rightPane: normalizeRightPanelId(session.rightPane),
+        rightPanelCollapsed: session.rightPanelCollapsed,
+        activeDomain: normalizeLeftPanelId(session.activeDomain),
+        leftPanelCollapsed: session.leftPanelCollapsed,
+        libraryExpanded: session.libraryExpanded,
+        contentFolder: session.contentFolder
+          ? normalizeContentFolderId(session.contentFolder as EditorState['contentFolder'])
+          : prev.contentFolder,
+        activeCommandId: commandExists(session.activeCommandId) ? session.activeCommandId : prev.activeCommandId,
+        activeAssetId: session.activeAssetId,
+        selectedPieceId: prev.worldPieces.some((piece) => piece.id === session.selectedPieceId)
+          ? session.selectedPieceId
+          : null,
+        floorIndex: session.floorIndex,
+        status: dropped > 0
+          ? `resumed ${session.mapName} — ${documents.length} tab${documents.length === 1 ? '' : 's'}, ${dropped} no longer on disk`
+          : `resumed ${session.mapName} — ${documents.length} tab${documents.length === 1 ? '' : 's'}`,
+      };
+    });
+    if (session.camera) {
+      setSessionCameraRecall((previous) => ({
+        view: { id: 'session:resume', name: 'where you left off', ...session.camera! },
+        nonce: (previous?.nonce ?? 0) + 1,
+      }));
+    }
+  };
+
+  /** Home's Continue. The map goes first and it may be ASYNC — switchMapDocument
+   *  can stop on an unsaved-changes prompt or refuse outright — so the
+   *  arrangement waits behind a pending record and lands only when the session's
+   *  map is genuinely live. Applying it eagerly would arrange tabs over whatever
+   *  map happened to still be loaded. */
+  const pendingResumeRef = useRef<EditorSession | null>(null);
+  const continueSession = () => {
+    const session = bootSession;
+    if (!session) {
+      setState((prev) => ({ ...prev, status: 'no saved session to continue — open a map and it starts recording' }));
+      return;
+    }
+    if (session.mapStem !== stateRef.current.activeMapStem) {
+      pendingResumeRef.current = session;
+      openMapDocument(session.mapStem);
+      return;
+    }
+    applyResumedArrangement(session);
+  };
+
+  useEffect(() => {
+    const pending = pendingResumeRef.current;
+    if (!pending || state.activeMapStem !== pending.mapStem) return;
+    pendingResumeRef.current = null;
+    applyResumedArrangement(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeMapStem]);
+
+  /** Home's map rows and New button: go there, then close the door behind you. */
+  const leaveHomeFor = (run: () => void) => {
+    run();
+    setMapListRevision((n) => n + 1);
+    setState((prev) => withoutHomeTab(prev, WORLD_DOCUMENT_ID));
   };
 
   const createCoastalMap = (rawName: string, seed: number, currentTriangles: number | null = null) => {
@@ -4274,7 +4479,12 @@ export default function AppFrame() {
 
     if (command.id === 'open-color-studio') {
       const current = stateRef.current;
-      selectNativeModelSession(materialDocument(assetById(current.activeAssetId, current.assetOverrides)));
+      const picked = assetByIdOrNull(current.activeAssetId, current.assetOverrides);
+      if (!picked) {
+        setState((prev) => ({ ...prev, openMenu: null, status: 'Color Studio needs a material — pick one in the Asset Explorer first' }));
+        return;
+      }
+      selectNativeModelSession(materialDocument(picked));
     }
     setState((prev0) => {
       const t0 = Date.now();
@@ -4285,7 +4495,7 @@ export default function AppFrame() {
       const prev = command.tool ? withMapPaintOff(prev0) : prev0;
       const paintDropped = prev !== prev0;
       const object = selectedObject(prev);
-      const asset = assetById(prev.activeAssetId, prev.assetOverrides);
+      const asset = assetByIdOrNull(prev.activeAssetId, prev.assetOverrides);
       let next: EditorState = {
         ...prev,
         openMenu: source === 'stage' ? prev.openMenu : null,
@@ -4332,7 +4542,7 @@ export default function AppFrame() {
             ? 'linked 2D city map — drag to pan, wheel to zoom, right-click to move the 3D camera'
             : 'returned to the 3D world view',
         };
-      } else if (command.id === 'open-color-studio') {
+      } else if (command.id === 'open-color-studio' && asset) {
         const doc = materialDocument(asset);
         next = {
           ...next,
@@ -4342,10 +4552,10 @@ export default function AppFrame() {
           contextOpen: false,
           openMenu: null,
         };
-      } else if (command.id === 'duplicate-selection') {
+      } else if (command.id === 'duplicate-selection' && object) {
         const duplicate: WorldObject = { ...object, id: `obj-${prev.seq}`, name: `${object.name} copy`, left: object.left + 32, top: object.top + 22 };
         next = { ...next, objects: [...prev.objects, duplicate], selectedObjectId: duplicate.id };
-      } else if (command.id === 'delete-selection') {
+      } else if (command.id === 'delete-selection' && object) {
         const remaining = prev.objects.filter((item) => item.id !== object.id && !item.hidden);
         next = {
           ...next,
@@ -4354,7 +4564,7 @@ export default function AppFrame() {
         };
       }
 
-      const target = object.name;
+      const target = object?.name ?? command.name;
       const editMs = Date.now() - t0;
       const event = pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       // Any world slice this command touched becomes a REAL reversible entry
@@ -4446,6 +4656,7 @@ export default function AppFrame() {
   const selectObject = (id: string) => {
     setState((prev) => {
       const object = prev.objects.find((item) => item.id === id) ?? selectedObject(prev);
+      if (!object) return { ...prev, status: 'that object is no longer in this map' };
       return {
         ...prev,
         selectedObjectId: object.id,
@@ -4777,12 +4988,27 @@ export default function AppFrame() {
     targets,
     materialAssetId: assetId,
   }, source);
-  const paintPieceFaces = (targets: readonly PieceMaterialTarget[]) =>
-    assignPieceMaterials(targets, stateRef.current.activeAssetId, 'viewport');
+  // With no material selected there is nothing to paint WITH. Refusing out
+  // loud beats silently applying whatever the catalog happens to list first
+  // (req_4435) — that substitution is the bug this pass removed.
+  const requireActiveMaterial = (verb: string): string | null => {
+    const assetId = stateRef.current.activeAssetId;
+    if (!assetId) {
+      setState((prev) => ({ ...prev, status: `${verb} needs a material — pick one in the Asset Explorer first` }));
+      return null;
+    }
+    return assetId;
+  };
+  const paintPieceFaces = (targets: readonly PieceMaterialTarget[]) => {
+    const assetId = requireActiveMaterial('Paint Faces');
+    if (assetId) assignPieceMaterials(targets, assetId, 'viewport');
+  };
   const assignPieceSlotAsset = (id: string, role: string | null, assetId: string, source = 'context') =>
     assignPieceMaterials([{ pieceId: id, roles: role ? [role] : 'all' }], assetId, source);
-  const assignPieceSlot = (id: string, role: string) =>
-    assignPieceSlotAsset(id, role, stateRef.current.activeAssetId, 'focus-panel');
+  const assignPieceSlot = (id: string, role: string) => {
+    const assetId = requireActiveMaterial('Binding a slot');
+    if (assetId) assignPieceSlotAsset(id, role, assetId, 'focus-panel');
+  };
 
   // Paint Facade (req_3062): the explicit selection is authoritative scope,
   // including a one-piece selection.
@@ -4989,7 +5215,10 @@ export default function AppFrame() {
       const paintActive = documentKind === 'facade' || (documentKind === 'model' && prev.modelTool.paint);
       const labActive = documentKind === 'material' && !!prev.labActiveRecipeId;
       const panes = leftPanelsFor(documentKind, paintActive, labActive);
-      const active = resolvedPanelId(panes, prev.activeDomain);
+      const active = resolvedPanelIdOrNull(panes, prev.activeDomain);
+      // No panes means no rail to press — a stale keypress from another
+      // document must not resolve into a pane this one does not have.
+      if (!active) return prev;
       const result = pressPanelButton(active, pressed, prev.leftPanelCollapsed);
       const changedPane = prev.activeDomain !== pressed;
       const selectedPane = panes.find((pane) => pane.id === pressed);
@@ -5053,7 +5282,9 @@ export default function AppFrame() {
   const selectContentFolder = (contentFolder: ContentFolderId) => {
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
-      const fallback = resolvedPanelId(leftPanelsFor(documentKind), prev.activeDomain);
+      // A document with no left rail (Home) has no explorer to navigate; the
+      // folder choice is remembered and applies when one is next shown.
+      const fallback = resolvedPanelIdOrNull(leftPanelsFor(documentKind), prev.activeDomain) ?? prev.activeDomain as LeftPanelId;
       const navigation = navigateLibraryCollection(
         prev.contentFolder,
         prev.libraryCollectionReturnFolder ?? DEFAULT_CONTENT_FOLDER,
@@ -5559,7 +5790,7 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: `SAVE FAILED: could not write ${path}` }));
       return;
     }
-    setState((prev) => ({ ...prev, status: `wrote ${path} — running build-shaders…` }));
+    setState((prev) => ({ ...prev, status: `wrote ${path} — generating catalog + thumbnails…` }));
     const result = await execAsync('tools/v8cli cart/editor/render3d/shaders/build-shaders.ts');
     setState((prev) => ({
       ...prev,
@@ -5661,7 +5892,7 @@ export default function AppFrame() {
 
   // The Ink dock's "open in Color Studio" — jump from a dipped shader ink to
   // its editing page (selecting the matching library asset when there is one).
-  const openColorStudioForSpec = (specId: string) => {
+  const openColorStudioForSpec = (specId: string, variant = 0) => {
     const spec = shaderSpec(specId);
     if (!spec) return;
     const previous = stateRef.current;
@@ -5688,7 +5919,8 @@ export default function AppFrame() {
     };
     stateRef.current = next;
     setState(next);
-    invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId: spec.id, variant: 0 }, 'paint dock');
+    const selectedVariant = Math.min(Math.max(0, variant), Math.max(0, spec.variants.length - 1));
+    invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId: spec.id, variant: selectedVariant }, 'material library');
   };
 
   // ── Model outliner (multi-part authoring) ───────────────────────────────────
@@ -9590,6 +9822,11 @@ export default function AppFrame() {
           leftPanelCollapsed: false,
           rightPane: 'lab',
           rightPanelCollapsed: false,
+        } : gainingFocus && doc.kind === 'animation' ? {
+          activeDomain: 'animation-capture',
+          leftPanelCollapsed: false,
+          rightPane: 'animation-generate',
+          rightPanelCollapsed: false,
         } : null),
         activeWorkspaceDocumentId,
         materialFocused: doc.kind === 'material',
@@ -10039,7 +10276,7 @@ export default function AppFrame() {
   const activePaintLayers = facadePaintActive
     ? (activeFacade ? <FacadePaintLayersSection facade={activeFacade} onLayers={updateFacadeLayers} /> : null)
     : <ModelPaintLayersSection refreshKey={modelMutationRevision} onDocumentMutated={markActiveModelDirty} />;
-  const activePaintSidePanel = !paintUiActive ? null
+  const activePaintSidePanel = !paintUiActive || !activeLeftPanelDefinition ? null
     : activeLeftPanelDefinition.renderer === 'paint' ? (
       <PaintPanel
         brush={activePaintBrush}
@@ -10070,14 +10307,17 @@ export default function AppFrame() {
         spine={paintSpine}
       />
     ) : null;
-  const activeWorldBibleSidePanel = activeLeftPanelDefinition.renderer === 'world-bible'
+  const activeWorldBibleSidePanel = activeLeftPanelDefinition?.renderer === 'world-bible'
     ? <WorldBibleIndexPanel />
     : null;
-  // The Material Lab's STACK panel (req_4406) — Section C's body while the
+  // The Material Lab's Layers panel (req_4406) — Section C's body while the
   // 'lab-stack' rail button is selected on a Lab document.
   const activeLabRecipeNow = activeLabRecipe(state);
-  const activeLabSidePanel = activeLeftPanelDefinition.renderer === 'lab-stack' && activeLabRecipeNow
-    ? <LabStackPanel recipe={activeLabRecipeNow} selected={state.labSelectedLayer} handlers={labHandlers} />
+  const activeLabSidePanel = activeLeftPanelDefinition?.renderer === 'lab-stack' && activeLabRecipeNow
+    ? <LabStackPanel recipe={activeLabRecipeNow} selected={state.labSelectedLayer} soloStage={state.labSoloStage} handlers={labHandlers} />
+    : null;
+  const activeAnimationSidePanel = activeLeftPanelDefinition?.renderer === 'animation-capture'
+    ? <AnimationCaptureSidePanel />
     : null;
 
   // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
@@ -10188,18 +10428,20 @@ export default function AppFrame() {
       ) : (
       <>
       <C.HW_Body>
-        <RenderProbe id="Left Rail">
+        {/* A document with no left panes shows no rail and no gutter — an
+            empty rail stub is chrome that advertises nothing (req_4435). */}
+        {leftGutterPresent ? <RenderProbe id="Left Rail">
           <LeftRail
             documentKind={activeDocumentKind}
             paintActive={paintUiActive}
             labActive={labUiActive}
-            activePane={activeLeftPanel}
+            activePane={activeLeftPanel!}
             collapsed={state.leftPanelCollapsed}
             onPane={pressLeftPanel}
           />
-        </RenderProbe>
-        {!state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activeLabSidePanel ? 'Lab Stack Panel' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
-          {activeWorldBibleSidePanel ?? activeLabSidePanel ?? activePaintSidePanel ?? <LibraryPanel
+        </RenderProbe> : null}
+        {leftGutterPresent && !state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activeLabSidePanel ? 'Lab Stack Panel' : activeAnimationSidePanel ? 'Animation Capture Panel' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
+          {activeWorldBibleSidePanel ?? activeLabSidePanel ?? activeAnimationSidePanel ?? activePaintSidePanel ?? <LibraryPanel
             state={state}
             catalogAssets={catalogAssets}
             assets={filteredAssets}
@@ -10246,6 +10488,17 @@ export default function AppFrame() {
             state={workspaceState}
             mapSwitchPending={mapSwitchPending}
             activeAsset={activeAsset}
+            homeSurface={(
+              <HomeSurface
+                session={bootSession}
+                maps={homeMapDocuments}
+                launch={launchNumberRef.current}
+                currentStem={state.activeMapStem}
+                onContinue={continueSession}
+                onOpenMap={(stem) => leaveHomeFor(() => openMapDocument(stem))}
+                onNewMap={(name) => leaveHomeFor(() => createNewMap(name))}
+              />
+            )}
             selectedPartCount={selectedPartCount}
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
@@ -10295,33 +10548,6 @@ export default function AppFrame() {
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
-            onRetopoTint={guarded((id) => {
-              const result = modelToolApiRef.current?.retopoTint(id) ?? { changed: -1, persisted: false };
-              const changed = result.changed;
-              setState((prev) => ({
-                ...prev,
-                status: changed > 0
-                  ? `${id < 0 ? `removed teaching tint from ${changed} faces` : `tinted ${changed} faces as band ${id + 1}`}${result.persisted ? ' — saved in model package' : ' — PACKAGE WRITE FAILED'}`
-                  : changed === 0 ? 'select one or more faces before tinting' : 'retopology tint is unavailable — restart into the rebuilt editor',
-              }));
-            })}
-            onRetopoGhost={guarded(() => {
-              const requested = !retopoGhostVisibleRef.current;
-              const ghost = modelToolApiRef.current?.retopoGhost(requested) ?? null;
-              setState((prev) => ({
-                ...prev,
-                status: ghost
-                  ? `source ghost ${ghost.visible ? 'ON — live edits remain underneath the frozen source' : 'off'} — ${ghost.covered}/${ghost.faces} original faces mapped${ghost.persisted ? ' — saved in model package' : ' — PACKAGE WRITE FAILED'}`
-                  : 'no frozen source ghost yet — tint the original soup before editing',
-              }));
-            })}
-            onRetopoClear={guarded(() => {
-              const result = modelToolApiRef.current?.retopoClear() ?? { cleared: false, persisted: false };
-              setState((prev) => ({ ...prev, status: result.cleared
-                ? `cleared the retopology guide${result.persisted ? ' from the model package' : ' live — PACKAGE WRITE FAILED'}`
-                : 'no retopology tint map is active' }));
-            })}
-            retopoGhostVisible={state.modelTool.retopoGhostVisible}
             onMapPaint={patchMapPaint}
             // Doc switching mid-blocking-session would unmount the surface that owns the
             // session (loop cut's captured base mesh dies with it) — guarded (req_2626 HH).
@@ -10344,11 +10570,14 @@ export default function AppFrame() {
             onFacadeClear={clearFacadePaint}
             onFacadeSave={saveFacadePainting}
             onArmPiece={armPiece}
-            viewRecall={worldViewRecall}
+            viewRecall={sessionCameraRecall ?? worldViewRecall}
             onRecallView={recallWorldViewById}
             onExitMaterialFocus={() => {
               selectNativeModelSession(state.workspaceDocuments.find((doc) => doc.id === WORLD_DOCUMENT_ID) ?? null);
-              setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }));
+              setState((prev) => {
+                const carried = assetByIdOrNull(prev.activeAssetId, prev.assetOverrides);
+                return { ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: carried ? `returned to world with ${carried.name}` : 'returned to world' };
+              });
             }}
             onSelectColorStudioMaterial={selectColorStudioMaterial}
             onColorStudioVariant={setColorStudioVariant}
@@ -10370,11 +10599,11 @@ export default function AppFrame() {
             onOpenInLab={openColorStudioForSpec}
           />
         </RenderProbe>
-        {activeDocumentKind !== 'knowledge' ? <RenderProbe id="Inspector">
+        {rightPanelsFor(activeDocumentKind, labUiActive).length > 0 ? <RenderProbe id="Inspector">
           <Inspector
             state={state}
             activeObject={activeObject}
-            activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
+            activeAsset={activeObject ? assetById(activeObject.assetId, state.assetOverrides) : null}
             onPane={pressRightPanel}
             onStatus={(status: string) => setState((prev) => ({ ...prev, status }))}
             onSemanticRegionRemoved={() => {

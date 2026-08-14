@@ -12,7 +12,7 @@ function assetKind(asset: Asset): string {
 
 export default function LibrarySearchResults(props: {
   hits: LibrarySearchHit[];
-  activeAssetId: string;
+  activeAssetId: string | null;
   activeDocumentId: string;
   onAsset: (asset: Asset) => void;
   onModel: (model: ModelPackage) => void;

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
@@ -15,7 +16,9 @@ import type { ExternalAutoRigUiState } from '../skeleton/externalAutoRig';
 export default function Workspace(props: {
   state: EditorState;
   mapSwitchPending: boolean;
-  activeAsset: Asset;
+  activeAsset: Asset | null;
+  /** The Home surface, composed by AppFrame (it owns the session + map list). */
+  homeSurface: ReactNode;
   onCommand: (id: string, source: string) => void;
   onModelToolApi: (api: ModelToolApi) => void;
   onModelToolState: (state: ModelToolSnapshot) => void;
@@ -41,10 +44,6 @@ export default function Workspace(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
-  onRetopoTint: (id: number) => void;
-  onRetopoGhost: () => void;
-  onRetopoClear: () => void;
-  retopoGhostVisible: boolean;
   selectedPartCount: number;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
@@ -82,6 +81,7 @@ export default function Workspace(props: {
   onColorSpineTrayPick: (color: OklchColor) => void;
   onColorSpineScenePick: (color: OklchColor, css: string) => void;
   onColorSpineLoadLibrarySet: (colors: OklchColor[]) => void;
+  onOpenInLab: (specId: string, variant?: number) => void;
 }) {
   return (
     <C.HW_Workspace>

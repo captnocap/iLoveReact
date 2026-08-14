@@ -2,7 +2,7 @@
 // viewport — world / model / playtest / animation / material-focus surfaces +
 // their in-viewport docks (BuildBar, MapPaintDock). Section F (StageTabs)
 // renders below the viewport inside this same panel.
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { WorldView } from '../world/worldViews';
@@ -10,13 +10,14 @@ import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { effectiveModelPackage } from '../data/content';
-import { modelDocument } from '../data/documents';
+import { WORLD_DOCUMENT_ID, modelDocument, worldDocument } from '../data/documents';
 import ContextMenu from '../shell/ContextMenu';
 import AnimationCaptureSurface from './AnimationCaptureSurface';
 import MaterialFocusSurface from './MaterialFocusSurface';
 import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurface';
 import PlaytestSurface from './PlaytestSurface';
 import StageTabs from './StageTabs';
+import { deriveLabDocumentTitles } from '../material/materialLabPresentation';
 import WorldEditorSurface from './WorldEditorSurface';
 import FacadePainterSurface from './FacadePainterSurface';
 import BuildBar from './BuildBar';
@@ -27,14 +28,16 @@ import type { PieceSelectionIntent } from '../world/selection';
 import type { FloraPaintSample, WorldFloraBrush } from '../world/surfaceFlora';
 import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 import type { CharacterRigApi, CharacterRigSnapshot } from '../../../runtime/skeleton';
-import { MODEL_PACKAGES } from '../data/catalog';
+import { MODEL_PACKAGES, assetByIdOrNull } from '../data/catalog';
 import { playerCharacterPackage } from '../world/playerCharacterLoader';
 import { characterRigViewportShouldOwnInput } from './characterRigViewport';
 
 export default function Stage(props: {
   state: EditorState;
   mapSwitchPending: boolean;
-  activeAsset: Asset;
+  activeAsset: Asset | null;
+  /** The Home surface node — Stage places it, AppFrame builds it. */
+  homeSurface: ReactNode;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
   onCommand: (id: string, source: string) => void;
@@ -92,7 +95,7 @@ export default function Stage(props: {
   onDeleteColorSet: (index: number) => void;
   labRecipe: import('../render3d/shaders/recipe').MaterialRecipe | null;
   labHandlers: import('./MaterialLabSurface').LabHandlers;
-  onOpenInLab: (specId: string) => void;
+  onOpenInLab: (specId: string, variant?: number) => void;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
@@ -118,11 +121,18 @@ export default function Stage(props: {
   // Tab titles are DERIVED from the live model, not the doc's frozen snapshot — a model's
   // name (e.g. a generic "Model 3") can change out from under an old persisted doc, and the
   // tab must follow it rather than show a stale seed name like "Cone 1" (req_2406).
-  const tabDocuments = props.state.workspaceDocuments.map((doc) => {
+  const modelDerivedDocuments = props.state.workspaceDocuments.map((doc) => {
+    // Same law for the world tab: it is named by the map ACTUALLY open in it,
+    // not by a frozen 'main.gamefile' that never existed (req_4435).
+    if (doc.id === WORLD_DOCUMENT_ID) return worldDocument(props.state.activeMapName);
     if (doc.kind !== 'model' || !doc.sourceId) return doc;
     const live = effectiveModelPackage(doc.sourceId, props.state.modelOverrides, props.state.modelDupes);
     return live ? modelDocument(live) : doc;
   });
+  const liveLabRecipe = props.state.labActiveRecipeId
+    ? props.state.labRecipes.find((recipe) => recipe.id === props.state.labActiveRecipeId) ?? null
+    : null;
+  const tabDocuments = deriveLabDocumentTitles(modelDerivedDocuments, props.state.activeWorkspaceDocumentId, liveLabRecipe);
   const characterRigViewportActive = characterRigViewportShouldOwnInput(
     activeModel,
     props.state.rightPane,
@@ -130,10 +140,15 @@ export default function Stage(props: {
     props.state.modelTool,
   );
   const worldActive = activeDocument.kind === 'world';
+  // The material surface's subject is THE DOCUMENT's material, resolved live —
+  // never state.activeAssetId, which is null whenever nothing is picked.
+  const materialFocusAsset = activeDocument.kind === 'material' && activeDocument.sourceId
+    ? assetByIdOrNull(activeDocument.sourceId, props.state.assetOverrides)
+    : props.activeAsset;
   return (
     <C.HW_StagePanel>
       <C.HW_StageViewport>
-        {activeDocument.kind === 'world' || activeDocument.kind === 'model' || activeDocument.kind === 'playtest' || activeDocument.kind === 'animation' || activeDocument.kind === 'knowledge' ? null : <C.HW_CanvasGrid />}
+        {activeDocument.kind === 'world' || activeDocument.kind === 'model' || activeDocument.kind === 'playtest' || activeDocument.kind === 'animation' || activeDocument.kind === 'knowledge' || activeDocument.kind === 'home' ? null : <C.HW_CanvasGrid />}
         <WorldEditorSurface
           active={worldActive}
           interactionLocked={props.mapSwitchPending}
@@ -165,7 +180,9 @@ export default function Stage(props: {
           onStampSticker={props.onStampSticker}
           onPaintFlora={props.onPaintFlora}
         />
-        {worldActive ? null : activeDocument.kind === 'knowledge' ? (
+        {worldActive ? null : activeDocument.kind === 'home' ? (
+          props.homeSurface
+        ) : activeDocument.kind === 'knowledge' ? (
           <WorldBibleSurface />
         ) : activeDocument.kind === 'animation' ? (
           <AnimationCaptureSurface targetPackage={capturePlayer} />
@@ -219,10 +236,10 @@ export default function Stage(props: {
             onCharacterRigStatus={props.onCharacterRigStatus}
             characterRigViewportActive={characterRigViewportActive}
           />
-        ) : (
+        ) : materialFocusAsset ? (
           <MaterialFocusSurface
             state={props.state}
-            activeAsset={props.activeAsset}
+            activeAsset={materialFocusAsset}
             labRecipe={props.labRecipe}
             labHandlers={props.labHandlers}
             onExit={props.onExitMaterialFocus}
@@ -243,6 +260,12 @@ export default function Stage(props: {
             onDeleteSet={props.onDeleteColorSet}
             onOpenInLab={props.onOpenInLab}
           />
+        ) : (
+          // No material document and nothing picked — the stage says so rather
+          // than staging whatever the catalog lists first (req_4435).
+          <C.HW_StageEmpty>
+            <C.HW_StageEmptyLine>Nothing open here — pick a material in the Asset Explorer, or choose a document tab.</C.HW_StageEmptyLine>
+          </C.HW_StageEmpty>
         )}
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}
         {/* Sims build bar (req_2563) — overlays the bottom of the viewport in

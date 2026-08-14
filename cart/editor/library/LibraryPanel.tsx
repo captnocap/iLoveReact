@@ -46,8 +46,9 @@ export default function LibraryPanel(props: {
   catalogAssets: Asset[];
   assets: Asset[];
   mode: LibraryTab;
-  activeAsset: Asset;
-  activeObject: WorldObject;
+  /** Null when the user has selected nothing (req_4435). */
+  activeAsset: Asset | null;
+  activeObject: WorldObject | null;
   contentFolder: ContentFolderId;
   expandedFolders: Partial<Record<ContentFolderId, boolean>>;
   onSearch: (search: string) => void;

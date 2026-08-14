@@ -80,7 +80,10 @@ export type LibraryTab = 'Build' | 'Props' | 'Skins';
 // where global tunables (Globals → Physics) are tested live.
 // 'animation' (req_2786): the CAPTURE tab — webcam feed beside the exported
 // player model with live pose sync; the animation workbench arc's surface.
-export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'facade' | 'knowledge';
+// 'home' is the boot surface (req_4435): the resume board a cold start opens
+// on — recent maps, continue-where-you-left-off, new. It is an ordinary
+// closeable document so it competes with nothing and can be reopened.
+export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'facade' | 'knowledge' | 'home';
 export type WorkspaceDocument = {
   id: string;
   kind: WorkspaceDocumentKind;
@@ -570,7 +573,10 @@ export type EditorState = {
   activeDomain: string;
   activeTab: LibraryTab;
   activeCommandId: string;
-  activeAssetId: string;
+  /** The material the user has SELECTED, or null when they have selected
+   *  nothing. Never a catalog default: a focused card at boot that the user
+   *  never clicked is initialization residue (req_4435). */
+  activeAssetId: string | null;
   // Per-device tool memory (req_3089, GIMP semantics): each physical pointer
   // device remembers the last TOOL command it activated, keyed per surface
   // scope so a model-scope tool never fires on the world surface. Flipping
@@ -641,7 +647,8 @@ export type EditorState = {
   fileExplorerSelectedId: string;
   fileExplorerHistory: ExplorerHistoryEntry[];
   fileExplorerDirectoryHistory: ExplorerDirectoryHistoryEntry[];
-  selectedObjectId: string;
+  /** The selected world object, or null when nothing is selected. */
+  selectedObjectId: string | null;
   contentFolder: ContentFolderId;
   /** Normal tree folder restored when a selected Favorites/Recent row toggles off. */
   libraryCollectionReturnFolder: ContentFolderId;

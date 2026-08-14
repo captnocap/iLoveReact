@@ -2,11 +2,30 @@ import type { Asset, ModelPackage, WorkspaceDocument } from './types';
 
 export const WORLD_DOCUMENT_ID = 'world:main';
 
+/** The world tab. Its subtitle used to read 'main.gamefile' — a file that does
+ *  not exist; the world lives in the ACTIVE MAP DOCUMENT's directory. The live
+ *  map name is supplied by the shell instead (worldDocument), so a restored
+ *  world carries its real name (req_4435). */
 export const WORLD_DOCUMENT: WorkspaceDocument = {
   id: WORLD_DOCUMENT_ID,
   kind: 'world',
   title: 'World Editor',
-  subtitle: 'main.gamefile',
+};
+
+/** The world tab named by the map actually open in it. */
+export function worldDocument(mapName: string): WorkspaceDocument {
+  return { ...WORLD_DOCUMENT, subtitle: mapName };
+}
+
+// HOME — the boot surface (req_4435). One document, opened by a cold start and
+// re-openable from File; closeable like any other tab, and never recorded in
+// the session (resuming from Home must not reopen Home).
+export const HOME_DOCUMENT_ID = 'home:start';
+
+export const HOME_DOCUMENT: WorkspaceDocument = {
+  id: HOME_DOCUMENT_ID,
+  kind: 'home',
+  title: 'Home',
 };
 
 // One project-wide World Bible tab. Individual entities navigate inside this

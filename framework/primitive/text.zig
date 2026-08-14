@@ -268,22 +268,62 @@ pub const TextEngine = struct {
             return line_h;
         }
         const wrap = self.wordWrap(text, size_px, max_width, letter_spacing);
-        const count = if (max_lines > 0 and wrap.count > max_lines) max_lines else wrap.count;
+        const overflowed = max_lines > 0 and wrap.count > max_lines;
+        const count = if (overflowed) max_lines else wrap.count;
         for (0..count) |li| {
+            const line_y = y + line_h * @as(f32, @floatFromInt(li));
+            // The line budget ran out with text still to come: the last kept
+            // line runs to the box edge and ends in an ellipsis, so a clamped
+            // value reads as "there is more" instead of stopping mid-word as
+            // if that were the whole value.
+            if (overflowed and li + 1 == count) {
+                _ = self.drawLineElidedRGBA(text[wrap.line_starts[li]..], x, line_y, size_px, max_width, cr, cg, cb, ca, letter_spacing, line_height_override);
+                continue;
+            }
             const line = text[wrap.line_starts[li]..wrap.line_ends[li]];
-            gpu_text.drawTextLine(line, x, y + line_h * @as(f32, @floatFromInt(li)), size_px, cr, cg, cb, ca);
+            gpu_text.drawTextLine(line, x, line_y, size_px, cr, cg, cb, ca);
         }
         return line_h * @as(f32, @floatFromInt(count));
     }
 
+    /// Paint ONE line inside `max_width`, ending in an ellipsis when the value
+    /// is wider than the box. This is the paint half of the no-wrap contract:
+    /// `measureTextWrappedEx` already clamps a no-wrap node's reported width to
+    /// max_width, so a painter that drew the natural width was disagreeing with
+    /// the layout that placed it — which is how panel strings ran off the panel
+    /// and off the app edge. Returns the line height actually drawn.
+    pub fn drawLineElidedRGBA(self: *TextEngine, text: []const u8, x: f32, y: f32, size_px: u16, max_width: f32, cr: f32, cg: f32, cb: f32, ca: f32, letter_spacing: f32, line_height_override: f32) f32 {
+        const lm = self.lineMetrics(size_px);
+        const line_h: f32 = if (line_height_override > 0) line_height_override else lm.height;
+        if (max_width <= 0 or self.measureLineWidth(text, size_px, letter_spacing) <= max_width) {
+            gpu_text.drawTextLine(text, x, y, size_px, cr, cg, cb, ca);
+            return line_h;
+        }
+        const keep = self.elisionPoint(text, size_px, max_width, letter_spacing);
+        if (keep == 0) {
+            gpu_text.drawTextLine(ELLIPSIS, x, y, size_px, cr, cg, cb, ca);
+            return line_h;
+        }
+        gpu_text.drawTextLine(text[0..keep], x, y, size_px, cr, cg, cb, ca);
+        const prefix_w = self.measureLineWidth(text[0..keep], size_px, letter_spacing);
+        gpu_text.drawTextLine(ELLIPSIS, x + prefix_w, y, size_px, cr, cg, cb, ca);
+        return line_h;
+    }
+
     pub fn drawTextTruncated(self: *TextEngine, text: []const u8, x: f32, y: f32, size_px: u16, max_width: f32, color: layout.Color, letter_spacing: f32) void {
-        const full_w = self.measureLineWidth(text, size_px, letter_spacing);
-        if (full_w <= max_width) return self.drawText(text, x, y, size_px, color);
-        const trunc = self.findTruncationPoint(text, size_px, max_width, letter_spacing);
-        if (trunc == 0) return self.drawText("...", x, y, size_px, color);
-        self.drawText(text[0..trunc], x, y, size_px, color);
-        const prefix_w = self.measureLineWidth(text[0..trunc], size_px, letter_spacing);
-        self.drawText("...", x + prefix_w, y, size_px, color);
+        _ = self.drawLineElidedRGBA(
+            text,
+            x,
+            y,
+            size_px,
+            max_width,
+            @as(f32, @floatFromInt(color.r)) / 255.0,
+            @as(f32, @floatFromInt(color.g)) / 255.0,
+            @as(f32, @floatFromInt(color.b)) / 255.0,
+            @as(f32, @floatFromInt(color.a)) / 255.0,
+            letter_spacing,
+            0,
+        );
     }
 
     pub fn drawTextWrapped(self: *TextEngine, text: []const u8, x: f32, y: f32, size_px: u16, max_width: f32, color: layout.Color) void {
@@ -487,7 +527,7 @@ pub const TextEngine = struct {
     /// (sum of advances) under-measures any string ending in a glyph whose
     /// ink overshoots its advance (e.g. 'r' in some fonts), which is what
     /// auto-sizes a chip too narrow and lets paint touch its right border.
-    fn measureLineWidth(self: *TextEngine, text: []const u8, size_px: u16, letter_spacing: f32) f32 {
+    pub fn measureLineWidth(self: *TextEngine, text: []const u8, size_px: u16, letter_spacing: f32) f32 {
         var width: f32 = 0;
         var char_count: usize = 0;
         var last_overhang: f32 = 0;
@@ -639,14 +679,16 @@ pub const TextEngine = struct {
         return max_word_w;
     }
 
-    // ── Truncation ────────────────────────────────────────────────────────
+    // ── Elision ───────────────────────────────────────────────────────────
 
-    /// Find the byte offset where text should be truncated to fit within
-    /// max_width minus the width of "...". Returns text.len if it fits.
-    fn findTruncationPoint(self: *TextEngine, text: []const u8, size_px: u16, max_width: f32, letter_spacing: f32) usize {
-        const ellipsis = "...";
-        const ellipsis_w = self.measureLineWidth(ellipsis, size_px, letter_spacing);
-        const avail = max_width - ellipsis_w;
+    /// One glyph, so an elided line keeps as much of the real value as the box
+    /// allows. Three dots would cost three glyphs of the value itself.
+    const ELLIPSIS = "…";
+
+    /// Byte offset at which `text` must stop so the kept prefix plus ELLIPSIS
+    /// still fits inside max_width. 0 means not even one glyph fits.
+    fn elisionPoint(self: *TextEngine, text: []const u8, size_px: u16, max_width: f32, letter_spacing: f32) usize {
+        const avail = max_width - self.measureLineWidth(ELLIPSIS, size_px, letter_spacing);
         if (avail <= 0) return 0;
 
         // Linear scan (UTF-8 aware) — accumulate width until overflow
@@ -657,7 +699,7 @@ pub const TextEngine = struct {
         while (i < text.len) {
             const sentinel_len = inlineGlyphSentinelLen(text, i);
             if (sentinel_len > 0) {
-                var adv: f32 = size_px;
+                var adv: f32 = @floatFromInt(size_px);
                 if (char_count > 0) adv += letter_spacing;
                 if (pen + adv > avail) break;
                 pen += adv;

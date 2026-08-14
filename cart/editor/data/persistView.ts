@@ -24,6 +24,7 @@ import { starterPaletteSets } from './colorSpine';
 import { loadLabRecipes } from './labRecipeStore';
 import { loadLibraryHistory } from './libraryHistoryStore';
 import { commandExists, MENUS } from './commands';
+import { HOME_DOCUMENT, HOME_DOCUMENT_ID, WORLD_DOCUMENT_ID } from './documents';
 import { normalizeContentFolderId, normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
 import type { EditorState } from './types';
 
@@ -127,8 +128,20 @@ export function loadPersistedState(): EditorState {
   const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
   const modelWork = getHotState<Partial<ModelWorkHot> | null>(MODEL_WORK_HOT_KEY, null);
   if (!saved) {
+    // COLD START. Open on HOME (req_4435) — the resume board, where the
+    // previous session, the real map list and New all live. The world tab is
+    // loaded behind it so Continue and a map click are both one press away,
+    // but nothing about the world is presented as chosen until it is.
+    // Repro door, same pattern as RJIT_MODELDOC / RJIT_EDKEYS elsewhere in this
+    // cart: `RJIT_BOOT_DOC=world` starts past Home so a headless shot can verify
+    // the world surface's own cold state. Home is still opened as a tab — the
+    // door changes which one is in front, never what exists.
+    const bootDoc = (globalThis as any).__env_get?.('RJIT_BOOT_DOC') as string | null | undefined;
+    base.workspaceDocuments = [HOME_DOCUMENT, ...base.workspaceDocuments];
+    base.activeWorkspaceDocumentId = bootDoc === 'world' ? WORLD_DOCUMENT_ID : HOME_DOCUMENT_ID;
     if (bootStatus) base.status = bootStatus;
-    else if (world?.pieces.length) base.status = `restored world — ${world.pieces.length} placed piece${world.pieces.length === 1 ? '' : 's'} from the world save`;
+    else if (world?.pieces.length) base.status = `${base.activeMapName} loaded — ${world.pieces.length} placed piece${world.pieces.length === 1 ? '' : 's'} from its world save`;
+    else base.status = `${base.activeMapName} loaded`;
     return base;
   }
   // Hot state is a VIEW cache, never a second world store. In particular, do

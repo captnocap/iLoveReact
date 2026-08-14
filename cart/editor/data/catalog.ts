@@ -53,6 +53,17 @@ export function assetById(id: string, overrides: Record<string, AssetOverride> =
   return applyAssetOverride(asset, overrides[asset.id]);
 }
 
+/** The catalog entry for `id`, or NULL when nothing is selected or the id is
+ *  gone (req_4435). assetById's `?? ASSETS[0]` fallback silently substitutes
+ *  the first material in the generated scan — which is how a boot with no
+ *  selection came to focus "Abalone Shell". Anything that needs to know
+ *  whether the USER chose a material must ask this, not assetById. */
+export function assetByIdOrNull(id: string | null, overrides: Record<string, AssetOverride> = {}): Asset | null {
+  if (!id) return null;
+  const asset = ASSETS.find((item) => item.id === id);
+  return asset ? applyAssetOverride(asset, overrides[asset.id]) : null;
+}
+
 export function assetPageSizeFor(tab: LibraryTab, expanded = false): number {
   if (expanded) return tab === 'Skins' ? MATERIAL_PAGE_SIZE_EXPANDED : ASSET_PAGE_SIZE_EXPANDED;
   return tab === 'Skins' ? MATERIAL_PAGE_SIZE : ASSET_PAGE_SIZE;

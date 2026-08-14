@@ -1360,6 +1360,14 @@ fn updateHover(host: *HostContext, root: *Node, mx: f32, my: f32) void {
             const r = node.computed;
             const off = events.cumulativeScrollOffset(root, node);
             tooltip.show(tt, r.x - off.sx, r.y - off.sy, r.w, r.h);
+        } else if (elidedTextUnder(node)) |full| {
+            // A single-line label that had to be ELIDED reveals itself on hover,
+            // so a truncated value is never a value you cannot read. Discovery
+            // chrome, not decoration: a string that FITS produces nothing here,
+            // so this can only ever appear where something was actually cut.
+            const r = node.computed;
+            const off = events.cumulativeScrollOffset(root, node);
+            tooltip.show(full, r.x - off.sx, r.y - off.sy, r.w, r.h);
         } else {
             tooltip.hide();
         }
@@ -1739,6 +1747,34 @@ fn dispatchPointerHandler(host: *HostContext, node: *Node, comptime kind: enum {
     }
 }
 
+/// The full text of a single-line label under `node` that did not fit its box,
+/// or null when everything under it is fully readable.
+///
+/// The hover path uses this to complete the overflow policy: paint elides a
+/// no-wrap label at its box (drawLineElidedRGBA), and hovering the row it lives
+/// in gives the value back. Bounded depth because it runs per hover-enter and a
+/// panel row is shallow — a whole subtree walk would be a different feature.
+fn elidedTextUnder(node: *const Node) ?[]const u8 {
+    const te = g_text_engine orelse return null;
+    if (node.text) |text| {
+        if (node.no_wrap and text.len > 0) {
+            const box = node.computed.w - node.style.padLeft() - node.style.padRight();
+            if (box > 0) {
+                gpu.setFontFamily(node.font_family_id);
+                defer gpu.setFontFamily(0);
+                const bold = node.font_weight >= 600;
+                gpu.setBold(bold);
+                defer gpu.setBold(false);
+                if (te.measureLineWidth(text, node.font_size, node.letter_spacing) > box + 0.5) return text;
+            }
+        }
+    }
+    for (node.children) |*child| {
+        if (elidedTextUnder(child)) |found| return found;
+    }
+    return null;
+}
+
 fn nodeWantsPointerCapture(node: *const Node) bool {
     const h = node.handlers;
     return h.on_mouse_move != null or h.js_on_mouse_move != null or h.lua_on_mouse_move != null or
@@ -1779,23 +1815,36 @@ fn drawNodeTextCommon(node: *Node, text: []const u8, x: f32, y: f32, max_width: 
     const bold = node.font_weight >= 600;
     if (node.font_family_id != 0) gpu.setFontFamily(node.font_family_id);
     if (bold) gpu.setBold(true);
-    const draw_width = if (node.no_wrap) @as(f32, 0) else max_width;
+    const cr = @as(f32, color.r) / 255.0;
+    const cg = @as(f32, color.g) / 255.0;
+    const cb = @as(f32, color.b) / 255.0;
     // Route through the text engine so paint shares the wordWrap algorithm
     // with measurement — single source of truth for line breaks.
-    const text_h = if (g_text_engine) |te| te.drawTextWrappedRGBA(
-        text,
-        x,
-        y,
-        node.font_size,
-        draw_width,
-        @as(f32, color.r) / 255.0,
-        @as(f32, color.g) / 255.0,
-        @as(f32, color.b) / 255.0,
-        final_a,
-        max_lines,
-        node.letter_spacing,
-        node.line_height,
-    ) else 0;
+    //
+    // OVERFLOW POLICY: a no-wrap node inside a bounded box ELIDES. Measurement
+    // already clamps its reported width to max_width, so painting the natural
+    // width made paint disagree with the layout that placed it — that is how a
+    // long value ran past its panel and off the app edge. Callers that want the
+    // old scrolled-single-line behaviour (TextInput) pass max_width = 0.
+    const text_h = if (g_text_engine) |te| blk: {
+        if (node.no_wrap and max_width > 0) {
+            break :blk te.drawLineElidedRGBA(text, x, y, node.font_size, max_width, cr, cg, cb, final_a, node.letter_spacing, node.line_height);
+        }
+        break :blk te.drawTextWrappedRGBA(
+            text,
+            x,
+            y,
+            node.font_size,
+            max_width,
+            cr,
+            cg,
+            cb,
+            final_a,
+            max_lines,
+            node.letter_spacing,
+            node.line_height,
+        );
+    } else 0;
     if (node.line_height > 0) gpu.setLineHeightOverride(0);
     if (node.letter_spacing != 0) gpu.setLetterSpacing(0);
     if (bold) gpu.setBold(false);

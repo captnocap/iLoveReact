@@ -1,7 +1,7 @@
 // editor/data/initialState.ts - seed world objects, seed history, initial state.
-import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
+import { CATALOG_DIAGNOSTICS, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
-import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
+import type { EditorState, ModelToolSnapshot } from './types';
 import { SPINE_DEFAULT_CURRENT } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
@@ -76,9 +76,10 @@ export function bootAuthoredFloraSpecies(): AuthoredFloraSpecies[] {
   });
 }
 
-export const INITIAL_OBJECTS: WorldObject[] = [
-  { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
-];
+// No seed objects. The old `obj-tile` "Selected material" placeholder existed
+// so selectedObject() could always return SOMETHING — which is exactly how a
+// focus panel came to describe an entity nobody had selected (req_4435).
+// selectedObject() returns null now, and every panel handles null.
 
 // A freshly re-mounted, view-mode viewer's tool state — shared by initialState() and the
 // hot-reload reset so the toolbar highlight always matches a clean viewer. A fresh palette
@@ -96,7 +97,10 @@ export function initialState(): EditorState {
     activeDomain: 'assets',
     activeTab: 'Skins',
     activeCommandId: 'select-tool',
-    activeAssetId: DEFAULT_ASSET_ID,
+    // Nothing selected at boot — the asset drawer's detail card and every
+    // focus panel render their designed empty state until the user picks
+    // something (req_4435).
+    activeAssetId: null,
     deviceTools: { world: { mouse: null, pen: null }, model: { mouse: null, pen: null } },
     stickerArm: { textureId: null, rot: 0, scale: 1 },
     worldFacades: [],
@@ -139,7 +143,7 @@ export function initialState(): EditorState {
     fileExplorerSelectedId: '',
     fileExplorerHistory: [],
     fileExplorerDirectoryHistory: [],
-    selectedObjectId: 'obj-tile',
+    selectedObjectId: null,
     selectedPieceIds: [],
     contentFolder: DEFAULT_CONTENT_FOLDER,
     libraryCollectionReturnFolder: DEFAULT_CONTENT_FOLDER,
@@ -172,9 +176,10 @@ export function initialState(): EditorState {
     activeWorldViewId: null,
     worldViewRecallNonce: 0,
     selectedPieceId: null,
-    // Default armed piece = a concrete floor (the placeholder Place piece the
-    // surface always dropped). The Build bar (Phase 2) overwrites this on pick.
-    armedPieceId: 'floor.concrete.common',
+    // NOTHING is armed at boot. A default here made the world Focus panel
+    // describe a "Concrete Floor" the user never chose, and hid PieceBody's
+    // real empty state behind a constant (req_4435). The Build bar arms.
+    armedPieceId: null,
     armedYawDegrees: 0,
     armedStamp: null,
     recentMaterialIds: [],
@@ -185,7 +190,7 @@ export function initialState(): EditorState {
     modelRigs: {},
     modelTextureSlots: {},
     modelLights: {},
-    objects: INITIAL_OBJECTS,
+    objects: [],
     assetOverrides: {},
     modelOverrides: {},
     modelDupes: [],
