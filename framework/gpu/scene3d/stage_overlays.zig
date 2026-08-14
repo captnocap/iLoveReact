@@ -847,6 +847,10 @@ pub fn drawCompassBall(cam: model_paint.Camera) void {
             core.drawCapsule(e.x, e.y, e.x, e.y, z3d.COMPASS_BACK[0], z3d.COMPASS_BACK[1], z3d.COMPASS_BACK[2], 1.0, z3d.COMPASS_DOT_NEG_PX - z3d.COMPASS_RING_GAP_PX);
         }
     }
+    // The centre is a stable camera-home control. Draw it last so an axis aimed
+    // directly through the camera cannot visually bury the recovery affordance.
+    core.drawCapsule(g.cx, g.cy, g.cx, g.cy, z3d.COMPASS_BACK[0], z3d.COMPASS_BACK[1], z3d.COMPASS_BACK[2], 1.0, z3d.COMPASS_HOME_PX + 3);
+    core.drawCapsule(g.cx, g.cy, g.cx, g.cy, z3d.COMPASS_TEXT[0], z3d.COMPASS_TEXT[1], z3d.COMPASS_TEXT[2], 1.0, z3d.COMPASS_HOME_PX);
 }
 /// Axis labels on the positive dots + the live angle readout beside the ball. yaw/pitch
 /// are derived from the SAME camera the frame drew (the exact orbitCamPos() angles:
@@ -872,7 +876,7 @@ pub fn drawCompassText(cam: model_paint.Camera) void {
     core.drawTextLine(line, tx, ty, 12, z3d.COMPASS_TEXT[0], z3d.COMPASS_TEXT[1], z3d.COMPASS_TEXT[2], 1.0);
 }
 /// What does a press at (mx,my) (window px) hit on the compass? 0..5 = axis*2 (+1 for
-/// the negative end); 6 = the ball body (furniture — consume the press, no snap);
+/// the negative end); 6 = centre camera-home control; 7 = inert ball furniture;
 /// -1 = not on the compass at all. Where dots overlap the closer dot wins, front
 /// (toward-viewer) end breaking ties.
 pub fn meshCompassHit(mx: f32, my: f32) i32 {
@@ -883,7 +887,10 @@ pub fn meshCompassHit(mx: f32, my: f32) i32 {
     const dxc = mx - g.cx;
     const dyc = my - g.cy;
     if (dxc * dxc + dyc * dyc > z3d.COMPASS_R_PX * z3d.COMPASS_R_PX) return -1;
-    var best: i32 = 6;
+    // Home owns the exact centre even when an axis points into the camera and its
+    // projected endpoint collapses there.
+    if (dxc * dxc + dyc * dyc <= z3d.COMPASS_HOME_HIT_PX * z3d.COMPASS_HOME_HIT_PX) return 6;
+    var best: i32 = 7;
     var best_key: f32 = std.math.floatMax(f32);
     for (g.ends, 0..) |e, k| {
         const dx = mx - e.x;
@@ -898,12 +905,15 @@ pub fn meshCompassHit(mx: f32, my: f32) i32 {
     }
     return best;
 }
-/// Snap the orbit to the axis-aligned view for a compass hit code (axis*2 + neg):
+/// Snap the orbit to the axis-aligned view for a compass hit code (axis*2 + neg),
+/// or rebase the full model when the centre camera-home control returns code 6:
 /// clicking a dot moves the EYE onto that world axis (front/right/top…), keeping the
-/// target and distance. Y uses the orbit's own pitch clamp — the pole is degenerate
-/// for a Y-up camera — so "top" is the same near-vertical view dragging reaches.
+/// target and distance. Rebase preserves yaw/pitch so an exact compass angle survives
+/// recovery. Y uses the orbit's own pitch clamp — the pole is degenerate for a Y-up
+/// camera — so "top" is the same near-vertical view dragging reaches.
 pub fn meshCompassSnap(code: i32) bool {
     if (z3d.g_orbit.locked) return false;
+    if (code == 6) return z3d.orbitFrameCurrent(false);
     if (code < 0 or code > 5) return false;
     const neg = @rem(code, 2) == 1;
     const half_pi: f32 = std.math.pi / 2.0;
@@ -919,6 +929,33 @@ pub fn meshCompassSnap(code: i32) bool {
         },
     }
     return true;
+}
+
+test "compass centre rebases full model while preserving exact view angle" {
+    const saved_orbit = z3d.g_orbit;
+    const saved_verts = z3d.g_edit_verts;
+    const saved_count = z3d.g_edit_count;
+    defer {
+        z3d.g_orbit = saved_orbit;
+        z3d.g_edit_verts = saved_verts;
+        z3d.g_edit_count = saved_count;
+    }
+
+    var verts = [_]f32{
+        -2, -1, 0, 0, 1, 0, 0, 0,
+        2,  3,  4, 0, 1, 0, 1, 0,
+        0,  0,  2, 0, 1, 0, 0, 1,
+    };
+    z3d.g_edit_verts = verts[0..];
+    z3d.g_edit_count = 3;
+    z3d.g_orbit = .{ .yaw = 1.1, .pitch = -0.35, .dist = 80, .target = .{ 50, 0, -70 }, .radius = 1, .framed = true };
+
+    try std.testing.expect(meshCompassSnap(6));
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), z3d.g_orbit.yaw, 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.35), z3d.g_orbit.pitch, 0.00001);
+    try std.testing.expectEqual([3]f32{ 0, 1, 2 }, z3d.g_orbit.target);
+    try std.testing.expectApproxEqAbs(@sqrt(@as(f32, 12)), z3d.g_orbit.radius, 0.00001);
+    try std.testing.expectApproxEqAbs(z3d.g_orbit.radius * 2.6, z3d.g_orbit.dist, 0.00001);
 }
 
 pub fn drawHistoricalPreviewSelection(cam: model_paint.Camera, ox: f32, oy: f32) void {
