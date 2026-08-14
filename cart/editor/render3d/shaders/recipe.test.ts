@@ -174,6 +174,17 @@ test('stage modules carry every prefix and share one data table', () => {
   assert(rows[0]!.length === rows[1]!.length, 'every stage row shares the full-table layout');
 });
 
+test('slot take-tagging matches brick ground truth (req_4405)', () => {
+  const brick = MATERIALS.find((m) => m.fn === 'brick')!;
+  const takes = brick.slots.map((slot) => slot.takes ?? null);
+  assert(JSON.stringify(takes[0]) === '[0]' && JSON.stringify(takes[1]) === '[0]', 'the shared default pair is overwritten by takes 2/3 — live for take 1 only');
+  assert(JSON.stringify(takes[2]) === '[1]' && JSON.stringify(takes[3]) === '[1]', 'take-2 branch pair mistagged');
+  assert(JSON.stringify(takes[4]) === '[2]' && JSON.stringify(takes[5]) === '[2]', 'take-3 branch pair mistagged');
+  assert(takes[6] === null && takes[7] === null, 'chip/mortar are read by every take and must stay untagged');
+  const entries = recipeSlots({ version: 1, id: 'take-probe', name: 'Take Probe', base: { fn: 'brick' }, layers: [] });
+  assert(JSON.stringify(entries[0]!.takes) === '[0]' && entries[7]!.takes === undefined, 'recipeSlots must carry takes through');
+});
+
 test('a disabled layer is absent from the composed fn and its deps', () => {
   const disabled: MaterialRecipe = {
     ...MOSSY_BRICK,

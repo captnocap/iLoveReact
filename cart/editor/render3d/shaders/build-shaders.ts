@@ -330,11 +330,96 @@ function dedupSlotName(name, taken) {
   return candidate;
 }
 
-// Rewrite one material's raw source; returns { rewritten, slots }.
-function extractSlots(raw) {
+// ── per-take slot liveness (req_4405) ───────────────────────────────────────
+// The palette panel needs to know WHICH TAKES actually read a slot: a color
+// inside `if (variant ...)` belongs to the takes satisfying the condition,
+// and a shared default is dead for any take whose branch overwrites the same
+// variable with its own slot literal (the brick idiom: `var a = ...` defaults
+// + per-take `a = ...` overrides). Tagging is conservative — anything the
+// parser cannot prove stays untagged, i.e. shown for every take.
+
+function takesFromCondition(cond, takeCount) {
+  const parts = cond.split('&&').map((s) => s.trim());
+  const tests = [];
+  for (const part of parts) {
+    const m = /^variant\s*(<=|>=|<|>|==)\s*(-?\d*\.?\d+)$/.exec(part);
+    if (!m) return null; // unparseable → no claim
+    tests.push({ op: m[1], value: Number(m[2]) });
+  }
+  const survivors = [];
+  for (let t = 0; t < takeCount; t++) {
+    const ok = tests.every(({ op, value }) =>
+      op === '<' ? t < value
+        : op === '<=' ? t <= value
+          : op === '>' ? t > value
+            : op === '>=' ? t >= value
+              : t === value);
+    if (ok) survivors.push(t);
+  }
+  return survivors.length > 0 && survivors.length < takeCount ? survivors : null;
+}
+
+// Line-granular scope scan: which takes govern each line. Good enough for the
+// corpus (branch bodies sit on their own lines); a one-line body just stays
+// untagged, which errs toward showing the slot.
+function analyzeVariantScopes(lines, takeCount) {
+  const takesAtLine = [];
+  const scopes = []; // { takes: number[]|null, depth }
+  let depth = 0;
+  let chain = null; // takes consumed by the current if/else-if chain
+  for (const line of lines) {
+    const commentAt = line.indexOf('//');
+    const code = commentAt === -1 ? line : line.slice(0, commentAt);
+    takesAtLine.push(scopes.length ? scopes[scopes.length - 1].takes : null);
+    const opens = (code.match(/\{/g) || []).length;
+    const closes = (code.match(/\}/g) || []).length;
+    const ifm = /(?:\}\s*)?(?:else\s+)?if\s*\(([^)]*\bvariant\b[^)]*)\)\s*\{/.exec(code);
+    const elsem = !ifm && /\}\s*else\s*\{/.test(code);
+    const midDepth = depth - closes;
+    while (scopes.length && scopes[scopes.length - 1].depth > midDepth) scopes.pop();
+    depth = midDepth + opens;
+    if (ifm) {
+      const takes = takesFromCondition(ifm[1], takeCount);
+      const startsChain = !/^\s*\}/.test(code);
+      if (startsChain) chain = takes ? new Set(takes) : null;
+      else if (chain && takes) takes.forEach((t) => chain.add(t));
+      else if (!takes) chain = null;
+      if (opens > 0) scopes.push({ takes, depth });
+    } else if (elsem) {
+      let takes = null;
+      if (chain) {
+        const rest = [];
+        for (let t = 0; t < takeCount; t++) if (!chain.has(t)) rest.push(t);
+        if (rest.length > 0 && rest.length < takeCount) takes = rest;
+      }
+      chain = null;
+      if (opens > 0) scopes.push({ takes, depth });
+    }
+  }
+  return takesAtLine;
+}
+
+// The assignment target left of a literal — the raw identifier (prettified
+// names are for humans; overwrite analysis needs the variable itself).
+function assignTargetAt(code, litPos) {
+  let best = null;
+  const assignRe = /(?:let\s+|var\s+)?([A-Za-z_]\w*)\s*=(?!=)/g;
+  let m;
+  while ((m = assignRe.exec(code))) {
+    if (m.index >= litPos) break;
+    best = m[1];
+  }
+  return best;
+}
+
+// Rewrite one material's raw source; returns { rewritten, slots } where each
+// slot may carry `takes` — the variant takes that actually read it (req_4405).
+function extractSlots(raw, takeCount) {
   const slots = [];
   const taken = new Set();
-  const outLines = raw.split('\n').map((line) => {
+  const lines = raw.split('\n');
+  const takesAtLine = analyzeVariantScopes(lines, takeCount);
+  const outLines = lines.map((line, lineIndex) => {
     const commentAt = line.indexOf('//');
     const code = commentAt === -1 ? line : line.slice(0, commentAt);
     const comment = commentAt === -1 ? '' : line.slice(commentAt);
@@ -355,14 +440,37 @@ function extractSlots(raw) {
       const base = slotNameAt(code, lit.pos, lit.text);
       const name = dedupSlotName(isMixPair ? base + (i === 0 ? ' low' : ' high') : base, taken);
       const slotIndex = slots.length;
-      slots.push({ name, rgb: lit.rgb });
+      slots.push({ name, rgb: lit.rgb, lineTakes: takesAtLine[lineIndex], target: assignTargetAt(code, lit.pos) });
       const at = lit.pos + drift;
       newCode = newCode.slice(0, at) + 'mat_pal(' + slotIndex + ', ' + lit.text + ')' + newCode.slice(at + lit.text.length);
       drift += ('mat_pal(' + slotIndex + ', ' + ')').length;
     });
     return newCode + comment;
   });
-  return { rewritten: outLines.join('\n'), slots };
+  // Overwrite analysis: a take-scoped slot literal assigned to `x` makes any
+  // SHARED slot targeting `x` dead for that take.
+  const overwritten = new Map(); // take -> Set(target)
+  for (const slot of slots) {
+    if (!slot.lineTakes || !slot.target) continue;
+    for (const t of slot.lineTakes) {
+      if (!overwritten.has(t)) overwritten.set(t, new Set());
+      overwritten.get(t).add(slot.target);
+    }
+  }
+  const finished = slots.map((slot) => {
+    let takes;
+    if (slot.lineTakes) {
+      takes = slot.lineTakes;
+    } else if (slot.target) {
+      const live = [];
+      for (let t = 0; t < takeCount; t++) {
+        if (!(overwritten.get(t)?.has(slot.target))) live.push(t);
+      }
+      if (live.length < takeCount) takes = live;
+    }
+    return takes ? { name: slot.name, rgb: slot.rgb, takes } : { name: slot.name, rgb: slot.rgb };
+  });
+  return { rewritten: outLines.join('\n'), slots: finished };
 }
 
 // The generated palette reader — lives in the emitted dispatch (not the
@@ -422,7 +530,7 @@ const materials = files.map((fileName) => {
   const m = parseMaterial(MATERIALS_DIR + '/' + fileName, fileName);
   const board = boardBySlug.get(m.boardSlug);
   if (!board) die(fileName + ': unknown @board "' + m.boardSlug + '" — not in boards.ts BOARD_SLUGS. Propose a new board there first, or fix the typo.');
-  const ex = extractSlots(m.raw);
+  const ex = extractSlots(m.raw, m.variantLabels.length);
   return { ...m, boardIndex: board.index, rewritten: ex.rewritten, slots: ex.slots };
 });
 
@@ -460,7 +568,8 @@ let registryOut = '';
 registryOut += '// _generated/registry.ts — GENERATED by build-shaders.ts. Do not hand-edit.\n';
 registryOut += '// Run: tools/v8cli cart/editor/render3d/shaders/build-shaders.ts\n';
 registryOut += "export type MaterialKind = 'surface' | 'composition' | 'gradient';\n\n";
-registryOut += 'export type MaterialSlot = { name: string; rgb: [number, number, number] };\n\n';
+registryOut += '// takes: the variant takes that actually READ this slot (absent = all).\n';
+registryOut += 'export type MaterialSlot = { name: string; rgb: [number, number, number]; takes?: number[] };\n\n';
 registryOut += '// @param declarations, in mat_param() index order. The D[] param section\n';
 registryOut += '// (count at D[6+3*paletteCount], then values) overrides the baked defaults.\n';
 registryOut += 'export type RegistryParam = { key: string; label: string; default: number; min: number; max: number };\n\n';
@@ -481,7 +590,8 @@ function paramsTs(params) {
 registryOut += 'export const MATERIALS: RegistryMaterial[] = [\n';
 for (const boardIdx of [...byBoard.keys()].sort((a, b) => a - b)) {
   for (const m of byBoard.get(boardIdx)) {
-    const slotsTs = '[' + m.slots.map((s) => '{ name: ' + JSON.stringify(s.name) + ', rgb: [' + s.rgb.join(', ') + '] }').join(', ') + ']';
+    const slotsTs = '[' + m.slots.map((s) => '{ name: ' + JSON.stringify(s.name) + ', rgb: [' + s.rgb.join(', ') + ']'
+      + (s.takes ? ', takes: [' + s.takes.join(', ') + ']' : '') + ' }').join(', ') + ']';
     registryOut += '  { fn: ' + JSON.stringify(m.fn) + ', slug: ' + JSON.stringify(m.slug) + ', name: ' + JSON.stringify(m.name)
       + ', board: ' + JSON.stringify(m.boardSlug) + ', boardIndex: ' + m.boardIndex + ', materialId: ' + m.materialId
       + ', variantLabels: ' + tsStringArray(m.variantLabels) + ', kind: ' + JSON.stringify(m.kind)

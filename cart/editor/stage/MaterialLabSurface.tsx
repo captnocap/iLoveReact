@@ -520,20 +520,39 @@ export default function MaterialLabSurface(props: {
           <SectionHead icon="Pipette">PALETTE</SectionHead>
           {visibleSlots.length === 0 ? (
             <Text style={{ color: FAINT, fontSize: 10 }}>no color slots in this selection</Text>
-          ) : (
-            <Row style={{ flexWrap: 'wrap', gap: 5 }}>
-              {visibleSlots.map((slot) => {
-                const slotIndex = slots.indexOf(slot);
-                const owned = slot.rgb[0] !== slot.baked[0] || slot.rgb[1] !== slot.baked[1] || slot.rgb[2] !== slot.baked[2];
-                return (
-                  <Pressable key={slotIndex} tooltip={`${slot.name} — ${slot.layer === -1 ? 'base' : `layer ${slot.layer + 1}`}${owned ? ' · owned' : ' · baked'}`}
-                    onPress={() => setPopover({ kind: 'color', slotIndex })}>
-                    <Box style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: rgb01ToHex(slot.rgb[0], slot.rgb[1], slot.rgb[2]), borderWidth: owned ? 2 : 1, borderColor: owned ? '#ffffff' : LINE }} />
-                  </Pressable>
-                );
-              })}
-            </Row>
-          )}
+          ) : (() => {
+            // A slot is LIVE when the take its call site samples with actually
+            // reads it (req_4405 — the "why does blue change nothing" fix).
+            // The base follows the variant bar unless pinned; layers pin at 0.
+            const effectiveVariant = (layer: number): number => layer === -1
+              ? (recipe.base.variant ?? state.colorStudioVariant)
+              : (recipe.layers[layer]?.variant ?? 0);
+            const live = visibleSlots.filter((slot) => !slot.takes || slot.takes.includes(effectiveVariant(slot.layer)));
+            const offTake = visibleSlots.filter((slot) => slot.takes && !slot.takes.includes(effectiveVariant(slot.layer)));
+            const swatch = (slot: typeof visibleSlots[number], dimmed: boolean) => {
+              const slotIndex = slots.indexOf(slot);
+              const owned = slot.rgb[0] !== slot.baked[0] || slot.rgb[1] !== slot.baked[1] || slot.rgb[2] !== slot.baked[2];
+              const where = slot.layer === -1 ? 'base' : `layer ${slot.layer + 1}`;
+              const takeNote = dimmed && slot.takes ? ` · read by take ${slot.takes.map((t) => t + 1).join('/')} — switch VARIANT to see it` : '';
+              return (
+                <Pressable key={slotIndex} tooltip={`${slot.name} — ${where}${owned ? ' · owned' : ' · baked'}${takeNote}`}
+                  onPress={() => setPopover({ kind: 'color', slotIndex })} style={{ opacity: dimmed ? 0.35 : 1 }}>
+                  <Box style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: rgb01ToHex(slot.rgb[0], slot.rgb[1], slot.rgb[2]), borderWidth: owned ? 2 : 1, borderColor: owned ? '#ffffff' : LINE }} />
+                </Pressable>
+              );
+            };
+            return (
+              <>
+                <Row style={{ flexWrap: 'wrap', gap: 5 }}>{live.map((slot) => swatch(slot, false))}</Row>
+                {offTake.length > 0 ? (
+                  <>
+                    <Text style={{ color: FAINT, fontSize: 8, fontWeight: '800', letterSpacing: 1 }}>OTHER TAKES</Text>
+                    <Row style={{ flexWrap: 'wrap', gap: 5 }}>{offTake.map((slot) => swatch(slot, true))}</Row>
+                  </>
+                ) : null}
+              </>
+            );
+          })()}
           <Pressable onPress={() => handlers.onEditRecipe('reset colors to baked', (r) => resetPalettes(r, selected))}
             style={{ height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 6, borderWidth: 1, borderColor: LINE }}>
             <Text style={{ color: DIM, fontSize: 9, fontWeight: '700' }}>RESET TO BAKED</Text>

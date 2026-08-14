@@ -166,6 +166,8 @@ export type RecipeSlotEntry = {
   /** the RESOLVED color: the call site's stored override, else the baked rgb. */
   rgb: [number, number, number];
   baked: [number, number, number];
+  /** the variant takes that actually READ this slot (absent = every take). */
+  takes?: number[];
 };
 
 type ParamIndexMap = Map<string, number>;
@@ -241,6 +243,7 @@ export function recipeSlots(recipe: MaterialRecipe): RecipeSlotEntry[] {
         name: slot.name,
         rgb: override ? [override[0], override[1], override[2]] : baked,
         baked,
+        ...(slot.takes ? { takes: slot.takes } : {}),
       });
     });
   };
