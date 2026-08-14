@@ -187,6 +187,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const architecture_scale_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/architecture_scale.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const root_mod = b.createModule(.{
         .root_source_file = b.path(app_source),
@@ -195,6 +200,7 @@ pub fn build(b: *std.Build) void {
     });
     root_mod.addOptions("build_options", options);
     root_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    root_mod.addImport("architecture_scale", architecture_scale_mod);
     // The cart bundle rides in as a named module: v8_app.zig lives in
     // framework/ and @embedFile can't reach a file outside the module root,
     // absolute path or not — a module name resolves like @import and has no
@@ -841,6 +847,7 @@ pub fn build(b: *std.Build) void {
     });
     scene3d_module_mod.addOptions("build_options", options);
     scene3d_module_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    scene3d_module_mod.addImport("architecture_scale", architecture_scale_mod);
     scene3d_module_mod.addImport("wgpu", wgpu_headers_mod);
     scene3d_module_mod.addImport("tls", tls_mod);
     scene3d_module_mod.addImport("pg", pg_dep.module("pg"));
@@ -888,6 +895,7 @@ pub fn build(b: *std.Build) void {
     });
     scene3d_mesh_drag_test_mod.addOptions("build_options", options);
     scene3d_mesh_drag_test_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    scene3d_mesh_drag_test_mod.addImport("architecture_scale", architecture_scale_mod);
     scene3d_mesh_drag_test_mod.addImport("wgpu", wgpu_mod);
     scene3d_mesh_drag_test_mod.addImport("tls", tls_mod);
     scene3d_mesh_drag_test_mod.addImport("pg", pg_dep.module("pg"));
@@ -926,6 +934,7 @@ pub fn build(b: *std.Build) void {
     });
     split3d_check_mod.addOptions("build_options", options);
     split3d_check_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    split3d_check_mod.addImport("architecture_scale", architecture_scale_mod);
     split3d_check_mod.addImport("wgpu", wgpu_mod);
     split3d_check_mod.addImport("tls", tls_mod);
     split3d_check_mod.addImport("pg", pg_dep.module("pg"));
@@ -965,6 +974,7 @@ pub fn build(b: *std.Build) void {
     });
     game_module_mod.addOptions("build_options", options);
     game_module_mod.addImport("dev_module_abi", dev_module_abi_mod);
+    game_module_mod.addImport("architecture_scale", architecture_scale_mod);
     game_module_mod.addImport("wgpu", wgpu_headers_mod);
     game_module_mod.addImport("tls", tls_mod);
     game_module_mod.addImport("pg", pg_dep.module("pg"));
@@ -1703,12 +1713,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    stage_scale_test_mod.addImport("stage_scale", b.createModule(.{
+    const stage_scale_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/stage_scale.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
-    }));
+    });
+    stage_scale_impl_test_mod.addImport("architecture_scale", architecture_scale_mod);
+    stage_scale_test_mod.addImport("stage_scale", stage_scale_impl_test_mod);
     const stage_scale_test = b.addTest(.{
         .name = "stage-scale-test",
         .root_module = stage_scale_test_mod,
@@ -2029,6 +2041,30 @@ pub fn build(b: *std.Build) void {
     const run_game_physics_test = b.addRunArtifact(game_physics_test);
     const game_physics_test_step = b.step("test-game-physics", "Run the game physics/movement behavior tests");
     game_physics_test_step.dependOn(&run_game_physics_test.step);
+
+    // ── Semantic building architecture contract tests ──────────────
+    // Pure allocator/math coverage follows the neighboring game-physics target:
+    // no blocking capability is used, so no std.Io is manufactured or injected.
+    const building_architecture_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/building_architecture.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const building_architecture_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/building_architecture.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    building_architecture_test_mod.addImport("building_architecture", building_architecture_mod_for_tests);
+    const building_architecture_test = b.addTest(.{
+        .name = "building-architecture-test",
+        .root_module = building_architecture_test_mod,
+    });
+    const run_building_architecture_test = b.addRunArtifact(building_architecture_test);
+    const building_architecture_test_step = b.step("test-building-architecture", "Run semantic building architecture contract tests");
+    building_architecture_test_step.dependOn(&run_building_architecture_test.step);
 
     const game_mesh_collision_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/game_mesh_collision.zig"),

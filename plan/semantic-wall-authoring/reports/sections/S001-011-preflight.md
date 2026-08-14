@@ -1,0 +1,712 @@
+# Section A preflight
+
+- Timestamp: 2026-08-14T14:24:23-07:00
+- HEAD: `12ea2449633305792c9cd9ca18b56789ce6708cb`
+- Scope declaration: only paths named by steps 1–11 belong to this section. Existing worktree changes outside those paths are user/other-worker work and must remain untouched.
+
+## git status --short
+
+```text
+ M .agents/skills/agent-seat/corpus/retopo.md
+ M .agents/skills/agent-seat/corpus/setup.md
+ M build.zig
+ M cart/editor/data/commands.test.ts
+ M cart/editor/data/commands.ts
+ M cart/editor/data/panelSystem.test.ts
+ M cart/editor/data/surfaces.test.ts
+ M cart/editor/data/surfaces.ts
+ M cart/editor/inspector/LabInspectorPanel.tsx
+ M cart/editor/material/LabPickers.tsx
+ M cart/editor/render3d/shaders/_generated/dispatch.ts
+ M cart/editor/render3d/shaders/_generated/ids.json
+ M cart/editor/render3d/shaders/_generated/registry.ts
+ M cart/editor/render3d/shaders/build-shaders.ts
+ M cart/editor/shell/LabStackPanel.tsx
+ M cart/editor/shell/ShaderGridBatch.test.ts
+ M cart/editor/shell/ShaderGridBatch.tsx
+ M cart/editor/skeleton/captureSession.test.ts
+ M cart/editor/skeleton/captureSession.ts
+ M cart/editor/skeleton/motionDocuments.ts
+ M cart/editor/stage/AnimationCaptureSurface.tsx
+ M cart/editor/stage/LabLibraryView.tsx
+ M cart/editor/stage/MaterialFocusSurface.tsx
+ M cart/editor/stage/MaterialLabSurface.tsx
+ M cart/editor/stage/MotionDock.tsx
+ M cart/editor/stage/ToolOptions.tsx
+ M cli/commands/codegen-bindings.ts
+ M cli/commands/push-bundle.ts
+ M cli/commands/watch-and-push.ts
+ M docs/game/SKELETON_OBJECT_MODEL.md
+ M framework/dev_modules/abi.zig
+ M framework/diag/dev_ipc.zig
+ M framework/diag/frame_telemetry.zig
+ M framework/game/map/chunks.zig
+ M framework/game/map/engine.zig
+ M framework/game/map/roads.zig
+ M framework/game/map/store.zig
+ M framework/gpu/gpu.zig
+ M framework/gpu/image_cache.zig
+ M framework/gpu/indexed_edit_mesh.zig
+ M framework/gpu/mesh_edge_semantics.zig
+ M framework/gpu/mesh_edit.zig
+ M framework/gpu/meshdoc_format.zig
+ M framework/gpu/model_source.zig
+ M framework/gpu/paint_program.zig
+ M framework/gpu/shaders.zig
+ M framework/gpu/stable_geometry_slot.zig
+ M framework/gpu/world_window.zig
+ M framework/layout.zig
+ M framework/net/http.zig
+ M framework/render/render_surfaces.zig
+ M framework/skeleton/bones_loader.zig
+ M framework/skeleton/capture_session.zig
+ M framework/skeleton/motion_document.zig
+ M framework/skeleton/motion_document_json.zig
+ D framework/skeleton/pose.zig
+ D framework/skeleton/pose_markers.zig
+ M framework/skeleton/pose_stream.zig
+ M framework/state/hotstate.zig
+ M framework/testing/unit/bones_loader.zig
+ M framework/testing/unit/capture_session.zig
+ M framework/testing/unit/fs_expected_content.zig
+ M framework/testing/unit/mesh_edge_semantics.zig
+ M framework/testing/unit/mesh_edit.zig
+ M framework/testing/unit/mesh_journal_log.zig
+ M framework/testing/unit/model_paint.zig
+ M framework/testing/unit/motion_document.zig
+ M framework/testing/unit/motion_document_json.zig
+ M framework/testing/unit/paint_program_journal.zig
+ D framework/testing/unit/pose_markers.zig
+ M framework/testing/unit/pose_stream.zig
+ M framework/testing/unit/world_loader_character_specimens.zig
+ M framework/testing_game_map.zig
+ M framework/testing_lore_snapshot.zig
+ M framework/v8_app.zig
+ M framework/v8_bindings_capture_session.zig
+ M framework/v8_bindings_fs.zig
+ M framework/v8_bindings_game_build.zig
+ M framework/v8_bindings_game_camera.zig
+ M framework/v8_bindings_game_map.zig
+ M framework/v8_bindings_game_pathing.zig
+ M framework/v8_bindings_game_physics.zig
+ M framework/v8_bindings_sdk.zig
+ M framework/v8_capture_world_target.zig
+ M framework/v8_ingredients.zig
+ M framework/world/constructor.zig
+ M framework/world/mapfile.zig
+ M framework/world_loader.zig
+ M framework/world_loader/animation.zig
+ M framework/world_loader/camera.zig
+ M framework/world_loader/config.zig
+ M framework/world_loader/player_assets.zig
+ M framework/world_loader/runtime_interaction.zig
+ M framework/world_loader/runtime_stream.zig
+ M framework/world_loader/scene_build.zig
+ M framework/world_loader/streaming_support.zig
+ M plan/model-recovery-surface/control_board.md
+ M plan/model-recovery-surface/state/completed.txt
+ M plan/model-recovery-surface/state/current_step.txt
+ M plan_store.yaml
+ M runtime/classifier.tsx
+ M runtime/game/map.ts
+ M runtime/geometries/Humanoid.ts
+ M runtime/geometries/_util.ts
+ M runtime/geometries/index.ts
+ M runtime/hooks/fetch.ts
+ M runtime/hooks/fs.ts
+ M runtime/hooks/process.ts
+ M runtime/hooks/useHotState.ts
+ M runtime/hooks/useTelemetry.ts
+ M runtime/primitives.tsx
+ M runtime/skeleton/capture.ts
+ M runtime/skeleton/rigs.test.ts
+ M runtime/skeleton/rigs.ts
+ M runtime/workspace/lumps.ts
+ M scripts/watchdog.sh
+?? .recovery/
+?? cart/editor/agent/characterRigSeat.test.ts
+?? cart/editor/animation/
+?? cart/editor/data/assetCatalog.category.test.ts
+?? cart/editor/data/extrudeParams.test.ts
+?? cart/editor/data/extrudeParams.ts
+?? cart/editor/data/modelPackageStore.atomic.test.ts
+?? cart/editor/data/modelPackageStore.character.test.ts
+?? cart/editor/data/modelPackageViewerPath.test.ts
+?? cart/editor/data/modelPackageViewerPath.ts
+?? cart/editor/data/recentModelLifecycle.test.ts
+?? cart/editor/data/recentModelLifecycle.ts
+?? "cart/editor/design documents/"
+?? cart/editor/inspector/CharacterRigSection.test.ts
+?? cart/editor/material/materialLabPresentation.test.ts
+?? cart/editor/material/materialLabPresentation.ts
+?? cart/editor/model/blobExplorerState.test.ts
+?? cart/editor/model/blobExplorerState.ts
+?? cart/editor/model/faceTable.test.ts
+?? cart/editor/model/faceTableDisplay.ts
+?? cart/editor/model/historicalPreviewLifecycle.test.ts
+?? cart/editor/model/historicalPreviewLifecycle.ts
+?? cart/editor/model/loreRecovery.test.ts
+?? cart/editor/model/meshSemantics.test.ts
+?? cart/editor/model/meshSemantics.ts
+?? cart/editor/model/modelDocumentColdMount.test.ts
+?? cart/editor/model/modelDocumentColdMount.ts
+?? cart/editor/model/modelPartImport.test.ts
+?? cart/editor/model/modelPartImport.ts
+?? cart/editor/model/modelSaveAuthority.test.ts
+?? cart/editor/model/modelSaveAuthority.ts
+?? cart/editor/model/modelShapeHydration.test.ts
+?? cart/editor/model/modelShapeHydration.ts
+?? cart/editor/model/recoveryWireContract.test.ts
+?? cart/editor/model/selectMeshFaces.test.ts
+?? cart/editor/model/selectMeshFaces.ts
+?? cart/editor/render3d/shaders/_generated/thumbnails/
+?? cart/editor/render3d/shaders/materialThumbnailManifest.test.ts
+?? cart/editor/render3d/shaders/materialThumbnailManifest.ts
+?? cart/editor/render3d/shaders/materials/milky_way_lab.wgsl
+?? cart/editor/shell/LinearArrayDialog.tsx
+?? cart/editor/shell/NameSelectionDialog.tsx
+?? cart/editor/shell/NativeUpdateNotice.test.ts
+?? cart/editor/shell/NativeUpdateNotice.tsx
+?? cart/editor/shell/characterExportReadiness.test.ts
+?? cart/editor/shell/characterExportReadiness.ts
+?? cart/editor/skeleton/captureTarget.test.ts
+?? cart/editor/skeleton/captureTarget.ts
+?? cart/editor/skeleton/characterRigAttachTransaction.test.ts
+?? cart/editor/skeleton/characterRigAttachTransaction.ts
+?? cart/editor/skeleton/characterRigCapability.test.ts
+?? cart/editor/skeleton/characterRigCapability.ts
+?? cart/editor/skeleton/characterRigDraft.ts
+?? cart/editor/skeleton/characterRigOpen.test.ts
+?? cart/editor/skeleton/characterRigOpen.ts
+?? cart/editor/skeleton/characterRigPackagePath.ts
+?? cart/editor/skeleton/characterRigPartMetadata.test.ts
+?? cart/editor/skeleton/characterRigPartMetadata.ts
+?? cart/editor/skeleton/externalAutoRig.test.ts
+?? cart/editor/skeleton/externalAutoRig.ts
+?? cart/editor/skeleton/promptMotion.test.ts
+?? cart/editor/skeleton/promptMotion.ts
+?? cart/editor/stage/BlobExplorerSurface.test.ts
+?? cart/editor/stage/ExtrudeDialog.tsx
+?? cart/editor/stage/characterRigViewport.test.ts
+?? cart/editor/stage/characterRigViewport.ts
+?? cart/editor/world/npcCharacterSession.test.ts
+?? cart/editor/world/npcCharacterSession.ts
+?? cart/editor/world/playerCharacterGate.test.ts
+?? cart/editor/world/playerCharacterGate.ts
+?? cart/editor/world/playerCharacterLoader.test.ts
+?? cart/editor/world/playerCharacterLoader.ts
+?? cart/editor/world/residentDemand.test.ts
+?? cart/editor/world/residentDemand.ts
+?? cli/dev/native-approval.test.ts
+?? cli/dev/native-approval.ts
+?? cli/dev/native-modules.ts
+?? cli/tools/
+?? docs/deshit/ANIMATION_CO_VISIBILITY.md
+?? docs/deshit/ANIMATION_FINDINGS.md
+?? docs/deshit/ANIMATION_REGISTRY_CONFORMANCE.md
+?? docs/deshit/ANIMATION_STRINGS.md
+?? docs/deshit/CO_VISIBILITY.md
+?? docs/deshit/FINDINGS.md
+?? docs/deshit/PASS-01-NON-WORLD-ACTION-BAR.md
+?? docs/deshit/PASS-02-ACTION-BAR-DIET.md
+?? docs/deshit/PASS-03-REMOVE-RETOPO-CHROME.md
+?? docs/deshit/PASS-04-MATERIAL-LIBRARY-PERF.md
+?? docs/deshit/PASS-05-MATERIAL-LIBRARY-NO-SHADERS.md
+?? docs/deshit/REGISTRY_CONFORMANCE.md
+?? docs/deshit/STRINGS.md
+?? docs/deshit/TIERS.md
+?? docs/game/CHARACTER_RIG_GUIDE.html
+?? docs/game/_requests/req_4096.json
+?? docs/game/_requests/req_4097.json
+?? docs/game/_requests/req_4098.json
+?? docs/game/_requests/req_4099.json
+?? docs/game/_requests/req_4100.json
+?? docs/game/_requests/req_4101.json
+?? docs/game/_requests/req_4102.json
+?? docs/game/_requests/req_4103.json
+?? docs/game/_requests/req_4104.json
+?? docs/game/_requests/req_4105.json
+?? docs/game/_requests/req_4106.json
+?? docs/game/_requests/req_4107.json
+?? docs/game/_requests/req_4108.json
+?? docs/game/_requests/req_4109.json
+?? docs/game/_requests/req_4110.json
+?? docs/game/_requests/req_4111.json
+?? docs/game/_requests/req_4112.json
+?? docs/game/_requests/req_4113.json
+?? docs/game/_requests/req_4114.json
+?? docs/game/_requests/req_4115.json
+?? docs/game/_requests/req_4116.json
+?? docs/game/_requests/req_4117.json
+?? docs/game/_requests/req_4118.json
+?? docs/game/_requests/req_4119.json
+?? docs/game/_requests/req_4120.json
+?? docs/game/_requests/req_4121.json
+?? docs/game/_requests/req_4122.json
+?? docs/game/_requests/req_4123.json
+?? docs/game/_requests/req_4124.json
+?? docs/game/_requests/req_4125.json
+?? docs/game/_requests/req_4126.json
+?? docs/game/_requests/req_4127.json
+?? docs/game/_requests/req_4128.json
+?? docs/game/_requests/req_4129.json
+?? docs/game/_requests/req_4130.json
+?? docs/game/_requests/req_4131.json
+?? docs/game/_requests/req_4132.json
+?? docs/game/_requests/req_4133.json
+?? docs/game/_requests/req_4134.json
+?? docs/game/_requests/req_4135.json
+?? docs/game/_requests/req_4136.json
+?? docs/game/_requests/req_4137.json
+?? docs/game/_requests/req_4138.json
+?? docs/game/_requests/req_4139.json
+?? docs/game/_requests/req_4140.json
+?? docs/game/_requests/req_4141.json
+?? docs/game/_requests/req_4142.json
+?? docs/game/_requests/req_4143.json
+?? docs/game/_requests/req_4144.json
+?? docs/game/_requests/req_4145.json
+?? docs/game/_requests/req_4146.json
+?? docs/game/_requests/req_4147.json
+?? docs/game/_requests/req_4148.json
+?? docs/game/_requests/req_4149.json
+?? docs/game/_requests/req_4150.json
+?? docs/game/_requests/req_4151.json
+?? docs/game/_requests/req_4152.json
+?? docs/game/_requests/req_4153.json
+?? docs/game/_requests/req_4154.json
+?? docs/game/_requests/req_4155.json
+?? docs/game/_requests/req_4156.json
+?? docs/game/_requests/req_4157.json
+?? docs/game/_requests/req_4158.json
+?? docs/game/_requests/req_4159.json
+?? docs/game/_requests/req_4160.json
+?? docs/game/_requests/req_4161.json
+?? docs/game/_requests/req_4162.json
+?? docs/game/_requests/req_4163.json
+?? docs/game/_requests/req_4164.json
+?? docs/game/_requests/req_4165.json
+?? docs/game/_requests/req_4166.json
+?? docs/game/_requests/req_4167.json
+?? docs/game/_requests/req_4168.json
+?? docs/game/_requests/req_4169.json
+?? docs/game/_requests/req_4170.json
+?? docs/game/_requests/req_4171.json
+?? docs/game/_requests/req_4172.json
+?? docs/game/_requests/req_4173.json
+?? docs/game/_requests/req_4174.json
+?? docs/game/_requests/req_4175.json
+?? docs/game/_requests/req_4176.json
+?? docs/game/_requests/req_4177.json
+?? docs/game/_requests/req_4178.json
+?? docs/game/_requests/req_4179.json
+?? docs/game/_requests/req_4180.json
+?? docs/game/_requests/req_4181.json
+?? docs/game/_requests/req_4182.json
+?? docs/game/_requests/req_4183.json
+?? docs/game/_requests/req_4184.json
+?? docs/game/_requests/req_4185.json
+?? docs/game/_requests/req_4186.json
+?? docs/game/_requests/req_4187.json
+?? docs/game/_requests/req_4188.json
+?? docs/game/_requests/req_4189.json
+?? docs/game/_requests/req_4190.json
+?? docs/game/_requests/req_4191.json
+?? docs/game/_requests/req_4192.json
+?? docs/game/_requests/req_4193.json
+?? docs/game/_requests/req_4194.json
+?? docs/game/_requests/req_4195.json
+?? docs/game/_requests/req_4196.json
+?? docs/game/_requests/req_4197.json
+?? docs/game/_requests/req_4198.json
+?? docs/game/_requests/req_4199.json
+?? docs/game/_requests/req_4200.json
+?? docs/game/_requests/req_4201.json
+?? docs/game/_requests/req_4202.json
+?? docs/game/_requests/req_4203.json
+?? docs/game/_requests/req_4204.json
+?? docs/game/_requests/req_4205.json
+?? docs/game/_requests/req_4206.json
+?? docs/game/_requests/req_4207.json
+?? docs/game/_requests/req_4208.json
+?? docs/game/_requests/req_4209.json
+?? docs/game/_requests/req_4210.json
+?? docs/game/_requests/req_4211.json
+?? docs/game/_requests/req_4212.json
+?? docs/game/_requests/req_4213.json
+?? docs/game/_requests/req_4214.json
+?? docs/game/_requests/req_4215.json
+?? docs/game/_requests/req_4216.json
+?? docs/game/_requests/req_4217.json
+?? docs/game/_requests/req_4218.json
+?? docs/game/_requests/req_4219.json
+?? docs/game/_requests/req_4220.json
+?? docs/game/_requests/req_4221.json
+?? docs/game/_requests/req_4222.json
+?? docs/game/_requests/req_4223.json
+?? docs/game/_requests/req_4224.json
+?? docs/game/_requests/req_4225.json
+?? docs/game/_requests/req_4226.json
+?? docs/game/_requests/req_4227.json
+?? docs/game/_requests/req_4228.json
+?? docs/game/_requests/req_4229.json
+?? docs/game/_requests/req_4230.json
+?? docs/game/_requests/req_4231.json
+?? docs/game/_requests/req_4232.json
+?? docs/game/_requests/req_4233.json
+?? docs/game/_requests/req_4235.json
+?? docs/game/_requests/req_4236.json
+?? docs/game/_requests/req_4238.json
+?? docs/game/_requests/req_4239.json
+?? docs/game/_requests/req_4240.json
+?? docs/game/_requests/req_4241.json
+?? docs/game/_requests/req_4242.json
+?? docs/game/_requests/req_4243.json
+?? docs/game/_requests/req_4245.json
+?? docs/game/_requests/req_4246.json
+?? docs/game/_requests/req_4247.json
+?? docs/game/_requests/req_4248.json
+?? docs/game/_requests/req_4249.json
+?? docs/game/_requests/req_4250.json
+?? docs/game/_requests/req_4251.json
+?? docs/game/_requests/req_4252.json
+?? docs/game/_requests/req_4253.json
+?? docs/game/_requests/req_4254.json
+?? docs/game/_requests/req_4255.json
+?? docs/game/_requests/req_4256.json
+?? docs/game/_requests/req_4257.json
+?? docs/game/_requests/req_4258.json
+?? docs/game/_requests/req_4259.json
+?? docs/game/_requests/req_4260.json
+?? docs/game/_requests/req_4261.json
+?? docs/game/_requests/req_4262.json
+?? docs/game/_requests/req_4263.json
+?? docs/game/_requests/req_4264.json
+?? docs/game/_requests/req_4265.json
+?? docs/game/_requests/req_4266.json
+?? docs/game/_requests/req_4267.json
+?? docs/game/_requests/req_4268.json
+?? docs/game/_requests/req_4269.json
+?? docs/game/_requests/req_4270.json
+?? docs/game/_requests/req_4271.json
+?? docs/game/_requests/req_4272.json
+?? docs/game/_requests/req_4273.json
+?? docs/game/_requests/req_4274.json
+?? docs/game/_requests/req_4275.json
+?? docs/game/_requests/req_4276.json
+?? docs/game/_requests/req_4277.json
+?? docs/game/_requests/req_4278.json
+?? docs/game/_requests/req_4279.json
+?? docs/game/_requests/req_4280.json
+?? docs/game/_requests/req_4281.json
+?? docs/game/_requests/req_4282.json
+?? docs/game/_requests/req_4283.json
+?? docs/game/_requests/req_4284.json
+?? docs/game/_requests/req_4285.json
+?? docs/game/_requests/req_4286.json
+?? docs/game/_requests/req_4287.json
+?? docs/game/_requests/req_4288.json
+?? docs/game/_requests/req_4289.json
+?? docs/game/_requests/req_4290.json
+?? docs/game/_requests/req_4291.json
+?? docs/game/_requests/req_4292.json
+?? docs/game/_requests/req_4293.json
+?? docs/game/_requests/req_4294.json
+?? docs/game/_requests/req_4295.json
+?? docs/game/_requests/req_4296.json
+?? docs/game/_requests/req_4297.json
+?? docs/game/_requests/req_4298.json
+?? docs/game/_requests/req_4299.json
+?? docs/game/_requests/req_4300.json
+?? docs/game/_requests/req_4301.json
+?? docs/game/_requests/req_4302.json
+?? docs/game/_requests/req_4303.json
+?? docs/game/_requests/req_4304.json
+?? docs/game/_requests/req_4305.json
+?? docs/game/_requests/req_4306.json
+?? docs/game/_requests/req_4307.json
+?? docs/game/_requests/req_4308.json
+?? docs/game/_requests/req_4309.json
+?? docs/game/_requests/req_4310.json
+?? docs/game/_requests/req_4311.json
+?? docs/game/_requests/req_4312.json
+?? docs/game/_requests/req_4313.json
+?? docs/game/_requests/req_4314.json
+?? docs/game/_requests/req_4315.json
+?? docs/game/_requests/req_4316.json
+?? docs/game/_requests/req_4317.json
+?? docs/game/_requests/req_4318.json
+?? docs/game/_requests/req_4319.json
+?? docs/game/_requests/req_4320.json
+?? docs/game/_requests/req_4321.json
+?? docs/game/_requests/req_4322.json
+?? docs/game/_requests/req_4323.json
+?? docs/game/_requests/req_4324.json
+?? docs/game/_requests/req_4325.json
+?? docs/game/_requests/req_4326.json
+?? docs/game/_requests/req_4327.json
+?? docs/game/_requests/req_4328.json
+?? docs/game/_requests/req_4329.json
+?? docs/game/_requests/req_4330.json
+?? docs/game/_requests/req_4331.json
+?? docs/game/_requests/req_4332.json
+?? docs/game/_requests/req_4333.json
+?? docs/game/_requests/req_4334.json
+?? docs/game/_requests/req_4335.json
+?? docs/game/_requests/req_4336.json
+?? docs/game/_requests/req_4337.json
+?? docs/game/_requests/req_4338.json
+?? docs/game/_requests/req_4339.json
+?? docs/game/_requests/req_4340.json
+?? docs/game/_requests/req_4341.json
+?? docs/game/_requests/req_4342.json
+?? docs/game/_requests/req_4343.json
+?? docs/game/_requests/req_4344.json
+?? docs/game/_requests/req_4345.json
+?? docs/game/_requests/req_4346.json
+?? docs/game/_requests/req_4347.json
+?? docs/game/_requests/req_4348.json
+?? docs/game/_requests/req_4349.json
+?? docs/game/_requests/req_4350.json
+?? docs/game/_requests/req_4351.json
+?? docs/game/_requests/req_4352.json
+?? docs/game/_requests/req_4353.json
+?? docs/game/_requests/req_4354.json
+?? docs/game/_requests/req_4355.json
+?? docs/game/_requests/req_4356.json
+?? docs/game/_requests/req_4357.json
+?? docs/game/_requests/req_4358.json
+?? docs/game/_requests/req_4359.json
+?? docs/game/_requests/req_4360.json
+?? docs/game/_requests/req_4361.json
+?? docs/game/_requests/req_4362.json
+?? docs/game/_requests/req_4363.json
+?? docs/game/_requests/req_4364.json
+?? docs/game/_requests/req_4365.json
+?? docs/game/_requests/req_4366.json
+?? docs/game/_requests/req_4367.json
+?? docs/game/_requests/req_4368.json
+?? docs/game/_requests/req_4369.json
+?? docs/game/_requests/req_4370.json
+?? docs/game/_requests/req_4371.json
+?? docs/game/_requests/req_4372.json
+?? docs/game/_requests/req_4373.json
+?? docs/game/_requests/req_4374.json
+?? docs/game/_requests/req_4375.json
+?? docs/game/_requests/req_4376.json
+?? docs/game/_requests/req_4377.json
+?? docs/game/_requests/req_4378.json
+?? docs/game/_requests/req_4379.json
+?? docs/game/_requests/req_4380.json
+?? docs/game/_requests/req_4381.json
+?? docs/game/_requests/req_4382.json
+?? docs/game/_requests/req_4383.json
+?? docs/game/_requests/req_4384.json
+?? docs/game/_requests/req_4385.json
+?? docs/game/_requests/req_4386.json
+?? docs/game/_requests/req_4387.json
+?? docs/game/_requests/req_4388.json
+?? docs/game/_requests/req_4389.json
+?? docs/game/_requests/req_4390.json
+?? docs/game/_requests/req_4391.json
+?? docs/game/_requests/req_4392.json
+?? docs/game/_requests/req_4393.json
+?? docs/game/_requests/req_4394.json
+?? docs/game/_requests/req_4395.json
+?? docs/game/_requests/req_4396.json
+?? docs/game/_requests/req_4397.json
+?? docs/game/_requests/req_4398.json
+?? docs/game/_requests/req_4399.json
+?? docs/game/_requests/req_4400.json
+?? docs/game/_requests/req_4401.json
+?? docs/game/_requests/req_4402.json
+?? docs/game/_requests/req_4403.json
+?? docs/game/_requests/req_4404.json
+?? docs/game/_requests/req_4405.json
+?? docs/game/_requests/req_4406.json
+?? docs/game/_requests/req_4407.json
+?? docs/game/_requests/req_4408.json
+?? docs/game/_requests/req_4409.json
+?? docs/game/_requests/req_4410.json
+?? docs/game/_requests/req_4411.json
+?? docs/game/_requests/req_4412.json
+?? docs/game/_requests/req_4413.json
+?? docs/game/_requests/req_4414.json
+?? docs/game/_requests/req_4415.json
+?? docs/game/_requests/req_4416.json
+?? docs/game/_requests/req_4417.json
+?? docs/game/_requests/req_4418.json
+?? docs/game/_requests/req_4419.json
+?? docs/game/_requests/req_4420.json
+?? docs/game/_requests/req_4421.json
+?? docs/game/_requests/req_4422.json
+?? docs/game/_requests/req_4423.json
+?? docs/game/_requests/req_4424.json
+?? docs/game/_requests/req_4425.json
+?? docs/game/_requests/req_4426.json
+?? docs/game/_requests/req_4427.json
+?? docs/game/_requests/req_4428.json
+?? docs/game/_requests/req_4429.json
+?? docs/game/_requests/req_4430.json
+?? docs/game/_requests/req_4431.json
+?? docs/game/_requests/req_4432.json
+?? docs/game/_requests/req_4433.json
+?? docs/game/_requests/req_4434.json
+?? docs/game/_requests/req_4435.json
+?? docs/game/_requests/req_4436.json
+?? docs/game/_requests/req_4437.json
+?? docs/game/_requests/req_4438.json
+?? docs/game/_requests/req_4439.json
+?? docs/game/_requests/req_4440.json
+?? docs/game/_requests/req_4441.json
+?? docs/game/_requests/req_4442.json
+?? docs/game/_requests/req_4443.json
+?? docs/game/_requests/req_4444.json
+?? docs/game/_requests/req_4445.json
+?? docs/game/_requests/req_4446.json
+?? docs/game/_requests/req_4447.json
+?? docs/game/_requests/req_4448.json
+?? docs/game/_requests/req_4449.json
+?? docs/game/_requests/req_4450.json
+?? docs/game/_requests/req_4451.json
+?? docs/game/_requests/req_4452.json
+?? docs/handoffs/SEAT-MODEL-EDITOR-DEFECTS-0803.md
+?? docs/plans/
+?? framework/character_specimen_module.zig
+?? framework/character_topology_module.zig
+?? framework/dev_bundle_stub.js
+?? framework/dev_game_module_root.zig
+?? framework/dev_modules/core_exports.zig
+?? framework/dev_modules/dirty_api.zig
+?? framework/dev_modules/game_module.zig
+?? framework/dev_modules/game_runtime.zig
+?? framework/dev_modules/game_source.zig
+?? framework/dev_modules/gpu_api.zig
+?? framework/dev_modules/host_tree_api.zig
+?? framework/dev_modules/io_owner.zig
+?? framework/dev_modules/loader.zig
+?? framework/dev_modules/material_api.zig
+?? framework/dev_modules/reload_controller.zig
+?? framework/dev_modules/v8_runtime_api.zig
+?? framework/dev_modules/world_window_api.zig
+?? framework/dev_scene3d_module_root.zig
+?? framework/diag/dev_ipc_queue.zig
+?? framework/ffi/v8_dev_module_exports.S
+?? framework/game/map/prepare_slot.zig
+?? framework/gpu/character_specimen.zig
+?? framework/gpu/character_topology_promotion.zig
+?? framework/gpu/historical_preview.zig
+?? framework/gpu/image_cache_policy.zig
+?? framework/gpu/mesh_face_diff.zig
+?? framework/gpu/mesh_face_field_candidate.zig
+?? framework/gpu/mesh_face_restore_proof.zig
+?? framework/gpu/mesh_face_table.zig
+?? framework/gpu/mesh_face_table_package.zig
+?? framework/gpu/mesh_face_table_saved.zig
+?? framework/gpu/mesh_face_table_worker.zig
+?? framework/gpu/mesh_semantic_restore.zig
+?? framework/gpu/model_adoption_finalize.zig
+?? framework/gpu/model_adoption_receipt.zig
+?? framework/gpu/model_write_lease.zig
+?? framework/npc_character_session_module.zig
+?? framework/player_assets_module.zig
+?? framework/rig_bend_diagnostics_module.zig
+?? framework/skeleton/character_hashes.zig
+?? framework/skeleton/character_topology.zig
+?? framework/skeleton/fk_pose.zig
+?? framework/skeleton/generated/
+?? framework/skeleton/humanoid_fit.zig
+?? framework/skeleton/rig_bend_diagnostics.zig
+?? framework/skeleton/rig_pose.zig
+?? framework/skeleton/rig_weight_diagnostics.zig
+?? framework/skeleton/skin_binding.zig
+?? framework/testing/_optional_payload_address_probe.zig
+?? framework/testing/fixtures/dev_modules/
+?? framework/testing/fixtures/mesh_face_diff_fixtures.zig
+?? framework/testing/fixtures/mesh_face_table_fixtures.zig
+?? framework/testing/fixtures/mesh_face_table_saved_fixtures.zig
+?? framework/testing/fixtures/recovery_wire_v1.json
+?? framework/testing/unit/character_specimen.zig
+?? framework/testing/unit/character_topology.zig
+?? framework/testing/unit/character_topology_promotion.zig
+?? framework/testing/unit/dev_ipc_queue.zig
+?? framework/testing/unit/dev_module_abi.zig
+?? framework/testing/unit/humanoid_clips.zig
+?? framework/testing/unit/image_cache_policy.zig
+?? framework/testing/unit/lore_retention.zig
+?? framework/testing/unit/mesh_face_diff.zig
+?? framework/testing/unit/mesh_face_field_candidate.zig
+?? framework/testing/unit/mesh_face_restore_proof.zig
+?? framework/testing/unit/mesh_face_table.zig
+?? framework/testing/unit/mesh_face_table_package.zig
+?? framework/testing/unit/mesh_face_table_saved.zig
+?? framework/testing/unit/mesh_face_table_worker.zig
+?? framework/testing/unit/mesh_semantic_restore.zig
+?? framework/testing/unit/model_blob_codec.zig
+?? framework/testing/unit/model_field_edit.zig
+?? framework/testing/unit/model_restore.zig
+?? framework/testing/unit/model_source_session.zig
+?? framework/testing/unit/rig_bend_diagnostics.zig
+?? framework/testing/unit/rig_fit.zig
+?? framework/testing/unit/rig_pose.zig
+?? framework/testing/unit/rig_weight_diagnostics.zig
+?? framework/testing/unit/scene3d_runtime_face_drain.zig
+?? framework/testing/unit/skin_binding.zig
+?? framework/testing/unit/status_monitor.zig
+?? framework/testing_model_field_edit.zig
+?? framework/testing_model_restore.zig
+?? framework/testing_recovery_public_boundary.zig
+?? framework/testing_recovery_wire_fixture.zig
+?? framework/testing_scene3d_runtime_face_drain.zig
+?? framework/tools/zig_function_inventory.zig
+?? framework/v8_bindings_scene3d.zig
+?? framework/vcs/lore_retention.zig
+?? framework/vcs/model_field_edit.zig
+?? framework/vcs/model_restore.zig
+?? framework/vcs/owned_byte_capability.zig
+?? framework/vcs/restore_manifest.zig
+?? framework/vcs/status_monitor.zig
+?? framework/world_loader/npc_character_policy.zig
+?? framework/world_loader_character_specimens_module.zig
+?? plan/animation-foundry/
+?? plan/edge-semantics/
+?? plan/material-lab-polish-3/
+?? plan/material-thumbnail-bake/
+?? plan/model-recovery-surface/reports/sections/
+?? plan/native-dev-hot-swap/
+?? plan/semantic-wall-authoring/
+?? runtime/geometries/Humanoid.test.ts
+?? runtime/model/
+?? runtime/skeleton/data/
+?? runtime/skeleton/generated/
+?? runtime/skeleton/humanoid-v1.test.ts
+?? runtime/skeleton/readiness.test.ts
+?? runtime/skeleton/readiness.ts
+?? runtime/skeleton/skinBinding.test.ts
+?? runtime/skeleton/skinBinding.ts
+?? runtime/vcs/loreSaveCoordinator.ts
+?? sdk/dev-module-registry.json
+?? tools/ardy-motion
+?? tools/ardy-text-encoder-server
+?? tools/check-character-severance
+?? tools/dev-module-import-audit
+?? tools/model-blob-validate-ts
+?? tools/model-package-backup
+?? tools/model-package-backup.test.sh
+?? tools/model-package-guard-test-fixture
+?? tools/model-package-migrate-candidate
+?? tools/model-package-validate
+?? tools/model-package-validate.test.sh
+?? tools/seat_args.js
+?? tools/seat_args.test.js
+?? tools/test-recovery-wire-contract
+```
+
+## Verification
+
+- Step 1 report written: true
+- Verification timestamp: 2026-08-14T14:38:36-07:00
+- `zig build test-building-architecture -Doptimize=ReleaseFast`: exit 1 because PATH resolved Zig 0.15.2; the exact toolchain mismatch is retained in `state/blocked.txt`.
+- `tools/zig/zig build test-building-architecture -Doptimize=ReleaseFast`: exit 0 using the repository-required Zig 0.16 compiler.
+- `tools/zig/zig build test-stage-scale -Doptimize=ReleaseFast`: exit 0; Studio consumes the same architecture-scale module.
+- Section A native harness passes: true

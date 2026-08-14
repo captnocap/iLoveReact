@@ -1,0 +1,2 @@
+Step 11 — 2026-08-14: `zig build test-building-architecture -Doptimize=ReleaseFast` invoked PATH Zig 0.15.2 and failed while evaluating repository/dependency Zig 0.16 APIs (`std.Io.Dir`, `Build.Graph.io`, and translate_c signatures). Source current_step remains 10. Resolution is to run the identical build target through the repository-pinned `tools/zig/zig` required by AGENTS.md.
+Step 11 resolution — repository-pinned Zig 0.16 target exited 0; the toolchain blocker is closed and no source workaround was introduced.

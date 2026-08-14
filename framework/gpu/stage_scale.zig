@@ -4,13 +4,15 @@
 //! modeling overlay. The stage grid, its ruler, and its mannequin all consume these
 //! values so a game-facing scale cue cannot quietly drift into a cosmetic one.
 
+const architecture_scale = @import("architecture_scale");
+
 /// Scale constants ruled for game authoring. Keep collider and visual height
 /// separate: one governs collision, the other is the stylized figure's head top.
 pub const Tuning = struct {
     /// One stage tile is one authored world metre.
     pub const tile_meters: f32 = 1.0;
-    /// Studio modeling units retain the Blockbench-compatible 16 u = 1 m contract.
-    pub const units_per_meter: f32 = 16.0;
+    /// Studio consumes the game-owned architecture scale; it does not own a second 16.
+    pub const units_per_meter: f32 = architecture_scale.units_per_meter_f32;
     /// Physical player capsule from the game scale contract.
     pub const player_collider_height_meters: f32 = 1.65;
     /// Stylized player head top; this is visual, not collision height.
@@ -31,7 +33,16 @@ pub const OverlayOptions = struct {
 };
 
 pub fn metersToUnits(meters: f32) f32 {
-    return meters * Tuning.units_per_meter;
+    return architecture_scale.metersToStudioUnits(meters);
+}
+
+comptime {
+    if (Tuning.units_per_meter != architecture_scale.units_per_meter_f32) {
+        @compileError("Studio scale must equal the architecture scale authority");
+    }
+    if (metersToUnits(Tuning.tile_meters) != architecture_scale.units_per_meter_f32) {
+        @compileError("one Studio tile must remain one architecture metre");
+    }
 }
 
 pub const MarkTone = enum {
