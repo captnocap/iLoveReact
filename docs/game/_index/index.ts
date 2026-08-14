@@ -31,6 +31,7 @@ import { editor_color_library } from './records/editor_color_library';
 import { editor_live_materials } from './records/editor_live_materials';
 import { editor_painted_placements } from './records/editor_painted_placements';
 import { editor_sections } from './records/editor_sections';
+import { editor_model_focus } from './records/editor_model_focus';
 import { editor_saved_views } from './records/editor_saved_views';
 import { editor_spin_props } from './records/editor_spin_props';
 import { editor_transport_paths } from './records/editor_transport_paths';
@@ -56,7 +57,7 @@ export type {
 };
 
 export const ALL_DOCS: DocIndex[] = [
-  bake_geometry, editor_color_library, editor_curve_kit, editor_deej, editor_mesh_integrity, editor_pen_device, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_live_materials, editor_map_documents, editor_map_paint_history, editor_painted_placements, editor_saved_views, editor_sections, editor_spin_props, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
+  bake_geometry, editor_color_library, editor_curve_kit, editor_deej, editor_mesh_integrity, editor_model_focus, editor_pen_device, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_live_materials, editor_map_documents, editor_map_paint_history, editor_painted_placements, editor_saved_views, editor_sections, editor_spin_props, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
   game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
   world_knowledge_authoring,
 ];
