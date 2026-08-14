@@ -26,15 +26,43 @@ export const D_DECL = '@group(0) @binding(1) var<storage, read> D: array<f32>;';
 // validates fn name == @material and the fill contract fixes the params).
 const MAT_FN_SIG = /fn ([A-Za-z0-9_]+)\(uv: vec2f, px: vec2f, variant: f32, seed: f32\) -> vec3f \{/g;
 
+// The three atom-kind signatures (build-shaders.ts ATOM_KINDS, enforced at
+// generation). Atoms are emitted AFTER the material bodies, so scanning from
+// the first material fn onward can never capture a prelude helper.
+const ATOM_FN_SIGS = [
+  /fn ([A-Za-z0-9_]+)\(uv: vec2f, px: vec2f, seed: f32\) -> f32 \{/g, // field
+  /fn ([A-Za-z0-9_]+)\(uv: vec2f, seed: f32, amount: f32\) -> vec2f \{/g, // warp
+  /fn ([A-Za-z0-9_]+)\(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32\) -> vec3f \{/g, // colormod
+];
+
+/** Brace-matched fn body starting at `start` (the regex match index). */
+function braceMatchedBody(source: string, start: number, headerLength: number): { text: string; end: number } {
+  let depth = 0;
+  let at = start + headerLength - 1; // the opening brace
+  for (; at < source.length; at += 1) {
+    const ch = source[at];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        at += 1;
+        break;
+      }
+    }
+  }
+  return { text: source.slice(start, at), end: at };
+}
+
 /** FILL_FUNCS split once: the helpers prelude (helpers.wgsl + mat_pal reader +
- *  quality/road helpers — everything before the first material fn) and each
- *  material fn's body, brace-matched. fill_pick has a different signature, so
- *  it never lands in the map — composed modules emit their own small chain.
- *  The prelude is returned RAW (D declaration intact); callers whose harness
- *  declares D apply their own replace. Throws on generator drift so a
- *  build-shaders.ts output change fails LOUD. */
-let cachedSplit: { prelude: string; bodies: Map<string, string> } | null = null;
-export function splitFillDispatch(): { prelude: string; bodies: Map<string, string> } {
+ *  quality/road helpers — everything before the first material fn), each
+ *  material fn's body, and each atom fn's body (field/warp/colormod — emitted
+ *  after the materials), all brace-matched. fill_pick has a different
+ *  signature, so it never lands in either map — composed modules emit their
+ *  own small chain. The prelude is returned RAW (D declaration intact);
+ *  callers whose harness declares D apply their own replace. Throws on
+ *  generator drift so a build-shaders.ts output change fails LOUD. */
+let cachedSplit: { prelude: string; bodies: Map<string, string>; atoms: Map<string, string> } | null = null;
+export function splitFillDispatch(): { prelude: string; bodies: Map<string, string>; atoms: Map<string, string> } {
   if (cachedSplit) return cachedSplit;
   if (!FILL_FUNCS.includes(D_DECL)) {
     throw new Error('[compose] dispatch drift: D declaration not found — re-check build-shaders.ts output');
@@ -46,26 +74,23 @@ export function splitFillDispatch(): { prelude: string; bodies: Map<string, stri
   while ((match = MAT_FN_SIG.exec(FILL_FUNCS))) {
     const start = match.index;
     if (firstAt < 0) firstAt = start;
-    let depth = 0;
-    let at = start + match[0].length - 1; // the opening brace
-    for (; at < FILL_FUNCS.length; at += 1) {
-      const ch = FILL_FUNCS[at];
-      if (ch === '{') depth += 1;
-      else if (ch === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          at += 1;
-          break;
-        }
-      }
-    }
-    bodies.set(match[1]!, FILL_FUNCS.slice(start, at));
-    MAT_FN_SIG.lastIndex = at;
+    const body = braceMatchedBody(FILL_FUNCS, start, match[0].length);
+    bodies.set(match[1]!, body.text);
+    MAT_FN_SIG.lastIndex = body.end;
   }
   if (firstAt < 0 || bodies.size === 0) {
     throw new Error('[compose] dispatch drift: no material fn bodies found — re-check build-shaders.ts output');
   }
-  cachedSplit = { prelude: FILL_FUNCS.slice(0, firstAt), bodies };
+  const atoms = new Map<string, string>();
+  for (const sig of ATOM_FN_SIGS) {
+    sig.lastIndex = firstAt;
+    while ((match = sig.exec(FILL_FUNCS))) {
+      const body = braceMatchedBody(FILL_FUNCS, match.index, match[0].length);
+      atoms.set(match[1]!, body.text);
+      sig.lastIndex = body.end;
+    }
+  }
+  cachedSplit = { prelude: FILL_FUNCS.slice(0, firstAt), bodies, atoms };
   return cachedSplit;
 }
 
@@ -78,22 +103,22 @@ export function fnForMaterialRow(materialId: number, boardIndex: number): string
   return MATERIAL_BY_ROW.get(`${Math.round(materialId)}:${Math.round(boardIndex)}`)?.fn ?? null;
 }
 
-/** Wanted fns plus every material fn their bodies call (compositions layering
- *  surfaces), deduped + sorted so equal sets compose byte-identical modules.
- *  Returns null (loudly, once per unknown name — a drifted caller can request
- *  the same bad fn hundreds of times per boot) when a fn is missing from the
- *  generated dispatch, so callers never compose a module the shader would
- *  miscompile. */
+/** Wanted fns plus every material AND atom fn their bodies call (compositions
+ *  layering surfaces; recipes calling field/warp/colormod atoms), deduped +
+ *  sorted so equal sets compose byte-identical modules. Returns null (loudly,
+ *  once per unknown name — a drifted caller can request the same bad fn
+ *  hundreds of times per boot) when a fn is missing from the generated
+ *  dispatch, so callers never compose a module the shader would miscompile. */
 const reportedUnknownFns = new Set<string>();
 export function resolveMaterialFns(fns: readonly string[]): string[] | null {
-  const { bodies } = splitFillDispatch();
+  const { bodies, atoms } = splitFillDispatch();
   const wanted = [...new Set(fns)].sort();
   const need: string[] = [];
   const queue = [...wanted];
   while (queue.length > 0) {
     const fn = queue.shift()!;
     if (need.includes(fn)) continue;
-    const body = bodies.get(fn);
+    const body = bodies.get(fn) ?? atoms.get(fn);
     if (!body) {
       if (!reportedUnknownFns.has(fn)) {
         reportedUnknownFns.add(fn);
@@ -102,7 +127,7 @@ export function resolveMaterialFns(fns: readonly string[]): string[] | null {
       return null;
     }
     need.push(fn);
-    for (const other of bodies.keys()) {
+    for (const other of [...bodies.keys(), ...atoms.keys()]) {
       if (other !== fn && !need.includes(other) && !queue.includes(other) && new RegExp(`\\b${other}\\s*\\(`).test(body)) {
         queue.push(other);
       }
@@ -144,8 +169,8 @@ export function fillShaderFor(fns: readonly (string | null | undefined)[]): stri
   // on every mount of every consumer.
   const src = resolved
     ? (() => {
-      const { prelude, bodies } = splitFillDispatch();
-      return [prelude, ...resolved.map((fn) => bodies.get(fn)!), fillPickFor(resolved), FILL_MAIN_SRC].join('\n');
+      const { prelude, bodies, atoms } = splitFillDispatch();
+      return [prelude, ...resolved.map((fn) => (bodies.get(fn) ?? atoms.get(fn))!), fillPickFor(resolved), FILL_MAIN_SRC].join('\n');
     })()
     : FILL_SHADER;
   composedFillShaders.set(key, src);

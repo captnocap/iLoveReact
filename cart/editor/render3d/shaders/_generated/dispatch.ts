@@ -15420,6 +15420,167 @@ fn quartz_rain(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+// ── atoms: field/warp/colormod building blocks (Material Lab) ──
+
+// @atom colormod_contrast
+// @name Contrast
+// @kind colormod
+// @tags color, contrast, filter
+// @author lab
+fn colormod_contrast(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f {
+  return sat3((col - vec3f(0.5, 0.5, 0.5)) * (1.0 + amount) + vec3f(0.5, 0.5, 0.5));
+}
+
+// @atom colormod_hue
+// @name Hue Shift
+// @kind colormod
+// @tags color, hue, filter
+// @author lab
+fn colormod_hue(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f {
+  let angle = amount * 6.2831853;
+  let s = sin(angle);
+  let c = cos(angle);
+  let y = dot(col, vec3f(0.299, 0.587, 0.114));
+  let i = dot(col, vec3f(0.596, -0.274, -0.322));
+  let q = dot(col, vec3f(0.211, -0.523, 0.312));
+  let i2 = i * c - q * s;
+  let q2 = i * s + q * c;
+  return sat3(vec3f(
+    y + 0.956 * i2 + 0.621 * q2,
+    y - 0.272 * i2 - 0.647 * q2,
+    y - 1.106 * i2 + 1.703 * q2));
+}
+
+// @atom colormod_night
+// @name Night
+// @kind colormod
+// @tags color, mood, filter
+// @author lab
+fn colormod_night(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f {
+  let cooled = sat3(col * vec3f(0.30, 0.38, 0.62) + vec3f(0.010, 0.014, 0.045));
+  return mix(col, cooled, sat(amount));
+}
+
+// @atom colormod_posterize
+// @name Posterize
+// @kind colormod
+// @tags color, quantize, filter
+// @author lab
+fn colormod_posterize(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f {
+  let levels = 6.0;
+  let quantized = floor(col * levels + vec3f(0.5, 0.5, 0.5)) / levels;
+  return mix(col, quantized, sat(amount));
+}
+
+// @atom colormod_saturate
+// @name Saturation
+// @kind colormod
+// @tags color, saturation, filter
+// @author lab
+fn colormod_saturate(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f {
+  let luma = dot(col, vec3f(0.299, 0.587, 0.114));
+  return sat3(mix(vec3f(luma, luma, luma), col, 1.0 + amount));
+}
+
+// @atom field_cells
+// @name Cell Borders
+// @kind field
+// @tags voronoi, cells, mask
+// @author lab
+fn field_cells(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  let v = voronoi(uv.x * 8.0 + seed, uv.y * 8.0 - seed);
+  return sat((v.y - v.x) * 2.2);
+}
+
+// @atom field_cracks
+// @name Cracks
+// @kind field
+// @tags cracks, damage, mask
+// @author lab
+fn field_cracks(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  return crack_field(uv, seed, 9.0);
+}
+
+// @atom field_drips
+// @name Drips
+// @kind field
+// @tags weathering, streaks, mask
+// @author lab
+fn field_drips(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  return vertical_drips(uv, seed, 1.0);
+}
+
+// @atom field_fbm
+// @name FBM Noise
+// @kind field
+// @tags noise, organic, mask
+// @author lab
+fn field_fbm(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  return sat(fbm(uv.x * 6.0 + seed, uv.y * 6.0 - seed, 4.0) * 0.5 + 0.5);
+}
+
+// @atom field_gradient
+// @name Vertical Gradient
+// @kind field
+// @tags gradient, directional, mask
+// @author lab
+fn field_gradient(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  return sat(uv.y);
+}
+
+// @atom field_leaf
+// @name Leaf Cover
+// @kind field
+// @tags foliage, organic, mask
+// @author lab
+fn field_leaf(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  return leaf_cover(uv, 0.55, seed);
+}
+
+// @atom field_speckle
+// @name Speckle
+// @kind field
+// @tags grain, dots, mask
+// @author lab
+fn field_speckle(uv: vec2f, px: vec2f, seed: f32) -> f32 {
+  return speckle(px, 3.0, seed, 0.90);
+}
+
+// @atom warp_fbm
+// @name FBM Warp
+// @kind warp
+// @tags noise, organic, domain
+// @author lab
+fn warp_fbm(uv: vec2f, seed: f32, amount: f32) -> vec2f {
+  let dx = fbm(uv.x * 4.0 + seed, uv.y * 4.0 - seed, 4.0);
+  let dy = fbm(uv.x * 4.0 - seed + 9.0, uv.y * 4.0 + seed + 3.0, 4.0);
+  return uv + vec2f(dx, dy) * amount * 0.5;
+}
+
+// @atom warp_ripple
+// @name Ripple
+// @kind warp
+// @tags waves, sine, domain
+// @author lab
+fn warp_ripple(uv: vec2f, seed: f32, amount: f32) -> vec2f {
+  return uv + vec2f(sin(uv.y * 22.0 + seed), sin(uv.x * 22.0 - seed)) * amount * 0.04;
+}
+
+// @atom warp_swirl
+// @name Swirl
+// @kind warp
+// @tags rotate, vortex, domain
+// @author lab
+fn warp_swirl(uv: vec2f, seed: f32, amount: f32) -> vec2f {
+  let center = vec2f(0.5, 0.5);
+  let p = uv - center;
+  let r = length(p);
+  let angle = (1.0 - sat(r * 2.0)) * amount * 3.1415926;
+  let s = sin(angle);
+  let c = cos(angle);
+  return center + vec2f(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
 fn fill_pick(material: i32, board: f32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = vec3f(0.0, 0.0, 0.0);
   if (board < 0.5) {

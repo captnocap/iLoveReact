@@ -1288,3 +1288,25 @@ export const FILL_BOARDS: FillBoard[] = [
     { slug: "quartz-rain", name: "Quartz Rain", variants: ["Light Rain", "Harsh Rain", "Glitter Rain"] },
   ] },
 ];
+
+export type AtomKind = 'field' | 'warp' | 'colormod';
+
+export type RegistryAtom = { fn: string; name: string; kind: AtomKind; tags: string[]; author: string };
+
+export const ATOMS: RegistryAtom[] = [
+  { fn: "colormod_contrast", name: "Contrast", kind: "colormod", tags: ["color", "contrast", "filter"], author: "lab" },
+  { fn: "colormod_hue", name: "Hue Shift", kind: "colormod", tags: ["color", "hue", "filter"], author: "lab" },
+  { fn: "colormod_night", name: "Night", kind: "colormod", tags: ["color", "mood", "filter"], author: "lab" },
+  { fn: "colormod_posterize", name: "Posterize", kind: "colormod", tags: ["color", "quantize", "filter"], author: "lab" },
+  { fn: "colormod_saturate", name: "Saturation", kind: "colormod", tags: ["color", "saturation", "filter"], author: "lab" },
+  { fn: "field_cells", name: "Cell Borders", kind: "field", tags: ["voronoi", "cells", "mask"], author: "lab" },
+  { fn: "field_cracks", name: "Cracks", kind: "field", tags: ["cracks", "damage", "mask"], author: "lab" },
+  { fn: "field_drips", name: "Drips", kind: "field", tags: ["weathering", "streaks", "mask"], author: "lab" },
+  { fn: "field_fbm", name: "FBM Noise", kind: "field", tags: ["noise", "organic", "mask"], author: "lab" },
+  { fn: "field_gradient", name: "Vertical Gradient", kind: "field", tags: ["gradient", "directional", "mask"], author: "lab" },
+  { fn: "field_leaf", name: "Leaf Cover", kind: "field", tags: ["foliage", "organic", "mask"], author: "lab" },
+  { fn: "field_speckle", name: "Speckle", kind: "field", tags: ["grain", "dots", "mask"], author: "lab" },
+  { fn: "warp_fbm", name: "FBM Warp", kind: "warp", tags: ["noise", "organic", "domain"], author: "lab" },
+  { fn: "warp_ripple", name: "Ripple", kind: "warp", tags: ["waves", "sine", "domain"], author: "lab" },
+  { fn: "warp_swirl", name: "Swirl", kind: "warp", tags: ["rotate", "vortex", "domain"], author: "lab" },
+];

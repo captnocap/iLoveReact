@@ -27,6 +27,7 @@ function die(msg) {
 const ROOT = __cwd();
 const SHADERS_DIR = ROOT + '/cart/editor/render3d/shaders';
 const MATERIALS_DIR = SHADERS_DIR + '/materials';
+const ATOMS_DIR = SHADERS_DIR + '/atoms';
 const GENERATED_DIR = SHADERS_DIR + '/_generated';
 const IDS_PATH = GENERATED_DIR + '/ids.json';
 const HELPERS_PATH = SHADERS_DIR + '/helpers.wgsl';
@@ -122,6 +123,57 @@ function parseMaterial(path, fileName) {
     fn, slug: fields['slug'], name: fields['name'], boardSlug: fields['board'],
     variantLabels, kind, tags, author: fields['author'], raw: src.replace(/\n+$/, ''), body,
   };
+}
+
+// ── parse one atom file's header (Material Lab building blocks) ─────────────
+// Atoms are NOT materials: no board, no variants, no stable (board, index) id —
+// they are addressed by fn name alone, referenced from recipe layers. Each kind
+// has ONE exact signature so a composed recipe can call any atom of a kind
+// interchangeably. The fn-name prefix must match the kind, which doubles as a
+// collision guard against helpers.wgsl / effect_math symbols.
+const ATOM_KINDS = {
+  field: { prefix: 'field_', signature: '(uv: vec2f, px: vec2f, seed: f32) -> f32' },
+  warp: { prefix: 'warp_', signature: '(uv: vec2f, seed: f32, amount: f32) -> vec2f' },
+  colormod: { prefix: 'colormod_', signature: '(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f' },
+};
+
+function parseAtom(path, fileName) {
+  const src = __fs_read(path);
+  if (src === null) die('cannot read ' + path);
+  const lines = src.split('\n');
+  const fields = {};
+  let bodyStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = HEADER_FIELD_RE.exec(line);
+    if (m) {
+      fields[m[1]] = m[2].trim();
+      continue;
+    }
+    if (line.startsWith('fn ')) { bodyStart = i; break; }
+    if (line.trim() === '' || line.startsWith('//')) continue;
+    die(fileName + ': unexpected line before fn declaration: ' + line);
+  }
+  if (bodyStart === -1) die(fileName + ': no `fn <name>(...)` found');
+  const required = ['atom', 'name', 'kind', 'tags', 'author'];
+  for (const key of required) {
+    if (!(key in fields)) die(fileName + ': missing header field @' + key);
+  }
+  const fn = fields['atom'];
+  const expectedFile = fn + '.wgsl';
+  if (fileName !== expectedFile) die(fileName + ': filename must match @atom (' + expectedFile + ')');
+  const kind = fields['kind'];
+  const kindSpec = ATOM_KINDS[kind];
+  if (!kindSpec) die(fileName + ': @kind must be field | warp | colormod, got ' + kind);
+  if (!fn.startsWith(kindSpec.prefix)) {
+    die(fileName + ': a ' + kind + ' atom fn must be prefixed "' + kindSpec.prefix + '" (got "' + fn + '")');
+  }
+  const requiredSig = 'fn ' + fn + kindSpec.signature + ' {';
+  if (lines[bodyStart] !== requiredSig) {
+    die(fileName + ': a ' + kind + ' atom must declare exactly `' + requiredSig + '` — got `' + lines[bodyStart] + '`');
+  }
+  const tags = fields['tags'].split(',').map((s) => s.trim()).filter(Boolean);
+  return { fn, name: fields['name'], kind, tags, author: fields['author'], raw: src.replace(/\n+$/, '') };
 }
 
 // ── load / update the stable id table ───────────────────────────────────────
@@ -292,6 +344,18 @@ const materials = files.map((fileName) => {
   return { ...m, boardIndex: board.index, rewritten: ex.rewritten, slots: ex.slots };
 });
 
+// Atoms sweep — tolerate a missing dir (a checkout without the Lab's atoms is
+// still a valid catalog build). Sorted by (kind, fn) for deterministic output.
+const atomFiles = __fs_exists(ATOMS_DIR) ? listWgslFiles(ATOMS_DIR) : [];
+const atoms = atomFiles.map((fileName) => parseAtom(ATOMS_DIR + '/' + fileName, fileName));
+atoms.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.fn < b.fn ? -1 : 1));
+{
+  const materialFns = new Set(materials.map((m) => m.fn));
+  for (const a of atoms) {
+    if (materialFns.has(a.fn)) die(a.fn + ': atom fn collides with a material fn');
+  }
+}
+
 const existingIds = loadIds();
 const { resolved, table } = assignIds(materials, existingIds);
 table.sort((a, b) => a.board - b.board || a.index - b.index);
@@ -349,6 +413,17 @@ for (const b of boards) {
 }
 registryOut += '];\n';
 
+// ── atoms (Material Lab building blocks) ─────────────────────────────────
+registryOut += '\n';
+registryOut += "export type AtomKind = 'field' | 'warp' | 'colormod';\n\n";
+registryOut += 'export type RegistryAtom = { fn: string; name: string; kind: AtomKind; tags: string[]; author: string };\n\n';
+registryOut += 'export const ATOMS: RegistryAtom[] = [\n';
+for (const a of atoms) {
+  registryOut += '  { fn: ' + JSON.stringify(a.fn) + ', name: ' + JSON.stringify(a.name) + ', kind: ' + JSON.stringify(a.kind)
+    + ', tags: ' + tsStringArray(a.tags) + ', author: ' + JSON.stringify(a.author) + ' },\n';
+}
+registryOut += '];\n';
+
 if (!__fs_write(GENERATED_DIR + '/registry.ts', registryOut)) die('failed to write registry.ts');
 
 // ── dispatch.ts ──────────────────────────────────────────────────────────
@@ -385,9 +460,18 @@ dispatchOut += MAT_PAL_WGSL;
 dispatchOut += '\n';
 dispatchOut += materialBodies;
 dispatchOut += '\n\n';
+// Atoms land AFTER the material bodies and BEFORE fill_pick: compose.ts's
+// prelude (everything before the first material fn) stays byte-identical, so
+// material-only composed modules do not change; compose splits atom bodies out
+// of this tail region by their kind signatures.
+if (atoms.length > 0) {
+  dispatchOut += '// ── atoms: field/warp/colormod building blocks (Material Lab) ──\n\n';
+  dispatchOut += atoms.map((a) => a.raw).join('\n\n');
+  dispatchOut += '\n\n';
+}
 dispatchOut += dispatchFn;
 dispatchOut += '`;\n';
 
 if (!__fs_write(GENERATED_DIR + '/dispatch.ts', dispatchOut)) die('failed to write dispatch.ts');
 
-__writeStderr('[build-shaders] ' + materials.length + ' materials across ' + boards.length + ' boards -> registry.ts + dispatch.ts\n');
+__writeStderr('[build-shaders] ' + materials.length + ' materials across ' + boards.length + ' boards + ' + atoms.length + ' atoms -> registry.ts + dispatch.ts\n');
