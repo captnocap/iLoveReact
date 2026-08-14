@@ -5583,6 +5583,16 @@ pub fn run(config_in: AppConfig) !void {
                         else
                             false;
                         if (input_consumed) stampInputLatency(config.host.io, "key");
+                        // Studio navigation is a native capture mode: once Tab enables it,
+                        // WASD updates host-held axes and never reaches the model command
+                        // keymap (W wireframe, A align, S scale, D detach). Text inputs still
+                        // win above, and the shell owns Tab so modal discipline stays intact.
+                        const studio_navigation_consumed = !input_consumed and r3d.meshEditCapturing() and
+                            r3d.orbitNavigationKey(sym, true);
+                        if (studio_navigation_consumed) {
+                            state_mod.markDirty();
+                            continue;
+                        }
                         if (!input_consumed and !videos.handleKey(sym)) {
                             selection.onKeyDown(config.root, sym, mod);
                             ifttt_zig.dispatchKeyDown(config.host, packed_key);
@@ -5595,6 +5605,10 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_KEY_UP => {
                     // Same full-width packing as KEY_DOWN (key_pack.zig).
                     const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(event.key.mod));
+                    if (r3d.orbitNavigationKey(@intCast(event.key.key), false)) {
+                        state_mod.markDirty();
+                        continue;
+                    }
                     _ = render_surfaces.handleKeyUp(io, environ, @intCast(event.key.key));
                     ifttt_zig.dispatchKeyUp(config.host, packed_key);
                     js_vm.callGlobalInt(config.host, "__ifttt_onKeyUp", packed_key);
@@ -5752,6 +5766,13 @@ pub fn run(config_in: AppConfig) !void {
                 },
                 c.SDL_EVENT_WINDOW_FOCUS_LOST => {
                     releaseWorldLoaderPointer();
+                    // SDL may not deliver key-up after focus leaves the window.
+                    // Clear every Studio navigation axis without changing the Tab
+                    // toggle, so returning to the editor cannot inherit a stuck walk.
+                    _ = r3d.orbitNavigationKey('w', false);
+                    _ = r3d.orbitNavigationKey('a', false);
+                    _ = r3d.orbitNavigationKey('s', false);
+                    _ = r3d.orbitNavigationKey('d', false);
                     if (world_loader_paint_node_id != 0) {
                         world_loader.paintPointer(io, world_loader_paint_node_id, .up, 0, 0);
                         world_loader_paint_node_id = 0;

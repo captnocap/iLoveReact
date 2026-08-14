@@ -74,7 +74,87 @@ pub const Orbit = struct {
     // loop are covered by the same switch. orbitFrame (model load) stays live — a
     // fresh model must land in view even under lock.
     locked: bool = false,
+    navigation_enabled: bool = false,
+    navigation_keys: u8 = 0,
 };
+
+pub const ORBIT_NAVIGATION_TUNING = struct {
+    /// Travel scales with the current dolly distance so close detail work stays
+    /// precise while a framed large model remains quick to cross.
+    pub const distance_per_second: f32 = 0.7;
+    pub const radius_floor_per_second: f32 = 0.08;
+    /// A debugger pause or window hitch must not teleport the camera on resume.
+    pub const maximum_step_seconds: f32 = 0.05;
+};
+
+const NAV_FORWARD: u8 = 1 << 0;
+const NAV_BACK: u8 = 1 << 1;
+const NAV_LEFT: u8 = 1 << 2;
+const NAV_RIGHT: u8 = 1 << 3;
+
+pub fn orbitNavigationEnabled() bool {
+    return z3d.g_orbit.navigation_enabled;
+}
+
+/// Tab is shell-owned; this is the strict native mode boundary it toggles. Key
+/// state is always cleared at a transition so a held key cannot leak across modes.
+pub fn orbitNavigationSet(enabled: bool) bool {
+    z3d.g_orbit.navigation_enabled = enabled;
+    z3d.g_orbit.navigation_keys = 0;
+    return enabled;
+}
+
+fn navigationKeyMask(sym: i32) u8 {
+    return switch (sym) {
+        'w', 'W' => NAV_FORWARD,
+        's', 'S' => NAV_BACK,
+        'a', 'A' => NAV_LEFT,
+        'd', 'D' => NAV_RIGHT,
+        else => 0,
+    };
+}
+
+/// Capture one physical WASD edge while navigation is enabled. Returning true is
+/// the engine's instruction not to forward that edge to Studio's command keymap.
+pub fn orbitNavigationKey(sym: i32, down: bool) bool {
+    if (!z3d.g_orbit.navigation_enabled) return false;
+    const mask = navigationKeyMask(sym);
+    if (mask == 0) return false;
+    if (down) z3d.g_orbit.navigation_keys |= mask else z3d.g_orbit.navigation_keys &= ~mask;
+    return true;
+}
+
+/// Host-side held-key integrator. The orbit eye and target translate together,
+/// retaining the current yaw/pitch/dolly while WASD walks over the XZ work plane.
+pub fn orbitNavigationTick(dt_raw: f32) bool {
+    if (!z3d.g_me_capture or !z3d.g_orbit.navigation_enabled or z3d.g_orbit.locked or
+        z3d.g_orbit.navigation_keys == 0 or !std.math.isFinite(dt_raw) or dt_raw <= 0)
+        return false;
+
+    var forward: f32 = 0;
+    var strafe: f32 = 0;
+    if (z3d.g_orbit.navigation_keys & NAV_FORWARD != 0) forward += 1;
+    if (z3d.g_orbit.navigation_keys & NAV_BACK != 0) forward -= 1;
+    if (z3d.g_orbit.navigation_keys & NAV_RIGHT != 0) strafe += 1;
+    if (z3d.g_orbit.navigation_keys & NAV_LEFT != 0) strafe -= 1;
+    const input_length = @sqrt(forward * forward + strafe * strafe);
+    if (input_length <= 0) return false;
+    forward /= input_length;
+    strafe /= input_length;
+
+    const yaw = z3d.g_orbit.yaw;
+    const view_forward = [3]f32{ -@sin(yaw), 0, -@cos(yaw) };
+    const view_right = [3]f32{ @cos(yaw), 0, -@sin(yaw) };
+    const speed = @max(
+        z3d.g_orbit.dist * ORBIT_NAVIGATION_TUNING.distance_per_second,
+        z3d.g_orbit.radius * ORBIT_NAVIGATION_TUNING.radius_floor_per_second,
+    );
+    const step = speed * @min(dt_raw, ORBIT_NAVIGATION_TUNING.maximum_step_seconds);
+    for (0..3) |axis| {
+        z3d.g_orbit.target[axis] += (view_forward[axis] * forward + view_right[axis] * strafe) * step;
+    }
+    return true;
+}
 
 pub fn residentMutationAllowed(domain: historical_preview.ResidentMutationDomain) bool {
     return z3d.g_historical_preview.allowsResidentMutation(domain);
@@ -194,4 +274,54 @@ pub inline fn vpLocalX(mx: f32) f32 {
 }
 pub inline fn vpLocalY(my: f32) f32 {
     return my - z3d.g_paint_vp_y;
+}
+
+test "Studio orbit navigation exclusively captures held WASD and moves camera-relative" {
+    const saved_orbit = z3d.g_orbit;
+    const saved_capture = z3d.g_me_capture;
+    defer {
+        z3d.g_orbit = saved_orbit;
+        z3d.g_me_capture = saved_capture;
+    }
+    z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
+    z3d.g_me_capture = true;
+
+    try std.testing.expect(orbitNavigationSet(true));
+    try std.testing.expect(orbitNavigationKey('w', true));
+    try std.testing.expect(!orbitNavigationKey('x', true));
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    try std.testing.expectApproxEqAbs(@as(f32, 0), z3d.g_orbit.target[0], 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.35), z3d.g_orbit.target[2], 0.00001);
+
+    try std.testing.expect(orbitNavigationKey('w', false));
+    const stopped = z3d.g_orbit.target;
+    try std.testing.expect(!orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    try std.testing.expectEqual(stopped, z3d.g_orbit.target);
+
+    try std.testing.expect(!orbitNavigationSet(false));
+    try std.testing.expect(!orbitNavigationKey('w', true));
+}
+
+test "Studio orbit navigation normalizes diagonals and respects camera lock" {
+    const saved_orbit = z3d.g_orbit;
+    const saved_capture = z3d.g_me_capture;
+    defer {
+        z3d.g_orbit = saved_orbit;
+        z3d.g_me_capture = saved_capture;
+    }
+    z3d.g_orbit = .{ .yaw = 0, .dist = 10, .radius = 1 };
+    z3d.g_me_capture = true;
+    _ = orbitNavigationSet(true);
+    _ = orbitNavigationKey('w', true);
+    _ = orbitNavigationKey('d', true);
+    try std.testing.expect(orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    const traveled = @sqrt(z3d.g_orbit.target[0] * z3d.g_orbit.target[0] + z3d.g_orbit.target[2] * z3d.g_orbit.target[2]);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), traveled, 0.00001);
+
+    z3d.g_orbit.locked = true;
+    const locked = z3d.g_orbit.target;
+    try std.testing.expect(!orbitNavigationTick(ORBIT_NAVIGATION_TUNING.maximum_step_seconds));
+    try std.testing.expectEqual(locked, z3d.g_orbit.target);
+    // Lock freezes camera motion, not the exclusive input contract.
+    try std.testing.expect(orbitNavigationKey('d', false));
 }

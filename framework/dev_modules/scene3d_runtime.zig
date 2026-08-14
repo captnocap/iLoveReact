@@ -627,6 +627,21 @@ pub fn orbitZoom(delta: f32) void {
     if (api()) |dispatch| dispatch.orbit_zoom(delta);
 }
 
+pub fn orbitNavigationEnabled() bool {
+    if (!modular_core) return implementation.orbitNavigationEnabled();
+    return if (api()) |dispatch| dispatch.orbit_navigation_enabled() else false;
+}
+
+pub fn orbitNavigationSet(enabled: bool) bool {
+    if (!modular_core) return implementation.orbitNavigationSet(enabled);
+    return if (api()) |dispatch| dispatch.orbit_navigation_set(enabled) else false;
+}
+
+pub fn orbitNavigationKey(sym: i32, down: bool) bool {
+    if (!modular_core) return implementation.orbitNavigationKey(sym, down);
+    return if (api()) |dispatch| dispatch.orbit_navigation_key(sym, down) else false;
+}
+
 pub fn focusAt(x: f32, y: f32) bool {
     if (!modular_core) return implementation.focusAt(x, y);
     return if (api()) |dispatch| dispatch.focus_at(x, y) else false;

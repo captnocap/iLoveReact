@@ -700,6 +700,16 @@ fn hostModelOrbitLock(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     scene3d.orbitSetLocked(on);
 }
 
+/// __model_orbit_navigation_toggle() → 1|0 — switch Studio's exclusive WASD
+/// camera capture. The engine consumes those key edges natively while enabled;
+/// Tab itself remains cart-owned so focused inputs and modal overlays win first.
+fn hostModelOrbitNavigationToggle(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const enabled = scene3d_runtime.orbitNavigationSet(!scene3d_runtime.orbitNavigationEnabled());
+    state.markDirty();
+    setReturnNumber(info, if (enabled) 1 else 0);
+}
+
 /// __model_cam_pose() → "[yaw,pitch,dist,tx,ty,tz]" — read the mesh-editor orbit pose.
 /// The cart's view-bookmark list (req_3067/req_3074) stores these; the host stays the
 /// pose authority, the list stays authored data.
@@ -5261,6 +5271,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
         v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
         v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
+        v8_runtime.registerHostFn("__model_orbit_navigation_toggle", hostModelOrbitNavigationToggle);
         v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
         v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
         v8_runtime.registerHostFn("__model_shot_offscreen", hostModelShotOffscreen);
@@ -5530,6 +5541,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
+    v8_runtime.registerHostFn("__model_orbit_navigation_toggle", hostModelOrbitNavigationToggle);
     v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
     v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
     v8_runtime.registerHostFn("__model_shot_offscreen", hostModelShotOffscreen);

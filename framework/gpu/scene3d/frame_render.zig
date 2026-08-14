@@ -62,6 +62,7 @@ pub fn update(dt: f32) void {
     // Clear scenes recorded but never flushed (e.g. a frame where gpu.frame()
     // bailed before flushPending). Runs before the paint walk each frame.
     z3d.g_pending_count = 0;
+    _ = z3d.orbitNavigationTick(dt);
     z3d.characterRigTickExercise(dt);
 }
 

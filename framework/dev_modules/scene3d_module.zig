@@ -160,6 +160,15 @@ fn orbitPan(dx: f32, dy: f32) callconv(.c) void {
 fn orbitZoom(delta: f32) callconv(.c) void {
     scene3d.orbitZoom(delta);
 }
+fn orbitNavigationEnabled() callconv(.c) bool {
+    return scene3d.orbitNavigationEnabled();
+}
+fn orbitNavigationSet(enabled: bool) callconv(.c) bool {
+    return scene3d.orbitNavigationSet(enabled);
+}
+fn orbitNavigationKey(sym: i32, down: bool) callconv(.c) bool {
+    return scene3d.orbitNavigationKey(sym, down);
+}
 fn focusAt(x: f32, y: f32) callconv(.c) bool {
     return scene3d.focusAt(x, y);
 }
@@ -708,6 +717,9 @@ var module_api = abi.Scene3dApiV1{
     .orbit_drag = orbitDrag,
     .orbit_pan = orbitPan,
     .orbit_zoom = orbitZoom,
+    .orbit_navigation_enabled = orbitNavigationEnabled,
+    .orbit_navigation_set = orbitNavigationSet,
+    .orbit_navigation_key = orbitNavigationKey,
     .focus_at = focusAt,
     .mesh_pick = meshPick,
     .mesh_out_of_scope_part_at = meshOutOfScopePartAt,

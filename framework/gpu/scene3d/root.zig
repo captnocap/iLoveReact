@@ -3,7 +3,6 @@
 //! Renders 3D.Mesh children to an offscreen texture with depth buffer,
 //! composited into the 2D layout tree via images.queueQuad().
 //! Reads camera/light/mesh props from the 3D.View node's children.
-
 //!
 //! Orchestrator of the verbatim split (req_4375): owns every top-level `var`
 //! (module state — including the DocState @This() reflection set) and re-exports
@@ -677,6 +676,10 @@ pub const orbitDrag = @import("orbit_camera.zig").orbitDrag;
 pub const orbitZoom = @import("orbit_camera.zig").orbitZoom;
 pub const orbitCamPos = @import("orbit_camera.zig").orbitCamPos;
 pub const orbitPan = @import("orbit_camera.zig").orbitPan;
+pub const orbitNavigationEnabled = @import("orbit_camera.zig").orbitNavigationEnabled;
+pub const orbitNavigationSet = @import("orbit_camera.zig").orbitNavigationSet;
+pub const orbitNavigationKey = @import("orbit_camera.zig").orbitNavigationKey;
+pub const orbitNavigationTick = @import("orbit_camera.zig").orbitNavigationTick;
 pub const orbitFocus = @import("orbit_camera.zig").orbitFocus;
 pub const focusAt = @import("orbit_camera.zig").focusAt;
 pub const vpLocalX = @import("orbit_camera.zig").vpLocalX;

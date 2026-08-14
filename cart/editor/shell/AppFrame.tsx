@@ -9130,6 +9130,17 @@ export default function AppFrame() {
       }
       return;
     }
+    // Studio camera navigation is an explicit exclusive mode. Tab stays at the
+    // shell boundary so open menus, blockers, and focused native inputs win before
+    // the host toggle; once enabled, engine.zig consumes WASD before this keymap,
+    // temporarily displacing Wire / Align / Scale / Detach exactly as advertised.
+    if (activeSurface(s) === 'model' && key === 'tab' && !mods.ctrl && !mods.meta && !mods.alt && !mods.shift) {
+      const enabled = Number((globalThis as any).__model_orbit_navigation_toggle?.() ?? 0) === 1;
+      setState((prev) => ({ ...prev, status: enabled
+        ? 'WASD camera movement enabled — Tab restores Studio shortcuts'
+        : 'WASD camera movement disabled — Studio shortcuts restored' }));
+      return;
+    }
     // Outliner-native clipboard. Geometry remains host-resident: copy records
     // stable part ids and paste invokes the same paint-carrying host duplicate
     // operation as the row button. Ctrl+D is the direct, one-keystroke twin.
