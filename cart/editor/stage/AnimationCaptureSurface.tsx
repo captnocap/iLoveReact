@@ -63,9 +63,17 @@ const DEFAULT_CAMERA: PoseCameraDevice = {
   bus: '',
 };
 
-const FACE = new Set(['nose', 'eye_left', 'eye_right', 'ear_left', 'ear_right']);
-const LEGS = new Set(['hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right']);
-const landmarkColor = (name: string): string => FACE.has(name) ? '#e8c14c' : LEGS.has(name) ? '#e8874c' : '#4cc9e8';
+const FACE = new Set([
+  'nose', 'eye_inner_left', 'eye_left', 'eye_outer_left', 'eye_inner_right', 'eye_right', 'eye_outer_right',
+  'ear_left', 'ear_right', 'mouth_left', 'mouth_right',
+]);
+const LEGS = new Set([
+  'hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'heel_left', 'heel_right', 'foot_index_left', 'foot_index_right',
+]);
+const HANDS = new Set(['pinky_left', 'pinky_right', 'index_left', 'index_right', 'thumb_left', 'thumb_right']);
+const landmarkColor = (name: string): string =>
+  FACE.has(name) ? '#e8c14c' : LEGS.has(name) ? '#e8874c' : HANDS.has(name) ? '#b3e84c' : '#4cc9e8';
 
 const SOURCE_EDGES: ReadonlyArray<readonly [SourceJointId, SourceJointId]> = [
   ['head', 'shoulder_center'],
@@ -292,7 +300,6 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   const loaderRef = useRef<any>(null);
   const apiRef = useRef<ReturnType<typeof createCaptureSessionApi> | null>(null);
   if (apiRef.current === null) apiRef.current = createCaptureSessionApi();
-  const preferredDepthSignRef = useRef<1 | -1>(1);
 
   const discoveredAtMount = useMemo(() => listPoseCameraDevices(), []);
   const savedCameraAtMount = useMemo(readStoredCameraSource, []);
@@ -311,7 +318,6 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   const [viewportNodeId, setViewportNodeId] = useState(0);
   const [snapshot, setSnapshot] = useState<CaptureSessionSnapshot | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [preferredDepthSign, setPreferredDepthSign] = useState<1 | -1>(1);
 
   const discoveredChoices = cameras.length > 0 ? cameras : [DEFAULT_CAMERA];
   // A selected source the scan missed stays pickable/visible instead of
@@ -374,9 +380,6 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
       if (!live) return true;
       try {
         let opened = api.openTarget(resolution.target);
-        if (opened.depthSign !== preferredDepthSignRef.current) {
-          opened = api.setDepthSign(preferredDepthSignRef.current);
-        }
         // Calibration begins the moment a session opens (req_4265): the feed
         // is the rest reference, and sessions reopen on camera change and hot
         // reload — demanding a manual click after each one reads as "detection
@@ -444,14 +447,15 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
     });
   };
 
-  const setDepthSign = (depthSign: 1 | -1) => {
-    preferredDepthSignRef.current = depthSign;
-    setPreferredDepthSign(depthSign);
-    if (snapshot) applyCommand((api) => api.setDepthSign(depthSign));
-  };
-
   const frameId = snapshot ? captureSnapshotFrameId(snapshot) : null;
-  const detectedKeypoints = snapshot?.detected?.keypoints ?? [];
+  // Native landmarks carry sigmoid visibility; the pane's marker code speaks
+  // one dialect ("confidence") shared with the legacy preview door below.
+  const detectedKeypoints = (snapshot?.detected?.landmarks ?? []).map((landmark) => ({
+    name: landmark.name,
+    x: landmark.x,
+    y: landmark.y,
+    confidence: landmark.visibility,
+  }));
 
   // Pre-calibration live preview (req_4263): until the native session promotes
   // its first completed triplet, the camera pane shows raw MoveNet detections
@@ -500,7 +504,6 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
   const meanConfidence = displayKeypoints.length > 0
     ? displayKeypoints.reduce((sum, keypoint) => sum + keypoint.confidence, 0) / displayKeypoints.length
     : 0;
-  const depthSign = snapshot?.depthSign ?? preferredDepthSign;
   const calibration = snapshot?.calibration;
   const localRotationCount = snapshot?.target ? Object.keys(snapshot.target.localRotations).length : 0;
   const root = snapshot?.target?.rootTranslation;
@@ -569,15 +572,6 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
               {snapshot?.frozen ? 'RESUME' : 'FREEZE TRIPLET'}
             </Text>
           </Pressable>
-          {([[1, 'TOWARD'], [-1, 'AWAY']] as const).map(([sign, label]) => (
-            <Pressable
-              key={label}
-              onPress={() => setDepthSign(sign)}
-              style={{ height: 26, paddingLeft: 8, paddingRight: 8, justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: depthSign === sign ? '#4cc9e8' : '#343943', backgroundColor: depthSign === sign ? '#15303b' : '#11151c' }}
-            >
-              <Text style={{ color: depthSign === sign ? '#7edcf2' : '#8b949e', fontSize: 9, fontFamily: 'monospace' }}>{label}</Text>
-            </Pressable>
-          ))}
           <Col style={{ position: 'relative', width: 220 }}>
             <Pressable
               onPress={() => setCameraMenuOpen((open) => !open)}
@@ -630,7 +624,7 @@ export default function AnimationCaptureSurface(props: { targetPackage: ModelPac
               </Box>
               <Text style={{ color: '#9a9ea6', fontSize: 9, fontFamily: 'monospace', marginTop: 8 }}>{`${selectedCamera.name} · ${cameraSrc}`}</Text>
               <Row style={{ marginTop: 5, gap: 12 }}>
-                <Text style={{ color: '#8e9baa', fontSize: 9, fontFamily: 'monospace' }}>{`${confidentKeypoints.length}/${displayKeypoints.length || 17} landmarks ≥ 0.5`}</Text>
+                <Text style={{ color: '#8e9baa', fontSize: 9, fontFamily: 'monospace' }}>{`${confidentKeypoints.length}/${displayKeypoints.length || 33} landmarks ≥ 0.5`}</Text>
                 <Text style={{ color: '#8e9baa', fontSize: 9, fontFamily: 'monospace' }}>{`mean confidence ${meanConfidence.toFixed(2)}`}</Text>
                 {!nativeDetected && displayKeypoints.length > 0 ? (
                   <Text style={{ color: '#d6ad61', fontSize: 9, fontFamily: 'monospace' }}>live preview · calibrate to track</Text>

@@ -4,17 +4,22 @@
 
 import type { BoneId, Quat, Vec3 } from './schema';
 
-export type CameraKeypoint = {
+/** One BlazePose landmark: screen position normalized to the camera frame
+ * (y down) plus its sigmoid visibility. The native side also holds the metric
+ * 3D world position; the wire carries only what the preview draws. */
+export type WorldLandmarkPoint = {
   name: string;
   x: number;
   y: number;
-  confidence: number;
+  visibility: number;
 };
 
-export type DetectedLandmarkFrame = {
+export type WorldLandmarkFrame = {
   frameId: number;
   timestampMs: number;
-  keypoints: CameraKeypoint[];
+  /** Pose-presence probability — below the native floor means nobody there. */
+  presence: number;
+  landmarks: WorldLandmarkPoint[];
 };
 
 export type SourceJointId =
@@ -95,9 +100,8 @@ export type CaptureSessionSnapshot = {
   sessionId: string;
   revision: number;
   frozen: boolean;
-  depthSign: 1 | -1;
   calibration: CaptureCalibrationStatus;
-  detected: DetectedLandmarkFrame | null;
+  detected: WorldLandmarkFrame | null;
   source: SourceSkeletonFrame | null;
   target: TargetPoseFrame | null;
   recording?: CaptureRecordingStatus;
@@ -119,7 +123,6 @@ export type CaptureSessionCommand =
   | { op: 'calibrate' }
   | { op: 'freeze' }
   | { op: 'resume' }
-  | { op: 'setDepthSign'; payload: { depthSign: 1 | -1 } }
   | { op: 'record' }
   | { op: 'recordStop'; payload: { directory: string; name: string } }
   | { op: 'poseKey' }
@@ -148,7 +151,6 @@ export interface CaptureSessionApi {
   calibrate(): CaptureSessionSnapshot;
   freeze(): CaptureSessionSnapshot;
   resume(): CaptureSessionSnapshot;
-  setDepthSign(depthSign: 1 | -1): CaptureSessionSnapshot;
   record(): CaptureSessionSnapshot;
   recordStop(directory: string, name: string): CaptureRecordingResult;
   poseKey(): CapturePoseKeySample;

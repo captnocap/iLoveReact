@@ -14,11 +14,17 @@ import type {
   CaptureSessionSnapshot,
   CaptureTarget,
 } from '../../../runtime/skeleton';
-const CAMERA_KEYPOINT_IDS = [
-  'nose', 'eye_left', 'eye_right', 'ear_left', 'ear_right',
+export const WORLD_LANDMARK_IDS = [
+  'nose',
+  'eye_inner_left', 'eye_left', 'eye_outer_left',
+  'eye_inner_right', 'eye_right', 'eye_outer_right',
+  'ear_left', 'ear_right',
+  'mouth_left', 'mouth_right',
   'shoulder_left', 'shoulder_right', 'elbow_left', 'elbow_right',
-  'wrist_left', 'wrist_right', 'hip_left', 'hip_right',
-  'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'wrist_left', 'wrist_right',
+  'pinky_left', 'pinky_right', 'index_left', 'index_right', 'thumb_left', 'thumb_right',
+  'hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'heel_left', 'heel_right', 'foot_index_left', 'foot_index_right',
 ] as const;
 
 const SOURCE_JOINT_IDS = [
@@ -89,8 +95,7 @@ function requireSnapshot(
   expectedSkeleton: CaptureSessionSnapshot['targetSkeleton'] | null,
 ): CaptureSessionSnapshot {
   if (!value || typeof value !== 'object' || typeof value.sessionId !== 'string' || value.sessionId.length === 0 ||
-      !Number.isInteger(value.revision) || value.revision < 0 || typeof value.frozen !== 'boolean' ||
-      (value.depthSign !== 1 && value.depthSign !== -1)) {
+      !Number.isInteger(value.revision) || value.revision < 0 || typeof value.frozen !== 'boolean') {
     throw new CaptureSessionFault('capture host returned a malformed snapshot');
   }
   const calibrationStates = new Set(['uncalibrated', 'collecting', 'calibrated', 'failed']);
@@ -101,20 +106,22 @@ function requireSnapshot(
   }
   const promotedFrameId = captureSnapshotFrameId(value);
   if (value.detected) {
-    if (!Number.isFinite(value.detected.timestampMs) || !Array.isArray(value.detected.keypoints) ||
-        value.detected.keypoints.length !== CAMERA_KEYPOINT_IDS.length) {
+    if (!Number.isFinite(value.detected.timestampMs) || !Number.isFinite(value.detected.presence) ||
+        value.detected.presence < 0 || value.detected.presence > 1 ||
+        !Array.isArray(value.detected.landmarks) ||
+        value.detected.landmarks.length !== WORLD_LANDMARK_IDS.length) {
       throw new CaptureSessionFault('capture host returned malformed detected landmarks');
     }
     const names = new Set<string>();
-    for (const point of value.detected.keypoints) {
+    for (const point of value.detected.landmarks) {
       if (!point || typeof point.name !== 'string' || point.name.length === 0 || names.has(point.name) ||
-          !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.confidence) ||
-          point.confidence < 0 || point.confidence > 1) {
+          !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.visibility) ||
+          point.visibility < 0 || point.visibility > 1) {
         throw new CaptureSessionFault('capture host returned malformed detected landmarks');
       }
       names.add(point.name);
     }
-    if (!exactIdSet(names, CAMERA_KEYPOINT_IDS)) {
+    if (!exactIdSet(names, WORLD_LANDMARK_IDS)) {
       throw new CaptureSessionFault('capture host returned an unstable landmark vocabulary');
     }
   }
@@ -259,10 +266,6 @@ export class NativeCaptureSessionApi implements CaptureSessionApi {
     return this.command({ op: 'resume' });
   }
 
-  setDepthSign(depthSign: 1 | -1): CaptureSessionSnapshot {
-    return this.command({ op: 'setDepthSign', payload: { depthSign } });
-  }
-
   /** Begin recording promoted frames into a role-addressed take (req_4285). */
   record(): CaptureSessionSnapshot {
     return this.command({ op: 'record' });
@@ -329,7 +332,7 @@ export class NativeCaptureSessionApi implements CaptureSessionApi {
     this.revision = revision;
   }
 
-  private command(request: Extract<CaptureSessionRequest, { op: 'calibrate' | 'freeze' | 'resume' | 'setDepthSign' | 'record' }>): CaptureSessionSnapshot {
+  private command(request: Extract<CaptureSessionRequest, { op: 'calibrate' | 'freeze' | 'resume' | 'record' }>): CaptureSessionSnapshot {
     const { sessionId, revision } = this.requireOpen();
     return this.acceptSnapshot(this.call<CaptureSessionSnapshot>({
       ...request,

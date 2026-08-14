@@ -26,11 +26,17 @@ const target: CaptureTarget = {
   viewportNodeId: 71,
 };
 
-const CAMERA_KEYPOINT_IDS = [
-  'nose', 'eye_left', 'eye_right', 'ear_left', 'ear_right',
+const WORLD_LANDMARK_IDS = [
+  'nose',
+  'eye_inner_left', 'eye_left', 'eye_outer_left',
+  'eye_inner_right', 'eye_right', 'eye_outer_right',
+  'ear_left', 'ear_right',
+  'mouth_left', 'mouth_right',
   'shoulder_left', 'shoulder_right', 'elbow_left', 'elbow_right',
-  'wrist_left', 'wrist_right', 'hip_left', 'hip_right',
-  'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'wrist_left', 'wrist_right',
+  'pinky_left', 'pinky_right', 'index_left', 'index_right', 'thumb_left', 'thumb_right',
+  'hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right',
+  'heel_left', 'heel_right', 'foot_index_left', 'foot_index_right',
 ] as const;
 const SOURCE_JOINT_IDS = [
   'shoulder_left', 'shoulder_right', 'elbow_left', 'elbow_right',
@@ -44,12 +50,12 @@ function snapshot(revision: number, frameId: number | null = null): CaptureSessi
     sessionId: 'capture:one',
     revision,
     frozen: false,
-    depthSign: 1,
     calibration: { state: 'calibrated', validFrameCount: 30, requiredFrameCount: 30 },
     detected: frameId === null ? null : {
       frameId,
       timestampMs: 1000,
-      keypoints: CAMERA_KEYPOINT_IDS.map((name) => ({ name, x: 0.5, y: 0.5, confidence: 0.9 })),
+      presence: 0.98,
+      landmarks: WORLD_LANDMARK_IDS.map((name) => ({ name, x: 0.5, y: 0.5, visibility: 0.9 })),
     },
     source: frameId === null ? null : {
       frameId,
@@ -97,10 +103,10 @@ test('open and revision-pinned commands serialize through one door', () => {
     const request = JSON.parse(json) as CaptureSessionRequest;
     requests.push(request);
     if (request.op === 'openTarget') return { ok: true, value: snapshot(revision) };
-    if (request.op === 'setDepthSign') {
-      assert(request.expectedRevision === revision, 'depth command omitted current revision');
+    if (request.op === 'calibrate') {
+      assert(request.expectedRevision === revision, 'calibrate omitted current revision');
       revision += 1;
-      return { ok: true, value: { ...snapshot(revision), depthSign: request.payload.depthSign } };
+      return { ok: true, value: snapshot(revision) };
     }
     if (request.op === 'freeze') {
       assert(request.expectedRevision === revision, 'freeze omitted current revision');
@@ -111,7 +117,7 @@ test('open and revision-pinned commands serialize through one door', () => {
     throw new Error(`unexpected ${request.op}`);
   });
   api.openTarget(target);
-  assert(api.setDepthSign(-1).depthSign === -1, 'depth sign did not round-trip');
+  assert(api.calibrate().revision === 3, 'calibrate did not round-trip');
   assert(api.freeze().frozen, 'freeze did not round-trip');
   assert(requests[0]?.op === 'openTarget' && requests[0].payload.cameraSource === '/dev/video2', 'open target lost camera identity');
   api.close();
