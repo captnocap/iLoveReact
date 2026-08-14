@@ -382,8 +382,8 @@ function ShaderLibrary(props: {
           onPress={() => props.onEditMaterial!(props.shaderInk!.surface)}
           style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 30, borderRadius: 8, borderWidth: 1, borderColor: LINE, backgroundColor: '#141518' }}
         >
-          <Icon name="Palette" size={12} color={ACCENT} />
-          <Text style={{ color: TEXT, fontSize: 11, fontWeight: '700' }}>open in Color Studio</Text>
+          <Icon name="FlaskConical" size={12} color={ACCENT} />
+          <Text style={{ color: TEXT, fontSize: 11, fontWeight: '700' }}>open in Material Lab</Text>
         </Pressable>
       ) : null}
     </Col>
