@@ -7,8 +7,12 @@ files are **generated from 3d.zig by byte slicing** (`_tool/split3d.zig`), so
 every decl body is verbatim by construction and the tool refuses to emit unless
 every body byte of the source lands in exactly one output file.
 
-Nothing imports this tree yet. The shipping build still compiles the original
-`gpu/3d.zig`; cutting importers over to this directory is a later, separate step.
+**This tree is LIVE (req_4378):** every former importer of `gpu/3d.zig` now
+imports this orchestrator — v8_bindings_core, the scene3d dev modules, the
+world_loader runtime, and the headless scene3d unit suites. The original
+`gpu/3d.zig` is unreferenced and kept only as the source the split was
+generated from; regenerating from it after it drifts would be wrong — the
+split files are now the live code.
 
 ## Layout
 
