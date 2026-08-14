@@ -3517,6 +3517,74 @@ fn buildLegacyLogicalTopologyAlloc(
     };
 }
 
+/// Rebuild the live edit handles from the document's durable logical-corner rows.
+/// Unlike the legacy position weld, coincident vertices with different stable ids
+/// remain independent. This is the boundary that makes an Edge Split seam usable:
+/// selecting and moving one face may not drag the position-coincident face across
+/// the split with it.
+fn buildExplicitLogicalTopologyAlloc(
+    allocator: std.mem.Allocator,
+    positions: []const f32,
+    face_count: usize,
+    floats_per_corner: usize,
+    face_parts: []const u32,
+    logical_rows: []const u32,
+    logical_vertex_count: u32,
+) !LegacyLogicalTopology {
+    const corner_count = face_count * 3;
+    if (face_count == 0 or floats_per_corner < 3 or face_parts.len != face_count or
+        positions.len < corner_count * floats_per_corner or logical_rows.len != corner_count or
+        logical_vertex_count == 0)
+    {
+        return error.InvalidLegacyLogicalTopology;
+    }
+
+    var dense_by_stable = std.AutoHashMapUnmanaged(u32, u32).empty;
+    defer dense_by_stable.deinit(allocator);
+    var vertex_positions = std.ArrayListUnmanaged(f32).empty;
+    defer vertex_positions.deinit(allocator);
+    var vertex_parts = std.ArrayListUnmanaged(u32).empty;
+    defer vertex_parts.deinit(allocator);
+    const corner_vertices = try allocator.alloc(u32, corner_count);
+    errdefer allocator.free(corner_vertices);
+
+    for (logical_rows, 0..) |stable_id, corner| {
+        if (stable_id >= logical_vertex_count) return error.InvalidLegacyLogicalTopology;
+        const base = corner * floats_per_corner;
+        const point = [3]f32{ positions[base], positions[base + 1], positions[base + 2] };
+        const part = face_parts[corner / 3];
+        const entry = try dense_by_stable.getOrPut(allocator, stable_id);
+        if (!entry.found_existing) {
+            entry.value_ptr.* = @intCast(vertex_positions.items.len / 3);
+            try vertex_positions.appendSlice(allocator, &point);
+            try vertex_parts.append(allocator, part);
+        } else {
+            const dense = entry.value_ptr.*;
+            const prior_base = @as(usize, dense) * 3;
+            const prior = [3]f32{
+                vertex_positions.items[prior_base],
+                vertex_positions.items[prior_base + 1],
+                vertex_positions.items[prior_base + 2],
+            };
+            const prior_key = weldKey(prior);
+            const point_key = weldKey(point);
+            if (vertex_parts.items[dense] != part or !std.mem.eql(i32, prior_key[0..], point_key[0..]))
+                return error.InvalidLegacyLogicalTopology;
+        }
+        corner_vertices[corner] = entry.value_ptr.*;
+    }
+
+    const owned_positions = try vertex_positions.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_positions);
+    const owned_parts = try vertex_parts.toOwnedSlice(allocator);
+    return .{
+        .allocator = allocator,
+        .corner_vertices = corner_vertices,
+        .vertex_positions = owned_positions,
+        .vertex_parts = owned_parts,
+    };
+}
+
 /// Explicit legacy-to-v5 mint boundary for a complete resident model assembled by
 /// Scene3D. The caller supplies one owner per face and receives corner ids in that
 /// exact face order. This is the same builder used by the live edit topology, so a
@@ -3632,7 +3700,18 @@ fn ensureTopology() bool {
     const face_parts = alloc.alloc(u32, face_count) catch return false;
     defer alloc.free(face_parts);
     for (face_parts, 0..) |*part, face| part.* = model_source.partIndexOf(model_source.faceGroupOf(@intCast(face)));
-    var topology = buildLegacyLogicalTopologyAlloc(alloc, pos, face_count, 3, face_parts) catch return false;
+    var topology = if (model_source.renderCornerLogicalIds()) |logical_rows|
+        buildExplicitLogicalTopologyAlloc(
+            alloc,
+            pos,
+            face_count,
+            3,
+            face_parts,
+            logical_rows,
+            model_source.logicalVertexCount(),
+        ) catch return false
+    else
+        buildLegacyLogicalTopologyAlloc(alloc, pos, face_count, 3, face_parts) catch return false;
     var topology_adopted = false;
     defer if (!topology_adopted) topology.deinit();
     const corner_vert = topology.corner_vertices;
@@ -6406,6 +6485,40 @@ test "face selection transform moves welded shared corners" {
     try testing.expectApproxEqAbs(@as(f32, 2), pos[11], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 2), pos[14], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0), pos[17], 0.0001);
+}
+
+test "face selection transform respects a same-part explicit split seam" {
+    var verts = [_]f32{
+        // Two triangles remain position-coincident along the diagonal, but Edge
+        // Split has assigned each face its own durable endpoint identities.
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    model_paint.setTarget(4400, &verts, 6);
+    model_source.retain("edge-split-seam", &verts, 6);
+    model_source.setFaceGroups(&.{ 0, 1 });
+    try testing.expect(model_source.setLogicalTopology(&.{ 0, 1, 2, 3, 4, 5 }, 6));
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+
+    try testing.expect(ensureTopology());
+    try testing.expect(selectFaceByIndex(0, false));
+    try testing.expectEqual(@as(u32, 6), vertCount());
+    const mutation = translateSelection(.{ 0, 0, 2 });
+    try testing.expect(mutation.changed);
+    try testing.expectEqual(@as(u32, 0), mutation.first_face);
+    try testing.expectEqual(@as(u32, 0), mutation.last_face);
+
+    const positions = model_paint.positions().?;
+    for (0..3) |corner| try testing.expectApproxEqAbs(@as(f32, 2), positions[corner * 3 + 2], 0.0001);
+    for (3..6) |corner| try testing.expectApproxEqAbs(@as(f32, 0), positions[corner * 3 + 2], 0.0001);
 }
 
 test "axis scale and rotate operate around the selection pivot" {

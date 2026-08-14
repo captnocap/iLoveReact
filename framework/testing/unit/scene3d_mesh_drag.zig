@@ -569,3 +569,38 @@ test "five-cut preview keeps every minted face inside the focused cube part" {
     try testing.expectEqualSlices(u32, &.{ 0, 6 }, model_source.partRanges().?);
     try testing.expectEqual(@as(u32, 12), model_paint.faceCount());
 }
+
+test "Edge Split keeps coincident face sides independent in the live edit cache" {
+    try testing.expect(scene3d.modelSessionSelect(0x4400));
+    scene3d.meshEditBeginModel();
+
+    var cube = try fixtures.cube(testing.allocator);
+    defer cube.deinit();
+    const render_corner_count: u32 = @intCast(cube.interleaved.len / 8);
+    scene3d.setPaintTarget("edge-split-live-seam", cube.interleaved, render_corner_count);
+    scene3d.meshEditSetFaceGroups(cube.groups);
+    scene3d.meshEditSetPartRanges(&.{ 0, 6 });
+    try testing.expect(scene3d.stashActiveEditMesh());
+
+    scene3d.meshEditSetMode(2);
+    try testing.expectEqual(@as(i32, 12), scene3d.meshEditSelectAll());
+    try testing.expect(scene3d.meshTopoSplitEdges());
+    try testing.expectEqual(@as(u32, 24), model_source.logicalVertexCount());
+
+    const before = try testing.allocator.dupe(f32, model_paint.positions().?);
+    defer testing.allocator.free(before);
+    scene3d.meshEditSetMode(3);
+    try testing.expect(scene3d.meshEditSelectFace(0, false));
+    const mutation = mesh_edit.translateSelection(.{ 0, 0.25, 0 });
+    try testing.expect(mutation.changed);
+    try testing.expectEqual(@as(u32, 0), mutation.first_face);
+    try testing.expectEqual(@as(u32, 1), mutation.last_face);
+
+    const after = model_paint.positions().?;
+    for (0..2 * 9) |component| {
+        const axis = component % 3;
+        const expected = before[component] + @as(f32, if (axis == 1) 0.25 else 0);
+        try testing.expectApproxEqAbs(expected, after[component], position_epsilon);
+    }
+    try testing.expectEqualSlices(f32, before[2 * 9 ..], after[2 * 9 ..]);
+}
