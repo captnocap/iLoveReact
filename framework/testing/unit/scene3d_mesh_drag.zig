@@ -27,6 +27,7 @@ fn installExplicitFixtureTopology(soup: *const fixtures.Soup) ![]u32 {
     );
     defer indexed.deinit();
     const rows = try testing.allocator.alloc(u32, soup.interleaved.len / 8);
+    errdefer testing.allocator.free(rows);
     var at: usize = 0;
     for (indexed.render_triangles.items) |triangle| {
         @memcpy(rows[at .. at + 3], triangle[0..]);
@@ -578,9 +579,12 @@ test "Edge Split keeps coincident face sides independent in the live edit cache"
     defer cube.deinit();
     const render_corner_count: u32 = @intCast(cube.interleaved.len / 8);
     scene3d.setPaintTarget("edge-split-live-seam", cube.interleaved, render_corner_count);
+    model_source.retain("edge-split-live-seam", cube.interleaved, render_corner_count);
     scene3d.meshEditSetFaceGroups(cube.groups);
     scene3d.meshEditSetPartRanges(&.{ 0, 6 });
     try testing.expect(scene3d.stashActiveEditMesh());
+    const natural_rows = try installExplicitFixtureTopology(&cube);
+    defer testing.allocator.free(natural_rows);
 
     scene3d.meshEditSetMode(2);
     try testing.expectEqual(@as(i32, 12), scene3d.meshEditSelectAll());

@@ -182,6 +182,54 @@ pub fn meshTopoConnectVertices() bool {
     return true;
 }
 
+fn resolveSplitEditEdges(
+    indexed: *const indexed_edit_mesh.Mesh,
+    edit_edges: []const mesh_edit.Edge,
+    part: u32,
+    out: [][2]u32,
+) bool {
+    if (edit_edges.len != out.len) return false;
+    if (model_source.renderCornerLogicalIds() != null) {
+        for (edit_edges, 0..) |edge, index| {
+            out[index] = .{
+                z3d.stableLogicalIdForEditVertex(edge[0]) orelse return false,
+                z3d.stableLogicalIdForEditVertex(edge[1]) orelse return false,
+            };
+        }
+        return indexed.splitEdgeIdsEligible(out, part);
+    }
+    const positions = std.heap.c_allocator.alloc([2]indexed_edit_mesh.Vec3, edit_edges.len) catch return false;
+    defer std.heap.c_allocator.free(positions);
+    for (edit_edges, 0..) |edge, index| positions[index] = .{
+        mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
+    };
+    return indexed.resolveSplitEdges(positions, part, out);
+}
+
+fn resolveTubeEditEdges(
+    indexed: *const indexed_edit_mesh.Mesh,
+    edit_edges: []const mesh_edit.Edge,
+    part: u32,
+    out: [][2]u32,
+) bool {
+    if (edit_edges.len != out.len) return false;
+    if (model_source.renderCornerLogicalIds() != null) {
+        for (edit_edges, 0..) |edge, index| {
+            out[index] = .{
+                z3d.stableLogicalIdForEditVertex(edge[0]) orelse return false,
+                z3d.stableLogicalIdForEditVertex(edge[1]) orelse return false,
+            };
+        }
+        return indexed.edgeTubeIdsEligible(out, part);
+    }
+    const positions = std.heap.c_allocator.alloc([2]indexed_edit_mesh.Vec3, edit_edges.len) catch return false;
+    defer std.heap.c_allocator.free(positions);
+    for (edit_edges, 0..) |edge, index| positions[index] = .{
+        mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
+    };
+    return indexed.resolveEdgeTubes(positions, part, out);
+}
+
 /// Duplicate logical vertex identities across every selected manifold edge while
 /// preserving face groups, materials, semantics, UVs, and Outliner part ownership.
 /// This is a topology seam, not Detach Faces: no new part/range is created.
@@ -208,17 +256,12 @@ pub fn meshTopoSplitEdges() bool {
     var indexed = z3d.cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
 
-    const selected_positions = std.heap.c_allocator.alloc([2]indexed_edit_mesh.Vec3, selected_count) catch return false;
-    defer std.heap.c_allocator.free(selected_positions);
-    for (selected, 0..) |edge, index| selected_positions[index] = .{
-        mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
-    };
     var resolved = std.ArrayListUnmanaged([2]u32).empty;
     defer resolved.deinit(std.heap.c_allocator);
     try_resolve: {
         const base = std.heap.c_allocator.alloc([2]u32, selected_count) catch return false;
         defer std.heap.c_allocator.free(base);
-        if (!indexed.resolveSplitEdges(selected_positions, selected_part, base)) return false;
+        if (!resolveSplitEditEdges(&indexed, selected, selected_part, base)) return false;
         resolved.appendSlice(std.heap.c_allocator, base) catch return false;
         break :try_resolve;
     }
@@ -234,11 +277,9 @@ pub fn meshTopoSplitEdges() bool {
                 if (!mesh_edit.hasEdgeBetweenPub(twin_a, twin_b)) continue;
                 const twin_part = mesh_edit.vertPartPub(twin_a) orelse continue;
                 if ((mesh_edit.vertPartPub(twin_b) orelse continue) != twin_part) continue;
-                const positions = [1][2]indexed_edit_mesh.Vec3{.{
-                    mesh_edit.vertPosPub(twin_a), mesh_edit.vertPosPub(twin_b),
-                }};
+                const edit_edge = [1]mesh_edit.Edge{.{ twin_a, twin_b }};
                 var twin: [1][2]u32 = undefined;
-                if (!indexed.resolveSplitEdges(positions[0..], twin_part, twin[0..])) return false;
+                if (!resolveSplitEditEdges(&indexed, edit_edge[0..], twin_part, twin[0..])) return false;
                 const key_a = @min(twin[0][0], twin[0][1]);
                 const key_b = @max(twin[0][0], twin[0][1]);
                 var duplicate = false;
@@ -322,16 +363,11 @@ pub fn meshTopoEdgeTubes(radius_raw: f32) bool {
     var indexed = z3d.cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse return false;
     defer indexed.deinit();
 
-    const selected_positions = std.heap.c_allocator.alloc([2]indexed_edit_mesh.Vec3, selected_count) catch return false;
-    defer std.heap.c_allocator.free(selected_positions);
-    for (selected, 0..) |edge, index| selected_positions[index] = .{
-        mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
-    };
     var resolved = std.ArrayListUnmanaged([2]u32).empty;
     defer resolved.deinit(std.heap.c_allocator);
     const base = std.heap.c_allocator.alloc([2]u32, selected_count) catch return false;
     defer std.heap.c_allocator.free(base);
-    if (!indexed.resolveEdgeTubes(selected_positions, selected_part, base)) {
+    if (!resolveTubeEditEdges(&indexed, selected, selected_part, base)) {
         z3d.topoRefuse("the selected edge network could not be resolved against the indexed mesh");
         return false;
     }
@@ -348,11 +384,9 @@ pub fn meshTopoEdgeTubes(radius_raw: f32) bool {
                 if (!mesh_edit.hasEdgeBetweenPub(twin_a, twin_b)) continue;
                 const twin_part = mesh_edit.vertPartPub(twin_a) orelse continue;
                 if ((mesh_edit.vertPartPub(twin_b) orelse continue) != twin_part) continue;
-                const positions = [1][2]indexed_edit_mesh.Vec3{.{
-                    mesh_edit.vertPosPub(twin_a), mesh_edit.vertPosPub(twin_b),
-                }};
+                const edit_edge = [1]mesh_edit.Edge{.{ twin_a, twin_b }};
                 var twin: [1][2]u32 = undefined;
-                if (!indexed.resolveEdgeTubes(positions[0..], twin_part, twin[0..])) return false;
+                if (!resolveTubeEditEdges(&indexed, edit_edge[0..], twin_part, twin[0..])) return false;
                 const key_a = @min(twin[0][0], twin[0][1]);
                 const key_b = @max(twin[0][0], twin[0][1]);
                 var duplicate = false;

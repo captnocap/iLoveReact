@@ -420,6 +420,9 @@ pub const EdgeTubeTuning = struct {
     pub const default_radius_m: f32 = 1.0 / 16.0;
     pub const minimum_radius_m: f32 = IMPORT_WELD_EPS * 2.0;
     pub const maximum_edge_fraction: f32 = 0.45;
+    /// A square cross-section corner is sqrt(2) radii from its centerline. Shared
+    /// vertices use that exact envelope for the junction box and tube inset.
+    pub const junction_extent_radii: f32 = @sqrt(2.0);
 };
 
 /// One selected open boundary loop is chamfered as a unit. The caller chooses
@@ -4413,10 +4416,22 @@ pub const Mesh = struct {
         for (selected_edges, 0..) |positions, index| {
             const a = mesh.vertexAt(positions[0], part) orelse return false;
             const b = mesh.vertexAt(positions[1], part) orelse return false;
-            if (a == b or mesh.edgeIncidentFaceCount(.{ a, b }) != 2) return false;
-            const key = edgeKey(a, b);
-            for (out_edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return false;
             out_edges[index] = .{ a, b };
+        }
+        return mesh.splitEdgeIdsEligible(out_edges, part);
+    }
+
+    /// Validate already-authoritative RJMD-v5 logical ids. Live topology doors
+    /// must use this instead of position lookup when coincident seam vertices exist.
+    pub fn splitEdgeIdsEligible(mesh: *const Mesh, edges: []const [2]u32, part: u32) bool {
+        if (edges.len == 0) return false;
+        for (edges, 0..) |edge, index| {
+            if (edge[0] == edge[1] or edge[0] >= mesh.vertices.items.len or edge[1] >= mesh.vertices.items.len or
+                !mesh.vertices.items[edge[0]].alive or !mesh.vertices.items[edge[1]].alive or
+                !mesh.vertexBelongsToPart(edge[0], part) or !mesh.vertexBelongsToPart(edge[1], part) or
+                mesh.edgeIncidentFaceCount(edge) != 2) return false;
+            const key = edgeKey(edge[0], edge[1]);
+            for (edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return false;
         }
         return true;
     }
@@ -4434,18 +4449,29 @@ pub const Mesh = struct {
         for (selected_edges, 0..) |positions, index| {
             const a = mesh.vertexAt(positions[0], part) orelse return false;
             const b = mesh.vertexAt(positions[1], part) orelse return false;
-            if (a == b or !mesh.vertices.items[a].alive or !mesh.vertices.items[b].alive) return false;
-            const key = edgeKey(a, b);
+            out_edges[index] = .{ a, b };
+        }
+        return mesh.edgeTubeIdsEligible(out_edges, part);
+    }
+
+    /// Validate selected tube centerlines by stable logical identity. Position
+    /// matching is ambiguous after Edge Split or any imported authored seam.
+    pub fn edgeTubeIdsEligible(mesh: *const Mesh, edges: []const [2]u32, part: u32) bool {
+        if (edges.len == 0) return false;
+        for (edges, 0..) |edge, index| {
+            if (edge[0] == edge[1] or edge[0] >= mesh.vertices.items.len or edge[1] >= mesh.vertices.items.len or
+                !mesh.vertices.items[edge[0]].alive or !mesh.vertices.items[edge[1]].alive or
+                !mesh.vertexBelongsToPart(edge[0], part) or !mesh.vertexBelongsToPart(edge[1], part)) return false;
             var exists = false;
             for (mesh.faces.items) |*face| {
-                if (face.alive and face.part == part and faceHasUndirectedEdge(face, a, b)) {
+                if (face.alive and face.part == part and faceHasUndirectedEdge(face, edge[0], edge[1])) {
                     exists = true;
                     break;
                 }
             }
             if (!exists) return false;
-            for (out_edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return false;
-            out_edges[index] = .{ a, b };
+            const key = edgeKey(edge[0], edge[1]);
+            for (edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return false;
         }
         return true;
     }
@@ -5200,6 +5226,8 @@ pub const Mesh = struct {
         try selected.ensureTotalCapacity(mesh.allocator, @intCast(edges.len));
         var degree = std.AutoHashMapUnmanaged(u32, u32).empty;
         defer degree.deinit(mesh.allocator);
+        var junction_source = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer junction_source.deinit(mesh.allocator);
         var maximum_radius = std.math.inf(f32);
 
         for (edges) |edge| {
@@ -5221,6 +5249,7 @@ pub const Mesh = struct {
                 const entry = try degree.getOrPut(mesh.allocator, vertex);
                 if (!entry.found_existing) entry.value_ptr.* = 0;
                 entry.value_ptr.* += 1;
+                if (!junction_source.contains(vertex)) try junction_source.put(mesh.allocator, vertex, source);
             }
             maximum_radius = @min(
                 maximum_radius,
@@ -5229,6 +5258,7 @@ pub const Mesh = struct {
         }
         const radius = @min(radius_raw, maximum_radius);
         if (!std.math.isFinite(radius) or radius < EdgeTubeTuning.minimum_radius_m) return false;
+        const junction_extent = radius * EdgeTubeTuning.junction_extent_radii;
 
         // Consume only faces completely described by the selected network. This
         // includes the repeated-corner triangles used to persist naked Pen Edges.
@@ -5254,6 +5284,19 @@ pub const Mesh = struct {
                 const uv = [4]Vec2{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } };
                 _ = try target.appendDerivedFace(source, loop[0..loop_raw.len], uv[0..loop_raw.len], null);
             }
+
+            fn inset(direction: Vec3, offsets: [4]Vec3, extent: f32) f32 {
+                var result = std.math.inf(f32);
+                for (offsets) |offset| {
+                    for (0..3) |axis| {
+                        const component = direction[axis];
+                        if (@abs(component) <= IMPORT_WELD_EPS) continue;
+                        const signed_offset = if (component > 0) offset[axis] else -offset[axis];
+                        result = @min(result, @max(0.0, (extent - signed_offset) / @abs(component)));
+                    }
+                }
+                return if (std.math.isFinite(result)) result else 0;
+            }
         };
 
         for (plans.items) |plan| {
@@ -5276,10 +5319,22 @@ pub const Mesh = struct {
                 add3(mul3(u, -radius), mul3(v, -radius)),
                 add3(mul3(u, radius), mul3(v, -radius)),
             };
+            const a_inset = if ((degree.get(plan.edge[0]) orelse 0) > 1)
+                Append.inset(direction, offsets, junction_extent)
+            else
+                0;
+            const reverse_direction = mul3(direction, -1);
+            const b_inset = if ((degree.get(plan.edge[1]) orelse 0) > 1)
+                Append.inset(reverse_direction, offsets, junction_extent)
+            else
+                0;
+            if (a_inset + b_inset >= length3(sub3(b, a)) - EdgeTubeTuning.minimum_radius_m) return false;
+            const tube_a = add3(a, mul3(direction, a_inset));
+            const tube_b = add3(b, mul3(direction, -b_inset));
             const first: u32 = @intCast(mesh.vertices.items.len);
-            for (offsets) |offset| try mesh.vertices.append(mesh.allocator, .{ .position = add3(a, offset) });
-            for (offsets) |offset| try mesh.vertices.append(mesh.allocator, .{ .position = add3(b, offset) });
-            const midpoint = mul3(add3(a, b), 0.5);
+            for (offsets) |offset| try mesh.vertices.append(mesh.allocator, .{ .position = add3(tube_a, offset) });
+            for (offsets) |offset| try mesh.vertices.append(mesh.allocator, .{ .position = add3(tube_b, offset) });
+            const midpoint = mul3(add3(tube_a, tube_b), 0.5);
             for (0..4) |side| {
                 const next = (side + 1) % 4;
                 const loop = [4]u32{ first + @as(u32, @intCast(side)), first + 4 + @as(u32, @intCast(side)), first + 4 + @as(u32, @intCast(next)), first + @as(u32, @intCast(next)) };
@@ -5293,6 +5348,37 @@ pub const Mesh = struct {
             if ((degree.get(plan.edge[1]) orelse 0) == 1) {
                 const cap = [4]u32{ first + 4, first + 5, first + 6, first + 7 };
                 try Append.face(mesh, plan.source_face, cap[0..], direction);
+            }
+        }
+
+        // A selected network vertex owns one explicit square junction. Struts are
+        // inset into its envelope, replacing the old pile of mutually rotated open
+        // rings with one stable, closed corner/branch volume.
+        var junction_iterator = degree.iterator();
+        while (junction_iterator.next()) |entry| {
+            if (entry.value_ptr.* <= 1) continue;
+            const center = mesh.vertices.items[entry.key_ptr.*].position;
+            const source = junction_source.get(entry.key_ptr.*) orelse return false;
+            const first: u32 = @intCast(mesh.vertices.items.len);
+            const signs = [8]Vec3{
+                .{ -1, -1, -1 }, .{ 1, -1, -1 }, .{ 1, 1, -1 }, .{ -1, 1, -1 },
+                .{ -1, -1, 1 },  .{ 1, -1, 1 },  .{ 1, 1, 1 },  .{ -1, 1, 1 },
+            };
+            for (signs) |sign| try mesh.vertices.append(mesh.allocator, .{
+                .position = add3(center, mul3(sign, junction_extent)),
+            });
+            const faces = [6][4]u32{
+                .{ 0, 4, 7, 3 }, .{ 1, 2, 6, 5 },
+                .{ 0, 1, 5, 4 }, .{ 3, 7, 6, 2 },
+                .{ 0, 3, 2, 1 }, .{ 4, 5, 6, 7 },
+            };
+            const outward = [6]Vec3{
+                .{ -1, 0, 0 }, .{ 1, 0, 0 },  .{ 0, -1, 0 },
+                .{ 0, 1, 0 },  .{ 0, 0, -1 }, .{ 0, 0, 1 },
+            };
+            for (faces, outward) |local, normal| {
+                const loop = [4]u32{ first + local[0], first + local[1], first + local[2], first + local[3] };
+                try Append.face(mesh, source, loop[0..], normal);
             }
         }
         try mesh.pruneOrphanVertices();
@@ -6583,8 +6669,10 @@ test "edge tubes consume a fully selected face into a square wireframe cage" {
     try std.testing.expect(!mesh.faces.items[0].alive);
     var lowered = try mesh.lower();
     defer lowered.deinit();
-    // Four uncapped square struts, two triangles per side.
-    try std.testing.expectEqual(@as(u32, 32), lowered.tri_count);
+    // Four square struts plus one closed square junction at every shared corner.
+    // The old 32-triangle result was four independently oriented open tubes whose
+    // endpoint rings crossed visibly instead of forming a usable cage.
+    try std.testing.expectEqual(@as(u32, 80), lowered.tri_count);
     for (lowered.parts) |part| try std.testing.expectEqual(NO_PART, part);
 }
 
