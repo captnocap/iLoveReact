@@ -272,7 +272,9 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
     current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
   ));
   const pivotLane = axisLane(bridge, 'selection', axisDelta);
-  const fmtCoord = (value: number) => fmtCellNumber(value, 4);
+  // Trimmed coordinates ("-0.2354", "0.615") — a fixed 4-decimal print packed
+  // three cells into an unreadable digit wall at this width (req_4412).
+  const fmtCoord = fmtSelectionNumber;
 
   return (
     <C.HW_Section>
@@ -347,11 +349,15 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
             )) : null}
             {/* Exact-coordinate vertex cells (req_4401): geometry spawning
                 fractions of a unit apart cannot be aligned by hand — type the
-                number. Commit-only lane: the write SELECTS that vertex, and a
-                live preview would rebuild this very section mid-keystroke. */}
+                number. Commit-only lane: the write SELECTS that vertex (then
+                restores the held selection host-side, req_4412), and a live
+                preview would rebuild this very section mid-keystroke.
+                COMPACT row (req_4412): the 82px form label + reset column left
+                three 4-decimal cells ~36px each — an unreadable digit wall.
+                A narrow id label hands the width back to the numbers. */}
             {isOpen ? group.vertices.map((vertex) => (
-              <Row key={`vx-${group.key}-${vertex.id}`} style={{ minHeight: REGIONS.grid.rowHeight + 3, alignItems: 'center', gap: 8, paddingLeft: 28, paddingRight: 12, width: '100%' }}>
-                <C.HW_FormLabel>{`v${vertex.id}`}</C.HW_FormLabel>
+              <Row key={`vx-${group.key}-${vertex.id}`} style={{ minHeight: REGIONS.grid.rowHeight + 3, alignItems: 'center', gap: 6, paddingLeft: 16, paddingRight: 12, width: '100%' }}>
+                <Text noWrap style={{ width: 34, fontSize: 10, fontFamily: 'monospace', color: accentFor('textDim') }}>{`v${vertex.id}`}</Text>
                 <TripleCells
                   values={vertex.at}
                   format={fmtCoord}
@@ -361,7 +367,6 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
                     if (op && bridge) bridge.transformScope({ vertex: vertex.id }, op);
                   }}
                 />
-                <Box style={{ width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn }} />
               </Row>
             )) : null}
           </Box>

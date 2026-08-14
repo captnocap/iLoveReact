@@ -286,7 +286,7 @@ export function TripleCells(props: {
   format?: (value: number) => string;
 }) {
   return (
-    <Row style={{ flexGrow: 1, minWidth: 0, gap: 4 }}>
+    <Row style={{ flexGrow: 1, minWidth: 0, gap: 5 }}>
       {([0, 1, 2] as const).map((axis) => (
         <NumberCell
           key={axis}

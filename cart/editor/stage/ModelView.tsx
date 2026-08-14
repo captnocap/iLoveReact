@@ -3152,6 +3152,36 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // journal ends the edit with exactly ONE op. Preview deliberately skips the
   // dirty flag and the geometry re-publish, so the published base values the
   // cells compute deltas against hold still until commit.
+  // Put the user's working selection back after a vertex write borrowed the
+  // selection machinery (req_4412). Element ids are stable across a translate
+  // (no topology change), so re-selecting them is exact. A truncated snapshot
+  // cannot be restored faithfully — fall back to leaving the vertex selected,
+  // never to restoring HALF a selection that then reads as the whole one.
+  const restoreHeldSelection = (held: ModelSelectionSnapshot | null) => {
+    if (!held || held.count === 0 || held.truncated) {
+      // The written vertex is still selected host-side — mirror that honestly.
+      adoptHostSelection({ mode: 1, verts: 1, edges: 0, sel: 1 });
+      return;
+    }
+    if (held.mode === 2 && held.edges.length > 0) {
+      chooseSelMode(2);
+      held.edges.forEach((edge, at) => { host.__mesh_edit_select_edge?.(edge.id, at === 0 ? 0 : 1); });
+      adoptHostSelection({ mode: 2, verts: 0, edges: held.edges.length, sel: held.edges.length });
+      return;
+    }
+    if (held.mode === 3 && held.triangles.length > 0) {
+      const selected = selectMeshFaces(host, held.triangles.map((triangle) => triangle.id));
+      adoptHostSelection({ mode: 3, verts: 0, edges: 0, sel: selected });
+      return;
+    }
+    if (held.mode === 1 && held.vertices.length > 0) {
+      chooseSelMode(1);
+      held.vertices.forEach((vertex, at) => { host.__mesh_edit_select_vertex?.(vertex.id, at === 0 ? 0 : 1); });
+      adoptHostSelection({ mode: 1, verts: held.vertices.length, edges: 0, sel: held.vertices.length });
+      return;
+    }
+    adoptHostSelection({ mode: 1, verts: 1, edges: 0, sel: 1 });
+  };
   const scopePreviewActiveRef = useRef(false);
   const squashScopePreview = () => {
     if (!scopePreviewActiveRef.current) return;
@@ -3171,9 +3201,24 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // One welded vertex, exact-coordinate entry. Translate only: rotating or
       // scaling a single point is a no-op wearing a journal entry.
       if (op.kind !== 'translate') return false;
+      // The write must SELECT the vertex to move it, but the user's working
+      // selection (the edge/face whose panel rows they are typing into) is not
+      // theirs to lose (req_4412) — capture it now, restore it after the op.
+      const held = readModelSelection();
       chooseSelMode(1);
       if (host.__mesh_edit_select_vertex?.(scope.vertex, 0) !== 1) return false;
-      adoptHostSelection({ mode: 1, verts: 1, edges: 0, sel: 1 });
+      const moved = host.__mesh_transform_translate?.(...op.delta) === 1;
+      if (moved) {
+        restoreHeldSelection(held);
+        setError(null);
+        if (phase === 'preview') {
+          scopePreviewActiveRef.current = true;
+        } else {
+          onDocumentMutated?.();
+          setSemanticRevision((value) => value + 1);
+        }
+      }
+      return moved;
     } else {
       const query = scope === 'model' ? { kind: 'all' } : { kind: 'part', lo: scope.lo, hi: scope.hi };
       chooseSelMode(3);
