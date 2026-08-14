@@ -74,6 +74,9 @@ pub const ActionKind = enum(u8) {
     // Append-only ordinal 36 (req_4271): the marquee-projected cut — a screen
     // rectangle's four edge planes split the face under it in one transaction.
     marquee_cut,
+    // Append-only ordinal 37 (req_4393): duplicate logical identities across
+    // selected edges without changing their authored Outliner part.
+    edge_split,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -186,6 +189,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "loop cut", .loop_cut },
         .{ "cut", .basic_cut },
         .{ "marquee cut", .marquee_cut },
+        .{ "edge split", .edge_split },
         .{ "connect vertices", .connect_vertices },
         .{ "bevel edge", .bevel },
         .{ "bevel vertex", .bevel },
@@ -291,6 +295,7 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .field_edit => "model.recovery.field-edit",
         .basic_cut => "model.mesh.basic-cut",
         .marquee_cut => "model.mesh.marquee-cut",
+        .edge_split => "model.mesh.edge-split",
     };
 }
 
@@ -322,6 +327,7 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .historical_restore,
         .basic_cut,
         .marquee_cut,
+        .edge_split,
         => true,
         .hide_part,
         .show_part,

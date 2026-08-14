@@ -54,6 +54,8 @@ export const NATIVE_MESH_ACTIONS = [
   // label previously mapped to NO kind at all), and the marquee-projected cut.
   { kind: 'basic-cut', label: 'cut', commandId: 'model.mesh.basic-cut' },
   { kind: 'marquee-cut', label: 'marquee cut', commandId: 'model.mesh.marquee-cut' },
+  // Append-only ordinal 37 (req_4393): same-part logical seam creation.
+  { kind: 'edge-split', label: 'edge split', commandId: 'model.mesh.edge-split' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

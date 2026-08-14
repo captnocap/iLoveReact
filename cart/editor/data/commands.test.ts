@@ -118,6 +118,15 @@ test('bevel is contextual to one corner or any sharp manifold edge selection', (
   assert(meshTopoCommands({ selMode: 2, sel: 4 }).find((command) => command.id === 'mesh-bevel')?.name === 'Bevel Edges', 'multi-edge action kept the ambiguous single-edge label');
 });
 
+test('Edge Split is available for any edge selection and never masquerades as face detach', () => {
+  const one = ids(meshTopoCommands({ selMode: 2, sel: 1 }));
+  const many = ids(meshTopoCommands({ selMode: 2, sel: 8 }));
+  assert(one.includes('mesh-edge-split') && many.includes('mesh-edge-split'), 'edge selection cannot reach Edge Split');
+  assert(!ids(meshTopoCommands({ selMode: 1, sel: 2 })).includes('mesh-edge-split'), 'vertex mode exposed Edge Split');
+  assert(!ids(meshTopoCommands({ selMode: 3, sel: 2 })).includes('mesh-edge-split'), 'face mode exposed Edge Split instead of Detach Faces');
+  assert(ids(meshTopoCommands({ selMode: 3, sel: 2 })).includes('mesh-detach'), 'face Detach disappeared while adding Edge Split');
+});
+
 test('one target vertex exposes the mixed edge-to-vertex extrusion', () => {
   const vertex = meshTopoCommands({ selMode: 1, sel: 1 });
   const extrude = vertex.find((command) => command.id === 'mesh-extrude');

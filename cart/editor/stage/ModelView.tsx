@@ -3484,6 +3484,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return { lo: r.lo, hi: r.hi };
     },
     mergeFaces: () => adoptMesh(meshMergeFaces()),
+    // Same-part seam: topology changes, Outliner ownership deliberately does not.
     edgeSplit: () => adoptMesh(meshEdgeSplit()),
     assignUvZone: (zone: number) => {
       const result = meshUvZoneAssign(zone);

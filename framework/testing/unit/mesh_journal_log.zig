@@ -64,6 +64,11 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ "bevel edge", .bevel, "model.mesh.bevel" },
         .{ journal_log.PAINT_FACES_LABEL, .paint_faces, "model.paint.fill-selection" },
         .{ journal_log.RETOPO_GUIDE_TINT_LABEL, .retopo_guide, "model.retopology.edit-guide" },
+        .{ "historical restore", .historical_restore, "model.recovery.restore" },
+        .{ "guarded field edit", .field_edit, "model.recovery.field-edit" },
+        .{ "cut", .basic_cut, "model.mesh.basic-cut" },
+        .{ "marquee cut", .marquee_cut, "model.mesh.marquee-cut" },
+        .{ "edge split", .edge_split, "model.mesh.edge-split" },
     };
     // integrity_alert is the one action-ring diagnostic that is not minted from
     // a journal label; every actual mutation kind must appear above.
@@ -84,6 +89,7 @@ test "only UV-structural mesh actions invalidate an authored paint layout" {
     try testing.expect(journal_log.actionInvalidatesPaintLayout(.split_quads));
     try testing.expect(journal_log.actionInvalidatesPaintLayout(.symmetrize));
     try testing.expect(journal_log.actionInvalidatesPaintLayout(.tris_to_quads));
+    try testing.expect(journal_log.actionInvalidatesPaintLayout(.edge_split));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.transform));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.nudge));
     try testing.expect(!journal_log.actionInvalidatesPaintLayout(.hide_part));

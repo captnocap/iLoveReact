@@ -799,6 +799,7 @@ pub const renormalizePartRanges = @import("part_ranges.zig").renormalizePartRang
 pub const ensureDisjointPartRanges = @import("part_ranges.zig").ensureDisjointPartRanges;
 pub const meshTopoLoopCut = @import("topo_cuts.zig").meshTopoLoopCut;
 pub const meshTopoConnectVertices = @import("topo_cuts.zig").meshTopoConnectVertices;
+pub const meshTopoSplitEdges = @import("topo_cuts.zig").meshTopoSplitEdges;
 pub const meshSymmetryReport = @import("topo_cuts.zig").meshSymmetryReport;
 pub const SYMMETRIZE_PART_PLANE_QUANTUM_M = @import("topo_cuts.zig").SYMMETRIZE_PART_PLANE_QUANTUM_M;
 pub const meshTopoSymmetrize = @import("topo_cuts.zig").meshTopoSymmetrize;

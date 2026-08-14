@@ -1576,6 +1576,15 @@ fn hostMeshTopoWeld(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_topo_edge_split() → JSON {"ok","key","count"}. Sever logical
+/// sharing across the selected manifold edges without creating a new part.
+fn hostMeshTopoEdgeSplit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshTopoSplitEdges();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_retopo_weld_pairs(json) → topology receipt. JSON:
 /// {"pairs":[[a,b],...],"maxDistance":0.01}. Each pair collapses to its own
 /// midpoint; the request is rejected atomically when ids overlap, cross parts,
@@ -5277,6 +5286,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_edit_path_pick", hostMeshEditPathPick);
         v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
         v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
+        v8_runtime.registerHostFn("__mesh_topo_edge_split", hostMeshTopoEdgeSplit);
         v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
         v8_runtime.registerHostFn("__mesh_retopo_normalize_widths", hostMeshRetopoNormalizeWidths);
         v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
@@ -5544,6 +5554,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_path_pick", hostMeshEditPathPick);
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
+    v8_runtime.registerHostFn("__mesh_topo_edge_split", hostMeshTopoEdgeSplit);
     v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
     v8_runtime.registerHostFn("__mesh_retopo_normalize_widths", hostMeshRetopoNormalizeWidths);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);

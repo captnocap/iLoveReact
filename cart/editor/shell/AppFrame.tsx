@@ -3801,6 +3801,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-invert') api.invertSelection();
         else if (commandId === 'mesh-weld') api.weld();
         else if (commandId === 'mesh-bevel') api.bevel();
+        else if (commandId === 'mesh-edge-split') api.edgeSplit();
         else if (commandId === 'mesh-loopcut') api.loopCut();
         else if (commandId === 'mesh-cut') api.basicCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');

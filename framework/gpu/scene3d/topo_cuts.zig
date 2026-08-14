@@ -182,6 +182,109 @@ pub fn meshTopoConnectVertices() bool {
     return true;
 }
 
+/// Duplicate logical vertex identities across every selected manifold edge while
+/// preserving face groups, materials, semantics, UVs, and Outliner part ownership.
+/// This is a topology seam, not Detach Faces: no new part/range is created.
+pub fn meshTopoSplitEdges() bool {
+    if (z3d.g_lc != null or z3d.g_bevel != null or z3d.g_quadify != null or !model_paint.hasTarget()) return false;
+    if (mesh_edit.mode() != .edge) return false;
+    const selected_count = mesh_edit.selectedEdgeCountPub();
+    if (selected_count == 0) return false;
+    const selected = std.heap.c_allocator.alloc(mesh_edit.Edge, selected_count) catch return false;
+    defer std.heap.c_allocator.free(selected);
+    if (mesh_edit.selectedEdgesPub(selected) != selected_count) return false;
+    const selected_part = mesh_edit.selectedEdgesCommonPartPub() orelse return false;
+    const verts = z3d.g_edit_verts orelse return false;
+    const tri_count = z3d.g_edit_count / 3;
+    if (tri_count == 0) return false;
+    const base_colors = z3d.collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(base_colors);
+    const groups = z3d.captureFaceGroups();
+    defer if (groups) |rows| std.heap.c_allocator.free(rows);
+    const parts = z3d.capturePartOfFaces();
+    defer if (parts) |rows| std.heap.c_allocator.free(rows);
+    const groups_arg: ?[]const u32 = if (groups) |rows| rows else null;
+    const parts_arg: ?[]const u32 = if (parts) |rows| rows else null;
+    var indexed = z3d.cloneIndexedEditMeshOrImport(verts, tri_count, groups_arg, parts_arg, model_source.faceMaterials()) orelse return false;
+    defer indexed.deinit();
+
+    const selected_positions = std.heap.c_allocator.alloc([2]indexed_edit_mesh.Vec3, selected_count) catch return false;
+    defer std.heap.c_allocator.free(selected_positions);
+    for (selected, 0..) |edge, index| selected_positions[index] = .{
+        mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
+    };
+    var resolved = std.ArrayListUnmanaged([2]u32).empty;
+    defer resolved.deinit(std.heap.c_allocator);
+    try_resolve: {
+        const base = std.heap.c_allocator.alloc([2]u32, selected_count) catch return false;
+        defer std.heap.c_allocator.free(base);
+        if (!indexed.resolveSplitEdges(selected_positions, selected_part, base)) return false;
+        resolved.appendSlice(std.heap.c_allocator, base) catch return false;
+        break :try_resolve;
+    }
+
+    // Mirror Edit is atomic for topology too: every extant twin edge joins the
+    // same split transaction, deduplicated when it was already selected.
+    if (mesh_edit.mirrorMask() != 0) {
+        for (selected) |source_edge| {
+            var subset: u8 = 1;
+            while (subset <= 7) : (subset += 1) {
+                const twin_a = mesh_edit.mirrorTwinOfVertPub(source_edge[0], subset) orelse continue;
+                const twin_b = mesh_edit.mirrorTwinOfVertPub(source_edge[1], subset) orelse continue;
+                if (!mesh_edit.hasEdgeBetweenPub(twin_a, twin_b)) continue;
+                const twin_part = mesh_edit.vertPartPub(twin_a) orelse continue;
+                if ((mesh_edit.vertPartPub(twin_b) orelse continue) != twin_part) continue;
+                const positions = [1][2]indexed_edit_mesh.Vec3{.{
+                    mesh_edit.vertPosPub(twin_a), mesh_edit.vertPosPub(twin_b),
+                }};
+                var twin: [1][2]u32 = undefined;
+                if (!indexed.resolveSplitEdges(positions[0..], twin_part, twin[0..])) return false;
+                const key_a = @min(twin[0][0], twin[0][1]);
+                const key_b = @max(twin[0][0], twin[0][1]);
+                var duplicate = false;
+                for (resolved.items) |existing| {
+                    if (@min(existing[0], existing[1]) == key_a and @max(existing[0], existing[1]) == key_b) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) resolved.append(std.heap.c_allocator, twin[0]) catch return false;
+            }
+        }
+    }
+    if (!(indexed.splitEdges(resolved.items) catch return false)) return false;
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
+
+    var snap = z3d.journalSnapshotCurrent("edge split");
+    const install_groups: ?[]const u32 = if (groups_arg != null) lowered.groups else null;
+    const installed = z3d.lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        install_groups,
+        lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
+        colors,
+        z3d.flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(indexed.vertices.items.len),
+    );
+    if (!installed) {
+        z3d.journalDiscard(&snap);
+        return false;
+    }
+    if (parts != null) z3d.renormalizePartRanges(lowered.parts, z3d.hostPartCount());
+    z3d.adoptIndexedEditMesh(&indexed, &lowered);
+    mesh_edit.setMode(.edge);
+    mesh_edit.clearSelection();
+    z3d.journalCommit(&snap);
+    return true;
+}
+
 // ── Symmetrize + symmetry check (the studio's req_1190/1191/1192, host-native — req_2831) ──
 // The trust layer the mirror planes shipped without: a live "is it symmetric?" count and
 // the keep+/− repair. Both use the same identity domains and the same fixed plane as live

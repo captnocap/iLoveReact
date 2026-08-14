@@ -4391,6 +4391,134 @@ pub const Mesh = struct {
         return if (std.math.isFinite(shared_max_width)) .{ .max_width = shared_max_width } else null;
     }
 
+    /// Resolve a selected same-part edge set without imposing bevel's sharpness
+    /// constraint. Edge Split accepts any interior manifold edge; boundaries are
+    /// already split and therefore reject as a no-op.
+    pub fn resolveSplitEdges(
+        mesh: *const Mesh,
+        selected_edges: []const [2]Vec3,
+        part: u32,
+        out_edges: [][2]u32,
+    ) bool {
+        if (selected_edges.len == 0 or out_edges.len != selected_edges.len) return false;
+        for (selected_edges, 0..) |positions, index| {
+            const a = mesh.vertexAt(positions[0], part) orelse return false;
+            const b = mesh.vertexAt(positions[1], part) orelse return false;
+            if (a == b or mesh.edgeIncidentFaceCount(.{ a, b }) != 2) return false;
+            const key = edgeKey(a, b);
+            for (out_edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return false;
+            out_edges[index] = .{ a, b };
+        }
+        return true;
+    }
+
+    /// Sever logical vertex sharing across selected manifold edges while retaining
+    /// every face in its existing authored group and Outliner part. Around each cut
+    /// endpoint, incident faces remain welded through unselected radial edges; each
+    /// resulting fan receives one logical vertex identity. An open cut endpoint has
+    /// no second barrier, so one deterministic incident face becomes the terminal fan.
+    pub fn splitEdges(mesh: *Mesh, edges: []const [2]u32) !bool {
+        if (edges.len == 0) return false;
+        var cut = std.AutoHashMapUnmanaged(u64, void).empty;
+        defer cut.deinit(mesh.allocator);
+        var endpoints = std.AutoHashMapUnmanaged(u32, void).empty;
+        defer endpoints.deinit(mesh.allocator);
+        try cut.ensureTotalCapacity(mesh.allocator, @intCast(edges.len));
+        try endpoints.ensureTotalCapacity(mesh.allocator, @intCast(edges.len * 2));
+        for (edges) |edge| {
+            if (edge[0] == edge[1] or mesh.edgeIncidentFaceCount(edge) != 2) return false;
+            const key = edgeKey(edge[0], edge[1]);
+            if (cut.contains(key)) return false;
+            try cut.put(mesh.allocator, key, {});
+            try endpoints.put(mesh.allocator, edge[0], {});
+            try endpoints.put(mesh.allocator, edge[1], {});
+        }
+
+        var endpoint_iterator = endpoints.keyIterator();
+        while (endpoint_iterator.next()) |endpoint_ptr| {
+            const vertex = endpoint_ptr.*;
+            if (vertex >= mesh.vertices.items.len or !mesh.vertices.items[vertex].alive) return false;
+            var incident = std.ArrayListUnmanaged(u32).empty;
+            defer incident.deinit(mesh.allocator);
+            for (mesh.faces.items) |*face| {
+                if (face.alive and containsVertex(face, vertex)) try incident.append(mesh.allocator, face.id);
+            }
+            if (incident.items.len < 2) return false;
+
+            const unassigned = std.math.maxInt(u32);
+            const component = try mesh.allocator.alloc(u32, incident.items.len);
+            defer mesh.allocator.free(component);
+            @memset(component, unassigned);
+            var stack = std.ArrayListUnmanaged(usize).empty;
+            defer stack.deinit(mesh.allocator);
+            var component_count: u32 = 0;
+            for (incident.items, 0..) |_, seed| {
+                if (component[seed] != unassigned) continue;
+                component[seed] = component_count;
+                try stack.append(mesh.allocator, seed);
+                while (stack.pop()) |current| {
+                    const face = &mesh.faces.items[incident.items[current]];
+                    const corner = indexOf(face.vertices.items, vertex) orelse return false;
+                    const neighbors = [2]u32{
+                        face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len],
+                        face.vertices.items[(corner + 1) % face.vertices.items.len],
+                    };
+                    for (neighbors) |neighbor| {
+                        if (cut.contains(edgeKey(vertex, neighbor))) continue;
+                        for (incident.items, 0..) |candidate_id, candidate_index| {
+                            if (component[candidate_index] != unassigned) continue;
+                            if (!faceHasUndirectedEdge(&mesh.faces.items[candidate_id], vertex, neighbor)) continue;
+                            component[candidate_index] = component_count;
+                            try stack.append(mesh.allocator, candidate_index);
+                        }
+                    }
+                }
+                component_count += 1;
+            }
+
+            // One selected edge in a closed fan removes only one adjacency from a
+            // cycle. A seam still needs two logical sides, so isolate the stable
+            // higher-id incident face at that open terminal.
+            if (component_count == 1) {
+                var terminal_face: ?u32 = null;
+                for (edges) |edge| {
+                    if (edge[0] != vertex and edge[1] != vertex) continue;
+                    var pair: [2]u32 = undefined;
+                    if (!mesh.edgeIncidentFaces(edge, &pair)) return false;
+                    const candidate = @max(pair[0], pair[1]);
+                    terminal_face = if (terminal_face) |prior| @max(prior, candidate) else candidate;
+                }
+                const terminal = terminal_face orelse return false;
+                for (incident.items, 0..) |face_id, index| {
+                    if (face_id == terminal) component[index] = 1;
+                }
+                component_count = 2;
+            }
+
+            var identities = try mesh.allocator.alloc(u32, component_count);
+            defer mesh.allocator.free(identities);
+            identities[0] = vertex;
+            var component_index: u32 = 1;
+            while (component_index < component_count) : (component_index += 1) {
+                identities[component_index] = @intCast(mesh.vertices.items.len);
+                try mesh.vertices.append(mesh.allocator, mesh.vertices.items[vertex]);
+            }
+            for (incident.items, 0..) |face_id, index| {
+                const replacement = identities[component[index]];
+                if (replacement == vertex) continue;
+                const face = &mesh.faces.items[face_id];
+                const corner = indexOf(face.vertices.items, vertex) orelse return false;
+                face.vertices.items[corner] = replacement;
+                if (face.diagonal) |*diagonal| {
+                    if (diagonal[0] == vertex) diagonal[0] = replacement;
+                    if (diagonal[1] == vertex) diagonal[1] = replacement;
+                }
+                face.source_tessellation_valid = false;
+            }
+        }
+        return true;
+    }
+
     /// Resolve one selected welded corner into the resident indexed topology.
     pub fn resolveBevelVertex(mesh: *const Mesh, position: Vec3, part: ?u32) ?BevelSelection {
         const vertex = mesh.vertexAt(position, part) orelse return null;

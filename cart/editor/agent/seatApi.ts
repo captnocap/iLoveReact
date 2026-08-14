@@ -1340,6 +1340,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     return boundary ? { ...result, deletedBoundary: boundary } : result;
   };
   const mergeFaces = (): TopologyReceipt | null => topology(() => host.__mesh_topo_merge_faces?.());
+  const edgeSplit = (): TopologyReceipt | null => topology(() => host.__mesh_topo_edge_split?.());
   const weld = (): TopologyReceipt | null => topology(() => host.__mesh_topo_weld?.());
   const weldPairs = (values: unknown, maxDistance?: number): TopologyReceipt | null => {
     if (!Array.isArray(values) || values.length === 0 || values.length > 4096) return null;
@@ -2228,7 +2229,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     look, elements, selection, retopoBands, boundaryContinuation, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectAudit, selectSplitPoints, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
-    mergeFaces, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
+    mergeFaces, edgeSplit, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, uvZone, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
     measure, stats, align, oracle, walk, setPosition, regionTable,
@@ -2604,6 +2605,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
         const targetSides = args.targetSides == null ? undefined : Number(args.targetSides);
         const result = seat.bevel(Number(args.width ?? 0), targetSides);
         return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one filled convex face, one bevelable vertex, one or more sharp manifold edges from one part, or one complete 3+ edge open boundary loop, then use a valid width and targetSides'));
+      }
+      case 'edge-split': {
+        const result = seat.edgeSplit();
+        return seat.reply('edge-split', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one or more interior manifold edges from one part; Edge Split keeps every face in that same Outliner part'));
       }
       case 'inset': {
         const result = seat.inset(

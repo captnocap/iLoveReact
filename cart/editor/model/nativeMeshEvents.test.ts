@@ -18,7 +18,7 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 test('semantic ordinals preserve the native journal contract', () => {
-  assert(NATIVE_MESH_ACTIONS.length === 33, `expected all 33 native actions, got ${NATIVE_MESH_ACTIONS.length}`);
+  assert(NATIVE_MESH_ACTIONS.length === 38, `expected all 38 native actions, got ${NATIVE_MESH_ACTIONS.length}`);
   assert(NATIVE_MESH_ACTIONS[0]?.commandId === 'model.mesh.extrude-face', 'first ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[14]?.commandId === 'model.mesh.merge-parts', 'merge ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[20]?.commandId === 'model.mesh.transform', 'transform ordinal drifted');
@@ -32,6 +32,11 @@ test('semantic ordinals preserve the native journal contract', () => {
   assert(NATIVE_MESH_ACTIONS[30]?.commandId === 'model.mesh.bevel', 'bevel ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[31]?.commandId === 'model.paint.fill-selection', 'selection-paint ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[32]?.commandId === 'model.retopology.edit-guide', 'retopology-guide ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[33]?.commandId === 'model.recovery.restore', 'historical-restore ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[34]?.commandId === 'model.recovery.field-edit', 'field-edit ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[35]?.commandId === 'model.mesh.basic-cut', 'basic-cut ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[36]?.commandId === 'model.mesh.marquee-cut', 'marquee-cut ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[37]?.commandId === 'model.mesh.edge-split', 'edge-split ordinal drifted');
 });
 
 test('document tokens are stable, distinct, nonzero, and bridge-exact', () => {
@@ -41,6 +46,7 @@ test('document tokens are stable, distinct, nonzero, and bridge-exact', () => {
   assert(bridge > 0 && bridge <= 0x7fff_ffff, `token escaped positive bridge range: ${bridge}`);
   assert(new Uint32Array([bridge])[0] === bridge, 'token did not survive Uint32 exactly');
 });
+
 
 test('one fixed native row decodes identity, phase, source, and counts', () => {
   const row = new Uint32Array(11);

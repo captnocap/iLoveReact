@@ -242,6 +242,8 @@ export type ModelToolApi = {
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   // Fuse the selected faces (2+ authored faces) into one authored face.
   mergeFaces: () => boolean;
+  // Sever selected edge sharing while every face stays in its current part.
+  edgeSplit: () => boolean;
   // Open the whole-topology triangle→quad dry-run/confirmation session.
   trisToQuads: () => boolean;
   // Toggle the selected faces as translucent glass (re-toggle to un-glass).
