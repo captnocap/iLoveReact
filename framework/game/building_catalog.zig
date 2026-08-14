@@ -4,8 +4,8 @@
 //! govern behavior. Neither this module nor its callers infer semantics from IDs.
 
 const std = @import("std");
-const scale = @import("architecture_scale.zig");
-const types = @import("wall_types.zig");
+const scale = @import("architecture_scale");
+const types = @import("wall_types");
 
 pub const MeasuredBounds3 = struct {
     min_x_u: f64,
@@ -189,6 +189,14 @@ pub const ValidationError = error{
     invalid_wall_opening_compatibility,
 };
 
+pub const SourceReferenceError = error{
+    unknown_wall_style,
+    incompatible_wall_style,
+    unknown_opening_kit,
+    incompatible_opening_kit,
+    opening_kind_mismatch,
+};
+
 pub fn validateCatalog(allocator: std.mem.Allocator, entries: []const CatalogEntry) (ValidationError || std.mem.Allocator.Error)!void {
     if (entries.len > types.Limits.maximum_catalog_entries) return error.catalog_limit_exceeded;
 
@@ -222,6 +230,39 @@ pub fn validateEntry(entry: CatalogEntry) ValidationError!void {
     try validateTags(entry.theme_tags);
     try validateTags(entry.gameplay_tags);
     try validateMeasurement(entry);
+}
+
+/// Resolve persisted references against one already measurable catalog snapshot.
+/// Lookup text identifies rows; typed family/role/kind fields alone grant meaning.
+pub fn validateSourceCatalogReferences(
+    allocator: std.mem.Allocator,
+    source: *const types.ArchitectureSource,
+    entries: []const CatalogEntry,
+) (SourceReferenceError || ValidationError || std.mem.Allocator.Error)!void {
+    try validateCatalog(allocator, entries);
+
+    var entry_indices = std.StringHashMap(usize).init(allocator);
+    defer entry_indices.deinit();
+    for (entries, 0..) |entry, index| try entry_indices.put(entry.catalog_id, index);
+
+    for (source.walls.edges) |edge| {
+        const style_index = entry_indices.get(edge.style_id) orelse return error.unknown_wall_style;
+        const style = entries[style_index];
+        if (style.family != .wall or style.role != .style) return error.incompatible_wall_style;
+
+        for (edge.openings) |opening| {
+            const kit_index = entry_indices.get(opening.kit_id) orelse return error.unknown_opening_kit;
+            const kit = entries[kit_index];
+            if (kit.family != .wall or kit.role != .opening) return error.incompatible_opening_kit;
+            const kind = kit.semantic_kind orelse return error.incompatible_opening_kit;
+            switch (kind) {
+                .wall_opening => |catalog_kind| {
+                    if (catalog_kind != opening.kind) return error.opening_kind_mismatch;
+                },
+                else => return error.incompatible_opening_kit,
+            }
+        }
+    }
 }
 
 pub fn queryCatalog(allocator: std.mem.Allocator, entries: []const CatalogEntry, query: CatalogQuery) std.mem.Allocator.Error!CatalogQueryResult {

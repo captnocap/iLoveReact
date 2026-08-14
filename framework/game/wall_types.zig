@@ -4,7 +4,7 @@
 //! rendering, V8, editor state, or legacy placement behavior.
 
 const std = @import("std");
-const architecture_scale = @import("architecture_scale.zig");
+const architecture_scale = @import("architecture_scale");
 
 pub const Unit = architecture_scale.Unit;
 
@@ -38,7 +38,7 @@ pub const WallTuning = struct {
 /// Structural tuning contains no door/window size. Measured catalog entries own all
 /// opening occupancy and clearance.
 pub const wall_tuning = WallTuning{
-    .minimum_wall_length_u = 1,
+    .minimum_wall_length_u = 2,
     .minimum_height_u = 1,
     .maximum_height_u = 4_096,
     .minimum_thickness_u = 1,
@@ -230,6 +230,167 @@ pub const ArchitectureSource = struct {
         self.* = undefined;
     }
 };
+
+pub const SourceValidationError = error{
+    unsupported_source_version,
+    source_limit_exceeded,
+    empty_source_id,
+    source_id_too_long,
+    duplicate_source_id,
+    floor_out_of_range,
+    unit_out_of_range,
+    invalid_wall_height,
+    invalid_wall_thickness,
+    missing_vertex_reference,
+    cross_floor_edge,
+    zero_length_edge,
+    short_edge,
+    missing_edge_reference,
+};
+
+pub const StructuralNumberError = error{
+    structural_value_not_finite,
+    structural_value_not_integer,
+    structural_value_out_of_range,
+};
+
+const supported_source_version: u16 = 1;
+
+/// Gate for dynamically typed wire/DTO numbers before they can enter integer-u
+/// architecture state. No epsilon or rounding is accepted at this boundary.
+pub fn validateStructuralNumber(value: f64) StructuralNumberError!Unit {
+    if (!std.math.isFinite(value)) return error.structural_value_not_finite;
+    if (@trunc(value) != value) return error.structural_value_not_integer;
+    if (value < @as(f64, @floatFromInt(Limits.minimum_unit)) or
+        value > @as(f64, @floatFromInt(Limits.maximum_unit)))
+    {
+        return error.structural_value_out_of_range;
+    }
+    return @intFromFloat(value);
+}
+
+/// Validate only persisted source structure. Catalog meaning and topology are
+/// separate boundaries, so this function never guesses semantic intent from IDs.
+pub fn validateSourceStructure(
+    allocator: std.mem.Allocator,
+    source: *const ArchitectureSource,
+) (SourceValidationError || std.mem.Allocator.Error)!void {
+    if (source.version != supported_source_version) return error.unsupported_source_version;
+    if (source.walls.vertices.len > Limits.maximum_vertices or
+        source.walls.edges.len > Limits.maximum_edges or
+        source.walls.anchors.len > Limits.maximum_anchors)
+    {
+        return error.source_limit_exceeded;
+    }
+
+    var source_ids = std.StringHashMap(void).init(allocator);
+    defer source_ids.deinit();
+    var vertex_indices = std.StringHashMap(usize).init(allocator);
+    defer vertex_indices.deinit();
+    var edge_ids = std.StringHashMap(void).init(allocator);
+    defer edge_ids.deinit();
+
+    for (source.walls.vertices, 0..) |vertex, index| {
+        try putUniqueSourceId(&source_ids, vertex.id);
+        try putUniqueReference(&vertex_indices, vertex.id, index);
+        if (vertex.floor < -wall_tuning.maximum_floor_magnitude or
+            vertex.floor > wall_tuning.maximum_floor_magnitude)
+        {
+            return error.floor_out_of_range;
+        }
+        try validateUnit(vertex.x_u);
+        try validateUnit(vertex.z_u);
+    }
+
+    var opening_count: usize = 0;
+    for (source.walls.edges) |edge| {
+        opening_count = std.math.add(usize, opening_count, edge.openings.len) catch
+            return error.source_limit_exceeded;
+        if (opening_count > Limits.maximum_openings) return error.source_limit_exceeded;
+
+        try putUniqueSourceId(&source_ids, edge.id);
+        const edge_result = try edge_ids.getOrPut(edge.id);
+        if (edge_result.found_existing) return error.duplicate_source_id;
+        try validateReferenceId(edge.start_vertex_id);
+        try validateReferenceId(edge.end_vertex_id);
+        try validateReferenceId(edge.style_id);
+        try validateReferenceId(edge.side_a.material_id);
+        try validateReferenceId(edge.side_b.material_id);
+        switch (edge.support) {
+            .absolute => |support| try validateUnit(support.base_y_u),
+            .slab => |support| try validateReferenceId(support.slab_id),
+        }
+        if (edge.height_u < wall_tuning.minimum_height_u or
+            edge.height_u > wall_tuning.maximum_height_u)
+        {
+            return error.invalid_wall_height;
+        }
+        if (edge.thickness_u < wall_tuning.minimum_thickness_u or
+            edge.thickness_u > wall_tuning.maximum_thickness_u)
+        {
+            return error.invalid_wall_thickness;
+        }
+
+        const start_index = vertex_indices.get(edge.start_vertex_id) orelse
+            return error.missing_vertex_reference;
+        const end_index = vertex_indices.get(edge.end_vertex_id) orelse
+            return error.missing_vertex_reference;
+        const start = source.walls.vertices[start_index];
+        const end = source.walls.vertices[end_index];
+        if (start.floor != end.floor) return error.cross_floor_edge;
+        const delta_x: i64 = @as(i64, end.x_u) - @as(i64, start.x_u);
+        const delta_z: i64 = @as(i64, end.z_u) - @as(i64, start.z_u);
+        const length_squared = delta_x * delta_x + delta_z * delta_z;
+        if (length_squared == 0) return error.zero_length_edge;
+        const minimum_length: i64 = wall_tuning.minimum_wall_length_u;
+        if (length_squared < minimum_length * minimum_length) return error.short_edge;
+
+        for (edge.openings) |opening| {
+            try putUniqueSourceId(&source_ids, opening.id);
+            try validateReferenceId(opening.kit_id);
+            try validateUnit(opening.column_u);
+            try validateUnit(opening.row_u);
+        }
+    }
+
+    for (source.walls.anchors) |anchor| {
+        try putUniqueSourceId(&source_ids, anchor.id);
+        try validateReferenceId(anchor.edge_id);
+        try validateReferenceId(anchor.target_piece_id);
+        if (!edge_ids.contains(anchor.edge_id)) return error.missing_edge_reference;
+        try validateUnit(anchor.column_u);
+        try validateUnit(anchor.row_u);
+    }
+}
+
+fn validateUnit(value: Unit) SourceValidationError!void {
+    if (value < Limits.minimum_unit or value > Limits.maximum_unit) {
+        return error.unit_out_of_range;
+    }
+}
+
+fn validateReferenceId(id: []const u8) SourceValidationError!void {
+    if (id.len == 0) return error.empty_source_id;
+    if (id.len > Limits.maximum_id_bytes) return error.source_id_too_long;
+}
+
+fn putUniqueSourceId(
+    ids: *std.StringHashMap(void),
+    id: []const u8,
+) (SourceValidationError || std.mem.Allocator.Error)!void {
+    try validateReferenceId(id);
+    const result = try ids.getOrPut(id);
+    if (result.found_existing) return error.duplicate_source_id;
+}
+
+fn putUniqueReference(
+    references: *std.StringHashMap(usize),
+    id: []const u8,
+    index: usize,
+) std.mem.Allocator.Error!void {
+    const result = try references.getOrPut(id);
+    result.value_ptr.* = index;
+}
 
 pub const RecordFamily = enum(u8) { vertex, edge, opening, anchor };
 pub const PatchOperationKind = enum(u8) { insert, replace, remove };

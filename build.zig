@@ -2051,13 +2051,40 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    const wall_types_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_types.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_types_mod_for_tests.addImport("architecture_scale", architecture_scale_mod);
+    const building_catalog_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/building_catalog.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    building_catalog_mod_for_tests.addImport("architecture_scale", architecture_scale_mod);
+    building_catalog_mod_for_tests.addImport("wall_types", wall_types_mod_for_tests);
     const building_architecture_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/building_architecture.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    const wall_topology_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_topology.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_topology_mod_for_tests.addImport("wall_types", wall_types_mod_for_tests);
+    building_architecture_mod_for_tests.addImport("architecture_scale", architecture_scale_mod);
+    building_architecture_mod_for_tests.addImport("wall_types", wall_types_mod_for_tests);
+    building_architecture_mod_for_tests.addImport("building_catalog", building_catalog_mod_for_tests);
+    building_architecture_mod_for_tests.addImport("wall_topology", wall_topology_mod_for_tests);
     building_architecture_test_mod.addImport("building_architecture", building_architecture_mod_for_tests);
+    building_architecture_test_mod.addImport("wall_topology", wall_topology_mod_for_tests);
     const building_architecture_test = b.addTest(.{
         .name = "building-architecture-test",
         .root_module = building_architecture_test_mod,
