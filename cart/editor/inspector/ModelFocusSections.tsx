@@ -95,7 +95,15 @@ export function ModelIdentityHeader(props: {
           <C.HW_TagText>{chip}</C.HW_TagText>
         </C.HW_Tag>
         {props.revision ? (
-          <Text noWrap numberOfLines={1} style={{ fontSize: 9, fontFamily: 'monospace', color: accentFor('textFaint') }}>{`rev ${props.revision}`}</Text>
+          // Lore revisions are full 40-char hashes — print the short form and
+          // let the text SHRINK, or the row's Recover/Save verbs get shoved
+          // clean off the panel (req_4399).
+          <Text
+            noWrap
+            numberOfLines={1}
+            tooltip={`lore revision ${props.revision}`}
+            style={{ flexShrink: 1, minWidth: 0, fontSize: 9, fontFamily: 'monospace', color: accentFor('textFaint') }}
+          >{`rev ${props.revision.slice(0, 8)}`}</Text>
         ) : null}
         <C.HW_Spacer />
         <C.HW_VerbFixed tooltip="Capture the native-resident mesh without invoking Save" onPress={props.recoverEnabled ? props.onRecover : undefined}>
