@@ -56,6 +56,8 @@ export const NATIVE_MESH_ACTIONS = [
   { kind: 'marquee-cut', label: 'marquee cut', commandId: 'model.mesh.marquee-cut' },
   // Append-only ordinal 37 (req_4393): same-part logical seam creation.
   { kind: 'edge-split', label: 'edge split', commandId: 'model.mesh.edge-split' },
+  // Append-only ordinal 38 (req_4396): same-part square struts from selected edges.
+  { kind: 'edge-tubes', label: 'edge to tubes', commandId: 'model.mesh.edge-tubes' },
 ] as const;
 
 const NATIVE_MESH_PHASES = ['applied', 'undone', 'redone'] as const;

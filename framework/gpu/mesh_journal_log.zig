@@ -77,6 +77,9 @@ pub const ActionKind = enum(u8) {
     // Append-only ordinal 37 (req_4393): duplicate logical identities across
     // selected edges without changing their authored Outliner part.
     edge_split,
+    // Append-only ordinal 38 (req_4396): selected edges become square-section
+    // struts while complete selected face boundaries are consumed in-place.
+    edge_tubes,
 };
 
 /// UV edit ordinals are a bridge contract with cart/editor/model/uvHistory.ts.
@@ -190,6 +193,7 @@ pub fn actionKindForLabel(label: []const u8) ?ActionKind {
         .{ "cut", .basic_cut },
         .{ "marquee cut", .marquee_cut },
         .{ "edge split", .edge_split },
+        .{ "edge to tubes", .edge_tubes },
         .{ "connect vertices", .connect_vertices },
         .{ "bevel edge", .bevel },
         .{ "bevel vertex", .bevel },
@@ -296,6 +300,7 @@ pub fn actionCommandId(kind: ActionKind) []const u8 {
         .basic_cut => "model.mesh.basic-cut",
         .marquee_cut => "model.mesh.marquee-cut",
         .edge_split => "model.mesh.edge-split",
+        .edge_tubes => "model.mesh.edge-tubes",
     };
 }
 
@@ -328,6 +333,7 @@ pub fn actionInvalidatesPaintLayout(kind: ActionKind) bool {
         .basic_cut,
         .marquee_cut,
         .edge_split,
+        .edge_tubes,
         => true,
         .hide_part,
         .show_part,

@@ -433,6 +433,7 @@ export type ModelToolApi = {
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   mergeFaces: () => boolean;
   edgeSplit: () => boolean;
+  edgeTubes: () => boolean;
   assignUvZone: (zone: number) => boolean;
   trisToQuads: () => boolean;
   glassSelection: () => boolean;
@@ -913,6 +914,7 @@ const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) 
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
 const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
 const meshEdgeSplit = () => readTopoResult(host.__mesh_topo_edge_split?.());
+const meshEdgeTubes = () => readTopoResult(host.__mesh_topo_edge_tubes?.(0));
 // UV MASK ZONES (req_4152): assign the face selection to one unfold chart WITHOUT
 // touching the authored face distribution. op 1 = assign.
 const meshUvZoneAssign = (zone: number): { ok?: number; changed?: number } | null => {
@@ -3486,6 +3488,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     mergeFaces: () => adoptMesh(meshMergeFaces()),
     // Same-part seam: topology changes, Outliner ownership deliberately does not.
     edgeSplit: () => adoptMesh(meshEdgeSplit()),
+    edgeTubes: () => adoptMesh(meshEdgeTubes()),
     assignUvZone: (zone: number) => {
       const result = meshUvZoneAssign(zone);
       if (!result || result.ok !== 1 || (result.changed ?? 0) < 1) return false;

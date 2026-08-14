@@ -413,6 +413,15 @@ pub const BevelTuning = struct {
     pub const coplanar_normal_dot: f32 = 0.999;
 };
 
+/// Selected-edge wireframe conversion uses the edge as the centerline of a
+/// square strut. Values are half-extents in metres, so the generated tube is
+/// `2 * radius` wide on both cross-section axes.
+pub const EdgeTubeTuning = struct {
+    pub const default_radius_m: f32 = 1.0 / 16.0;
+    pub const minimum_radius_m: f32 = IMPORT_WELD_EPS * 2.0;
+    pub const maximum_edge_fraction: f32 = 0.45;
+};
+
 /// One selected open boundary loop is chamfered as a unit. The caller chooses
 /// any larger target side count; added sides are spread as evenly as possible
 /// around the old corners while every untouched boundary span stays positive.
@@ -4412,6 +4421,35 @@ pub const Mesh = struct {
         return true;
     }
 
+    /// Resolve any selected same-part authored edge against one captured indexed
+    /// base. Unlike bevel and edge split, naked/boundary edges are valid tube
+    /// centerlines; only duplicate, missing, cross-part, or collapsed edges refuse.
+    pub fn resolveEdgeTubes(
+        mesh: *const Mesh,
+        selected_edges: []const [2]Vec3,
+        part: u32,
+        out_edges: [][2]u32,
+    ) bool {
+        if (selected_edges.len == 0 or out_edges.len != selected_edges.len) return false;
+        for (selected_edges, 0..) |positions, index| {
+            const a = mesh.vertexAt(positions[0], part) orelse return false;
+            const b = mesh.vertexAt(positions[1], part) orelse return false;
+            if (a == b or !mesh.vertices.items[a].alive or !mesh.vertices.items[b].alive) return false;
+            const key = edgeKey(a, b);
+            var exists = false;
+            for (mesh.faces.items) |*face| {
+                if (face.alive and face.part == part and faceHasUndirectedEdge(face, a, b)) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) return false;
+            for (out_edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return false;
+            out_edges[index] = .{ a, b };
+        }
+        return true;
+    }
+
     /// Sever logical vertex sharing across selected manifold edges while retaining
     /// every face in its existing authored group and Outliner part. Around each cut
     /// endpoint, incident faces remain welded through unselected radial edges; each
@@ -5143,6 +5181,122 @@ pub const Mesh = struct {
         for (mesh.vertices.items, 0..) |*vertex, index| {
             if (!used[index]) vertex.alive = false;
         }
+    }
+
+    /// Replace selected authored edges with square-section struts. A face whose
+    /// complete non-degenerate boundary is selected is consumed (Select All thus
+    /// produces a wireframe cage); partially selected faces remain untouched.
+    /// Incident struts extend to the same endpoint and omit internal end caps, so
+    /// bends and branches meet as one continuous solid instead of detached parts.
+    pub fn edgeTubes(mesh: *Mesh, edges: []const [2]u32, radius_raw: f32) !bool {
+        if (edges.len == 0 or !std.math.isFinite(radius_raw)) return false;
+
+        const EdgePlan = struct { edge: [2]u32, source_face: u32 };
+        var plans = std.ArrayListUnmanaged(EdgePlan).empty;
+        defer plans.deinit(mesh.allocator);
+        try plans.ensureTotalCapacity(mesh.allocator, edges.len);
+        var selected = std.AutoHashMapUnmanaged(u64, void).empty;
+        defer selected.deinit(mesh.allocator);
+        try selected.ensureTotalCapacity(mesh.allocator, @intCast(edges.len));
+        var degree = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer degree.deinit(mesh.allocator);
+        var maximum_radius = std.math.inf(f32);
+
+        for (edges) |edge| {
+            if (edge[0] == edge[1] or edge[0] >= mesh.vertices.items.len or edge[1] >= mesh.vertices.items.len) return false;
+            if (!mesh.vertices.items[edge[0]].alive or !mesh.vertices.items[edge[1]].alive) return false;
+            const key = edgeKey(edge[0], edge[1]);
+            if (selected.contains(key)) return false;
+            var source_face: ?u32 = null;
+            for (mesh.faces.items) |*face| {
+                if (face.alive and faceHasUndirectedEdge(face, edge[0], edge[1])) {
+                    source_face = face.id;
+                    break;
+                }
+            }
+            const source = source_face orelse return false;
+            try selected.put(mesh.allocator, key, {});
+            try plans.append(mesh.allocator, .{ .edge = edge, .source_face = source });
+            for (edge) |vertex| {
+                const entry = try degree.getOrPut(mesh.allocator, vertex);
+                if (!entry.found_existing) entry.value_ptr.* = 0;
+                entry.value_ptr.* += 1;
+            }
+            maximum_radius = @min(
+                maximum_radius,
+                length3(sub3(mesh.vertices.items[edge[1]].position, mesh.vertices.items[edge[0]].position)) * EdgeTubeTuning.maximum_edge_fraction,
+            );
+        }
+        const radius = @min(radius_raw, maximum_radius);
+        if (!std.math.isFinite(radius) or radius < EdgeTubeTuning.minimum_radius_m) return false;
+
+        // Consume only faces completely described by the selected network. This
+        // includes the repeated-corner triangles used to persist naked Pen Edges.
+        for (mesh.faces.items) |*face| {
+            if (!face.alive or face.vertices.items.len < 2) continue;
+            var boundary_edges: usize = 0;
+            var all_selected = true;
+            for (face.vertices.items, 0..) |a, corner| {
+                const b = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                if (a == b) continue;
+                boundary_edges += 1;
+                if (!selected.contains(edgeKey(a, b))) all_selected = false;
+            }
+            if (boundary_edges > 0 and all_selected) face.alive = false;
+        }
+
+        const Append = struct {
+            fn face(target: *Mesh, source: u32, loop_raw: []const u32, outward: Vec3) !void {
+                var loop: [4]u32 = undefined;
+                if (loop_raw.len < 3 or loop_raw.len > loop.len) return error.InvalidTubeFace;
+                @memcpy(loop[0..loop_raw.len], loop_raw);
+                if (dot3(target.loopNormal(loop[0..loop_raw.len]), outward) < 0) std.mem.reverse(u32, loop[0..loop_raw.len]);
+                const uv = [4]Vec2{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } };
+                _ = try target.appendDerivedFace(source, loop[0..loop_raw.len], uv[0..loop_raw.len], null);
+            }
+        };
+
+        for (plans.items) |plan| {
+            const a = mesh.vertices.items[plan.edge[0]].position;
+            const b = mesh.vertices.items[plan.edge[1]].position;
+            const direction = norm3(sub3(b, a));
+            if (length3(direction) < 0.5) return false;
+            const abs_direction = Vec3{ @abs(direction[0]), @abs(direction[1]), @abs(direction[2]) };
+            const reference: Vec3 = if (abs_direction[0] <= abs_direction[1] and abs_direction[0] <= abs_direction[2])
+                .{ 1, 0, 0 }
+            else if (abs_direction[1] <= abs_direction[2])
+                .{ 0, 1, 0 }
+            else
+                .{ 0, 0, 1 };
+            const u = norm3(cross3(direction, reference));
+            const v = norm3(cross3(direction, u));
+            const offsets = [4]Vec3{
+                add3(mul3(u, radius), mul3(v, radius)),
+                add3(mul3(u, -radius), mul3(v, radius)),
+                add3(mul3(u, -radius), mul3(v, -radius)),
+                add3(mul3(u, radius), mul3(v, -radius)),
+            };
+            const first: u32 = @intCast(mesh.vertices.items.len);
+            for (offsets) |offset| try mesh.vertices.append(mesh.allocator, .{ .position = add3(a, offset) });
+            for (offsets) |offset| try mesh.vertices.append(mesh.allocator, .{ .position = add3(b, offset) });
+            const midpoint = mul3(add3(a, b), 0.5);
+            for (0..4) |side| {
+                const next = (side + 1) % 4;
+                const loop = [4]u32{ first + @as(u32, @intCast(side)), first + 4 + @as(u32, @intCast(side)), first + 4 + @as(u32, @intCast(next)), first + @as(u32, @intCast(next)) };
+                const side_midpoint = add3(midpoint, mul3(add3(offsets[side], offsets[next]), 0.5));
+                try Append.face(mesh, plan.source_face, loop[0..], sub3(side_midpoint, midpoint));
+            }
+            if ((degree.get(plan.edge[0]) orelse 0) == 1) {
+                const cap = [4]u32{ first, first + 1, first + 2, first + 3 };
+                try Append.face(mesh, plan.source_face, cap[0..], mul3(direction, -1));
+            }
+            if ((degree.get(plan.edge[1]) orelse 0) == 1) {
+                const cap = [4]u32{ first + 4, first + 5, first + 6, first + 7 };
+                try Append.face(mesh, plan.source_face, cap[0..], direction);
+            }
+        }
+        try mesh.pruneOrphanVertices();
+        return true;
     }
 
     /// Bevel a manifold-edge set simultaneously. Every source face is inset once,
@@ -6407,6 +6561,50 @@ test "semantic membership survives indexed face splitting" {
     try std.testing.expect(lowered.tri_count > 2);
     for (lowered.semantic_regions) |region| try std.testing.expectEqual(@as(u32, 7), region);
     for (lowered.semantic_instances) |instance| try std.testing.expectEqual(@as(u32, 2), instance);
+}
+
+test "edge tubes consume a fully selected face into a square wireframe cage" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ -1, 0, -1 }, .{ 1, 0, -1 }, .{ 1, 0, 1 }, .{ -1, 0, 1 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
+    defer mesh.deinit();
+    const positions = [4][2]Vec3{
+        .{ quads[0][0], quads[0][1] },
+        .{ quads[0][1], quads[0][2] },
+        .{ quads[0][2], quads[0][3] },
+        .{ quads[0][3], quads[0][0] },
+    };
+    var edges: [4][2]u32 = undefined;
+    try std.testing.expect(mesh.resolveEdgeTubes(positions[0..], NO_PART, edges[0..]));
+    try std.testing.expect(try mesh.edgeTubes(edges[0..], 0.1));
+    try std.testing.expect(!mesh.faces.items[0].alive);
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    // Four uncapped square struts, two triangles per side.
+    try std.testing.expectEqual(@as(u32, 32), lowered.tri_count);
+    for (lowered.parts) |part| try std.testing.expectEqual(NO_PART, part);
+}
+
+test "one edge tube keeps a partial source face and closes both ends" {
+    const allocator = std.testing.allocator;
+    const quads = [_][4]Vec3{.{ .{ -1, 0, -1 }, .{ 1, 0, -1 }, .{ 1, 0, 1 }, .{ -1, 0, 1 } }};
+    const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+    defer allocator.free(fixture.verts);
+    defer allocator.free(fixture.groups);
+    var mesh = try Mesh.fromSoup(allocator, fixture.verts, 2, fixture.groups, null);
+    defer mesh.deinit();
+    const positions = [1][2]Vec3{.{ quads[0][0], quads[0][1] }};
+    var edges: [1][2]u32 = undefined;
+    try std.testing.expect(mesh.resolveEdgeTubes(positions[0..], NO_PART, edges[0..]));
+    try std.testing.expect(try mesh.edgeTubes(edges[0..], 0.1));
+    try std.testing.expect(mesh.faces.items[0].alive);
+    var lowered = try mesh.lower();
+    defer lowered.deinit();
+    // Source quad + four tube sides + two caps.
+    try std.testing.expectEqual(@as(u32, 14), lowered.tri_count);
 }
 
 test "indexed loop cut follows a closed flared quad ring at edge ratios" {

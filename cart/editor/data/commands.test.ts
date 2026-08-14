@@ -127,6 +127,13 @@ test('Edge Split is available for any edge selection and never masquerades as fa
   assert(ids(meshTopoCommands({ selMode: 3, sel: 2 })).includes('mesh-detach'), 'face Detach disappeared while adding Edge Split');
 });
 
+test('Edge to Tubes is available only for selected edges', () => {
+  assert(ids(meshTopoCommands({ selMode: 2, sel: 1 })).includes('mesh-edge-tubes'), 'one selected edge cannot become a tube');
+  assert(ids(meshTopoCommands({ selMode: 2, sel: 12 })).includes('mesh-edge-tubes'), 'an edge network cannot become connected tubes');
+  assert(!ids(meshTopoCommands({ selMode: 1, sel: 2 })).includes('mesh-edge-tubes'), 'vertex mode exposed Edge to Tubes');
+  assert(!ids(meshTopoCommands({ selMode: 3, sel: 2 })).includes('mesh-edge-tubes'), 'face mode exposed Edge to Tubes');
+});
+
 test('one target vertex exposes the mixed edge-to-vertex extrusion', () => {
   const vertex = meshTopoCommands({ selMode: 1, sel: 1 });
   const extrude = vertex.find((command) => command.id === 'mesh-extrude');

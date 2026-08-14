@@ -69,6 +69,7 @@ test "every journaled mesh label has one stable semantic command identity" {
         .{ "cut", .basic_cut, "model.mesh.basic-cut" },
         .{ "marquee cut", .marquee_cut, "model.mesh.marquee-cut" },
         .{ "edge split", .edge_split, "model.mesh.edge-split" },
+        .{ "edge to tubes", .edge_tubes, "model.mesh.edge-tubes" },
     };
     // integrity_alert is the one action-ring diagnostic that is not minted from
     // a journal label; every actual mutation kind must appear above.

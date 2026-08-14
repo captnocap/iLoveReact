@@ -290,6 +290,9 @@ export const COMMANDS: Command[] = [
   // Duplicate logical vertex identities across the selected edge seam while all
   // faces remain in their current authored Outliner part.
   { id: 'mesh-edge-split', menu: 'Edit', scope: 'model', name: 'Edge Split', icon: 'Scissors', key: 'D', context: true, native: true, undoable: true, tool: true },
+  // Destructive selected-edge wireframe: complete selected boundaries become
+  // connected square struts without creating another Outliner part.
+  { id: 'mesh-edge-tubes', menu: 'Edit', scope: 'model', name: 'Edge to Tubes', icon: 'Boxes', key: '', context: true, native: true, undoable: true, tool: true },
   // Studio's req_1182 face correction, restored on the active host-native surface:
   // reverse winding + UV corner order so an inside-out created face points outward.
   { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
@@ -471,7 +474,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-view'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-align-loop'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-edge-split'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-edge-tubes'), cmd('mesh-edge-split'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -563,10 +566,11 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
   if (tool.selMode === 2) {
     // Weld collapses the selected edges' endpoints — one edge = an edge collapse.
     return tool.sel === 1
-      ? [commandById('mesh-extrude'), commandById('mesh-bevel'), commandById('mesh-edge-split'), commandById('mesh-loopcut'), commandById('mesh-weld')]
+      ? [commandById('mesh-extrude'), commandById('mesh-bevel'), commandById('mesh-edge-tubes'), commandById('mesh-edge-split'), commandById('mesh-loopcut'), commandById('mesh-weld')]
       : [
           commandById('mesh-create-face'),
           { ...commandById('mesh-bevel'), name: 'Bevel Edges' },
+          commandById('mesh-edge-tubes'),
           commandById('mesh-edge-split'),
           commandById('mesh-align-loop'),
           commandById('mesh-weld'),

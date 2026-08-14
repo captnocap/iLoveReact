@@ -840,7 +840,7 @@ test('resident destructive and constructive topology doors are reachable', () =>
   const topologyOk = () => JSON.stringify({ ok: 1, key: 'doc', count: 60, generation: 5 });
   for (const door of [
     '__mesh_topo_extrude_edge', '__mesh_topo_connect_vertices', '__mesh_delete_selection',
-    '__mesh_topo_merge_faces', '__mesh_topo_edge_split', '__mesh_topo_weld', '__mesh_topo_solidify',
+    '__mesh_topo_merge_faces', '__mesh_topo_edge_split', '__mesh_topo_edge_tubes', '__mesh_topo_weld', '__mesh_topo_solidify',
     '__mesh_topo_flip_faces', '__mesh_topo_glass',
   ]) (globalThis as any)[door] = topologyOk;
   const sources: number[] = [];
@@ -848,7 +848,7 @@ test('resident destructive and constructive topology doors are reachable', () =>
   const seat = createAgentSeat();
   for (const request of [
     { action: 'extrude-edge', args: { distance: 0.1 } }, { action: 'connect' },
-    { action: 'delete' }, { action: 'merge-faces' }, { action: 'edge-split' }, { action: 'weld' },
+    { action: 'delete' }, { action: 'merge-faces' }, { action: 'edge-split' }, { action: 'edge-tubes' }, { action: 'weld' },
     { action: 'solidify', args: { thickness: 0.03 } }, { action: 'flip' }, { action: 'glass' },
   ]) assert(executeSeatRequest(seat, request).ok, `${request.action} stayed unreachable`);
   assert(sources.includes(9) && sources[sources.length - 1] === 0, 'seat mutations were not attributed to automation');

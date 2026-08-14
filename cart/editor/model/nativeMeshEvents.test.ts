@@ -18,7 +18,7 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
 test('semantic ordinals preserve the native journal contract', () => {
-  assert(NATIVE_MESH_ACTIONS.length === 38, `expected all 38 native actions, got ${NATIVE_MESH_ACTIONS.length}`);
+  assert(NATIVE_MESH_ACTIONS.length === 39, `expected all 39 native actions, got ${NATIVE_MESH_ACTIONS.length}`);
   assert(NATIVE_MESH_ACTIONS[0]?.commandId === 'model.mesh.extrude-face', 'first ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[14]?.commandId === 'model.mesh.merge-parts', 'merge ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[20]?.commandId === 'model.mesh.transform', 'transform ordinal drifted');
@@ -37,6 +37,7 @@ test('semantic ordinals preserve the native journal contract', () => {
   assert(NATIVE_MESH_ACTIONS[35]?.commandId === 'model.mesh.basic-cut', 'basic-cut ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[36]?.commandId === 'model.mesh.marquee-cut', 'marquee-cut ordinal drifted');
   assert(NATIVE_MESH_ACTIONS[37]?.commandId === 'model.mesh.edge-split', 'edge-split ordinal drifted');
+  assert(NATIVE_MESH_ACTIONS[38]?.commandId === 'model.mesh.edge-tubes', 'edge-tubes ordinal drifted');
 });
 
 test('document tokens are stable, distinct, nonzero, and bridge-exact', () => {

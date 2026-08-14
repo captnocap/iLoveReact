@@ -1348,6 +1348,10 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   };
   const mergeFaces = (): TopologyReceipt | null => topology(() => host.__mesh_topo_merge_faces?.());
   const edgeSplit = (): TopologyReceipt | null => topology(() => host.__mesh_topo_edge_split?.());
+  const edgeTubes = (radius = 0): TopologyReceipt | null => {
+    if (!Number.isFinite(radius) || radius < 0) return null;
+    return topology(() => host.__mesh_topo_edge_tubes?.(radius));
+  };
   const weld = (): TopologyReceipt | null => topology(() => host.__mesh_topo_weld?.());
   const weldPairs = (values: unknown, maxDistance?: number): TopologyReceipt | null => {
     if (!Array.isArray(values) || values.length === 0 || values.length > 4096) return null;
@@ -2236,7 +2240,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     look, elements, selection, retopoBands, boundaryContinuation, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectAudit, selectSplitPoints, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
     connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
-    mergeFaces, edgeSplit, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
+    mergeFaces, edgeSplit, edgeTubes, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, uvZone, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
     measure, stats, align, oracle, walk, setPosition, regionTable,
@@ -2620,6 +2624,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'edge-split': {
         const result = seat.edgeSplit();
         return seat.reply('edge-split', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one or more interior manifold edges from one part; Edge Split keeps every face in that same Outliner part'));
+      }
+      case 'edge-tubes': {
+        const result = seat.edgeTubes(Number(args.radius ?? 0));
+        return seat.reply('edge-tubes', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one or more same-part edges; radius is in metres and zero uses the native default'));
       }
       case 'inset': {
         const result = seat.inset(

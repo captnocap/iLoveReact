@@ -1585,6 +1585,17 @@ fn hostMeshTopoEdgeSplit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_topo_edge_tubes(radiusMetres=default) → JSON {"ok","key","count"}.
+/// Selected edges become connected square-section struts in their current part;
+/// a non-positive/missing radius selects the native tuning-table default.
+fn hostMeshTopoEdgeTubes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const radius: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const ok = scene3d.meshTopoEdgeTubes(radius);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_retopo_weld_pairs(json) → topology receipt. JSON:
 /// {"pairs":[[a,b],...],"maxDistance":0.01}. Each pair collapses to its own
 /// midpoint; the request is rejected atomically when ids overlap, cross parts,
@@ -5287,6 +5298,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
         v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
         v8_runtime.registerHostFn("__mesh_topo_edge_split", hostMeshTopoEdgeSplit);
+        v8_runtime.registerHostFn("__mesh_topo_edge_tubes", hostMeshTopoEdgeTubes);
         v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
         v8_runtime.registerHostFn("__mesh_retopo_normalize_widths", hostMeshRetopoNormalizeWidths);
         v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
@@ -5555,6 +5567,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
     v8_runtime.registerHostFn("__mesh_topo_edge_split", hostMeshTopoEdgeSplit);
+    v8_runtime.registerHostFn("__mesh_topo_edge_tubes", hostMeshTopoEdgeTubes);
     v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
     v8_runtime.registerHostFn("__mesh_retopo_normalize_widths", hostMeshRetopoNormalizeWidths);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);

@@ -244,6 +244,8 @@ export type ModelToolApi = {
   mergeFaces: () => boolean;
   // Sever selected edge sharing while every face stays in its current part.
   edgeSplit: () => boolean;
+  // Convert selected edge centerlines into same-part square struts.
+  edgeTubes: () => boolean;
   // Open the whole-topology triangle→quad dry-run/confirmation session.
   trisToQuads: () => boolean;
   // Toggle the selected faces as translucent glass (re-toggle to un-glass).
