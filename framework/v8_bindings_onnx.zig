@@ -27,6 +27,7 @@ const HostContext = @import("host_context.zig");
 const onnx = @import("ml/onnx.zig");
 const segment = @import("ml/segment.zig");
 const pose = @import("ml/pose.zig");
+const blazepose = @import("ml/blazepose.zig");
 const render_surfaces = @import("render/render_surfaces.zig");
 const video_devices = @import("render/video_devices.zig");
 const capture_session = @import("v8_bindings_capture_session.zig");
@@ -455,12 +456,20 @@ fn emitPoseResult(host: *HostContext, result: *const pose.AsyncResult) void {
 
 pub fn tickDrain(host: *HostContext) void {
     capture_session.tickSubmit(host);
+    // Legacy MoveNet lane: every completion belongs to the JS
+    // __pose_estimate_async door now — capture runs on its own BlazePose
+    // lane below (req_4387).
     while (pose.pollAsync(host.io)) |result_value| {
         var result = result_value;
         defer result.deinit();
-        if (!capture_session.consumePoseResult(host, &result)) emitPoseResult(host, &result);
+        emitPoseResult(host, &result);
     }
-    // A completion frees the one-entry pose mailbox. Submit here as well as at
+    while (blazepose.pollAsync(host.io)) |result_value| {
+        var result = result_value;
+        defer result.deinit();
+        _ = capture_session.consumePoseResult(host, &result);
+    }
+    // A completion frees the one-entry mailbox. Submit here as well as at
     // the start of the tick so capture stays inference-bound without waiting
     // an extra render frame; the native cadence floor still applies.
     capture_session.tickSubmit(host);

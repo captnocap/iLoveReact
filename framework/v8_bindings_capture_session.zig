@@ -16,11 +16,23 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const HostContext = @import("host_context.zig");
-const pose = @import("ml/pose.zig");
-const pose_mailbox = @import("ml/pose_mailbox.zig");
+const blazepose = @import("ml/blazepose.zig");
 const render_surfaces = @import("render/render_surfaces.zig");
 const capture = @import("skeleton/capture_session.zig");
 const source = capture.source_skeleton;
+
+// The skeleton consumes landmarks by index; the model emits them by index.
+// One wire order, asserted here where both sides are visible.
+comptime {
+    const skeleton_fields = @typeInfo(source.WorldLandmarkName).@"enum".fields;
+    const model_fields = @typeInfo(blazepose.LandmarkName).@"enum".fields;
+    if (skeleton_fields.len != model_fields.len) @compileError("WorldLandmarkName / blazepose.LandmarkName length mismatch");
+    for (skeleton_fields, model_fields) |skeleton_field, model_field| {
+        if (!std.mem.eql(u8, skeleton_field.name, model_field.name) or skeleton_field.value != model_field.value) {
+            @compileError("WorldLandmarkName order must match blazepose.LandmarkName: " ++ skeleton_field.name);
+        }
+    }
+}
 
 const log = std.log.scoped(.capture_session_host);
 const allocator = std.heap.c_allocator;
@@ -94,7 +106,7 @@ const FrameSlot = struct {
     width: u32 = 0,
     height: u32 = 0,
     retain_count: u8 = 0,
-    frame: ?pose_mailbox.Frame = null,
+    frame: ?blazepose.Frame = null,
 
     fn reset(self: *FrameSlot) void {
         if (self.frame) |*owned| owned.deinit();
@@ -181,7 +193,7 @@ const FrameStore = struct {
 
     /// Move the mailbox-owned frame into its already-retained token. The
     /// caller's frame becomes empty on success and remains owned on failure.
-    fn adopt(self: *FrameStore, token: u64, owned: *pose_mailbox.Frame) !void {
+    fn adopt(self: *FrameStore, token: u64, owned: *blazepose.Frame) !void {
         const slot = self.find(token) orelse return error.UnknownImmutableFrame;
         if (slot.retain_count == 0 or slot.frame != null) return error.InvalidImmutableFrameLease;
         if (slot.request_id != owned.identity.request_id or
@@ -254,6 +266,10 @@ var g_active_request: ?ActiveRequest = null;
 var g_next_request_id: u32 = MANAGED_REQUEST_BIT;
 var g_next_frame_id: u64 = 1;
 var g_last_submit_ms: ?u64 = null;
+/// The session the last submit belonged to. A change means a fresh camera —
+/// the model's tracked ROI must not survive it.
+var g_last_session_buf: [SESSION_ID_BYTES]u8 = undefined;
+var g_last_session_len: usize = 0;
 
 fn monotonicNowMs(_: ?*anyopaque) u64 {
     const host = g_host orelse return 0;
@@ -454,7 +470,12 @@ pub fn tickSubmit(host: *HostContext) void {
     @memcpy(active.session_id_buf[0..target.session_id.len], target.session_id);
     active.session_id_len = target.session_id.len;
 
-    const status = pose.enqueueIdentifiedRgba(host.io, .{
+    if (!std.mem.eql(u8, g_last_session_buf[0..g_last_session_len], target.session_id)) {
+        blazepose.resetTracking(host.io);
+        @memcpy(g_last_session_buf[0..target.session_id.len], target.session_id);
+        g_last_session_len = target.session_id.len;
+    }
+    const status = blazepose.enqueueIdentifiedRgba(host.io, .{
         .request_id = request_id,
         .frame_id = frame_id,
         .timestamp_ms = now_ms,
@@ -467,26 +488,26 @@ pub fn tickSubmit(host: *HostContext) void {
     g_last_submit_ms = now_ms;
 }
 
-fn detectedFrame(result: *const pose.AsyncResult) source.DetectedLandmarkFrame {
-    var keypoints: [source.KEYPOINT_COUNT]source.CameraKeypoint = undefined;
-    for (result.keypoints, 0..) |keypoint, index| {
-        keypoints[index] = .{
-            .name = @enumFromInt(index),
-            .x = keypoint.x,
-            .y = keypoint.y,
-            .confidence = keypoint.score,
+fn worldFrame(result: *const blazepose.AsyncResult) source.WorldLandmarkFrame {
+    var landmarks: [source.WORLD_LANDMARK_COUNT]source.WorldLandmark = undefined;
+    for (result.payload.landmarks, 0..) |landmark, index| {
+        landmarks[index] = .{
+            .screen = .{ landmark.x, landmark.y },
+            .world = .{ landmark.world[0], landmark.world[1], landmark.world[2] },
+            .visibility = std.math.clamp(landmark.visibility, 0, 1),
         };
     }
     return .{
         .frame_id = result.frame_id,
         .timestamp_ms = result.timestamp_ms,
-        .keypoints = keypoints,
+        .presence = std.math.clamp(result.payload.presence, 0, 1),
+        .landmarks = landmarks,
     };
 }
 
-/// Consume only high-bit request IDs reserved by this binding. Legacy JS pose
-/// replies keep flowing through v8_bindings_onnx unchanged.
-pub fn consumePoseResult(host: *HostContext, result: *pose.AsyncResult) bool {
+/// Consume only high-bit request IDs reserved by this binding — the
+/// BlazePose lane is capture's, but the reservation bit stays the contract.
+pub fn consumePoseResult(host: *HostContext, result: *blazepose.AsyncResult) bool {
     _ = host;
     if ((result.request_id & MANAGED_REQUEST_BIT) == 0) return false;
     const active = g_active_request orelse return true;
@@ -512,7 +533,7 @@ pub fn consumePoseResult(host: *HostContext, result: *pose.AsyncResult) bool {
         return true;
     };
     if (g_frame_store.adopt(active.token, &owned)) |_| {
-        _ = manager.ingestCompletedFrame(active.sessionId(), detectedFrame(result)) catch |err| {
+        _ = manager.ingestCompletedFrame(active.sessionId(), worldFrame(result)) catch |err| {
             log.debug("capture frame {d} discarded: {s}", .{ active.frame_id, @errorName(err) });
         };
     } else |err| {

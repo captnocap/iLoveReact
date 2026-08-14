@@ -233,21 +233,6 @@ fn command(
     return manager.handle(request);
 }
 
-fn depthCommand(
-    manager: *capture.Manager,
-    session_id: []const u8,
-    revision: u64,
-    sign: i8,
-) ![]u8 {
-    var buffer: [320]u8 = undefined;
-    const request = try std.fmt.bufPrint(
-        &buffer,
-        "{{\"op\":\"setDepthSign\",\"sessionId\":\"{s}\",\"expectedRevision\":{d},\"payload\":{{\"depthSign\":{d}}}}}",
-        .{ session_id, revision, sign },
-    );
-    return manager.handle(request);
-}
-
 fn snapshotRequest(manager: *capture.Manager, session_id: []const u8) ![]u8 {
     var buffer: [192]u8 = undefined;
     const request = try std.fmt.bufPrint(
@@ -268,34 +253,68 @@ fn closeRequest(manager: *capture.Manager, session_id: []const u8) ![]u8 {
     return manager.handle(request);
 }
 
-fn point(name: source.KeypointName, x: f32, y: f32, confidence: f32) source.CameraKeypoint {
-    return .{ .name = name, .x = x, .y = y, .confidence = confidence };
+const Placement = struct {
+    world: [3]f32,
+    screen: [2]f32,
+};
+
+/// A camera-facing standing figure in MediaPipe world convention (metres,
+/// hip-centred, y down, subject-left = +x) — the same figure the retarget
+/// suite poses.
+fn placement(name: source.WorldLandmarkName) Placement {
+    return switch (name) {
+        .nose => .{ .world = .{ 0.00, -0.62, -0.10 }, .screen = .{ 0.50, 0.10 } },
+        .eye_inner_left => .{ .world = .{ 0.02, -0.65, -0.09 }, .screen = .{ 0.51, 0.09 } },
+        .eye_left => .{ .world = .{ 0.03, -0.65, -0.09 }, .screen = .{ 0.52, 0.09 } },
+        .eye_outer_left => .{ .world = .{ 0.04, -0.65, -0.09 }, .screen = .{ 0.53, 0.09 } },
+        .eye_inner_right => .{ .world = .{ -0.02, -0.65, -0.09 }, .screen = .{ 0.49, 0.09 } },
+        .eye_right => .{ .world = .{ -0.03, -0.65, -0.09 }, .screen = .{ 0.48, 0.09 } },
+        .eye_outer_right => .{ .world = .{ -0.04, -0.65, -0.09 }, .screen = .{ 0.47, 0.09 } },
+        .ear_left => .{ .world = .{ 0.07, -0.64, -0.02 }, .screen = .{ 0.54, 0.11 } },
+        .ear_right => .{ .world = .{ -0.07, -0.64, -0.02 }, .screen = .{ 0.46, 0.11 } },
+        .mouth_left => .{ .world = .{ 0.02, -0.58, -0.09 }, .screen = .{ 0.51, 0.13 } },
+        .mouth_right => .{ .world = .{ -0.02, -0.58, -0.09 }, .screen = .{ 0.49, 0.13 } },
+        .shoulder_left => .{ .world = .{ 0.17, -0.50, 0.00 }, .screen = .{ 0.60, 0.30 } },
+        .shoulder_right => .{ .world = .{ -0.17, -0.50, 0.00 }, .screen = .{ 0.40, 0.30 } },
+        .elbow_left => .{ .world = .{ 0.25, -0.28, 0.00 }, .screen = .{ 0.65, 0.45 } },
+        .elbow_right => .{ .world = .{ -0.25, -0.28, 0.00 }, .screen = .{ 0.35, 0.45 } },
+        .wrist_left => .{ .world = .{ 0.28, -0.05, 0.00 }, .screen = .{ 0.65, 0.60 } },
+        .wrist_right => .{ .world = .{ -0.28, -0.05, 0.00 }, .screen = .{ 0.35, 0.60 } },
+        .pinky_left => .{ .world = .{ 0.30, 0.00, 0.00 }, .screen = .{ 0.66, 0.63 } },
+        .pinky_right => .{ .world = .{ -0.30, 0.00, 0.00 }, .screen = .{ 0.34, 0.63 } },
+        .index_left => .{ .world = .{ 0.30, 0.00, -0.02 }, .screen = .{ 0.66, 0.63 } },
+        .index_right => .{ .world = .{ -0.30, 0.00, -0.02 }, .screen = .{ 0.34, 0.63 } },
+        .thumb_left => .{ .world = .{ 0.29, -0.01, -0.02 }, .screen = .{ 0.65, 0.62 } },
+        .thumb_right => .{ .world = .{ -0.29, -0.01, -0.02 }, .screen = .{ 0.35, 0.62 } },
+        .hip_left => .{ .world = .{ 0.09, 0.00, 0.00 }, .screen = .{ 0.56, 0.55 } },
+        .hip_right => .{ .world = .{ -0.09, 0.00, 0.00 }, .screen = .{ 0.44, 0.55 } },
+        .knee_left => .{ .world = .{ 0.10, 0.40, 0.00 }, .screen = .{ 0.56, 0.75 } },
+        .knee_right => .{ .world = .{ -0.10, 0.40, 0.00 }, .screen = .{ 0.44, 0.75 } },
+        .ankle_left => .{ .world = .{ 0.11, 0.80, 0.00 }, .screen = .{ 0.56, 0.95 } },
+        .ankle_right => .{ .world = .{ -0.11, 0.80, 0.00 }, .screen = .{ 0.44, 0.95 } },
+        .heel_left => .{ .world = .{ 0.11, 0.84, 0.02 }, .screen = .{ 0.56, 0.97 } },
+        .heel_right => .{ .world = .{ -0.11, 0.84, 0.02 }, .screen = .{ 0.44, 0.97 } },
+        .foot_index_left => .{ .world = .{ 0.11, 0.86, -0.06 }, .screen = .{ 0.57, 0.98 } },
+        .foot_index_right => .{ .world = .{ -0.11, 0.86, -0.06 }, .screen = .{ 0.43, 0.98 } },
+    };
 }
 
-fn makeDetected(frame_id: u64, timestamp_ms: u64, confidence: f32) source.DetectedLandmarkFrame {
-    return .{
+fn makeDetected(frame_id: u64, timestamp_ms: u64, visibility: f32) source.WorldLandmarkFrame {
+    var frame = source.WorldLandmarkFrame{
         .frame_id = frame_id,
         .timestamp_ms = timestamp_ms,
-        .keypoints = .{
-            point(.nose, 0.50, 0.10, confidence),
-            point(.eye_left, 0.48, 0.09, confidence),
-            point(.eye_right, 0.52, 0.09, confidence),
-            point(.ear_left, 0.46, 0.11, confidence),
-            point(.ear_right, 0.54, 0.11, confidence),
-            point(.shoulder_left, 0.40, 0.30, confidence),
-            point(.shoulder_right, 0.60, 0.30, confidence),
-            point(.elbow_left, 0.35, 0.45, confidence),
-            point(.elbow_right, 0.65, 0.45, confidence),
-            point(.wrist_left, 0.35, 0.60, confidence),
-            point(.wrist_right, 0.65, 0.60, confidence),
-            point(.hip_left, 0.44, 0.55, confidence),
-            point(.hip_right, 0.56, 0.55, confidence),
-            point(.knee_left, 0.44, 0.75, confidence),
-            point(.knee_right, 0.56, 0.75, confidence),
-            point(.ankle_left, 0.44, 0.95, confidence),
-            point(.ankle_right, 0.56, 0.95, confidence),
-        },
+        .presence = 1.0,
+        .landmarks = undefined,
     };
+    for (0..source.WORLD_LANDMARK_COUNT) |index| {
+        const spot = placement(@enumFromInt(index));
+        frame.landmarks[index] = .{
+            .screen = spot.screen,
+            .world = .{ spot.world[0], spot.world[1], spot.world[2] },
+            .visibility = visibility,
+        };
+    }
+    return frame;
 }
 
 fn immutableFrame(frame_id: u64, timestamp_ms: u64, token: u64) capture.ImmutableCameraFrame {
@@ -432,7 +451,7 @@ test "30 valid frames within ten seconds promote one atomic triplet and freeze p
     const session_id = manager.currentSessionId().?;
 
     var low_confidence = makeDetected(1, 1_100, 0.8);
-    low_confidence.keypoints[@intFromEnum(source.KeypointName.hip_left)].confidence =
+    low_confidence.landmarks[@intFromEnum(source.WorldLandmarkName.hip_left)].visibility =
         source.DEFAULT_TUNING.minimum_confidence - 0.001;
     try manager.beginInference(session_id, immutableFrame(1, 1_100, 1_001));
     try testing.expectEqual(
@@ -454,7 +473,9 @@ test "30 valid frames within ten seconds promote one atomic triplet and freeze p
     try testing.expect(state.publication_valid);
 
     var next_detected = makeDetected(32, 4_200, 0.9);
-    for (&next_detected.keypoints) |*keypoint| keypoint.x += 0.08;
+    // Step the whole figure sideways: root translation is screen-derived, so
+    // the resumed deformed root must land away from the frozen one.
+    for (&next_detected.landmarks) |*landmark| landmark.screen[0] += 0.08;
     try manager.beginInference(session_id, immutableFrame(32, 4_200, 10_032));
     try testing.expectEqual(@as(usize, 1), manager.inferenceTarget().?.pending_count);
     const freeze_reply = try command(&manager, "freeze", session_id, manager.currentRevision().?);
@@ -509,13 +530,13 @@ test "30 valid frames within ten seconds promote one atomic triplet and freeze p
     try testing.expectEqual(@as(isize, 2), state.live_leases);
 
     try manager.beginInference(session_id, immutableFrame(33, 4_300, 10_033));
-    const depth_reply = try depthCommand(&manager, session_id, manager.currentRevision().?, -1);
-    defer testing.allocator.free(depth_reply);
-    var depth_parsed = try expectReplyOk(depth_reply);
-    defer depth_parsed.deinit();
-    const depth_snapshot = depth_parsed.value.object.get("value").?.object;
-    try testing.expectEqual(@as(i64, -1), depth_snapshot.get("depthSign").?.integer);
-    try testing.expect(depth_snapshot.get("detected").? == .null);
+    const recal_reply = try command(&manager, "calibrate", session_id, manager.currentRevision().?);
+    defer testing.allocator.free(recal_reply);
+    var recal_parsed = try expectReplyOk(recal_reply);
+    defer recal_parsed.deinit();
+    const recal_snapshot = recal_parsed.value.object.get("value").?.object;
+    try testing.expectEqualStrings("collecting", recal_snapshot.get("calibration").?.object.get("state").?.string);
+    try testing.expect(recal_snapshot.get("detected").? == .null);
     // A configuration command invalidates the result but cannot release RGBA
     // that an in-flight worker may still be reading. Failure/cancellation owns
     // the explicit discard handshake.

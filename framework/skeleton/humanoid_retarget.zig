@@ -401,7 +401,7 @@ pub const CameraFrameRef = struct {
 
 pub const CompletedTriplet = struct {
     camera: CameraFrameRef,
-    detected: source.DetectedLandmarkFrame,
+    detected: source.WorldLandmarkFrame,
     reconstructed: source.SourceSkeletonFrame,
     target: TargetPoseFrame,
 };

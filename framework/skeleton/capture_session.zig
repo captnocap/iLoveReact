@@ -1,7 +1,7 @@
 //! Revisioned native capture/retarget session.
 //!
 //! The public JSON surface is deliberately small: openTarget, calibrate,
-//! freeze, resume, setDepthSign, record, recordStop, snapshot, and close.
+//! freeze, resume, record, recordStop, snapshot, and close.
 //! Camera inference enters through the non-JSON
 //! beginInference/ingestCompletedFrame seam. A retained immutable RGBA frame
 //! is assigned before inference and that exact frame is transferred into the
@@ -233,7 +233,6 @@ const Session = struct {
     bones: []const rig.Bone = &.{},
     mapper: ?retarget.Retargeter = null,
     calibrator: source.Calibrator,
-    depth_sign: source.DepthSign = .positive,
     triplets: retarget.TripletState = .{},
     latest_frame: ?ImmutableCameraFrame = null,
     pinned_frame: ?ImmutableCameraFrame = null,
@@ -534,7 +533,7 @@ pub const Manager = struct {
     pub fn ingestCompletedFrame(
         self: *Manager,
         session_id: []const u8,
-        detected: source.DetectedLandmarkFrame,
+        detected: source.WorldLandmarkFrame,
     ) !IngestResult {
         const session = try self.requireSessionId(session_id);
         const pending_index = session.findPending(detected.frame_id) orelse return error.UnknownPendingFrame;
@@ -569,7 +568,6 @@ pub const Manager = struct {
         var reconstructed = try source.reconstruct(
             &detected,
             calibration,
-            session.depth_sign,
             source.DEFAULT_TUNING,
         );
         const target = try session.mapper.?.retarget(calibration, &reconstructed);
@@ -705,17 +703,6 @@ pub const Manager = struct {
         session.revision += 1;
     }
 
-    fn setDepthSign(self: *Manager, session: *Session, sign: source.DepthSign) !void {
-        _ = self;
-        if (session.depth_sign == sign) return;
-        try session.freshMapper();
-        session.dropRecording();
-        session.clearTriplets(true);
-        session.inference_generation +%= 1;
-        session.depth_sign = sign;
-        session.revision += 1;
-    }
-
     fn startRecording(self: *Manager, session: *Session) !void {
         _ = self;
         if (session.recording != null) return error.RecordingActive;
@@ -841,26 +828,6 @@ pub const Manager = struct {
             self.freeze(session) catch |err| return self.operationErrorReply("capture freeze rejected", err);
         } else if (std.mem.eql(u8, op, "resume")) {
             self.resumeLive(session);
-        } else if (std.mem.eql(u8, op, "setDepthSign")) {
-            const payload_value = required(request, "payload") catch |err| {
-                return self.operationErrorReply("invalid depth sign", err);
-            };
-            const payload = object(payload_value) catch |err| {
-                return self.operationErrorReply("invalid depth sign", err);
-            };
-            const sign_value = required(payload, "depthSign") catch |err| {
-                return self.operationErrorReply("invalid depth sign", err);
-            };
-            const raw = signed(sign_value) catch |err| {
-                return self.operationErrorReply("invalid depth sign", err);
-            };
-            const sign: source.DepthSign = if (raw == 1)
-                .positive
-            else if (raw == -1)
-                .negative
-            else
-                return self.operationErrorReply("invalid depth sign", error.InvalidDepthSign);
-            self.setDepthSign(session, sign) catch |err| return self.operationErrorReply("depth sign rejected", err);
         } else if (std.mem.eql(u8, op, "record")) {
             self.startRecording(session) catch |err| return self.operationErrorReply("capture record rejected", err);
         } else if (std.mem.eql(u8, op, "recordStop")) {
@@ -1014,13 +981,6 @@ fn unsigned(value: std.json.Value) !u64 {
     };
 }
 
-fn signed(value: std.json.Value) !i64 {
-    return switch (value) {
-        .integer => |integer| integer,
-        else => error.ExpectedInteger,
-    };
-}
-
 fn parseTarget(value: std.json.Value) !TargetDescriptor {
     const map = try object(value);
     const viewport = try unsigned(try required(map, "viewportNodeId"));
@@ -1056,16 +1016,20 @@ fn writeQuat(writer: *std.Io.Writer, value: rig.Quat) !void {
     try writer.print("[{d},{d},{d},{d}]", .{ value[0], value[1], value[2], value[3] });
 }
 
-fn writeDetected(writer: *std.Io.Writer, frame: source.DetectedLandmarkFrame) !void {
-    try writer.print("{{\"frameId\":{d},\"timestampMs\":{d},\"keypoints\":[", .{ frame.frame_id, frame.timestamp_ms });
-    for (frame.keypoints, 0..) |keypoint, index| {
+fn writeDetected(writer: *std.Io.Writer, frame: source.WorldLandmarkFrame) !void {
+    try writer.print("{{\"frameId\":{d},\"timestampMs\":{d},\"presence\":{d},\"landmarks\":[", .{
+        frame.frame_id,
+        frame.timestamp_ms,
+        frame.presence,
+    });
+    for (frame.landmarks, 0..) |landmark, index| {
         if (index != 0) try writer.writeByte(',');
         try writer.writeAll("{\"name\":");
-        try writeJsonString(writer, @tagName(keypoint.name));
-        try writer.print(",\"x\":{d},\"y\":{d},\"confidence\":{d}}}", .{
-            keypoint.x,
-            keypoint.y,
-            keypoint.confidence,
+        try writeJsonString(writer, @tagName(@as(source.WorldLandmarkName, @enumFromInt(index))));
+        try writer.print(",\"x\":{d},\"y\":{d},\"visibility\":{d}}}", .{
+            landmark.screen[0],
+            landmark.screen[1],
+            landmark.visibility,
         });
     }
     try writer.writeAll("]}");
@@ -1144,10 +1108,9 @@ fn writeTargetSkeleton(writer: *std.Io.Writer, session: *const Session) !void {
 fn writeSnapshot(writer: *std.Io.Writer, session: *const Session) !void {
     try writer.writeAll("{\"sessionId\":");
     try writeJsonString(writer, session.id());
-    try writer.print(",\"revision\":{d},\"frozen\":{s},\"depthSign\":{d},\"calibration\":{{\"state\":", .{
+    try writer.print(",\"revision\":{d},\"frozen\":{s},\"calibration\":{{\"state\":", .{
         session.revision,
         if (session.triplets.frozen) "true" else "false",
-        @intFromEnum(session.depth_sign),
     });
     try writeJsonString(writer, @tagName(session.calibrator.state));
     try writer.print(",\"validFrameCount\":{d},\"requiredFrameCount\":{d}", .{

@@ -1,4 +1,5 @@
-//! Focused calibration, reconstruction, retarget, recovery, and frame-identity proofs.
+//! Focused calibration, world-landmark assembly, retarget, recovery, and
+//! frame-identity proofs.
 //!
 //! Direct run: tools/zig/zig test --dep humanoid_retarget
 //!   -Mroot=framework/testing/unit/retarget.zig
@@ -11,66 +12,106 @@ const source = retarget.source;
 const rig = retarget.rig;
 const fk = rig.fk;
 
-fn point(name: source.KeypointName, x: f32, y: f32, confidence: f32) source.CameraKeypoint {
-    return .{ .name = name, .x = x, .y = y, .confidence = confidence };
-}
+const Placement = struct {
+    world: [3]f32,
+    screen: [2]f32,
+};
 
-fn makeFrame(frame_id: u64, timestamp_ms: u64, confidence: f32) source.DetectedLandmarkFrame {
-    return .{
-        .frame_id = frame_id,
-        .timestamp_ms = timestamp_ms,
-        .keypoints = .{
-            point(.nose, 0.50, 0.10, confidence),
-            point(.eye_left, 0.48, 0.09, confidence),
-            point(.eye_right, 0.52, 0.09, confidence),
-            point(.ear_left, 0.46, 0.11, confidence),
-            point(.ear_right, 0.54, 0.11, confidence),
-            point(.shoulder_left, 0.40, 0.30, confidence),
-            point(.shoulder_right, 0.60, 0.30, confidence),
-            point(.elbow_left, 0.35, 0.45, confidence),
-            point(.elbow_right, 0.65, 0.45, confidence),
-            point(.wrist_left, 0.35, 0.60, confidence),
-            point(.wrist_right, 0.65, 0.60, confidence),
-            point(.hip_left, 0.44, 0.55, confidence),
-            point(.hip_right, 0.56, 0.55, confidence),
-            point(.knee_left, 0.44, 0.75, confidence),
-            point(.knee_right, 0.56, 0.75, confidence),
-            point(.ankle_left, 0.44, 0.95, confidence),
-            point(.ankle_right, 0.56, 0.95, confidence),
-        },
+/// A camera-facing standing figure in MediaPipe world convention: metres,
+/// hip-centred, y DOWN, z toward the subject's rear (face points at negative
+/// z). Subject-left is +x, matching the model's real output.
+fn placement(name: source.WorldLandmarkName) Placement {
+    return switch (name) {
+        .nose => .{ .world = .{ 0.00, -0.62, -0.10 }, .screen = .{ 0.50, 0.10 } },
+        .eye_inner_left => .{ .world = .{ 0.02, -0.65, -0.09 }, .screen = .{ 0.51, 0.09 } },
+        .eye_left => .{ .world = .{ 0.03, -0.65, -0.09 }, .screen = .{ 0.52, 0.09 } },
+        .eye_outer_left => .{ .world = .{ 0.04, -0.65, -0.09 }, .screen = .{ 0.53, 0.09 } },
+        .eye_inner_right => .{ .world = .{ -0.02, -0.65, -0.09 }, .screen = .{ 0.49, 0.09 } },
+        .eye_right => .{ .world = .{ -0.03, -0.65, -0.09 }, .screen = .{ 0.48, 0.09 } },
+        .eye_outer_right => .{ .world = .{ -0.04, -0.65, -0.09 }, .screen = .{ 0.47, 0.09 } },
+        .ear_left => .{ .world = .{ 0.07, -0.64, -0.02 }, .screen = .{ 0.54, 0.11 } },
+        .ear_right => .{ .world = .{ -0.07, -0.64, -0.02 }, .screen = .{ 0.46, 0.11 } },
+        .mouth_left => .{ .world = .{ 0.02, -0.58, -0.09 }, .screen = .{ 0.51, 0.13 } },
+        .mouth_right => .{ .world = .{ -0.02, -0.58, -0.09 }, .screen = .{ 0.49, 0.13 } },
+        .shoulder_left => .{ .world = .{ 0.17, -0.50, 0.00 }, .screen = .{ 0.60, 0.30 } },
+        .shoulder_right => .{ .world = .{ -0.17, -0.50, 0.00 }, .screen = .{ 0.40, 0.30 } },
+        .elbow_left => .{ .world = .{ 0.25, -0.28, 0.00 }, .screen = .{ 0.65, 0.45 } },
+        .elbow_right => .{ .world = .{ -0.25, -0.28, 0.00 }, .screen = .{ 0.35, 0.45 } },
+        .wrist_left => .{ .world = .{ 0.28, -0.05, 0.00 }, .screen = .{ 0.65, 0.60 } },
+        .wrist_right => .{ .world = .{ -0.28, -0.05, 0.00 }, .screen = .{ 0.35, 0.60 } },
+        .pinky_left => .{ .world = .{ 0.30, 0.00, 0.00 }, .screen = .{ 0.66, 0.63 } },
+        .pinky_right => .{ .world = .{ -0.30, 0.00, 0.00 }, .screen = .{ 0.34, 0.63 } },
+        .index_left => .{ .world = .{ 0.30, 0.00, -0.02 }, .screen = .{ 0.66, 0.63 } },
+        .index_right => .{ .world = .{ -0.30, 0.00, -0.02 }, .screen = .{ 0.34, 0.63 } },
+        .thumb_left => .{ .world = .{ 0.29, -0.01, -0.02 }, .screen = .{ 0.65, 0.62 } },
+        .thumb_right => .{ .world = .{ -0.29, -0.01, -0.02 }, .screen = .{ 0.35, 0.62 } },
+        .hip_left => .{ .world = .{ 0.09, 0.00, 0.00 }, .screen = .{ 0.56, 0.55 } },
+        .hip_right => .{ .world = .{ -0.09, 0.00, 0.00 }, .screen = .{ 0.44, 0.55 } },
+        .knee_left => .{ .world = .{ 0.10, 0.40, 0.00 }, .screen = .{ 0.56, 0.75 } },
+        .knee_right => .{ .world = .{ -0.10, 0.40, 0.00 }, .screen = .{ 0.44, 0.75 } },
+        .ankle_left => .{ .world = .{ 0.11, 0.80, 0.00 }, .screen = .{ 0.56, 0.95 } },
+        .ankle_right => .{ .world = .{ -0.11, 0.80, 0.00 }, .screen = .{ 0.44, 0.95 } },
+        .heel_left => .{ .world = .{ 0.11, 0.84, 0.02 }, .screen = .{ 0.56, 0.97 } },
+        .heel_right => .{ .world = .{ -0.11, 0.84, 0.02 }, .screen = .{ 0.44, 0.97 } },
+        .foot_index_left => .{ .world = .{ 0.11, 0.86, -0.06 }, .screen = .{ 0.57, 0.98 } },
+        .foot_index_right => .{ .world = .{ -0.11, 0.86, -0.06 }, .screen = .{ 0.43, 0.98 } },
     };
 }
 
+fn makeFrame(frame_id: u64, timestamp_ms: u64, visibility: f32) source.WorldLandmarkFrame {
+    var frame = source.WorldLandmarkFrame{
+        .frame_id = frame_id,
+        .timestamp_ms = timestamp_ms,
+        .presence = 1.0,
+        .landmarks = undefined,
+    };
+    for (0..source.WORLD_LANDMARK_COUNT) |index| {
+        const spot = placement(@enumFromInt(index));
+        frame.landmarks[index] = .{
+            .screen = spot.screen,
+            .world = .{ spot.world[0], spot.world[1], spot.world[2] },
+            .visibility = visibility,
+        };
+    }
+    return frame;
+}
+
+fn landmarkAt(frame: *source.WorldLandmarkFrame, name: source.WorldLandmarkName) *source.WorldLandmark {
+    return &frame.landmarks[@intFromEnum(name)];
+}
+
+/// Roll a facial landmark pair about its midpoint in the world x/y plane —
+/// an in-image head roll expressed in metric 3D.
 fn rollFacePair(
-    frame: *source.DetectedLandmarkFrame,
-    left_name: source.KeypointName,
-    right_name: source.KeypointName,
+    frame: *source.WorldLandmarkFrame,
+    left_name: source.WorldLandmarkName,
+    right_name: source.WorldLandmarkName,
     radians: f32,
 ) void {
-    const left = &frame.keypoints[@intFromEnum(left_name)];
-    const right = &frame.keypoints[@intFromEnum(right_name)];
-    const midpoint_x = (left.x + right.x) * 0.5;
-    const midpoint_y = (left.y + right.y) * 0.5;
-    const half_x = (right.x - left.x) * 0.5;
-    const half_y = -(right.y - left.y) * 0.5;
+    const left = landmarkAt(frame, left_name);
+    const right = landmarkAt(frame, right_name);
+    const midpoint_x = (left.world[0] + right.world[0]) * 0.5;
+    const midpoint_y = (left.world[1] + right.world[1]) * 0.5;
+    const half_x = (right.world[0] - left.world[0]) * 0.5;
+    const half_y = -(right.world[1] - left.world[1]) * 0.5;
     const cosine = @cos(radians);
     const sine = @sin(radians);
     const rotated_x = cosine * half_x - sine * half_y;
     const rotated_y = sine * half_x + cosine * half_y;
-    left.x = midpoint_x - rotated_x;
-    left.y = midpoint_y + rotated_y;
-    right.x = midpoint_x + rotated_x;
-    right.y = midpoint_y - rotated_y;
+    left.world[0] = midpoint_x - rotated_x;
+    left.world[1] = midpoint_y + rotated_y;
+    right.world[0] = midpoint_x + rotated_x;
+    right.world[1] = midpoint_y - rotated_y;
 }
 
-fn rollFace(frame: *source.DetectedLandmarkFrame, radians: f32) void {
+fn rollFace(frame: *source.WorldLandmarkFrame, radians: f32) void {
     rollFacePair(frame, .eye_left, .eye_right, radians);
     rollFacePair(frame, .ear_left, .ear_right, radians);
 }
 
-fn setFacePairConfidence(frame: *source.DetectedLandmarkFrame, confidence: f32) void {
-    for ([_]source.KeypointName{ .eye_left, .eye_right, .ear_left, .ear_right }) |name| {
-        frame.keypoints[@intFromEnum(name)].confidence = confidence;
+fn setFacePairVisibility(frame: *source.WorldLandmarkFrame, visibility: f32) void {
+    for ([_]source.WorldLandmarkName{ .eye_left, .eye_right, .ear_left, .ear_right }) |name| {
+        landmarkAt(frame, name).visibility = visibility;
     }
 }
 
@@ -85,8 +126,7 @@ fn calibrateRest() !source.Calibration {
         var frame = makeFrame(index + 1, @intCast(100 + index * 100), 0.8);
         // One extreme but valid sample must not displace a 30-frame median.
         if (index == 0) {
-            frame.keypoints[@intFromEnum(source.KeypointName.elbow_left)].x = 0.90;
-            frame.keypoints[@intFromEnum(source.KeypointName.elbow_left)].y = 0.80;
+            landmarkAt(&frame, .elbow_left).world = .{ 0.60, -0.60, 0.30 };
             rollFace(&frame, std.math.pi * 0.40);
         }
         const result = try calibrator.push(&frame);
@@ -102,27 +142,37 @@ fn vectorLength(v: [3]f32) f32 {
     return @sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
-test "calibration requires 30 distinct valid frames above the minimum confidence within ten seconds" {
+test "calibration requires 30 distinct valid frames above the core gate within ten seconds" {
     const bar = source.DEFAULT_TUNING.minimum_confidence;
     var calibrator = try source.Calibrator.init(source.DEFAULT_TUNING);
     calibrator.begin(0);
     var rejected = makeFrame(1, 100, 0.8);
-    rejected.keypoints[@intFromEnum(source.KeypointName.hip_left)].confidence = bar - 0.001;
+    landmarkAt(&rejected, .hip_left).visibility = bar - 0.001;
     try testing.expectEqual(source.CalibrationPush.ignored_invalid, try calibrator.push(&rejected));
     try testing.expectEqual(@as(u8, 0), calibrator.valid_frame_count);
 
-    var missing_face = makeFrame(2, 150, 0.8);
-    setFacePairConfidence(&missing_face, bar - 0.001);
-    try testing.expectEqual(source.CalibrationPush.ignored_invalid, try calibrator.push(&missing_face));
+    // Nobody in frame: presence below the floor is not a sample, no matter
+    // how confident the individual landmarks claim to be.
+    var absent = makeFrame(2, 150, 0.8);
+    absent.presence = source.PRESENCE_FLOOR - 0.01;
+    try testing.expectEqual(source.CalibrationPush.ignored_invalid, try calibrator.push(&absent));
     try testing.expectEqual(@as(u8, 0), calibrator.valid_frame_count);
 
-    for (0..29) |index| {
-        var frame = makeFrame(index + 1, @intCast(200 + index * 100), bar);
+    // Occluded facial pairs do NOT block calibration — the old 2D path's
+    // facial-pair requirement was the calibration lottery, and it is gone.
+    var faceless = makeFrame(3, 175, 0.8);
+    setFacePairVisibility(&faceless, 0.1);
+    try testing.expectEqual(source.CalibrationPush.accepted, try calibrator.push(&faceless));
+    try testing.expectEqual(@as(u8, 1), calibrator.valid_frame_count);
+
+    for (0..28) |index| {
+        var frame = makeFrame(index + 4, @intCast(200 + index * 100), bar);
         try testing.expectEqual(source.CalibrationPush.accepted, try calibrator.push(&frame));
     }
-    var duplicate = makeFrame(29, 5_000, 0.8);
-    try testing.expectEqual(source.CalibrationPush.ignored_invalid, try calibrator.push(&duplicate));
-    var thirtieth = makeFrame(30, 9_900, 0.8);
+    // Frame id 31 was the loop's last sample: a replayed id is not a frame.
+    var replay = makeFrame(31, 5_100, 0.8);
+    try testing.expectEqual(source.CalibrationPush.ignored_invalid, try calibrator.push(&replay));
+    var thirtieth = makeFrame(32, 9_900, 0.8);
     try testing.expectEqual(source.CalibrationPush.completed, try calibrator.push(&thirtieth));
     try testing.expectEqual(source.CalibrationState.calibrated, calibrator.state);
     try testing.expectEqual(@as(u8, 30), calibrator.valid_frame_count);
@@ -134,34 +184,59 @@ test "calibration requires 30 distinct valid frames above the minimum confidence
     try testing.expectEqual(source.CalibrationState.failed, expired.state);
 }
 
-test "calibration uses medians and 3D reconstruction preserves calibrated segment length" {
+test "calibration uses medians and assembly passes metric depth straight through" {
     const calibration = try calibrateRest();
-    const expected_upper_length = @sqrt(@as(f32, 0.05 * 0.05 + 0.15 * 0.15)) / 0.45;
+    // Upper arm from the standing figure: shoulder (0.17,-0.50) → elbow
+    // (0.25,-0.28) in world metres = sqrt(0.08² + 0.22²). The one extreme
+    // sample in calibrateRest must not move the median.
+    const expected_upper_length = @sqrt(@as(f32, 0.08 * 0.08 + 0.22 * 0.22));
     try testing.expectApproxEqAbs(
         expected_upper_length,
         calibration.rest_segments[@intFromEnum(source.SegmentId.upper_arm_left)].length,
         1.0e-5,
     );
-
-    var foreshortened = makeFrame(100, 12_000, 0.9);
-    foreshortened.keypoints[@intFromEnum(source.KeypointName.elbow_left)].x = 0.39;
-    foreshortened.keypoints[@intFromEnum(source.KeypointName.elbow_left)].y = 0.34;
-    const positive = try source.reconstruct(&foreshortened, calibration, .positive, source.DEFAULT_TUNING);
-    const negative = try source.reconstruct(&foreshortened, calibration, .negative, source.DEFAULT_TUNING);
-    const positive_segment = positive.segment(.upper_arm_left);
-    const negative_segment = negative.segment(.upper_arm_left);
+    // World landmarks are hip-centred, so rest hips sit at the origin and the
+    // hip→head span is metric.
     try testing.expectApproxEqAbs(
-        calibration.rest_segments[@intFromEnum(source.SegmentId.upper_arm_left)].length,
-        positive_segment.length,
-        1.0e-5,
+        @as(f32, 0),
+        vectorLength(calibration.rest_joints[@intFromEnum(source.JointId.hip_center)]),
+        1.0e-4,
     );
-    try testing.expectApproxEqAbs(positive_segment.length, negative_segment.length, 1.0e-5);
-    try testing.expect(positive.joint(.elbow_left).position[2] > 0);
-    try testing.expect(negative.joint(.elbow_left).position[2] < 0);
+
+    // The model says the elbow is 0.15 m toward the camera: SOURCE space
+    // reports exactly that (+z toward camera), no sign input, no recovered
+    // depth, no length clamp.
+    var toward_camera = makeFrame(100, 12_000, 0.9);
+    landmarkAt(&toward_camera, .elbow_left).world = .{ 0.25, -0.28, -0.15 };
+    const assembled = try source.reconstruct(&toward_camera, calibration, source.DEFAULT_TUNING);
+    try testing.expectApproxEqAbs(@as(f32, 0.15), assembled.joint(.elbow_left).position[2], 1.0e-4);
+    const live_vector = [3]f32{
+        0.25 - 0.17,
+        -(-0.28) - 0.50, // source y: -(world y)
+        0.15,
+    };
     try testing.expectApproxEqAbs(
-        @abs(positive.joint(.elbow_left).position[2]),
-        @abs(negative.joint(.elbow_left).position[2]),
-        1.0e-5,
+        vectorLength(live_vector),
+        assembled.segment(.upper_arm_left).length,
+        1.0e-4,
+    );
+}
+
+test "nobody in frame assembles as all-unobserved at rest" {
+    const calibration = try calibrateRest();
+    var absent = makeFrame(110, 12_500, 0.9);
+    absent.presence = 0.1;
+    const assembled = try source.reconstruct(&absent, calibration, source.DEFAULT_TUNING);
+    for (assembled.joints) |joint| try testing.expectEqual(@as(f32, 0), joint.confidence);
+    for (assembled.segments) |segment| try testing.expectEqual(@as(f32, 0), segment.confidence);
+    try testing.expectApproxEqAbs(
+        @as(f32, 0),
+        vectorLength(.{
+            assembled.joint(.hip_center).position[0] - calibration.rest_joints[@intFromEnum(source.JointId.hip_center)][0],
+            assembled.joint(.hip_center).position[1] - calibration.rest_joints[@intFromEnum(source.JointId.hip_center)][1],
+            assembled.joint(.hip_center).position[2] - calibration.rest_joints[@intFromEnum(source.JointId.hip_center)][2],
+        }),
+        1.0e-6,
     );
 }
 
@@ -171,36 +246,36 @@ test "confident eye and ear geometry authors the source head frame" {
 
     var rolled = makeFrame(101, 12_100, 0.9);
     rollFace(&rolled, std.math.pi / 6.0);
-    const reconstructed = try source.reconstruct(&rolled, calibration, .positive, source.DEFAULT_TUNING);
-    const head = reconstructed.segment(.head);
+    const assembled = try source.reconstruct(&rolled, calibration, source.DEFAULT_TUNING);
+    const head = assembled.segment(.head);
     try testing.expect(head.confidence >= 0.9);
     try testing.expect(rotationSimilarity(rest_head.rotation, head.rotation) < 0.99);
 
     var eyes_only = rolled;
     eyes_only.frame_id = 102;
-    eyes_only.keypoints[@intFromEnum(source.KeypointName.ear_left)].confidence = 0.1;
-    eyes_only.keypoints[@intFromEnum(source.KeypointName.ear_right)].confidence = 0.1;
-    try testing.expect((try source.reconstruct(&eyes_only, calibration, .positive, source.DEFAULT_TUNING)).segment(.head).confidence >= 0.9);
+    landmarkAt(&eyes_only, .ear_left).visibility = 0.1;
+    landmarkAt(&eyes_only, .ear_right).visibility = 0.1;
+    try testing.expect((try source.reconstruct(&eyes_only, calibration, source.DEFAULT_TUNING)).segment(.head).confidence >= 0.9);
 
     var ears_only = rolled;
     ears_only.frame_id = 103;
-    ears_only.keypoints[@intFromEnum(source.KeypointName.eye_left)].confidence = 0.1;
-    ears_only.keypoints[@intFromEnum(source.KeypointName.eye_right)].confidence = 0.1;
-    try testing.expect((try source.reconstruct(&ears_only, calibration, .positive, source.DEFAULT_TUNING)).segment(.head).confidence >= 0.9);
+    landmarkAt(&ears_only, .eye_left).visibility = 0.1;
+    landmarkAt(&ears_only, .eye_right).visibility = 0.1;
+    try testing.expect((try source.reconstruct(&ears_only, calibration, source.DEFAULT_TUNING)).segment(.head).confidence >= 0.9);
 
     var missing = rolled;
     missing.frame_id = 104;
-    setFacePairConfidence(&missing, 0.1);
-    const missing_head = (try source.reconstruct(&missing, calibration, .positive, source.DEFAULT_TUNING)).segment(.head);
+    setFacePairVisibility(&missing, 0.1);
+    const missing_head = (try source.reconstruct(&missing, calibration, source.DEFAULT_TUNING)).segment(.head);
     try testing.expectEqual(@as(f32, 0), missing_head.confidence);
     try testing.expect(rotationSimilarity(rest_head.rotation, missing_head.rotation) > 0.99999);
 
     var missing_nose = rolled;
     missing_nose.frame_id = 105;
-    missing_nose.keypoints[@intFromEnum(source.KeypointName.nose)].confidence = 0.1;
+    landmarkAt(&missing_nose, .nose).visibility = 0.1;
     try testing.expectEqual(
         @as(f32, 0),
-        (try source.reconstruct(&missing_nose, calibration, .positive, source.DEFAULT_TUNING)).segment(.head).confidence,
+        (try source.reconstruct(&missing_nose, calibration, source.DEFAULT_TUNING)).segment(.head).confidence,
     );
 }
 
@@ -246,7 +321,7 @@ fn distance(a: [3]f32, b: [3]f32) f32 {
 
 fn posedSource(calibration: source.Calibration, frame_id: u64, timestamp_ms: u64) !source.SourceSkeletonFrame {
     var detected = makeFrame(frame_id, timestamp_ms, 0.9);
-    var frame = try source.reconstruct(&detected, calibration, .positive, source.DEFAULT_TUNING);
+    var frame = try source.reconstruct(&detected, calibration, source.DEFAULT_TUNING);
     const angle: f32 = 1.2;
     const segment_index = @intFromEnum(source.SegmentId.lower_arm_left);
     const local_flex = try fk.axisAngle(.{ 1, 0, 0 }, angle);
@@ -350,7 +425,7 @@ test "missing facial orientation holds neck and head then fades to bind" {
 
     var detected = makeFrame(1, 1_000, 0.9);
     rollFace(&detected, std.math.pi / 5.0);
-    var source_frame = try source.reconstruct(&detected, calibration, .positive, source.DEFAULT_TUNING);
+    var source_frame = try source.reconstruct(&detected, calibration, source.DEFAULT_TUNING);
     const posed = try mapper.retarget(calibration, &source_frame);
     const neck_index: usize = 4;
     const head_index: usize = 5;
@@ -360,14 +435,14 @@ test "missing facial orientation holds neck and head then fades to bind" {
     try testing.expectEqualSlices(f32, &TARGET_BONES[12].bind_rotation, &posed.local_rotations[12]);
 
     var missing = detected;
-    setFacePairConfidence(&missing, 0.1);
+    setFacePairVisibility(&missing, 0.1);
     missing.frame_id = 2;
     missing.timestamp_ms = 1_100;
-    source_frame = try source.reconstruct(&missing, calibration, .positive, source.DEFAULT_TUNING);
+    source_frame = try source.reconstruct(&missing, calibration, source.DEFAULT_TUNING);
     const hold_start = try mapper.retarget(calibration, &source_frame);
     missing.frame_id = 3;
     missing.timestamp_ms = 1_250;
-    source_frame = try source.reconstruct(&missing, calibration, .positive, source.DEFAULT_TUNING);
+    source_frame = try source.reconstruct(&missing, calibration, source.DEFAULT_TUNING);
     const hold_end = try mapper.retarget(calibration, &source_frame);
     for ([_]usize{ neck_index, head_index }) |index| {
         try testing.expect(rotationSimilarity(posed.local_rotations[index], hold_start.local_rotations[index]) > 0.99999);
@@ -376,7 +451,7 @@ test "missing facial orientation holds neck and head then fades to bind" {
 
     missing.frame_id = 4;
     missing.timestamp_ms = 1_425;
-    source_frame = try source.reconstruct(&missing, calibration, .positive, source.DEFAULT_TUNING);
+    source_frame = try source.reconstruct(&missing, calibration, source.DEFAULT_TUNING);
     const fading = try mapper.retarget(calibration, &source_frame);
     for ([_]usize{ neck_index, head_index }) |index| {
         try testing.expect(rotationSimilarity(TARGET_BONES[index].bind_rotation, fading.local_rotations[index]) >
@@ -385,7 +460,7 @@ test "missing facial orientation holds neck and head then fades to bind" {
 
     missing.frame_id = 5;
     missing.timestamp_ms = 1_600;
-    source_frame = try source.reconstruct(&missing, calibration, .positive, source.DEFAULT_TUNING);
+    source_frame = try source.reconstruct(&missing, calibration, source.DEFAULT_TUNING);
     const bound = try mapper.retarget(calibration, &source_frame);
     for ([_]usize{ neck_index, head_index }) |index| {
         try testing.expect(rotationSimilarity(TARGET_BONES[index].bind_rotation, bound.local_rotations[index]) > 0.99999);
@@ -395,7 +470,7 @@ test "missing facial orientation holds neck and head then fades to bind" {
 test "triplet promotion rejects mixed frames and freeze pins one immutable triplet" {
     const calibration = try calibrateRest();
     var detected = makeFrame(1, 30_000, 0.9);
-    var reconstructed = try source.reconstruct(&detected, calibration, .positive, source.DEFAULT_TUNING);
+    var reconstructed = try source.reconstruct(&detected, calibration, source.DEFAULT_TUNING);
     var target = retarget.TargetPoseFrame{
         .frame_id = 1,
         .timestamp_ms = 30_000,
