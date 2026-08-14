@@ -70,7 +70,9 @@ const SMOOTHING_STORE_KEY = 'editor.animation.smoothing';
 // steadier confidence gates, slower limb appear/vanish).
 type SmoothingFactors = { smooth: number; response: number; gate: number };
 const DEFAULT_SMOOTHING_FACTORS: SmoothingFactors = Object.freeze({ smooth: 0.5, response: 0.5, gate: 0.5 });
-const factorScale = (t: number): number => Math.pow(10, (t - 0.5) * 2);
+// ±2 decades (0.01×..100×) around the defaults — deep enough to pin a noisy
+// virtual-camera feed dead still at the right end (req_4397).
+const factorScale = (t: number): number => Math.pow(10, (t - 0.5) * 4);
 
 function applySmoothingFactors(factors: SmoothingFactors): void {
   const smooth = factorScale(factors.smooth);

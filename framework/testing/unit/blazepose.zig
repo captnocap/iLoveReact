@@ -134,6 +134,23 @@ test "live blazepose request runs outside the submitting thread" {
     }
 }
 
+test "optional still-image convergence probe" {
+    // The user's baseline (req_4397): a STILL image fed on a loop must
+    // produce a FROZEN skeleton. The ROI lock + a deterministic session
+    // leave the tracking loop nothing to wander on.
+    var environ = try std.testing.environ.createMap(std.testing.allocator);
+    defer environ.deinit();
+    const image_path = environ.get("RJIT_BLAZEPOSE_IMAGE") orelse return error.SkipZigTest;
+    const path_z = try std.testing.allocator.dupeZ(u8, image_path);
+    defer std.testing.allocator.free(path_z);
+    const worst = blazepose.probeStillConvergence(std.testing.io, &environ, path_z.ptr, 30) orelse
+        return error.BlazeposeStillProbeFailed;
+    std.debug.print("[blazepose-still-probe] worst last-two-frames delta = {d:.8} frame-heights\n", .{worst});
+    // Sub-microdelta = frozen at any display precision (1e-6 of frame
+    // height on a 1080p feed is ~0.001 px).
+    try std.testing.expect(worst < 1.0e-6);
+}
+
 test "optional image estimate probe" {
     var environ = try std.testing.environ.createMap(std.testing.allocator);
     defer environ.deinit();
