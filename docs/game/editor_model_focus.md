@@ -18,9 +18,15 @@ commits ONE exact host-journaled transform.
   position/rotation/scale. No edit icons, no edit modes. Everything else is
   plain text.
 - **Click-to-edit in place** (`inspector/EditCell.tsx`): click → inline input
-  (primary-tinted border), Enter commits, Esc cancels, blur commits; a
-  horizontal drag ≥3px scrubs the number and commits once on release so the
-  host journal records one op, never a smear.
+  (primary-tinted border). Enter commits through the NATIVE submit lane
+  (`onSubmit` — the engine's `onKeyDown` carries numeric keyCodes, never a key
+  string); Esc (keyCode 27, fired before the engine's unfocus-blur) cancels;
+  blur commits. A horizontal drag ≥3px scrubs. Typing and scrubbing LIVE-FOLLOW
+  on the mesh (req_4401): each step goes through `transformScope`'s 'preview'
+  phase, which squashes the previous preview op via `__mesh_undo` before
+  applying the next — real-time motion, exactly ONE journal op per edit. Delta
+  math anchors on the BASE captured at edit start, never the refreshing
+  published value.
 - **Overridden reads brighter**: off-default values use `theme:text`, defaults
   use the gold `theme:valNum`; the reserved 18px ↺ column is dim (`#3a4a58`)
   at default and interactive when overridden.
@@ -56,7 +62,11 @@ commits ONE exact host-journaled transform.
   only the first 4 groups render, then "+ N more · show all". An unassigned
   face-group semantic renders a dashed "assign…" cell into the NAMES pane
   (SEMBLOB-0801: names are rigging data). Truncated native reads surface as a
-  quiet `rendering X/Y tris` line, not a gold warning.
+  quiet `rendering X/Y tris` line, not a gold warning. Vertex rows render as
+  WRITABLE exact-coordinate cells (req_4401 — geometry spawning fractions of a
+  unit apart is un-alignable by hand): the write selects that welded vertex
+  (`__mesh_edit_select_vertex`) and translates it by the typed delta.
+  Commit-only, because the select would rebuild the section mid-keystroke.
 - **Identity header** (`ModelIdentityHeader`): thumbnail chip + editable name
   (the one AppFrame rename path) + thumbnail-shot verb; save chip + lore
   `rev N` (from the recovery coordinator's `repository.revision`) +
@@ -87,12 +97,18 @@ roles (purple Bone). Bone skeletons stay in the RIG tab.
   primitives plus "Import mesh…"; the region/edge/rig legend pins at the foot;
   the outliner flex-fills the height every other section leaves over.
 
+## Input routing (req_4401)
+
+The native mesh-editor router treats any non-interactive hit as VIEWPORT input
+(`engine.zig meHitIsChrome`), so clicks on focus-panel padding were landing as
+stage selects. `HW_RightPanel`/`HW_RightRail` now carry `blocksPointerEvents`,
+making every pixel of Section G chrome.
+
 ## Known gaps (named, not hand-waved)
 
 - "shares verts → part" chips (in the mock) need a native shared-vertex query
   between part ranges; no such door exists yet.
-- Vertex-coordinate and normal cells in SELECTION detail stay read-only —
-  per-vertex numeric write needs a select-vertex + translate lane.
+- Normal cells in SELECTION detail stay read-only (no numeric-normal door).
 - An on-demand MEASURE verb for an over-budget audit does not exist; the audit
   rows keep the honest "not measured".
 - Multi-axis PART rotation reset is order-approximate (see above).

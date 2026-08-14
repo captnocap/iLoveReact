@@ -284,8 +284,10 @@ export type ModelFocusShape = {
 // cells write geometry through these — the scope is selected through the same
 // native selector door the Seat's move/rotate/scale compile to, then ONE exact
 // host-journaled transform lands. 'model' selects every visible group;
-// 'selection' applies to whatever is already selected (the pivot cell's lane).
-export type ModelTransformScope = 'model' | 'selection' | { lo: number; hi: number };
+// 'selection' applies to whatever is already selected (the pivot cell's lane);
+// { vertex } selects one welded vertex for exact-coordinate entry (req_4401 —
+// aligning geometry that spawns fractions of a unit apart; translate only).
+export type ModelTransformScope = 'model' | 'selection' | { lo: number; hi: number } | { vertex: number };
 export type ModelScopeTransformOp =
   | { kind: 'translate'; delta: [number, number, number] }
   | { kind: 'rotate'; axis: 0 | 1 | 2; degrees: number }
@@ -339,10 +341,14 @@ export type ModelFocusBridge = {
   /** Rename a region, or remove it entirely (req_3894). */
   editRegion: (id: number, edit: { name: string } | { remove: true }) => { changed: number } | null;
   editEdgeRegion: (id: number, edit: MeshEdgeRegionEdit) => { changed: number } | null;
-  /** One exact, host-journaled numeric transform over a part range or the whole
-   *  model (req_4392). Returns false when the host refuses — no live mesh, an
-   *  empty range, or a scope partially hidden/clipped (never a half-transform). */
-  transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp) => boolean;
+  /** One exact, host-journaled numeric transform over a part range, the whole
+   *  model, the live selection, or one welded vertex (req_4392). Returns false
+   *  when the host refuses — no live mesh, an empty range, or a scope partially
+   *  hidden/clipped (never a half-transform). phase 'preview' squashes the
+   *  previous preview op first (live mesh follow, ONE journal op per edit). */
+  transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp, phase?: 'preview' | 'commit') => boolean;
+  /** Undo an uncommitted preview op — the Esc lane (req_4401). */
+  cancelScopePreview: () => void;
   camMarks: { name: string; active: boolean }[];
   camStore: () => void;
   camRecallAt: (index: number) => void;
@@ -357,7 +363,8 @@ export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
   scaleBy: (factor: number) => boolean;
-  transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp) => boolean;
+  transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp, phase?: 'preview' | 'commit') => boolean;
+  cancelScopePreview: () => void;
   alignLoop: () => number;
   // The cart half of the integrity roll call (req_3484): re-read key, selection,
   // and part ranges from host truth after the host reports (or heals) a ledger
@@ -3132,19 +3139,41 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setError('copy sel: select the faces to stamp onto the other side first (face mode)');
   };
 
-  // ── Numeric scope transforms (req_4392) ────────────────────────────────────
+  // ── Numeric scope transforms (req_4392 / live preview req_4401) ────────────
   // The focus panel's boxed PART/SHAPE cells write geometry through the SAME
   // doors the Seat's move/rotate/scale verbs use: select the scope with the
   // native selector query, land one exact host-journaled transform. The
   // selection deliberately stays on the scope afterwards — the edit focused
   // that geometry in every other sense already.
-  const transformScope = (scope: ModelTransformScope, op: ModelScopeTransformOp): boolean => {
+  //
+  // PREVIEW phase (req_4401 — "no live change to the mesh"): every preview
+  // SQUASHES the previous preview op through __mesh_undo before applying the
+  // new one, so the mesh follows the typing/scrub in real time while the host
+  // journal ends the edit with exactly ONE op. Preview deliberately skips the
+  // dirty flag and the geometry re-publish, so the published base values the
+  // cells compute deltas against hold still until commit.
+  const scopePreviewActiveRef = useRef(false);
+  const squashScopePreview = () => {
+    if (!scopePreviewActiveRef.current) return;
+    host.__mesh_undo?.();
+    scopePreviewActiveRef.current = false;
+  };
+  const cancelScopePreview = () => squashScopePreview();
+  const transformScope = (scope: ModelTransformScope, op: ModelScopeTransformOp, phase: 'preview' | 'commit' = 'commit'): boolean => {
+    squashScopePreview();
     let pivot: [number, number, number] = [0, 0, 0];
     if (scope === 'selection') {
       // Whatever is already selected — the door itself refuses an empty set.
       const snapshot = readModelSelection();
       if (!snapshot || snapshot.count === 0) return false;
       if (snapshot.pivot) pivot = snapshot.pivot;
+    } else if (typeof scope === 'object' && 'vertex' in scope) {
+      // One welded vertex, exact-coordinate entry. Translate only: rotating or
+      // scaling a single point is a no-op wearing a journal entry.
+      if (op.kind !== 'translate') return false;
+      chooseSelMode(1);
+      if (host.__mesh_edit_select_vertex?.(scope.vertex, 0) !== 1) return false;
+      adoptHostSelection({ mode: 1, verts: 1, edges: 0, sel: 1 });
     } else {
       const query = scope === 'model' ? { kind: 'all' } : { kind: 'part', lo: scope.lo, hi: scope.hi };
       chooseSelMode(3);
@@ -3173,8 +3202,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           : host.__mesh_gizmo_scale_by?.(op.factor) === 1;
     if (ok) {
       setError(null);
-      onDocumentMutated?.();
-      setSemanticRevision((value) => value + 1);
+      if (phase === 'preview') {
+        scopePreviewActiveRef.current = true;
+      } else {
+        onDocumentMutated?.();
+        setSemanticRevision((value) => value + 1);
+      }
     }
     return ok;
   };
@@ -3190,6 +3223,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     gizmo: chooseGizmoTool,
     scaleBy: meshScaleBy,
     transformScope,
+    cancelScopePreview,
     alignLoop,
     resyncFromHost: () => {
       const session = readModelSession();
@@ -4005,7 +4039,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       selectEdgeRegion: (id, additive) => toolApiRef.current?.selectEdgeRegion(id, additive) ?? null,
       editRegion: (id, edit) => toolApiRef.current?.editRegion(id, edit) ?? null,
       editEdgeRegion: (id, edit) => toolApiRef.current?.editEdgeRegion(id, edit) ?? null,
-      transformScope: (scope, op) => toolApiRef.current?.transformScope(scope, op) ?? false,
+      transformScope: (scope, op, phase) => toolApiRef.current?.transformScope(scope, op, phase) ?? false,
+      cancelScopePreview: () => toolApiRef.current?.cancelScopePreview(),
       camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
       // Route through the api ref so the bridge's verbs always close over fresh state,
       // exactly like the shell's tool dispatch.

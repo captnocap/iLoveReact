@@ -504,7 +504,11 @@ classifier({
 
   // FOCUS PANEL region (req_2627/req_3266): open body + persistent pane rail.
   // Collapsed Inspector renders HW_RightRail alone, returning body width to Stage.
-  HW_RightPanel: { type: 'Box', style: { width: REGIONS.focusPanel.width, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
+  // blocksPointerEvents (req_4401): the native mesh-editor router treats any
+  // non-interactive hit as VIEWPORT input (engine.zig meHitIsChrome), so a
+  // click on panel padding was selecting on the stage. The panel root blocking
+  // makes every pixel of Section G chrome.
+  HW_RightPanel: { type: 'Box', blocksPointerEvents: true, style: { width: REGIONS.focusPanel.width, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   // UV authoring is the one bounded user-resizable focus-panel shape. This
   // full-height strip captures the pointer, so the drag continues over Stage.
   HW_RightResizeGrip: { type: 'Pressable', style: { width: REGIONS.focusPanel.resizeHandleWidth, height: '100%', flexShrink: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'theme:bgAlt' }, hoverStyle: { backgroundColor: 'theme:segActiveBg' } },
@@ -549,7 +553,7 @@ classifier({
   HW_RigSideButtonText: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
   HW_RigWrapRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 3, paddingBottom: 3 } },
   HW_RigReadinessLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { width: 58, fontFamily: MONO, fontWeight: 900 } },
-  HW_RightRail: { type: 'Box', style: { width: REGIONS.focusPanel.railWidth, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
+  HW_RightRail: { type: 'Box', blocksPointerEvents: true, style: { width: REGIONS.focusPanel.railWidth, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_ObjectHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Tag: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:success' } },
   HW_TagText: { type: 'Text', fontSize: 8, color: '#061015', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1 } },

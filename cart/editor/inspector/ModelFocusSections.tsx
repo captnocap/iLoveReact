@@ -11,7 +11,7 @@ import { C, accentFor } from '../workspace.cls';
 import { REGIONS } from '../shell/regions';
 import ModelThumbnail from '../library/ModelThumbnail';
 import { AssignCell, CellRow, NumberCell, TripleCells, fmtCellNumber } from './EditCell';
-import type { ModelFocusBridge, ModelFocusShape, ModelScopeTransformOp } from '../stage/ModelView';
+import type { ModelFocusBridge, ModelFocusShape, ModelScopeTransformOp, ModelTransformScope } from '../stage/ModelView';
 import type { ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import type { ModelPackage, ModelPart } from '../data/types';
 import {
@@ -47,6 +47,30 @@ const fmtSelectionVector = (value: ModelSelectionVec3): string =>
 function fmtSelectionFact(value: ModelSelectionFaceFact, prefix: string): string {
   return value === 'mixed' ? `mixed ${prefix}s` : value === null ? 'none' : `${prefix} ${value}`;
 }
+
+// One writable lane per boxed cell (req_4401): preview follows the typing/scrub
+// on the mesh through the bridge's squashing preview phase, commit lands the
+// one journaled op, cancel restores. All delta math anchors on the BASE the
+// edit started from — the published value may refresh under a live preview.
+type AxisOpFor = (axis: 0 | 1 | 2, value: number, base: number) => ModelScopeTransformOp | null;
+function axisLane(bridge: ModelFocusBridge | null, scope: ModelTransformScope, opFor: AxisOpFor) {
+  const run = (phase: 'preview' | 'commit') => (axis: 0 | 1 | 2, value: number, base: number) => {
+    const op = opFor(axis, value, base);
+    if (op && bridge) bridge.transformScope(scope, op, phase);
+  };
+  return {
+    onCommit: run('commit'),
+    onPreview: bridge ? run('preview') : undefined,
+    onCancel: bridge ? () => bridge.cancelScopePreview() : undefined,
+  };
+}
+
+const axisDelta = (axis: 0 | 1 | 2, value: number, base: number): ModelScopeTransformOp | null => {
+  if (value === base) return null;
+  const delta: [number, number, number] = [0, 0, 0];
+  delta[axis] = value - base;
+  return { kind: 'translate', delta };
+};
 
 // ── Identity header ──────────────────────────────────────────────────────────
 // The mock's compact top block: thumbnail chip · editable name · thumbnail-shot
@@ -126,7 +150,14 @@ export function ModelIdentityHeader(props: {
 // "+ N more · show all" fold. The pivot is the section's writable cell — its
 // edit translates the live selection so the pivot lands where typed.
 type SelectionDetailRow = { key: string; label: string; value: string };
-type SelectionGroup = { key: string; title: string; meta: string; rows: SelectionDetailRow[]; assignable: boolean };
+type SelectionVertexRow = { id: number; at: ModelSelectionVec3 };
+type SelectionGroup = {
+  key: string; title: string; meta: string;
+  rows: SelectionDetailRow[];
+  /** Writable exact-coordinate rows (req_4401 — the alignment lane). */
+  vertices: SelectionVertexRow[];
+  assignable: boolean;
+};
 
 function selectionGroups(selection: ModelSelectionSnapshot, semanticNames: Map<number, string>): SelectionGroup[] {
   const groups: SelectionGroup[] = [];
@@ -145,23 +176,25 @@ function selectionGroups(selection: ModelSelectionSnapshot, semanticNames: Map<n
       groups.push({
         key: `vertex-${vertex.id}`,
         title: `v${vertex.id}`,
-        meta: `${fmtSelectionVector(vertex.at)} m${vertex.part === null ? '' : ` · part ${vertex.part}`}`,
+        meta: vertex.part === null ? '' : `part ${vertex.part}`,
         rows: [],
+        vertices: [{ id: vertex.id, at: vertex.at }],
         assignable: false,
       });
     }
   } else if (selection.mode === 2) {
     for (const edge of selection.edges) {
-      const rows: SelectionDetailRow[] = [];
+      const vertices: SelectionVertexRow[] = [];
       for (const vertexId of edge.vertices) {
         const vertex = vertexById.get(vertexId);
-        if (vertex) rows.push({ key: `edge-${edge.id}-v${vertexId}`, label: `vertex v${vertexId}`, value: `${fmtSelectionVector(vertex.at)} m` });
+        if (vertex) vertices.push({ id: vertexId, at: vertex.at });
       }
       groups.push({
         key: `edge-${edge.id}`,
         title: `e${edge.id}`,
         meta: `v${edge.vertices[0]}–v${edge.vertices[1]} · ${fmtSelectionNumber(edge.length)} m · ${edge.open ? 'open' : 'closed'} · ${edge.part === null ? 'no part' : `part ${edge.part}`}`,
-        rows,
+        rows: [],
+        vertices,
         assignable: false,
       });
     }
@@ -187,6 +220,11 @@ function selectionGroups(selection: ModelSelectionSnapshot, semanticNames: Map<n
         title: face.group === null ? `tri ${face.triangleIds[0]}` : `face ${face.group}`,
         meta: `${face.triangleIds.length} tris · ${face.vertices.length} verts`,
         rows,
+        vertices: face.vertices
+          .map((vertexId) => vertexById.get(vertexId))
+          .filter((vertex): vertex is NonNullable<typeof vertex> => Boolean(vertex))
+          .slice(0, SELECTION_TUNING.maxVisibleDetailRows)
+          .map((vertex) => ({ id: vertex.id, at: vertex.at })),
         assignable: face.region === null,
       });
     }
@@ -233,13 +271,8 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
   const toggleGroup = (key: string) => setOpenGroups((current) => (
     current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
   ));
-  const commitPivot = (axis: 0 | 1 | 2, value: number) => {
-    const pivot = selection.pivot;
-    if (!pivot || !bridge) return;
-    const delta: [number, number, number] = [0, 0, 0];
-    delta[axis] = value - pivot[axis];
-    bridge.transformScope('selection', { kind: 'translate', delta });
-  };
+  const pivotLane = axisLane(bridge, 'selection', axisDelta);
+  const fmtCoord = (value: number) => fmtCellNumber(value, 4);
 
   return (
     <C.HW_Section>
@@ -256,7 +289,10 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
         <CellRow label="pivot">
           <TripleCells
             values={selection.pivot}
-            onCommit={commitPivot}
+            onCommit={pivotLane.onCommit}
+            onPreview={pivotLane.onPreview}
+            onCancel={pivotLane.onCancel}
+            format={fmtCoord}
             scrubStep={0.01}
           />
         </CellRow>
@@ -287,14 +323,15 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
         </C.HW_ReadRow>
       ) : null}
       {visibleGroups.map((group) => {
-        const isOpen = open.has(group.key) && group.rows.length > 0;
+        const detailCount = group.rows.length + group.vertices.length;
+        const isOpen = open.has(group.key) && detailCount > 0;
         return (
           <Box key={group.key} style={{ width: '100%', flexDirection: 'column' }}>
             <Pressable
               onPress={() => toggleGroup(group.key)}
               style={{ minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, width: '100%' }}
             >
-              <Text style={{ width: 10, fontSize: 8, color: accentFor('textFaint'), textAlign: 'center' }}>{group.rows.length > 0 ? (isOpen ? '▾' : '▸') : '·'}</Text>
+              <Text style={{ width: 10, fontSize: 8, color: accentFor('textFaint'), textAlign: 'center' }}>{detailCount > 0 ? (isOpen ? '▾' : '▸') : '·'}</Text>
               <Text noWrap numberOfLines={1} style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 800, color: accentFor('textSecondary') }}>{group.title}</Text>
               <Text noWrap numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, fontSize: 9, fontFamily: 'monospace', color: accentFor('textFaint') }}>{group.meta}</Text>
               <C.HW_Spacer />
@@ -307,6 +344,25 @@ export function SelectionSection({ selection, semantics, bridge, onOpenNames }: 
                 <C.HW_FormLabel>{row.label}</C.HW_FormLabel>
                 <C.HW_ReadValue>{row.value}</C.HW_ReadValue>
               </C.HW_ReadRow>
+            )) : null}
+            {/* Exact-coordinate vertex cells (req_4401): geometry spawning
+                fractions of a unit apart cannot be aligned by hand — type the
+                number. Commit-only lane: the write SELECTS that vertex, and a
+                live preview would rebuild this very section mid-keystroke. */}
+            {isOpen ? group.vertices.map((vertex) => (
+              <Row key={`vx-${group.key}-${vertex.id}`} style={{ minHeight: REGIONS.grid.rowHeight + 3, alignItems: 'center', gap: 8, paddingLeft: 28, paddingRight: 12, width: '100%' }}>
+                <C.HW_FormLabel>{`v${vertex.id}`}</C.HW_FormLabel>
+                <TripleCells
+                  values={vertex.at}
+                  format={fmtCoord}
+                  scrubStep={0.005}
+                  onCommit={(axis, value, base) => {
+                    const op = axisDelta(axis, value, base);
+                    if (op && bridge) bridge.transformScope({ vertex: vertex.id }, op);
+                  }}
+                />
+                <Box style={{ width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn }} />
+              </Row>
             )) : null}
           </Box>
         );
@@ -347,6 +403,7 @@ export function ShapeSection({ shape, bridge, onSelectAudit }: {
     ['mounts', shape ? fmtCount(shape.mounts) : '—'],
   ];
   const center = shape?.center ?? null;
+  const centerLane = axisLane(bridge, 'model', axisDelta);
   return (
     <C.HW_Section>
       <C.HW_SectionHead>
@@ -375,11 +432,9 @@ export function ShapeSection({ shape, bridge, onSelectAudit }: {
           <TripleCells
             values={center}
             scrubStep={0.01}
-            onCommit={(axis, value) => {
-              const delta: [number, number, number] = [0, 0, 0];
-              delta[axis] = value - center[axis];
-              bridge.transformScope('model', { kind: 'translate', delta });
-            }}
+            onCommit={centerLane.onCommit}
+            onPreview={centerLane.onPreview}
+            onCancel={centerLane.onCancel}
           />
         </CellRow>
       ) : (
@@ -394,10 +449,13 @@ export function ShapeSection({ shape, bridge, onSelectAudit }: {
             width={64}
             value={shape.radius}
             scrubStep={0.01}
-            onCommit={(value) => {
-              if (!(value > 0)) return;
-              bridge.transformScope('model', { kind: 'scale-uniform', factor: value / shape.radius });
+            onCommit={(value, base) => {
+              if (value > 0 && base > 0) bridge.transformScope('model', { kind: 'scale-uniform', factor: value / base });
             }}
+            onPreview={(value, base) => {
+              if (value > 0 && base > 0) bridge.transformScope('model', { kind: 'scale-uniform', factor: value / base }, 'preview');
+            }}
+            onCancel={() => bridge.cancelScopePreview()}
           />
           <Text style={{ fontSize: 9, color: accentFor('textFaint') }}>u</Text>
           <C.HW_Spacer />
@@ -499,23 +557,27 @@ export function PartSection({ modelId, part, bridge }: {
     setHotState(PART_XFORM_TWIG, all);
     setRevision((value) => value + 1);
   };
-  const apply = (op: ModelScopeTransformOp): boolean =>
-    Boolean(range && bridge?.transformScope(range, op));
-  const commitAxis = (lane: 'pos' | 'rot' | 'scl', axis: 0 | 1 | 2, value: number) => {
-    const current = entry[lane][axis];
-    if (value === current) return;
-    let ok = false;
+  const apply = (op: ModelScopeTransformOp, phase: 'preview' | 'commit' = 'commit'): boolean =>
+    Boolean(range && bridge?.transformScope(range, op, phase));
+  const laneOp = (lane: 'pos' | 'rot' | 'scl', axis: 0 | 1 | 2, value: number, base: number): ModelScopeTransformOp | null => {
+    if (value === base) return null;
     if (lane === 'pos') {
       const delta: [number, number, number] = [0, 0, 0];
-      delta[axis] = value - current;
-      ok = apply({ kind: 'translate', delta });
-    } else if (lane === 'rot') {
-      ok = apply({ kind: 'rotate', axis, degrees: value - current });
-    } else {
-      if (!(value > 0) || !(current > 0)) return;
-      ok = apply({ kind: 'scale', axis, factor: value / current });
+      delta[axis] = value - base;
+      return { kind: 'translate', delta };
     }
-    if (!ok) return;
+    if (lane === 'rot') return { kind: 'rotate', axis, degrees: value - base };
+    if (!(value > 0) || !(base > 0)) return null;
+    return { kind: 'scale', axis, factor: value / base };
+  };
+  const previewAxis = (lane: 'pos' | 'rot' | 'scl') => (axis: 0 | 1 | 2, value: number, base: number) => {
+    const op = laneOp(lane, axis, value, base);
+    if (op) apply(op, 'preview');
+  };
+  const cancelPreview = bridge ? () => bridge.cancelScopePreview() : undefined;
+  const commitAxis = (lane: 'pos' | 'rot' | 'scl', axis: 0 | 1 | 2, value: number, base: number) => {
+    const op = laneOp(lane, axis, value, base);
+    if (!op || !apply(op)) return;
     const next: PartTransformEntry = {
       pos: [...entry.pos] as [number, number, number],
       rot: [...entry.rot] as [number, number, number],
@@ -565,13 +627,13 @@ export function PartSection({ modelId, part, bridge }: {
       {range ? (
         <>
           <CellRow label="position" overridden={posOverridden} onReset={() => resetLane('pos')} resetTooltip="Translate the part back to its session origin">
-            <TripleCells values={entry.pos} overridden={posOverridden} scrubStep={0.01} onCommit={(axis, value) => commitAxis('pos', axis, value)} />
+            <TripleCells values={entry.pos} overridden={posOverridden} scrubStep={0.01} onCommit={(axis, value, base) => commitAxis('pos', axis, value, base)} onPreview={previewAxis('pos')} onCancel={cancelPreview} />
           </CellRow>
           <CellRow label="rotation" overridden={rotOverridden} onReset={() => resetLane('rot')} resetTooltip="Unwind the session rotations">
-            <TripleCells values={entry.rot} overridden={rotOverridden} scrubStep={0.5} format={(value) => `${Math.round(value)}°`} onCommit={(axis, value) => commitAxis('rot', axis, value)} />
+            <TripleCells values={entry.rot} overridden={rotOverridden} scrubStep={0.5} format={(value) => `${Math.round(value)}°`} onCommit={(axis, value, base) => commitAxis('rot', axis, value, base)} onPreview={previewAxis('rot')} onCancel={cancelPreview} />
           </CellRow>
           <CellRow label="scale" overridden={sclOverridden} onReset={() => resetLane('scl')} resetTooltip="Scale the part back to 1.00">
-            <TripleCells values={entry.scl} overridden={sclOverridden} scrubStep={0.01} format={(value) => fmtCellNumber(value)} onCommit={(axis, value) => commitAxis('scl', axis, value)} />
+            <TripleCells values={entry.scl} overridden={sclOverridden} scrubStep={0.01} format={(value) => fmtCellNumber(value)} onCommit={(axis, value, base) => commitAxis('scl', axis, value, base)} onPreview={previewAxis('scl')} onCancel={cancelPreview} />
           </CellRow>
         </>
       ) : (
