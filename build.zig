@@ -1822,7 +1822,6 @@ pub fn build(b: *std.Build) void {
     const mesh_edge_semantics_test_step = b.step("test-mesh-edge-semantics", "Run durable named-edge semantic path tests");
     mesh_edge_semantics_test_step.dependOn(&run_mesh_edge_semantics_test.step);
 
-
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
     const mesh_edit_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
@@ -1862,6 +1861,18 @@ pub fn build(b: *std.Build) void {
         .root_module = indexed_edit_mesh_test_mod,
     });
     const run_indexed_edit_mesh_test = b.addRunArtifact(indexed_edit_mesh_test);
+    const multi_edge_bevel_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/multi_edge_bevel.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    multi_edge_bevel_test_mod.addImport("indexed_edit_mesh", indexed_edit_mesh_test_mod);
+    const multi_edge_bevel_test = b.addTest(.{
+        .name = "multi-edge-bevel-test",
+        .root_module = multi_edge_bevel_test_mod,
+    });
+    const run_multi_edge_bevel_test = b.addRunArtifact(multi_edge_bevel_test);
     const character_topology_promotion_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/character_topology_promotion.zig"),
         .target = target,
@@ -1882,6 +1893,7 @@ pub fn build(b: *std.Build) void {
     mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
     mesh_edit_test_step.dependOn(&run_mesh_edit_impl_test.step);
     mesh_edit_test_step.dependOn(&run_indexed_edit_mesh_test.step);
+    mesh_edit_test_step.dependOn(&run_multi_edge_bevel_test.step);
     mesh_edit_test_step.dependOn(&run_character_topology_promotion_test.step);
 
     // ── mesh journal log (history ownership diagnostics + JSON) unit tests ─

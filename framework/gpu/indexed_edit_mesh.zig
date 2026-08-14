@@ -643,6 +643,12 @@ pub const BevelSelection = struct {
     max_width: f32,
 };
 
+/// A simultaneously resolved manifold-edge set. `max_width` is the strictest
+/// member limit, so one preview width can never partially bevel the selection.
+pub const BevelEdgesSelection = struct {
+    max_width: f32,
+};
+
 const MirrorPositionKey = struct { part: u32, x: i32, y: i32, z: i32 };
 /// Sentinel part id for any-part position lookups — never a real part index.
 const MIRROR_ANY_PART: u32 = std.math.maxInt(u32);
@@ -4361,6 +4367,30 @@ pub const Mesh = struct {
         return .{ .target = target, .max_width = mesh.bevelLimit(target) orelse return null };
     }
 
+    /// Resolve every selected manifold edge against one captured indexed base.
+    /// Duplicate or ineligible edges reject the whole set before preview mutation.
+    pub fn resolveBevelEdges(
+        mesh: *const Mesh,
+        selected_edges: []const [2]Vec3,
+        part: u32,
+        out_edges: [][2]u32,
+    ) ?BevelEdgesSelection {
+        if (selected_edges.len < 2 or out_edges.len != selected_edges.len) return null;
+        var shared_max_width = std.math.inf(f32);
+        for (selected_edges, 0..) |positions, index| {
+            const resolved = mesh.resolveBevelEdge(positions[0], positions[1], part) orelse return null;
+            const edge = switch (resolved.target) {
+                .edge => |value| value,
+                .vertex => return null,
+            };
+            const key = edgeKey(edge[0], edge[1]);
+            for (out_edges[0..index]) |prior| if (edgeKey(prior[0], prior[1]) == key) return null;
+            out_edges[index] = edge;
+            shared_max_width = @min(shared_max_width, resolved.max_width);
+        }
+        return if (std.math.isFinite(shared_max_width)) .{ .max_width = shared_max_width } else null;
+    }
+
     /// Resolve one selected welded corner into the resident indexed topology.
     pub fn resolveBevelVertex(mesh: *const Mesh, position: Vec3, part: ?u32) ?BevelSelection {
         const vertex = mesh.vertexAt(position, part) orelse return null;
@@ -4985,6 +5015,301 @@ pub const Mesh = struct {
         for (mesh.vertices.items, 0..) |*vertex, index| {
             if (!used[index]) vertex.alive = false;
         }
+    }
+
+    /// Bevel a manifold-edge set simultaneously. Every source face is inset once,
+    /// then edge strips and shared-vertex caps are stitched from that one corner map.
+    /// Adjacent selections therefore meet at one authored cap instead of deleting the
+    /// identity the next sequential edge still needs.
+    pub fn bevelEdges(mesh: *Mesh, edges: []const [2]u32, width_raw: f32) !bool {
+        beginMutation(.bevel);
+        if (edges.len < 2) return false;
+
+        const EdgePlan = struct { edge: [2]u32, incident: [2]u32 };
+        var plans = std.ArrayListUnmanaged(EdgePlan).empty;
+        defer plans.deinit(mesh.allocator);
+        try plans.ensureTotalCapacity(mesh.allocator, edges.len);
+        var selected = std.AutoHashMapUnmanaged(u64, void).empty;
+        defer selected.deinit(mesh.allocator);
+        try selected.ensureTotalCapacity(mesh.allocator, @intCast(edges.len));
+        var selected_degree = std.AutoHashMapUnmanaged(u32, u32).empty;
+        defer selected_degree.deinit(mesh.allocator);
+        var shared_limit = std.math.inf(f32);
+
+        for (edges) |edge| {
+            const eligibility = mesh.bevelEligibility(.{ .edge = edge });
+            if (!acceptOrRemember(eligibility)) return false;
+            const key = edgeKey(edge[0], edge[1]);
+            if (selected.contains(key)) return false;
+            try selected.put(mesh.allocator, key, {});
+            var incident: [2]u32 = undefined;
+            if (!mesh.edgeIncidentFaces(edge, &incident)) return false;
+            plans.appendAssumeCapacity(.{ .edge = edge, .incident = incident });
+            for (edge) |vertex| {
+                const degree = try selected_degree.getOrPut(mesh.allocator, vertex);
+                if (!degree.found_existing) degree.value_ptr.* = 0;
+                degree.value_ptr.* += 1;
+            }
+            shared_limit = @min(shared_limit, eligibility.metrics.?.max_width.?);
+        }
+        const width = @min(width_raw, shared_limit);
+        if (!std.math.isFinite(width) or width < BevelTuning.minimum_width_m) {
+            last_operation_refusal = .blocked(.width_below_minimum, "requested multi-edge bevel width is below the durable minimum", .{ .max_width = shared_limit });
+            return false;
+        }
+
+        const original_face_count = mesh.faces.items.len;
+        const center = mesh.meshCentroid();
+        // Key = face id + original vertex id. One inset point per affected face
+        // corner is the shared authority consumed by faces, strips, and caps.
+        var corner_point = std.AutoHashMapUnmanaged(u64, u32).empty;
+        defer corner_point.deinit(mesh.allocator);
+        try corner_point.ensureTotalCapacity(mesh.allocator, @intCast(edges.len * 4));
+        // Directed original edge -> inset point nearest its first endpoint. Faces
+        // across an unselected edge consume this too, preventing a geometric
+        // T-junction where only the selected edge's incident face was shortened.
+        var edge_split = std.AutoHashMapUnmanaged(u64, u32).empty;
+        defer edge_split.deinit(mesh.allocator);
+        try edge_split.ensureTotalCapacity(mesh.allocator, @intCast(edges.len * 4));
+
+        var face_index: usize = 0;
+        while (face_index < original_face_count) : (face_index += 1) {
+            const face = &mesh.faces.items[face_index];
+            if (!face.alive or face.vertices.items.len < 3) continue;
+            for (face.vertices.items, 0..) |vertex, corner| {
+                const previous = face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len];
+                const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                const previous_selected = selected.contains(edgeKey(previous, vertex));
+                const next_selected = selected.contains(edgeKey(vertex, next));
+                if (!previous_selected and !next_selected) continue;
+
+                var offset = Vec3{ 0, 0, 0 };
+                if (previous_selected and next_selected) {
+                    const previous_recede = mesh.edgeRecede(face.id, .{ previous, vertex }) orelse return false;
+                    const next_recede = mesh.edgeRecede(face.id, .{ vertex, next }) orelse return false;
+                    const denominator = 1.0 + dot3(previous_recede.direction, next_recede.direction);
+                    if (@abs(denominator) <= IMPORT_WELD_EPS) return false;
+                    offset = mul3(add3(previous_recede.direction, next_recede.direction), width / denominator);
+                } else {
+                    const edge = if (previous_selected) [2]u32{ previous, vertex } else [2]u32{ vertex, next };
+                    const recede = mesh.edgeRecede(face.id, edge) orelse return false;
+                    offset = mul3(recede.direction, width);
+                }
+                const position = add3(mesh.vertices.items[vertex].position, offset);
+                if (!std.math.isFinite(position[0]) or !std.math.isFinite(position[1]) or !std.math.isFinite(position[2])) return false;
+                // Adjacent selected edges can drive two face-corner solves onto the
+                // same unselected edge. Reuse that exact logical point so the miter is
+                // welded, not merely two coincident render positions.
+                var point: ?u32 = null;
+                var prior_face: u32 = 0;
+                while (prior_face < face.id) : (prior_face += 1) {
+                    const candidate = corner_point.get(directedEdgeKey(prior_face, vertex)) orelse continue;
+                    if (samePoint(mesh.vertices.items[candidate].position, position)) {
+                        point = candidate;
+                        break;
+                    }
+                }
+                if (point == null) {
+                    point = @intCast(mesh.vertices.items.len);
+                    try mesh.vertices.append(mesh.allocator, .{ .position = position });
+                }
+                try corner_point.put(mesh.allocator, directedEdgeKey(face.id, vertex), point.?);
+                if (previous_selected != next_selected) {
+                    const unselected_neighbor = if (previous_selected) next else previous;
+                    const split_key = directedEdgeKey(vertex, unselected_neighbor);
+                    if (edge_split.get(split_key)) |existing| {
+                        if (existing != point.?) return false;
+                    } else {
+                        try edge_split.put(mesh.allocator, split_key, point.?);
+                    }
+                }
+            }
+        }
+
+        // Rebuild each affected source face exactly once from the common corner map.
+        face_index = 0;
+        while (face_index < original_face_count) : (face_index += 1) {
+            const face = &mesh.faces.items[face_index];
+            if (!face.alive) continue;
+            var changed = false;
+            for (face.vertices.items, 0..) |vertex, corner| {
+                const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                if (corner_point.contains(directedEdgeKey(face.id, vertex)) or
+                    edge_split.contains(directedEdgeKey(vertex, next)) or
+                    edge_split.contains(directedEdgeKey(next, vertex)))
+                {
+                    changed = true;
+                    break;
+                }
+            }
+            if (!changed) continue;
+            var vertices = std.ArrayListUnmanaged(u32).empty;
+            errdefer vertices.deinit(mesh.allocator);
+            var uvs = std.ArrayListUnmanaged(Vec2).empty;
+            errdefer uvs.deinit(mesh.allocator);
+            try vertices.ensureTotalCapacity(mesh.allocator, face.vertices.items.len + 2);
+            try uvs.ensureTotalCapacity(mesh.allocator, face.vertices.items.len + 2);
+            for (face.vertices.items, 0..) |vertex, corner| {
+                const previous = face.vertices.items[(corner + face.vertices.items.len - 1) % face.vertices.items.len];
+                const next = face.vertices.items[(corner + 1) % face.vertices.items.len];
+                const incoming = edge_split.get(directedEdgeKey(vertex, previous));
+                const outgoing = edge_split.get(directedEdgeKey(vertex, next));
+                const replacement = corner_point.get(directedEdgeKey(face.id, vertex));
+                const candidates = if (replacement) |point|
+                    [3]?u32{ incoming, point, outgoing }
+                else if (incoming != null and outgoing != null)
+                    // The neighboring face across a bevel endpoint is clipped too;
+                    // retaining the old corner here would overlap the endpoint cap.
+                    [3]?u32{ incoming, outgoing, null }
+                else
+                    [3]?u32{ incoming, vertex, outgoing };
+                for (candidates) |candidate| {
+                    const point = candidate orelse continue;
+                    if (vertices.items.len > 0 and vertices.items[vertices.items.len - 1] == point) continue;
+                    try vertices.append(mesh.allocator, point);
+                    try uvs.append(mesh.allocator, if (point == vertex)
+                        face.uvs.items[corner]
+                    else
+                        mesh.faceUvAt(face.id, mesh.vertices.items[point].position));
+                }
+            }
+            if (vertices.items.len > 1 and vertices.items[0] == vertices.items[vertices.items.len - 1]) {
+                _ = vertices.pop();
+                _ = uvs.pop();
+            }
+            // Lowering triangulates 5+-corner authored faces as a fan. A split point
+            // is collinear with its source edge, so choose a fan origin away from
+            // every split segment instead of emitting a zero-area triangle.
+            if (vertices.items.len > 4) {
+                var fan_origin: ?usize = null;
+                for (0..vertices.items.len) |candidate| {
+                    var durable = true;
+                    var step: usize = 1;
+                    while (step + 1 < vertices.items.len) : (step += 1) {
+                        const a = mesh.vertices.items[vertices.items[candidate]].position;
+                        const b = mesh.vertices.items[vertices.items[(candidate + step) % vertices.items.len]].position;
+                        const c = mesh.vertices.items[vertices.items[(candidate + step + 1) % vertices.items.len]].position;
+                        const area_vector = cross3(sub3(b, a), sub3(c, a));
+                        if (dot3(area_vector, area_vector) <= IMPORT_WELD_EPS * IMPORT_WELD_EPS) {
+                            durable = false;
+                            break;
+                        }
+                    }
+                    if (durable) {
+                        fan_origin = candidate;
+                        break;
+                    }
+                }
+                const rotate = fan_origin orelse return false;
+                if (rotate != 0) {
+                    std.mem.reverse(u32, vertices.items[0..rotate]);
+                    std.mem.reverse(u32, vertices.items[rotate..]);
+                    std.mem.reverse(u32, vertices.items);
+                    std.mem.reverse(Vec2, uvs.items[0..rotate]);
+                    std.mem.reverse(Vec2, uvs.items[rotate..]);
+                    std.mem.reverse(Vec2, uvs.items);
+                }
+            }
+            face.vertices.deinit(mesh.allocator);
+            face.uvs.deinit(mesh.allocator);
+            face.vertices = vertices;
+            face.uvs = uvs;
+            face.diagonal = if (face.vertices.items.len == 4) chosenQuadDiagonal(mesh, face) else null;
+            face.source_tessellation_valid = false;
+        }
+
+        // One quad per selected edge, joined to the inset corners of both incident faces.
+        for (plans.items) |plan| {
+            var strip = [4]u32{
+                corner_point.get(directedEdgeKey(plan.incident[0], plan.edge[0])) orelse return false,
+                corner_point.get(directedEdgeKey(plan.incident[0], plan.edge[1])) orelse return false,
+                corner_point.get(directedEdgeKey(plan.incident[1], plan.edge[1])) orelse return false,
+                corner_point.get(directedEdgeKey(plan.incident[1], plan.edge[0])) orelse return false,
+            };
+            mesh.orientLoopOutward(strip[0..], center);
+            _ = try mesh.appendBevelFace(plan.incident[0], strip[0..]);
+        }
+
+        // Close each affected original vertex. If an untouched face still uses the
+        // sharp point, each selected edge owns one endpoint triangle into it. If the
+        // point was fully cut away, all incident inset corners form one shared cap.
+        var vertex_it = selected_degree.iterator();
+        while (vertex_it.next()) |entry| {
+            const vertex = entry.key_ptr.*;
+            var original_still_used = false;
+            face_index = 0;
+            while (face_index < original_face_count) : (face_index += 1) {
+                const face = &mesh.faces.items[face_index];
+                if (face.alive and containsVertex(face, vertex)) {
+                    original_still_used = true;
+                    break;
+                }
+            }
+            if (original_still_used) {
+                for (plans.items) |plan| {
+                    if (plan.edge[0] != vertex and plan.edge[1] != vertex) continue;
+                    var cap = [3]u32{
+                        vertex,
+                        corner_point.get(directedEdgeKey(plan.incident[0], vertex)) orelse return false,
+                        corner_point.get(directedEdgeKey(plan.incident[1], vertex)) orelse return false,
+                    };
+                    mesh.orientLoopOutward(cap[0..], center);
+                    _ = try mesh.appendBevelFace(plan.incident[0], cap[0..]);
+                }
+                continue;
+            }
+
+            var ring = std.ArrayListUnmanaged(u32).empty;
+            defer ring.deinit(mesh.allocator);
+            var normal = Vec3{ 0, 0, 0 };
+            var source_face: ?u32 = null;
+            face_index = 0;
+            while (face_index < original_face_count) : (face_index += 1) {
+                const face: *const Face = &mesh.faces.items[face_index];
+                const point = corner_point.get(directedEdgeKey(face.id, vertex)) orelse continue;
+                var already_present = false;
+                for (ring.items) |existing| if (existing == point) {
+                    already_present = true;
+                    break;
+                };
+                if (already_present) continue;
+                try ring.append(mesh.allocator, point);
+                normal = add3(normal, faceNormal(mesh, face));
+                if (source_face == null) source_face = face.id;
+            }
+            // Two adjacent selected cube edges meet at one welded miter point; the
+            // two edge strips close each other and need no zero-area corner cap.
+            if (ring.items.len < 3) continue;
+            normal = norm3(normal);
+            if (length3(normal) < 0.5) return false;
+            const reference = if (@abs(normal[1]) < 0.9) Vec3{ 0, 1, 0 } else Vec3{ 1, 0, 0 };
+            const u_axis = norm3(cross3(normal, reference));
+            const v_axis = cross3(normal, u_axis);
+            const SortContext = struct {
+                target_mesh: *const Mesh,
+                pivot: Vec3,
+                u: Vec3,
+                v: Vec3,
+                fn lessThan(context: @This(), lhs: u32, rhs: u32) bool {
+                    const left = sub3(context.target_mesh.vertices.items[lhs].position, context.pivot);
+                    const right = sub3(context.target_mesh.vertices.items[rhs].position, context.pivot);
+                    const left_angle = std.math.atan2(dot3(left, context.v), dot3(left, context.u));
+                    const right_angle = std.math.atan2(dot3(right, context.v), dot3(right, context.u));
+                    return if (left_angle == right_angle) lhs < rhs else left_angle < right_angle;
+                }
+            };
+            std.mem.sort(u32, ring.items, SortContext{
+                .target_mesh = mesh,
+                .pivot = mesh.vertices.items[vertex].position,
+                .u = u_axis,
+                .v = v_axis,
+            }, SortContext.lessThan);
+            mesh.orientLoopOutward(ring.items, center);
+            _ = try mesh.appendBevelFace(source_face.?, ring.items);
+        }
+
+        try mesh.pruneOrphanVertices();
+        return true;
     }
 
     fn bevelEdge(mesh: *Mesh, edge: [2]u32, width: f32) !bool {

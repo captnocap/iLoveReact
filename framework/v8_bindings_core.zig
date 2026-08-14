@@ -1637,7 +1637,7 @@ fn hostMeshTopoConnectVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callco
 
 /// __mesh_bevel_begin() → JSON {"ok","kind","defaultWidth","minimumWidth","maxWidth",
 /// "sidesBefore"?,"defaultTargetSides"?,"minimumTargetSides"?,"maximumTargetSides"?}.
-/// Capture one selected sharp manifold edge, one 3+-edge corner, one complete
+/// Capture selected sharp manifold edges, one 3+-edge corner, one complete
 /// selected open-boundary loop, or one filled authored face as a host-owned live
 /// preview session. A filled face becomes a welded N-gon center ready to extrude.
 /// Widths are metres; the Studio popup converts them to modeling u.
@@ -1649,6 +1649,7 @@ fn hostMeshBevelBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
     const kind = switch (bevel.kind) {
         .edge => "edge",
+        .edges => "edges",
         .vertex => "vertex",
         .boundary => "boundary",
         .face_polygon => "face-polygon",

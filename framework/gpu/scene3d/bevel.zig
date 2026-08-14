@@ -54,16 +54,17 @@ const Node = layout.Node;
 
 const z3d = @import("root.zig");
 
-// ── Bevel: one indexed target or one open boundary loop, host-owned session ───
+// ── Bevel: indexed vertex/edge sets or one open boundary loop, host-owned session ───
 // The cart owns only popup values. Stable topology identity, preview installation,
 // part/material/UV provenance, exact cancel, and the one-entry journal transaction
 // stay behind this boundary.
-pub const BevelSessionKind = enum { vertex, edge, boundary, face_polygon };
+pub const BevelSessionKind = enum { vertex, edge, edges, boundary, face_polygon };
 pub const BevelSession = struct {
     kind: z3d.BevelSessionKind,
     original_mode: mesh_edit.Mode,
     selection_index: u32,
     target: ?indexed_edit_mesh.BevelTarget,
+    edge_targets: ?[][2]u32,
     boundary_loop: ?[]u32,
     boundary_selection: ?[]mesh_edit.Edge,
     polygon_faces: ?[]u32,
@@ -96,6 +97,7 @@ pub fn bevelFree() void {
     if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
     if (session.boundary_loop) |loop| std.heap.c_allocator.free(loop);
     if (session.boundary_selection) |edges| std.heap.c_allocator.free(edges);
+    if (session.edge_targets) |edges| std.heap.c_allocator.free(edges);
     if (session.polygon_faces) |faces| std.heap.c_allocator.free(faces);
     z3d.journalDiscard(&session.snap);
     z3d.g_bevel = null;
@@ -178,6 +180,7 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
 
     var selection_index: u32 = 0;
     var target: ?indexed_edit_mesh.BevelTarget = null;
+    var edge_targets: ?[][2]u32 = null;
     var boundary_loop: ?[]u32 = null;
     var boundary_selection: ?[]mesh_edit.Edge = null;
     var polygon_faces: ?[]u32 = null;
@@ -187,6 +190,7 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
     defer if (!ownership_adopted) {
         if (boundary_loop) |loop| std.heap.c_allocator.free(loop);
         if (boundary_selection) |edges| std.heap.c_allocator.free(edges);
+        if (edge_targets) |edges| std.heap.c_allocator.free(edges);
         if (polygon_faces) |faces| std.heap.c_allocator.free(faces);
     };
     var kind: z3d.BevelSessionKind = undefined;
@@ -220,7 +224,7 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
                 shared_max_width = resolved.max_width;
                 break :edge_target;
             }
-            if (selected_count < indexed_edit_mesh.BoundaryChamferTuning.minimum_sides) return null;
+            if (selected_count < 2) return null;
             const selected = std.heap.c_allocator.alloc(mesh_edit.Edge, selected_count) catch return null;
             boundary_selection = selected;
             if (mesh_edit.selectedEdgesPub(selected) != selected_count) return null;
@@ -230,11 +234,24 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
             for (selected, 0..) |edge, index| edge_positions[index] = .{
                 mesh_edit.vertPosPub(edge[0]), mesh_edit.vertPosPub(edge[1]),
             };
-            const loop = std.heap.c_allocator.alloc(u32, selected_count) catch return null;
-            boundary_loop = loop;
-            const resolved = base_mesh.resolveBoundaryChamfer(edge_positions, part, loop) orelse return null;
-            boundary_info = resolved;
-            kind = .boundary;
+            if (selected_count >= indexed_edit_mesh.BoundaryChamferTuning.minimum_sides) {
+                const loop = std.heap.c_allocator.alloc(u32, selected_count) catch return null;
+                if (base_mesh.resolveBoundaryChamfer(edge_positions, part, loop)) |resolved| {
+                    boundary_loop = loop;
+                    boundary_info = resolved;
+                    kind = .boundary;
+                    shared_max_width = resolved.max_width;
+                    break :edge_target;
+                }
+                std.heap.c_allocator.free(loop);
+            }
+            const targets = std.heap.c_allocator.alloc([2]u32, selected_count) catch return null;
+            edge_targets = targets;
+            const resolved = base_mesh.resolveBevelEdges(edge_positions, part, targets) orelse {
+                z3d.topoRefuse("Bevel Edges needs sharp manifold edges from one part");
+                return null;
+            };
+            kind = .edges;
             shared_max_width = resolved.max_width;
         },
         .face => face_target: {
@@ -287,7 +304,7 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
     // the same base. A twin that resolves joins every preview/commit; its max width
     // tightens the shared clamp so one slider drives both sides.
     var twin_targets = [_]?indexed_edit_mesh.BevelTarget{null} ** 7;
-    if (kind != .boundary and mesh_edit.mirrorMask() != 0) {
+    if (kind != .boundary and kind != .edges and mesh_edit.mirrorMask() != 0) {
         var subset: u8 = 1;
         while (subset <= 7) : (subset += 1) {
             const twin_resolved: ?indexed_edit_mesh.BevelSelection = switch (original_mode) {
@@ -318,6 +335,43 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
             shared_max_width = @min(shared_max_width, twin_selection.max_width);
         }
     }
+    // A multi-edge selection can exceed the fixed seven mirror-subset slots used by
+    // single targets. Expand it into one deduplicated dynamic indexed set instead.
+    if (kind == .edges and mesh_edit.mirrorMask() != 0) {
+        const selected_edges = boundary_selection orelse return null;
+        var expanded = std.ArrayListUnmanaged([2]u32).empty;
+        defer expanded.deinit(std.heap.c_allocator);
+        expanded.appendSlice(std.heap.c_allocator, edge_targets orelse return null) catch return null;
+        for (selected_edges) |source_edge| {
+            var subset: u8 = 1;
+            while (subset <= 7) : (subset += 1) {
+                const t0 = mesh_edit.mirrorTwinOfVertPub(source_edge[0], subset) orelse continue;
+                const t1 = mesh_edit.mirrorTwinOfVertPub(source_edge[1], subset) orelse continue;
+                if (!mesh_edit.hasEdgeBetweenPub(t0, t1)) continue;
+                const twin_part = mesh_edit.vertPartPub(t0) orelse continue;
+                if ((mesh_edit.vertPartPub(t1) orelse continue) != twin_part) continue;
+                const twin = base_mesh.resolveBevelEdge(mesh_edit.vertPosPub(t0), mesh_edit.vertPosPub(t1), twin_part) orelse continue;
+                const twin_edge = switch (twin.target) {
+                    .edge => |edge| edge,
+                    .vertex => continue,
+                };
+                var duplicate = false;
+                for (expanded.items) |existing| {
+                    if ((existing[0] == twin_edge[0] and existing[1] == twin_edge[1]) or
+                        (existing[0] == twin_edge[1] and existing[1] == twin_edge[0]))
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate) continue;
+                expanded.append(std.heap.c_allocator, twin_edge) catch return null;
+                shared_max_width = @min(shared_max_width, twin.max_width);
+            }
+        }
+        std.heap.c_allocator.free(edge_targets.?);
+        edge_targets = expanded.toOwnedSlice(std.heap.c_allocator) catch return null;
+    }
     const minimum_width = switch (kind) {
         .boundary => indexed_edit_mesh.BoundaryChamferTuning.minimum_width_m,
         .face_polygon => indexed_edit_mesh.FacePolygonTuning.minimum_width_m,
@@ -334,6 +388,7 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
     );
     const label = switch (kind) {
         .edge => "bevel edge",
+        .edges => "bevel edges",
         .vertex => "bevel vertex",
         .boundary => "chamfer boundary",
         .face_polygon => "face to n-gon",
@@ -343,6 +398,7 @@ pub fn meshBevelBegin() ?z3d.BevelInfo {
         .original_mode = original_mode,
         .selection_index = selection_index,
         .target = target,
+        .edge_targets = edge_targets,
         .boundary_loop = boundary_loop,
         .boundary_selection = boundary_selection,
         .polygon_faces = polygon_faces,
@@ -381,6 +437,7 @@ pub fn meshBevelPreview(width_raw: f32, target_sides: u32) bool {
     session.last_preview_ok = false;
     session.last_reason = switch (session.kind) {
         .edge => "This edge cannot produce a durable bevel at that width",
+        .edges => "These edges cannot produce one durable joined bevel at that width",
         .vertex => "This corner cannot produce a durable bevel at that width",
         .boundary => "This opening cannot produce that target side count at this width",
         .face_polygon => "This face cannot produce that welded center side count at this ring width",
@@ -400,6 +457,7 @@ pub fn meshBevelPreview(width_raw: f32, target_sides: u32) bool {
     var center_face_id: ?u32 = null;
     const changed: bool = switch (session.kind) {
         .edge, .vertex => preview.bevel(session.target orelse return false, width) catch return false,
+        .edges => preview.bevelEdges(session.edge_targets orelse return false, width) catch return false,
         .boundary => preview.chamferBoundary(session.boundary_loop orelse return false, width, target_sides) catch return false,
         .face_polygon => polygonize: {
             const faces = session.polygon_faces orelse return false;
@@ -577,6 +635,7 @@ pub fn meshBevelEnd(commit: bool) bool {
     if (session.last_face_part) |parts| std.heap.c_allocator.free(parts);
     if (session.boundary_loop) |loop| std.heap.c_allocator.free(loop);
     if (session.boundary_selection) |edges| std.heap.c_allocator.free(edges);
+    if (session.edge_targets) |edges| std.heap.c_allocator.free(edges);
     if (session.polygon_faces) |faces| std.heap.c_allocator.free(faces);
     z3d.journalDiscard(&session.snap);
     z3d.g_bevel = null;

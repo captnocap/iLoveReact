@@ -528,7 +528,8 @@ export function meshToolCommands(): Command[] {
 
 // The contextual topology pair stays ordered as cmd('mesh-loopcut'), cmd('mesh-cut').
 // The contextual topology ops that apply to the current selection: extrude/loop-cut on a single
-// edge, create-face on two or more, and the face-selection toolset (loop-cut/detach/glass/
+// edge, bevel on any sharp manifold edge set, create-face on two or more, and the
+// face-selection toolset (loop-cut/detach/glass/
 // solidify/merge) in face mode — loop cut on a FACE is the studio's Blockbench treatment
 // (popup: direction/cuts/offset, live preview). Tris to Quads is the one whole-topology
 // verb: it remains available in Face mode with no selection and plans across parts
@@ -562,7 +563,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
       ? [commandById('mesh-extrude'), commandById('mesh-bevel'), commandById('mesh-loopcut'), commandById('mesh-weld')]
       : [
           commandById('mesh-create-face'),
-          ...(tool.sel >= 3 ? [{ ...commandById('mesh-bevel'), name: 'Chamfer Boundary' }] : []),
+          { ...commandById('mesh-bevel'), name: 'Bevel Edges' },
           commandById('mesh-align-loop'),
           commandById('mesh-weld'),
         ];

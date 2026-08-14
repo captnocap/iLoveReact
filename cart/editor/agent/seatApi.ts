@@ -1308,7 +1308,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     if (!Number.isFinite(width) || width <= 0) return null;
     const begin = parseJson<{
       ok?: number;
-      kind?: 'edge' | 'vertex' | 'boundary' | 'face-polygon';
+      kind?: 'edge' | 'edges' | 'vertex' | 'boundary' | 'face-polygon';
       defaultTargetSides?: number;
       minimumTargetSides?: number;
       maximumTargetSides?: number;
@@ -2603,7 +2603,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'bevel': {
         const targetSides = args.targetSides == null ? undefined : Number(args.targetSides);
         const result = seat.bevel(Number(args.width ?? 0), targetSides);
-        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one filled convex face, one bevelable edge/vertex, or one complete 3+ edge open boundary loop, then use a valid width and targetSides'));
+        return seat.reply('bevel', !!result, result ?? undefined, result ? undefined : seat.withTopoRefusal('select one filled convex face, one bevelable vertex, one or more sharp manifold edges from one part, or one complete 3+ edge open boundary loop, then use a valid width and targetSides'));
       }
       case 'inset': {
         const result = seat.inset(

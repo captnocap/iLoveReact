@@ -104,7 +104,7 @@ test('face mode exposes the whole-topology quad scan without a selection', () =>
   assert(commands.join('|') === 'mesh-tris-to-quads', 'empty Face mode did not expose exactly the global topology scan');
 });
 
-test('bevel is contextual to one corner, one sharp edge, or a 3+ edge boundary loop', () => {
+test('bevel is contextual to one corner or any sharp manifold edge selection', () => {
   const vertex = ids(meshTopoCommands({ selMode: 1, sel: 1 }));
   const vertices = ids(meshTopoCommands({ selMode: 1, sel: 2 }));
   const edge = ids(meshTopoCommands({ selMode: 2, sel: 1 }));
@@ -113,9 +113,9 @@ test('bevel is contextual to one corner, one sharp edge, or a 3+ edge boundary l
   assert(vertex.includes('mesh-bevel') && vertex.includes('mesh-extrude'), 'single target vertex lost Bevel or mixed extrusion');
   assert(!vertices.includes('mesh-bevel') && vertices.includes('mesh-align-loop') && vertices.includes('mesh-weld'), 'multi-vertex selection lost Align Loop/Weld or still exposes Bevel');
   assert(edge.includes('mesh-bevel'), 'single-edge Bevel disappeared');
-  assert(!edges.includes('mesh-bevel') && edges.includes('mesh-align-loop'), 'multi-edge selection lost Align Loop or still exposes Bevel');
-  assert(boundary.includes('mesh-bevel'), 'closed 3+ edge boundary loop cannot reach Chamfer Boundary');
-  assert(meshTopoCommands({ selMode: 2, sel: 4 }).find((command) => command.id === 'mesh-bevel')?.name === 'Chamfer Boundary', 'boundary-loop action kept the ambiguous single-edge label');
+  assert(edges.includes('mesh-bevel') && edges.includes('mesh-align-loop'), 'two-edge selection cannot reach joined Bevel or lost Align Loop');
+  assert(boundary.includes('mesh-bevel'), '3+ edge selection cannot reach joined Bevel or boundary chamfer');
+  assert(meshTopoCommands({ selMode: 2, sel: 4 }).find((command) => command.id === 'mesh-bevel')?.name === 'Bevel Edges', 'multi-edge action kept the ambiguous single-edge label');
 });
 
 test('one target vertex exposes the mixed edge-to-vertex extrusion', () => {

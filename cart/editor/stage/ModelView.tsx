@@ -788,11 +788,11 @@ const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
 const meshWeld = () => readTopoResult(host.__mesh_topo_weld?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
-// Bevel / Face to N-gon: one captured-base session shared by one vertex, one
-// sharp edge, every corner of one selected open boundary loop, or one filled face.
+// Bevel / Face to N-gon: one captured-base session shared by one vertex, one or
+// more sharp manifold edges, every corner of one selected open boundary loop, or one filled face.
 type BevelInfo = {
   ok: number;
-  kind?: 'edge' | 'vertex' | 'boundary' | 'face-polygon';
+  kind?: 'edge' | 'edges' | 'vertex' | 'boundary' | 'face-polygon';
   defaultWidth?: number;
   minimumWidth?: number;
   maxWidth?: number;
@@ -1475,13 +1475,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (result?.ok) setExtrude(null);
   };
 
-  // ── Bevel popup: one selected edge/vertex, one complete open boundary loop,
+  // ── Bevel popup: selected manifold edge(s)/one vertex, one complete open boundary loop,
   // or one filled face becoming a welded N-gon extrusion center.
   // Width is displayed in modeling units (16 u = 1 m), while the host keeps geometry
   // and limits in metres. Every step rebuilds from the captured base; Apply commits
   // one journal entry and Cancel restores the base plus its original selection.
   const [bv, setBv] = useState<null | {
-    kind: 'edge' | 'vertex' | 'boundary' | 'face-polygon';
+    kind: 'edge' | 'edges' | 'vertex' | 'boundary' | 'face-polygon';
     width: number;
     min: number;
     max: number;
@@ -1493,9 +1493,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   }>(null);
   const openBevel = () => {
     const info = meshBevelBegin();
-    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'vertex' && info.kind !== 'boundary' && info.kind !== 'face-polygon') ||
+    if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'edges' && info.kind !== 'vertex' && info.kind !== 'boundary' && info.kind !== 'face-polygon') ||
         typeof info.defaultWidth !== 'number' || typeof info.minimumWidth !== 'number' || typeof info.maxWidth !== 'number') {
-      setError('Select one filled convex face, one sharp manifold edge, one corner with at least 3 edges, or every edge of one open boundary loop');
+      setError('Select one filled convex face, one or more sharp manifold edges from one part, one corner with at least 3 edges, or every edge of one open boundary loop');
       return;
     }
     const min = roundBevelUnits(info.minimumWidth * U_PER_TILE);
@@ -5320,18 +5320,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
                     </Pressable>
                   )}
-                  {(selInfo.sel === 1 || selInfo.sel >= 3) && (
+                  {selInfo.sel >= 1 && (
                     <Pressable
                       onPress={openBevel}
                       tooltip={selInfo.sel === 1
                         ? 'Bevel selected sharp manifold edge — opens a live width preview'
-                        : 'Chamfer the complete selected open boundary loop to a chosen larger side count'}
+                        : 'Bevel selected sharp manifold edges together; a complete open boundary loop becomes a boundary chamfer'}
                       style={{
                         paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
                         backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
                       }}
                     >
-                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>{selInfo.sel === 1 ? 'Bevel' : 'Chamfer Boundary'}</Text>
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>{selInfo.sel === 1 ? 'Bevel' : 'Bevel Edges'}</Text>
                     </Pressable>
                   )}
                   {selInfo.sel === 1 && (
@@ -5620,14 +5620,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           >
             <Col style={{ gap: 4 }}>
               <Text style={{ color: '#edf5f7', fontSize: 17, fontWeight: 800 }}>
-                {bv.kind === 'boundary' ? 'Chamfer Boundary' : bv.kind === 'face-polygon' ? 'Face to N-gon' : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
+                {bv.kind === 'boundary' ? 'Chamfer Boundary' : bv.kind === 'face-polygon' ? 'Face to N-gon' : bv.kind === 'edges' ? 'Bevel Edges' : `Bevel ${bv.kind === 'edge' ? 'Edge' : 'Vertex'}`}
               </Text>
               <Text style={{ color: '#b8c6d0', fontSize: 12 }}>
                 {bv.kind === 'boundary' && bv.sidesBefore > 0
                   ? `${bv.sidesBefore}-sided opening → ${bv.targetSides}-sided opening`
                   : bv.kind === 'face-polygon' && bv.sidesBefore > 0
                     ? `${bv.sidesBefore}-corner face → welded ${bv.targetSides}-sided extrusion center`
-                  : 'Adjust how far the selected corner is cut back.'}
+                  : bv.kind === 'edges'
+                    ? 'Adjust one joined cut across every selected edge.'
+                    : 'Adjust how far the selected corner is cut back.'}
               </Text>
             </Col>
             {bv.fallbackReason ? (
