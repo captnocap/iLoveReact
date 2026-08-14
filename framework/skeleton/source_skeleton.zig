@@ -429,23 +429,9 @@ fn jointLandmark(id: JointId) ?WorldLandmarkName {
     };
 }
 
-/// Direct joints from world landmarks (SOURCE space, metres). Confidence is
-/// the landmark's visibility; derived centres take the min of their parents.
-fn jointsFromWorld(frame: *const WorldLandmarkFrame) [JOINT_COUNT]SourceJoint {
-    var joints: [JOINT_COUNT]SourceJoint = undefined;
-    for (0..JOINT_COUNT) |index| {
-        const id: JointId = @enumFromInt(index);
-        if (jointLandmark(id)) |name| {
-            const landmark = frame.landmark(name);
-            joints[index] = .{
-                .id = id,
-                .position = sourcePoint(landmark),
-                .confidence = landmark.visibility,
-            };
-        } else {
-            joints[index] = .{ .id = id, .position = .{ 0, 0, 0 }, .confidence = 0 };
-        }
-    }
+/// Centres and spine derive from the four direct torso joints; recomputed
+/// whenever those move (assembly, parking).
+fn recomputeDerivedJoints(joints: *[JOINT_COUNT]SourceJoint) void {
     const shoulder_left = joints[@intFromEnum(JointId.shoulder_left)];
     const shoulder_right = joints[@intFromEnum(JointId.shoulder_right)];
     const hip_left = joints[@intFromEnum(JointId.hip_left)];
@@ -467,6 +453,26 @@ fn jointsFromWorld(frame: *const WorldLandmarkFrame) [JOINT_COUNT]SourceJoint {
         .position = midpoint(hip_center.position, shoulder_center.position),
         .confidence = @min(hip_center.confidence, shoulder_center.confidence),
     };
+}
+
+/// Direct joints from world landmarks (SOURCE space, metres). Confidence is
+/// the landmark's visibility; derived centres take the min of their parents.
+fn jointsFromWorld(frame: *const WorldLandmarkFrame) [JOINT_COUNT]SourceJoint {
+    var joints: [JOINT_COUNT]SourceJoint = undefined;
+    for (0..JOINT_COUNT) |index| {
+        const id: JointId = @enumFromInt(index);
+        if (jointLandmark(id)) |name| {
+            const landmark = frame.landmark(name);
+            joints[index] = .{
+                .id = id,
+                .position = sourcePoint(landmark),
+                .confidence = landmark.visibility,
+            };
+        } else {
+            joints[index] = .{ .id = id, .position = .{ 0, 0, 0 }, .confidence = 0 };
+        }
+    }
+    recomputeDerivedJoints(&joints);
     return joints;
 }
 
@@ -671,6 +677,24 @@ pub fn reconstruct(
             0,
         };
         for (&joints) |*joint| joint.position = add(joint.position, add(displacement, rest_hip));
+
+        // Sub-floor joints are hallucinations (out-of-frame or occluded limbs
+        // the model still positions). Park each one at its calibrated rest
+        // offset from its live chain parent — SEGMENTS is parent-first, so
+        // a whole unseen leg hangs naturally off a confident hip instead of
+        // tap-dancing through noise (req_4389). Confidence stays as reported,
+        // so retarget gating and the diagnostic dots remain honest.
+        for (SEGMENTS) |definition| {
+            const to_index = @intFromEnum(definition.to);
+            if (jointLandmark(joints[to_index].id) == null) continue;
+            if (joints[to_index].confidence >= tuning.minimum_confidence) continue;
+            const rest = calibration.rest_segments[@intFromEnum(definition.id)];
+            joints[to_index].position = add(
+                joints[@intFromEnum(definition.from)].position,
+                scale(rest.direction, rest.length),
+            );
+        }
+        recomputeDerivedJoints(&joints);
     }
 
     var segments: [SEGMENT_COUNT]SegmentFrame = undefined;

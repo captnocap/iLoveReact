@@ -494,7 +494,11 @@ fn worldFrame(result: *const blazepose.AsyncResult) source.WorldLandmarkFrame {
         landmarks[index] = .{
             .screen = .{ landmark.x, landmark.y },
             .world = .{ landmark.world[0], landmark.world[1], landmark.world[2] },
-            .visibility = std.math.clamp(landmark.visibility, 0, 1),
+            // The skeleton's confidence is the JOINT of "unoccluded" and
+            // "actually inside the frame" — presence is what knows a
+            // sitting subject has no legs on camera, and it is the signal
+            // that stops hallucinated limbs from driving the rig (req_4389).
+            .visibility = std.math.clamp(@min(landmark.visibility, landmark.presence), 0, 1),
         };
     }
     return .{

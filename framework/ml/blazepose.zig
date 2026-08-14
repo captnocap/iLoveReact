@@ -521,13 +521,15 @@ pub fn pollAsync(io: std.Io) ?AsyncResult {
     return g_async.queue.poll(io);
 }
 
-/// Drop the tracked ROI so the next solve re-runs the detector. Camera
-/// changes and session opens must call this — a stale ROI from another feed
-/// is a confidently wrong crop.
+/// Drop the tracked ROI and all temporal filter state so the next solve
+/// re-runs the detector cold. Camera changes and session opens must call
+/// this — a stale ROI from another feed is a confidently wrong crop, and a
+/// stale filter smears two feeds together.
 pub fn resetTracking(io: std.Io) void {
     g_inference_mutex.lockUncancelable(io);
     defer g_inference_mutex.unlock(io);
     g_track_roi = null;
+    g_filters.reset();
 }
 
 fn asyncWorkerLoop(state: *AsyncState) std.Io.Cancelable!void {
@@ -541,6 +543,7 @@ fn asyncWorkerLoop(state: *AsyncState) std.Io.Cancelable!void {
             owned_frame.?.rgba,
             owned_frame.?.width,
             owned_frame.?.height,
+            owned_frame.?.identity.timestamp_ms,
         );
         const elapsed_i64 = @max(0, std.Io.Clock.now(.awake, state.io).toMilliseconds() - started_ms);
         const elapsed_ms: u32 = @intCast(@min(elapsed_i64, @as(i64, std.math.maxInt(u32))));
@@ -568,6 +571,92 @@ pub const Roi = struct {
 fn sigmoid(x: f32) f32 {
     return 1.0 / (1.0 + @exp(-std.math.clamp(x, -100.0, 100.0)));
 }
+
+// ── Temporal filtering (MediaPipe's smoothing stage, req_4389) ─────────
+//
+// Raw per-frame network output jitters at sensor-noise frequency, and the
+// tracked ROI feeds landmarks back into the next frame's crop window, so an
+// unfiltered pipeline oscillates visibly even on a motionless subject.
+// MediaPipe stabilizes with One Euro filters on landmarks (scaled by ROI
+// size so the cutoffs are resolution-invariant), a much stiffer One Euro on
+// the aux ROI landmarks (calming the crop-window feedback loop), and a
+// low-pass on visibilities (so confidence gates cannot flap frame-to-frame).
+// Same filter family and constants here.
+
+pub const OneEuroConfig = struct { min_cutoff: f32, beta: f32, derivate_cutoff: f32 };
+const SCREEN_FILTER = OneEuroConfig{ .min_cutoff = 0.05, .beta = 80.0, .derivate_cutoff = 1.0 };
+const WORLD_FILTER = OneEuroConfig{ .min_cutoff = 0.1, .beta = 40.0, .derivate_cutoff = 1.0 };
+const AUX_FILTER = OneEuroConfig{ .min_cutoff = 0.01, .beta = 10.0, .derivate_cutoff = 1.0 };
+const VISIBILITY_LOWPASS_ALPHA: f32 = 0.1;
+const DEFAULT_FRAME_DT: f32 = 1.0 / 30.0;
+
+/// One Euro: a low-pass whose cutoff rises with speed — still signals get
+/// heavy smoothing (jitter dies), fast motion gets light smoothing (no lag).
+pub const OneEuro = struct {
+    initialized: bool = false,
+    value: f32 = 0,
+    derivative: f32 = 0,
+
+    fn smoothingAlpha(cutoff: f32, dt: f32) f32 {
+        const tau = 1.0 / (2.0 * std.math.pi * cutoff);
+        return 1.0 / (1.0 + tau / dt);
+    }
+
+    pub fn filter(self: *OneEuro, raw: f32, dt: f32, config: OneEuroConfig) f32 {
+        if (!self.initialized) {
+            self.* = .{ .initialized = true, .value = raw, .derivative = 0 };
+            return raw;
+        }
+        const raw_derivative = (raw - self.value) / dt;
+        const derivative_alpha = smoothingAlpha(config.derivate_cutoff, dt);
+        self.derivative = derivative_alpha * raw_derivative + (1 - derivative_alpha) * self.derivative;
+        const cutoff = config.min_cutoff + config.beta * @abs(self.derivative);
+        const alpha = smoothingAlpha(cutoff, dt);
+        self.value = alpha * raw + (1 - alpha) * self.value;
+        return self.value;
+    }
+};
+
+const LowPass = struct {
+    initialized: bool = false,
+    value: f32 = 0,
+
+    fn filter(self: *LowPass, raw: f32, alpha: f32) f32 {
+        if (!self.initialized) {
+            self.* = .{ .initialized = true, .value = raw };
+            return raw;
+        }
+        self.value = alpha * raw + (1 - alpha) * self.value;
+        return self.value;
+    }
+};
+
+/// Guarded by g_inference_mutex like the tracking ROI. Reset on every
+/// tracking (re)acquisition — filtering across a detector re-lock would
+/// smear two different crops together.
+const FilterState = struct {
+    last_timestamp_ms: u64 = 0,
+    screen: [LANDMARK_COUNT][2]OneEuro = std.mem.zeroes([LANDMARK_COUNT][2]OneEuro),
+    world: [LANDMARK_COUNT][3]OneEuro = std.mem.zeroes([LANDMARK_COUNT][3]OneEuro),
+    visibility: [LANDMARK_COUNT]LowPass = std.mem.zeroes([LANDMARK_COUNT]LowPass),
+    landmark_presence: [LANDMARK_COUNT]LowPass = std.mem.zeroes([LANDMARK_COUNT]LowPass),
+    aux: [2][2]OneEuro = std.mem.zeroes([2][2]OneEuro),
+
+    fn reset(self: *FilterState) void {
+        self.* = .{};
+    }
+
+    /// Seconds since the previous solve, clamped to sane frame times.
+    /// Zero/backwards timestamps (legacy door, image probe) get the default.
+    fn stepDt(self: *FilterState, timestamp_ms: u64) f32 {
+        defer self.last_timestamp_ms = timestamp_ms;
+        if (self.last_timestamp_ms == 0 or timestamp_ms <= self.last_timestamp_ms) return DEFAULT_FRAME_DT;
+        const dt = @as(f32, @floatFromInt(timestamp_ms - self.last_timestamp_ms)) / 1000.0;
+        return std.math.clamp(dt, 1.0 / 120.0, 0.25);
+    }
+};
+
+var g_filters: FilterState = .{};
 
 /// MediaPipe NormalizeRadians: wrap into [-π, π).
 fn normalizeRadians(angle: f32) f32 {
@@ -857,6 +946,7 @@ fn solveLandmarks(
     height: u32,
     roi: Roi,
     tracked: bool,
+    dt: f32,
 ) InferError!RawSolve {
     cropRoiInto(rgba, width, height, roi, g_landmark_scratch[0..]);
     var outputs: [3]?*c.OrtValue = .{ null, null, null };
@@ -869,6 +959,10 @@ fn solveLandmarks(
     const crop_f = @as(f32, @floatFromInt(LANDMARK_INPUT));
     const width_f = @as(f32, @floatFromInt(width));
     const height_f = @as(f32, @floatFromInt(height));
+    // ROI-relative filtering units keep the One Euro cutoffs invariant to
+    // camera resolution and subject distance (the MediaPipe object-scale
+    // convention).
+    const roi_scale = @max(roi.side, 1.0);
 
     var solve = RawSolve{
         .frame = .{
@@ -888,28 +982,36 @@ fn solveLandmarks(
             roi.center_y + roi.sin_t * dx + roi.cos_t * dy,
         };
         if (index >= LANDMARK_COUNT) continue;
+        const filtered_x = g_filters.screen[index][0].filter(source_px[index][0] / roi_scale, dt, SCREEN_FILTER) * roi_scale;
+        const filtered_y = g_filters.screen[index][1].filter(source_px[index][1] / roi_scale, dt, SCREEN_FILTER) * roi_scale;
         const raw_world = world[index * 3 ..][0..3];
+        // World landmarks rotate by the ROI rotation ONLY (no
+        // scale/translate) — they are already metric and hip-centred.
+        const rotated_world = [3]f32{
+            roi.cos_t * raw_world[0] - roi.sin_t * raw_world[1],
+            roi.sin_t * raw_world[0] + roi.cos_t * raw_world[1],
+            raw_world[2],
+        };
         solve.frame.landmarks[index] = .{
-            .x = source_px[index][0] / width_f,
-            .y = source_px[index][1] / height_f,
+            .x = filtered_x / width_f,
+            .y = filtered_y / height_f,
             .z = (raw[2] / crop_f) * roi.side / height_f,
-            .visibility = sigmoid(raw[3]),
-            .presence = sigmoid(raw[4]),
-            // World landmarks rotate by the ROI rotation ONLY (no
-            // scale/translate) — they are already metric and hip-centred.
+            .visibility = g_filters.visibility[index].filter(sigmoid(raw[3]), VISIBILITY_LOWPASS_ALPHA),
+            .presence = g_filters.landmark_presence[index].filter(sigmoid(raw[4]), VISIBILITY_LOWPASS_ALPHA),
             .world = .{
-                roi.cos_t * raw_world[0] - roi.sin_t * raw_world[1],
-                roi.sin_t * raw_world[0] + roi.cos_t * raw_world[1],
-                raw_world[2],
+                g_filters.world[index][0].filter(rotated_world[0], dt, WORLD_FILTER),
+                g_filters.world[index][1].filter(rotated_world[1], dt, WORLD_FILTER),
+                g_filters.world[index][2].filter(rotated_world[2], dt, WORLD_FILTER),
             },
         };
     }
-    solve.next_roi = roiFromPoints(
-        source_px[AUX_ROI_CENTER][0],
-        source_px[AUX_ROI_CENTER][1],
-        source_px[AUX_ROI_SCALE][0],
-        source_px[AUX_ROI_SCALE][1],
-    );
+    // The next tracking window derives from HEAVILY smoothed aux landmarks —
+    // this is what breaks the crop→landmarks→crop oscillation.
+    const aux_center_x = g_filters.aux[0][0].filter(source_px[AUX_ROI_CENTER][0] / roi_scale, dt, AUX_FILTER) * roi_scale;
+    const aux_center_y = g_filters.aux[0][1].filter(source_px[AUX_ROI_CENTER][1] / roi_scale, dt, AUX_FILTER) * roi_scale;
+    const aux_scale_x = g_filters.aux[1][0].filter(source_px[AUX_ROI_SCALE][0] / roi_scale, dt, AUX_FILTER) * roi_scale;
+    const aux_scale_y = g_filters.aux[1][1].filter(source_px[AUX_ROI_SCALE][1] / roi_scale, dt, AUX_FILTER) * roi_scale;
+    solve.next_roi = roiFromPoints(aux_center_x, aux_center_y, aux_scale_x, aux_scale_y);
     return solve;
 }
 
@@ -917,14 +1019,18 @@ fn solveLandmarks(
 
 /// Estimate the pose in an RGBA frame (top-down, stride w*4). Tracking mode:
 /// reuses the previous confident solve's predicted ROI and only re-runs the
-/// detector on loss. Returns null only for infra failures (missing models,
-/// ORT errors); "nobody in frame" is a successful NO_POSE-shaped result.
+/// detector on loss; the temporal filters reset on every (re)acquisition.
+/// `timestamp_ms` paces the One Euro filters — pass 0 when no real cadence
+/// exists (single images) and the default frame time is assumed.
+/// Returns null only for infra failures (missing models, ORT errors);
+/// "nobody in frame" is a successful NO_POSE-shaped result.
 pub fn estimateRgba(
     io: std.Io,
     environ: *const std.process.Environ.Map,
     rgba: []const u8,
     width: u32,
     height: u32,
+    timestamp_ms: u64,
 ) ?PoseFrame {
     g_inference_mutex.lockUncancelable(io);
     defer g_inference_mutex.unlock(io);
@@ -933,20 +1039,25 @@ pub fn estimateRgba(
     const api = onnx.api() orelse return null;
 
     const tracked = g_track_roi != null;
+    if (!tracked) g_filters.reset();
+    const dt = g_filters.stepDt(timestamp_ms);
     var roi = g_track_roi orelse (detectPersonRoi(api, rgba, width, height) catch return null) orelse return NO_POSE;
-    var solve = solveLandmarks(api, rgba, width, height, roi, tracked) catch return null;
+    var solve = solveLandmarks(api, rgba, width, height, roi, tracked, dt) catch return null;
     if (solve.frame.presence < PRESENCE_MIN and tracked) {
         // The tracked ROI went stale (subject left it). One fresh detector
-        // pass this frame before conceding.
+        // pass this frame before conceding; the filters restart with it.
         g_track_roi = null;
+        g_filters.reset();
         roi = (detectPersonRoi(api, rgba, width, height) catch return null) orelse return NO_POSE;
-        solve = solveLandmarks(api, rgba, width, height, roi, false) catch return null;
+        solve = solveLandmarks(api, rgba, width, height, roi, false, DEFAULT_FRAME_DT) catch return null;
     }
     g_track_roi = if (solve.frame.presence >= PRESENCE_MIN) solve.next_roi else null;
     return solve.frame;
 }
 
 /// Estimate from an image FILE (stb) — the headless verification door.
+/// Single-shot by definition: tracking and filter state reset first so a
+/// probe never smears into (or inherits from) a live session.
 pub fn estimateImage(io: std.Io, environ: *const std.process.Environ.Map, path: [*:0]const u8) ?PoseFrame {
     var sw: c_int = 0;
     var sh: c_int = 0;
@@ -958,5 +1069,6 @@ pub fn estimateImage(io: std.Io, environ: *const std.process.Environ.Map, path: 
     defer stb.stbi_image_free(pixels);
     const w: u32 = @intCast(sw);
     const h: u32 = @intCast(sh);
-    return estimateRgba(io, environ, pixels[0 .. @as(usize, w) * @as(usize, h) * 4], w, h);
+    resetTracking(io);
+    return estimateRgba(io, environ, pixels[0 .. @as(usize, w) * @as(usize, h) * 4], w, h, 0);
 }

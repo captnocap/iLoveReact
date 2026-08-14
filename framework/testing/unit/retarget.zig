@@ -222,6 +222,38 @@ test "calibration uses medians and assembly passes metric depth straight through
     );
 }
 
+test "hallucinated sub-floor limbs park at rest off their live parents" {
+    const calibration = try calibrateRest();
+    // A seated half-body subject: the model still positions legs, wildly and
+    // differently every frame, at sub-floor confidence. Both frames must
+    // assemble to the SAME parked leg — hanging off the live hip by the
+    // calibrated rest offsets — instead of tap-dancing through the noise.
+    var first = makeFrame(120, 13_000, 0.9);
+    var second = makeFrame(121, 13_033, 0.9);
+    const leg = [_]source.WorldLandmarkName{ .knee_left, .ankle_left, .knee_right, .ankle_right };
+    for (leg, 0..) |name, index| {
+        landmarkAt(&first, name).visibility = 0.1;
+        landmarkAt(&second, name).visibility = 0.1;
+        const wobble = @as(f32, @floatFromInt(index)) * 0.11;
+        landmarkAt(&first, name).world = .{ 0.4 + wobble, 0.3 - wobble, 0.2 };
+        landmarkAt(&second, name).world = .{ -0.3 - wobble, 0.6 + wobble, -0.25 };
+    }
+    const assembled_first = try source.reconstruct(&first, calibration, source.DEFAULT_TUNING);
+    const assembled_second = try source.reconstruct(&second, calibration, source.DEFAULT_TUNING);
+    for ([_]source.JointId{ .knee_left, .ankle_left, .knee_right, .ankle_right }) |joint_id| {
+        const a = assembled_first.joint(joint_id).position;
+        const b = assembled_second.joint(joint_id).position;
+        try testing.expectApproxEqAbs(@as(f32, 0), vectorLength(.{ a[0] - b[0], a[1] - b[1], a[2] - b[2] }), 1.0e-5);
+    }
+    // Parked at the calibrated rest offset from the live hip, and still
+    // reported unobserved so the retarget drive gate holds the rig legs.
+    const hip = assembled_first.joint(.hip_left).position;
+    const knee = assembled_first.joint(.knee_left).position;
+    const rest_upper_leg = calibration.rest_segments[@intFromEnum(source.SegmentId.upper_leg_left)];
+    try testing.expectApproxEqAbs(rest_upper_leg.length, vectorLength(.{ knee[0] - hip[0], knee[1] - hip[1], knee[2] - hip[2] }), 1.0e-4);
+    try testing.expect(assembled_first.segment(.upper_leg_left).confidence < 0.35);
+}
+
 test "nobody in frame assembles as all-unobserved at rest" {
     const calibration = try calibrateRest();
     var absent = makeFrame(110, 12_500, 0.9);

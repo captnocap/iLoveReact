@@ -75,6 +75,38 @@ test "roi rule: degenerate and non-finite inputs are rejected" {
     try std.testing.expectEqual(@as(?blazepose.Roi, null), blazepose.roiFromPoints(std.math.nan(f32), 10, 20, 20));
 }
 
+test "one euro filter kills jitter without lagging real motion" {
+    const dt: f32 = 1.0 / 30.0;
+    const config = blazepose.OneEuroConfig{ .min_cutoff = 0.05, .beta = 80.0, .derivate_cutoff = 1.0 };
+
+    // Constant input passes through exactly.
+    var constant = blazepose.OneEuro{};
+    for (0..10) |_| try std.testing.expectApproxEqAbs(@as(f32, 0.5), constant.filter(0.5, dt, config), 1e-6);
+
+    // A still subject with ±2px-equivalent sensor noise: filtered excursion
+    // must collapse well below the raw noise amplitude.
+    var noisy = blazepose.OneEuro{};
+    _ = noisy.filter(0.5, dt, config);
+    var worst: f32 = 0;
+    for (0..120) |step| {
+        const noise: f32 = if (step % 2 == 0) 0.004 else -0.004;
+        const out = noisy.filter(0.5 + noise, dt, config);
+        if (step > 10) worst = @max(worst, @abs(out - 0.5));
+    }
+    try std.testing.expect(worst < 0.001);
+
+    // A fast sweep must track: the speed-adaptive cutoff keeps lag small
+    // relative to the traveled distance.
+    var moving = blazepose.OneEuro{};
+    var target: f32 = 0;
+    var out: f32 = 0;
+    for (0..30) |_| {
+        target += 0.05;
+        out = moving.filter(target, dt, config);
+    }
+    try std.testing.expect(@abs(out - target) < 0.01);
+}
+
 test "live blazepose request runs outside the submitting thread" {
     var environ = try std.testing.environ.createMap(std.testing.allocator);
     defer environ.deinit();
