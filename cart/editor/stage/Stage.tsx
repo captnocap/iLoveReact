@@ -93,6 +93,7 @@ export default function Stage(props: {
   labRecipe: import('../render3d/shaders/recipe').MaterialRecipe | null;
   labHandlers: import('./MaterialLabSurface').LabHandlers;
   labUsage: { world: number; models: number };
+  onOpenInLab: (specId: string) => void;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
@@ -242,6 +243,7 @@ export default function Stage(props: {
             onSpineLoadLibrarySet={props.onColorSpineLoadLibrarySet}
             onCreateSet={props.onCreateColorSet}
             onDeleteSet={props.onDeleteColorSet}
+            onOpenInLab={props.onOpenInLab}
           />
         )}
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}

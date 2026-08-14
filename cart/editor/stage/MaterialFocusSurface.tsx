@@ -31,7 +31,7 @@ import type { Asset, EditorState, Rgb } from '../data/types';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { MaterialRecipe } from '../render3d/shaders/recipe';
 import ColorStudioViewTabs from './ColorStudioViewTabs';
-import ColorLibraryPanel from './ColorLibraryPanel';
+import LabLibraryView from './LabLibraryView';
 import MaterialLabSurface, { type LabHandlers } from './MaterialLabSurface';
 
 const VIEW_LABELS: Record<EditorState['colorStudioView'], string> = {
@@ -64,6 +64,7 @@ export default function MaterialFocusSurface(props: {
   onSpineLoadLibrarySet: (name: string, colors: OklchColor[]) => void;
   onCreateSet: () => void;
   onDeleteSet: (index: number) => void;
+  onOpenInLab: (specId: string) => void;
 }) {
   const spec = colorStudioSpec(props.state);
   const specs = studioSpecs();
@@ -116,24 +117,14 @@ export default function MaterialFocusSurface(props: {
       <C.HW_ColorStudioShell>
         <ColorStudioViewTabs view={props.state.colorStudioView} onSelect={props.onView} />
         {props.state.colorStudioView === 'library' ? (
-          <C.HW_ColorPreviewPanel>
-            <C.HW_ColorStudioBody style={{ flexDirection: 'column', padding: 14 }}>
-              <ColorLibraryPanel
-                current={props.state.colorSpineCurrent}
-                palette={props.state.colorSpinePalette}
-                recents={props.state.colorSpineRecents}
-                scenePick={props.state.colorSpineScenePick}
-                sets={props.state.colorSpineSets}
-                onSetCurrent={props.onSpineCurrent}
-                onAddToTray={props.onSpineAddToTray}
-                onPickTray={props.onSpineTrayPick}
-                onScenePick={props.onSpineScenePick}
-                onLoadLibrarySet={props.onSpineLoadLibrarySet}
-                onCreateSet={props.onCreateSet}
-                onDeleteSet={props.onDeleteSet}
-              />
-            </C.HW_ColorStudioBody>
-          </C.HW_ColorPreviewPanel>
+          <LabLibraryView
+            sets={props.state.colorSpineSets}
+            savedTray={props.state.colorSpinePalette}
+            onOpenInLab={props.onOpenInLab}
+            onLoadSet={props.onSpineLoadLibrarySet}
+            onCreateSet={props.onCreateSet}
+            onDeleteSet={props.onDeleteSet}
+          />
         ) : props.labRecipe ? (
           <MaterialLabSurface
             state={props.state}

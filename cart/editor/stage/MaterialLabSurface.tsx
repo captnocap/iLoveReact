@@ -65,6 +65,9 @@ export type LabHandlers = {
   onSpineCurrent: (color: OklchColor) => void;
   onSpineAddToTray: () => void;
   onSpineLoadLibrarySet: (name: string, colors: OklchColor[]) => void;
+  /** Promote this recipe to a real materials/*.wgsl + rerun the generator. */
+  onSaveToCatalog: () => void;
+  onDeleteRecipe: () => void;
 };
 
 // ── generic packed-grid packer (no Paint-tuning cap — the envelope is generic) ──
@@ -541,7 +544,23 @@ export default function MaterialLabSurface(props: {
           <SectionHead icon="Info">RECIPE FACTS</SectionHead>
           <Text style={{ color: DIM, fontSize: 9 }}>base {recipe.base.fn} · {enabledCount} layer{enabledCount === 1 ? '' : 's'} · {params.length} params · {slots.length} slots</Text>
           <Text style={{ color: DIM, fontSize: 9 }}>used by {props.usage.world} world slots · {props.usage.models} model slots</Text>
+          {(() => {
+            const promotedFn = recipe.id.replace(/-/g, '_');
+            const promoted = MATERIALS.some((m) => m.fn === promotedFn && m.author === 'lab');
+            return <Text style={{ color: promoted ? '#7fbf7f' : FAINT, fontSize: 9, fontWeight: '700' }}>{promoted ? `IN CATALOG as ${promotedFn}` : 'NOT IN CATALOG'}</Text>;
+          })()}
         </Col>
+
+        <Row style={{ gap: 5 }}>
+          <Pressable tooltip="Emit a real materials/*.wgsl and rerun the generator — the material joins every picker with a stable id" onPress={handlers.onSaveToCatalog}
+            style={{ flexGrow: 1, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: ACCENT, backgroundColor: PANEL }}>
+            <Text style={{ color: ACCENT, fontSize: 10, fontWeight: '800' }}>SAVE TO CATALOG</Text>
+          </Pressable>
+          <Pressable tooltip="Delete this experiment (the catalog copy, if saved, stays)" onPress={handlers.onDeleteRecipe}
+            style={{ width: 30, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: LINE }}>
+            <Icon name="Trash2" size={12} color={DIM} />
+          </Pressable>
+        </Row>
       </Col>
 
       {/* ── popovers (scrim overlays, root-last within the surface) ────────── */}

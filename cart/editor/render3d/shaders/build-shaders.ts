@@ -163,9 +163,19 @@ function parseMaterial(path, fileName) {
   const tags = fields['tags'].split(',').map((s) => s.trim()).filter(Boolean);
   const body = lines.slice(bodyStart).join('\n').replace(/\n+$/, '');
   const raw = rewriteParams(src.replace(/\n+$/, ''), params, fileName);
+  // Lab-promoted materials carry their editable recipe as a trailing JSON
+  // line — lifted into the registry so the Lab reopens them (req_4395).
+  let recipeJson = null;
+  for (const line of lines) {
+    if (line.startsWith('// @recipe-json ')) {
+      recipeJson = line.slice('// @recipe-json '.length).trim();
+      try { JSON.parse(recipeJson); } catch { die(fileName + ': @recipe-json is not valid JSON'); }
+      break;
+    }
+  }
   return {
     fn, slug: fields['slug'], name: fields['name'], boardSlug: fields['board'],
-    variantLabels, kind, tags, author: fields['author'], raw, body, params,
+    variantLabels, kind, tags, author: fields['author'], raw, body, params, recipeJson,
   };
 }
 
@@ -459,7 +469,10 @@ registryOut += '  fn: string;\n  slug: string;\n  name: string;\n  board: string
 registryOut += '  // Palette slots: the baked vec3f constants extracted from the material fn,\n';
 registryOut += '  // in mat_pal() index order. D[5]=count, D[6+i*3..]=RGB overrides them.\n';
 registryOut += '  slots: MaterialSlot[];\n';
-registryOut += '  params: RegistryParam[];\n};\n\n';
+registryOut += '  params: RegistryParam[];\n';
+registryOut += '  // Lab-promoted materials only: the MaterialRecipe JSON that rebuilt this\n';
+registryOut += '  // fn, so the Material Lab reopens it editable (@recipe-json trailing line).\n';
+registryOut += '  recipe?: string;\n};\n\n';
 function paramsTs(params) {
   return '[' + params.map((p) => '{ key: ' + JSON.stringify(p.key) + ', label: ' + JSON.stringify(p.label)
     + ', default: ' + p.default + ', min: ' + p.min + ', max: ' + p.max + ' }').join(', ') + ']';
@@ -473,7 +486,8 @@ for (const boardIdx of [...byBoard.keys()].sort((a, b) => a - b)) {
       + ', board: ' + JSON.stringify(m.boardSlug) + ', boardIndex: ' + m.boardIndex + ', materialId: ' + m.materialId
       + ', variantLabels: ' + tsStringArray(m.variantLabels) + ', kind: ' + JSON.stringify(m.kind)
       + ', tags: ' + tsStringArray(m.tags) + ', author: ' + JSON.stringify(m.author)
-      + ',\n    slots: ' + slotsTs + ', params: ' + paramsTs(m.params) + ' },\n';
+      + ',\n    slots: ' + slotsTs + ', params: ' + paramsTs(m.params)
+      + (m.recipeJson ? ', recipe: ' + JSON.stringify(m.recipeJson) : '') + ' },\n';
   }
 }
 registryOut += '];\n\n';

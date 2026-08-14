@@ -68,23 +68,43 @@ export interface ShaderSpec {
   fillFn?: string;
 }
 
-/** Append a palette section to a fill-material data[]: D[5] = slot count,
- *  D[6 + i*3 ..] = slot i RGB. Pass null/empty to keep the 5-float baked form
- *  (mat_pal falls back to the authored constants — pixel-identical). */
-export function withPalette(data: number[], palette: Array<[number, number, number]> | null | undefined): number[] {
-  if (!palette || palette.length === 0) return data;
-  return [...data.slice(0, 5), palette.length, ...palette.flat()];
+/** Split a fill row into its sections: head [0..4], palette rgbs, params. */
+function splitFillRow(data: number[]): { head: number[]; palette: number[]; params: number[] } {
+  const head = data.slice(0, 5);
+  if (data.length <= 5) return { head, palette: [], params: [] };
+  const paletteCount = Math.max(0, Math.round(data[5] ?? 0));
+  const palette = data.slice(6, 6 + paletteCount * 3);
+  const paramAt = 6 + paletteCount * 3;
+  if (data.length <= paramAt) return { head, palette, params: [] };
+  const paramCount = Math.max(0, Math.round(data[paramAt] ?? 0));
+  return { head, palette, params: data.slice(paramAt + 1, paramAt + 1 + paramCount) };
 }
 
-/** Append a param section AFTER the palette section: count, then values, read
- *  by mat_param in @param index order. A 5-float row gains an explicit zero
- *  palette count first so the sections stay addressable. Pass null/empty to
- *  keep the row as-is (mat_param falls back to baked — pixel-identical). */
+function joinFillRow(head: number[], palette: number[], params: number[]): number[] {
+  if (palette.length === 0 && params.length === 0) return head;
+  const row = [...head, palette.length / 3, ...palette];
+  if (params.length > 0) row.push(params.length, ...params);
+  return row;
+}
+
+/** Replace the palette section of a fill-material data[] (D[5] = slot count,
+ *  D[6 + i*3 ..] = slot i RGB), PRESERVING any param section after it. Pass
+ *  null/empty to keep the row as-is (mat_pal falls back to the authored
+ *  constants — pixel-identical). */
+export function withPalette(data: number[], palette: Array<[number, number, number]> | null | undefined): number[] {
+  if (!palette || palette.length === 0) return data;
+  const { head, params } = splitFillRow(data);
+  return joinFillRow(head, palette.flat(), params);
+}
+
+/** Replace the param section (count + values after the palette section, read
+ *  by mat_param in @param index order), PRESERVING the palette section. Pass
+ *  null/empty to keep the row as-is (mat_param falls back to baked —
+ *  pixel-identical). */
 export function withParams(data: number[], params: number[] | null | undefined): number[] {
   if (!params || params.length === 0) return data;
-  const paletteCount = data.length > 5 ? data[5]! : 0;
-  const base = data.length > 5 ? data.slice(0, 6 + paletteCount * 3) : [...data.slice(0, 5), 0];
-  return [...base, params.length, ...params];
+  const { head, palette } = splitFillRow(data);
+  return joinFillRow(head, palette, params);
 }
 
 export type ShaderTexturePreset = {
@@ -409,13 +429,19 @@ function fillSpec(b: FillBoard, m: FillMaterial): ShaderSpec {
         { key: 'seedShift', label: 'Take seed shift', default: perVariant * v, min: 0, max: FILL_SEED_MAX, step: 1, integer: true },
       ],
     })),
-    buildData: (variantValue, base, o) => [
+    // Every default row carries the registry's palette + param tables
+    // explicitly (req_4395). For hand-written materials the values equal the
+    // baked constants — pixel-identical — and for lab-promoted recipes the
+    // tables ARE the stored look (their baked fallbacks are the callees'
+    // originals), so a promoted material renders correctly in EVERY consumer,
+    // thumbnails included.
+    buildData: (variantValue, base, o) => withParams(withPalette([
       materialId,
       variantValue,
       (base.seed ?? defaultSeed) + (o.seedShift ?? perVariant * variantValue),
       base.grade ?? FILL_GRADE_STD,
       b.board,
-    ],
+    ], (registryMaterial?.slots ?? []).map((slot) => slot.rgb)), (registryMaterial?.params ?? []).map((p) => p.default)),
     slots: registryMaterial?.slots ?? [],
   };
 }

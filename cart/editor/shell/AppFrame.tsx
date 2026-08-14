@@ -290,7 +290,7 @@ import {
   planDetachedPartHandoff,
   recoverAppendedPartUndoRows,
 } from '../model/outlinerCommand';
-import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
+import { linearArrayParams, materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh, type LightRig } from '../model/editMesh';
 import { modelPartImportPayload } from '../model/modelPartImport';
 import { normalizeModelLights } from '../model/modelLights';
@@ -340,11 +340,14 @@ import { loadStickers, registerStickers, ensureStickerForTexture } from '../data
 import { FACADE_TEXELS_PER_METER, facadeFromSelection, facadeLayers, type Facade, type FacadeStroke, type FacadeStamp } from '../world/facades';
 import { resizeFacadeRgba, setLiveFacades, saveFacadeBake } from '../world/facadeBake';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
-import { readFileBase64, remove } from '../../../runtime/hooks/fs';
+import { readFileBase64, remove, writeFile } from '../../../runtime/hooks/fs';
 import { oklchName, pushRecentColor } from '../data/colorSpine';
 import { scheduleColorLibrarySave } from '../data/colorLibraryStore';
 import { scheduleLabRecipesSave } from '../data/labRecipeStore';
 import { validateRecipe, type MaterialRecipe } from '../render3d/shaders/recipe';
+import { promoteRecipeSource } from '../render3d/shaders/catalogPromotion';
+import { MATERIALS as REGISTRY_MATERIALS } from '../render3d/shaders/_generated/registry';
+import { execAsync } from '../../../runtime/hooks/process';
 import type { LabHandlers, LabRecipeEdit } from '../stage/MaterialLabSurface';
 
 // Material Lab undo entries (req_4395): whole-document snapshots — a recipe is
@@ -827,7 +830,7 @@ export default function AppFrame() {
     if (importPlan) return { id: 'import-image', label: 'Import Image' };
     if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
     if (stlConversionName) return { id: 'stl-conversion', label: 'STL Conversion' };
-    if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
+    if (pathArrayPrompt) return { id: 'path-array', label: pathArrayPrompt.mode === 'linear' ? 'Linear Array' : 'Path Array' };
     if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
     if (nameSelectionOpen) return { id: 'name-selection', label: 'Name Selection' };
     if (prefabCaptureOpen) return { id: 'prefab-capture', label: 'Create Prefab' };
@@ -5486,10 +5489,30 @@ export default function AppFrame() {
   };
 
   /** Enter the Lab on a catalog material: reuse the newest recipe based on it,
-   *  or mint a fresh working recipe (micro-saved — experiments survive until
-   *  deleted). Returns the patch to fold into the entry's setState. */
+   *  reopen a promoted material's embedded recipe, or mint a fresh working
+   *  recipe (micro-saved — experiments survive until deleted). Returns the
+   *  patch to fold into the entry's setState. */
   const ensureLabRecipeFor = (fillFn: string, name: string): Partial<EditorState> => {
     const previous = stateRef.current;
+    // A lab-promoted material reopens EDITABLE from its registry-embedded
+    // recipe JSON (the @recipe-json trailing line, req_4395 phase 5).
+    const promoted = REGISTRY_MATERIALS.find((m) => m.fn === fillFn)?.recipe;
+    if (promoted) {
+      try {
+        const recipe = JSON.parse(promoted) as MaterialRecipe;
+        const invalid = validateRecipe(recipe);
+        if (invalid) throw new Error(invalid);
+        const known = previous.labRecipes.some((r) => r.id === recipe.id);
+        return {
+          ...(known ? {} : { labRecipes: [...previous.labRecipes, recipe] }),
+          labActiveRecipeId: recipe.id,
+          labSelectedLayer: null,
+          labSoloStage: null,
+        };
+      } catch (error) {
+        console.error(`[lab] '${fillFn}' carries an unusable embedded recipe: ${(error as Error).message}`);
+      }
+    }
     const existing = [...previous.labRecipes].reverse().find((recipe) => recipe.base.fn === fillFn);
     if (existing) {
       return { labActiveRecipeId: existing.id, labSelectedLayer: null, labSoloStage: null };
@@ -5513,6 +5536,52 @@ export default function AppFrame() {
     };
   };
 
+  /** SAVE TO CATALOG (req_4395 phase 5): emit the recipe as a real
+   *  materials/*.wgsl (recipe JSON embedded), then run the ONE generator via
+   *  the host exec door. The regenerated registry/dispatch hot-reload into
+   *  every picker; ids.json hands the material its stable id. */
+  const saveRecipeToCatalog = async () => {
+    const recipe = activeLabRecipe(stateRef.current);
+    if (!recipe) return;
+    const out = promoteRecipeSource(recipe);
+    if (!out.ok) {
+      setState((prev) => ({ ...prev, status: `save to catalog refused: ${out.error}` }));
+      return;
+    }
+    const path = `cart/editor/render3d/shaders/materials/${out.fileName}`;
+    if (!writeFile(path, out.source)) {
+      setState((prev) => ({ ...prev, status: `SAVE FAILED: could not write ${path}` }));
+      return;
+    }
+    setState((prev) => ({ ...prev, status: `wrote ${path} — running build-shaders…` }));
+    const result = await execAsync('tools/v8cli cart/editor/render3d/shaders/build-shaders.ts');
+    setState((prev) => ({
+      ...prev,
+      status: result.code === 0
+        ? `${recipe.name} joined the catalog as ${out.fn} — hot reload delivers it to every picker`
+        : `generator FAILED (code ${result.code}) — ${path} kept on disk; fix and rerun build-shaders`,
+    }));
+  };
+
+  const deleteActiveLabRecipe = () => {
+    const previous = stateRef.current;
+    const recipe = activeLabRecipe(previous);
+    if (!recipe) return;
+    const next: EditorState = {
+      ...previous,
+      labRecipes: previous.labRecipes.filter((r) => r.id !== recipe.id),
+      labActiveRecipeId: null,
+      labSelectedLayer: null,
+      status: `deleted experiment "${recipe.name}"${REGISTRY_MATERIALS.some((m) => m.fn === recipe.id.replace(/-/g, '_')) ? ' — its catalog copy stays' : ''}`,
+    };
+    labHistoryRef.current = {
+      undo: [{ label: `delete ${recipe.name}`, before: labSnapshot(previous), after: labSnapshot(next) }, ...labHistoryRef.current.undo].slice(0, LAB_UNDO_CAP),
+      redo: [],
+    };
+    stateRef.current = next;
+    setState(next);
+  };
+
   const labHandlers: LabHandlers = {
     onEditRecipe: applyLabEdit,
     onRenameRecipe: (name: string) => applyLabEdit(`rename recipe → ${name}`, (recipe) => ({ ...recipe, name })),
@@ -5525,6 +5594,8 @@ export default function AppFrame() {
     onSpineCurrent: (color) => setColorSpineCurrent(color, 'lab'),
     onSpineAddToTray: () => addColorSpineToTray('lab'),
     onSpineLoadLibrarySet: (name, colors) => loadColorSpineLibrarySet(name, colors, 'lab'),
+    onSaveToCatalog: () => { void saveRecipeToCatalog(); },
+    onDeleteRecipe: deleteActiveLabRecipe,
   };
 
   /** References to the Lab base material across authored data — the honest,
@@ -7002,7 +7073,7 @@ export default function AppFrame() {
   // Agent Seat form of the same path-array authority. The visible dialog only
   // gathers these parameters; geometry still bottoms out in ModelToolApi.pathArray
   // and metadata still comes from materializePathArrayRows.
-  const applySeatPathArray = (sourceIds: string[], rawParams: PathArrayParams): SeatShellReceipt => {
+  const applySeatPathArray = (sourceIds: string[], rawParams: PathArrayParams, kind: 'path' | 'linear' = 'path'): SeatShellReceipt => {
     const live = stateRef.current;
     const mid = activePartsModelId(live);
     const api = modelToolApiRef.current;
@@ -7018,7 +7089,7 @@ export default function AppFrame() {
       if (hostResult) withNativeMeshActionSource('seat', () => api.undoMesh());
       return { ok: false, reason: 'path array failed or returned incomplete host ranges; the operation was rolled back' };
     }
-    const materialized = materializePathArrayRows(parts, sourceIds, hostResult.ranges, live.seq);
+    const materialized = materializePathArrayRows(parts, sourceIds, hostResult.ranges, live.seq, kind);
     if (!materialized || materialized.created.length !== expectedRanges) {
       withNativeMeshActionSource('seat', () => api.undoMesh());
       return { ok: false, reason: 'path array metadata failed validation; the operation was rolled back' };
@@ -7034,7 +7105,7 @@ export default function AppFrame() {
       modelParts: { ...live.modelParts, [mid]: materialized.parts },
       modelActivePartId: primaryId,
       modelDirty: { ...live.modelDirty, [mid]: true },
-      status: `Agent Seat built ${params.bays}-bay path in ${materialized.groupName}`,
+      status: `Agent Seat built ${params.bays}-bay ${kind === 'linear' ? 'linear array' : 'path'} in ${materialized.groupName}`,
     };
     stateRef.current = next;
     setState(next);
@@ -8235,6 +8306,15 @@ export default function AppFrame() {
         const ids = stringArray(args.ids);
         if (!args.params || typeof args.params !== 'object') return fail('source part ids and path-array params are required');
         return applySeatPathArray(ids, args.params as PathArrayParams);
+      }
+      if (action === 'part-linear-array') {
+        const ids = stringArray(args.ids);
+        const direction = String(args.direction ?? '+x').toLowerCase();
+        const axis = ({ '+x': 0, '-x': 1, '+z': 2, '-z': 3 } as const)[direction as '+x' | '-x' | '+z' | '-z'];
+        if (axis === undefined) return fail('linear array direction must be +x, -x, +z, or -z');
+        const bays = Number(args.bays);
+        if (!Number.isInteger(bays) || bays < 2 || bays > 64) return fail('linear array bays must be an integer from 2 through 64, including the source');
+        return applySeatPathArray(ids, linearArrayParams(axis, bays), 'linear');
       }
       if (action === 'part-import') {
         const packageId = String(args.id ?? '');
@@ -10228,6 +10308,7 @@ export default function AppFrame() {
             labRecipe={activeLabRecipe(state)}
             labHandlers={labHandlers}
             labUsage={labUsageFor(activeLabRecipe(state))}
+            onOpenInLab={openColorStudioForSpec}
           />
         </RenderProbe>
         {activeDocumentKind !== 'knowledge' ? <RenderProbe id="Inspector">
