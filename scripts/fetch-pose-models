@@ -1,17 +1,37 @@
 #!/bin/sh
-# fetch-pose-models — vendor the MoveNet SinglePose Lightning ONNX model the
-# editor's animation capture uses (req_2786, framework/ml/pose.zig). Same
-# home as the SlimSAM pair: ~/.reactjit/models/. Any MoveNet-signature model
-# (input int32 [1,192,192,3], output f32 [1,1,17,3]) drops in under this name.
+# fetch-pose-models — vendor the pose-estimation ONNX models the editor's
+# animation capture uses. Same home as the SlimSAM pair: ~/.reactjit/models/.
+#
+# BlazePose GHUM full (req_4387, framework/ml/blazepose.zig) — the capture
+# lane. Two graphs, parity-proven ONNX conversions of Google MediaPipe's
+# Apache-2.0 pose_landmarker_full task bundle (worst-case world-landmark
+# delta 1.02 cm vs the Python mediapipe reference; contract + provenance:
+# https://github.com/fernandotonon/QtMeshEditor/blob/master/docs/MOCAP_SPIKE.md):
+#   blazepose_detector.onnx   input f32[1,224,224,3] in [-1,1]
+#                             → [1,2254,12] boxes+keypoints, [1,2254,1] scores
+#   blazepose_landmarks.onnx  input f32[1,256,256,3] in [0,1]
+#                             → [1,195] screen landmarks, [1,1] presence,
+#                               [1,117] WORLD landmarks (metres, hip-centred)
+#
+# MoveNet SinglePose Lightning (req_2786, framework/ml/pose.zig) — the legacy
+# lane, kept only while the __pose_estimate_async door still serves as a
+# ground-truth probe. Signature: input i32[1,192,192,3], output f32[1,1,17,3].
 set -e
 DIR="$HOME/.reactjit/models"
-OUT="$DIR/movenet_lightning.onnx"
-URL="https://huggingface.co/Xenova/movenet-singlepose-lightning/resolve/main/onnx/model.onnx"
 mkdir -p "$DIR"
-if [ -s "$OUT" ]; then
-  echo "[pose-models] already present: $OUT ($(du -h "$OUT" | cut -f1))"
-  exit 0
-fi
-echo "[pose-models] downloading MoveNet Lightning → $OUT"
-curl -fsSL -o "$OUT" "$URL"
-echo "[pose-models] done: $(du -h "$OUT" | cut -f1)"
+
+fetch() {
+  out="$DIR/$1"
+  url="$2"
+  if [ -s "$out" ]; then
+    echo "[pose-models] already present: $out ($(du -h "$out" | cut -f1))"
+    return 0
+  fi
+  echo "[pose-models] downloading $1 → $out"
+  curl -fsSL -o "$out" "$url"
+  echo "[pose-models] done: $(du -h "$out" | cut -f1)"
+}
+
+fetch blazepose_detector.onnx "https://huggingface.co/fernandotonon/QtMeshEditor-blazepose-onnx/resolve/main/pose_detector.onnx"
+fetch blazepose_landmarks.onnx "https://huggingface.co/fernandotonon/QtMeshEditor-poselandmarks-onnx/resolve/main/pose_landmarks.onnx"
+fetch movenet_lightning.onnx "https://huggingface.co/Xenova/movenet-singlepose-lightning/resolve/main/onnx/model.onnx"

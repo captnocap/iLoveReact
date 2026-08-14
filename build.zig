@@ -1577,6 +1577,38 @@ pub fn build(b: *std.Build) void {
         run_pose_async_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/onnxruntime/lib"));
         const pose_async_test_step = b.step("test-pose-async", "Run ONNX-backed live pose worker integration test");
         pose_async_test_step.dependOn(&run_pose_async_test.step);
+
+        // BlazePose lane (req_4387): contract checks run model-free; the
+        // lifecycle test additionally proves output-shape resolution when the
+        // vendored models are installed. RJIT_BLAZEPOSE_IMAGE=/path.jpg is the
+        // ground-truth probe.
+        const blazepose_mod_for_tests = b.createModule(.{
+            .root_source_file = b.path("framework/ml/blazepose.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        blazepose_mod_for_tests.addIncludePath(b.path("deps/onnxruntime/include"));
+        blazepose_mod_for_tests.addIncludePath(b.path("."));
+        const blazepose_test_mod = b.createModule(.{
+            .root_source_file = b.path("framework/testing/unit/blazepose.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        blazepose_test_mod.addImport("blazepose", blazepose_mod_for_tests);
+        blazepose_test_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
+        const blazepose_test = b.addTest(.{
+            .name = "blazepose-test",
+            .root_module = blazepose_test_mod,
+        });
+        blazepose_test.root_module.addLibraryPath(b.path("deps/onnxruntime/lib"));
+        blazepose_test.root_module.linkSystemLibrary("onnxruntime", .{});
+        blazepose_test.root_module.addRPath(b.path("deps/onnxruntime/lib"));
+        const run_blazepose_test = b.addRunArtifact(blazepose_test);
+        run_blazepose_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/onnxruntime/lib"));
+        const blazepose_test_step = b.step("test-blazepose", "Run ONNX-backed BlazePose lane contract + integration tests");
+        blazepose_test_step.dependOn(&run_blazepose_test.step);
     }
 
     // ── mesh import (GLB/OBJ) unit tests — headless, no GPU ────────────────────
