@@ -288,14 +288,36 @@ fn surface_blend(kind: i32, base: vec3f, over: vec3f, f: f32) -> vec3f {
 }
 
 var<private> mat_data_base: u32 = 0u;
+// Composed recipes rebase a layer's slot/param indices into the recipe's own
+// flat tables by setting these before the layer's sample; every ordinary
+// single-material path leaves them at zero, so reads are unchanged.
+var<private> mat_slot_offset: i32 = 0;
+var<private> mat_param_offset: i32 = 0;
 
-fn mat_pal(i: i32, baked: vec3f) -> vec3f {
+fn mat_pal(i_in: i32, baked: vec3f) -> vec3f {
+  let i = i_in + mat_slot_offset;
   if (arrayLength(&D) < mat_data_base + 7u) { return baked; }
   let n = i32(D[mat_data_base + 5u] + 0.5);
-  if (i >= n) { return baked; }
+  if (i >= n || i < 0) { return baked; }
   let base = mat_data_base + u32(6 + i * 3);
   if (arrayLength(&D) < base + 3u) { return baked; }
   return vec3f(D[base], D[base + 1u], D[base + 2u]);
+}
+
+// The param section (Material Lab phase 3) rides AFTER the palette section:
+// D[6 + 3*paletteCount] = param count, then the values. Same defaulting law
+// as mat_pal: absent/short data ⇒ the baked constant, pixel-identical.
+fn mat_param(i_in: i32, baked: f32) -> f32 {
+  let i = i_in + mat_param_offset;
+  if (arrayLength(&D) < mat_data_base + 7u) { return baked; }
+  let n = i32(D[mat_data_base + 5u] + 0.5);
+  let p_base = mat_data_base + u32(6 + n * 3);
+  if (arrayLength(&D) < p_base + 1u) { return baked; }
+  let pn = i32(D[p_base] + 0.5);
+  if (i >= pn || i < 0) { return baked; }
+  let at = p_base + 1u + u32(i);
+  if (arrayLength(&D) < at + 1u) { return baked; }
+  return D[at];
 }
 
 // @material road
@@ -15466,9 +15488,9 @@ fn colormod_night(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> v
 // @kind colormod
 // @tags color, quantize, filter
 // @author lab
+// @param levels: f32 = 6.0 range(2.0, 16.0) "Levels"
 fn colormod_posterize(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -> vec3f {
-  let levels = 6.0;
-  let quantized = floor(col * levels + vec3f(0.5, 0.5, 0.5)) / levels;
+  let quantized = floor(col * mat_param(0, 6.0) + vec3f(0.5, 0.5, 0.5)) / mat_param(0, 6.0);
   return mix(col, quantized, sat(amount));
 }
 
@@ -15487,8 +15509,9 @@ fn colormod_saturate(col: vec3f, uv: vec2f, px: vec2f, seed: f32, amount: f32) -
 // @kind field
 // @tags voronoi, cells, mask
 // @author lab
+// @param scale: f32 = 8.0 range(2.0, 24.0) "Cell scale"
 fn field_cells(uv: vec2f, px: vec2f, seed: f32) -> f32 {
-  let v = voronoi(uv.x * 8.0 + seed, uv.y * 8.0 - seed);
+  let v = voronoi(uv.x * mat_param(0, 8.0) + seed, uv.y * mat_param(0, 8.0) - seed);
   return sat((v.y - v.x) * 2.2);
 }
 
@@ -15497,8 +15520,9 @@ fn field_cells(uv: vec2f, px: vec2f, seed: f32) -> f32 {
 // @kind field
 // @tags cracks, damage, mask
 // @author lab
+// @param scale: f32 = 9.0 range(2.0, 24.0) "Crack scale"
 fn field_cracks(uv: vec2f, px: vec2f, seed: f32) -> f32 {
-  return crack_field(uv, seed, 9.0);
+  return crack_field(uv, seed, mat_param(0, 9.0));
 }
 
 // @atom field_drips
@@ -15515,8 +15539,9 @@ fn field_drips(uv: vec2f, px: vec2f, seed: f32) -> f32 {
 // @kind field
 // @tags noise, organic, mask
 // @author lab
+// @param scale: f32 = 6.0 range(1.0, 24.0) "Noise scale"
 fn field_fbm(uv: vec2f, px: vec2f, seed: f32) -> f32 {
-  return sat(fbm(uv.x * 6.0 + seed, uv.y * 6.0 - seed, 4.0) * 0.5 + 0.5);
+  return sat(fbm(uv.x * mat_param(0, 6.0) + seed, uv.y * mat_param(0, 6.0) - seed, 4.0) * 0.5 + 0.5);
 }
 
 // @atom field_gradient
@@ -15542,8 +15567,9 @@ fn field_leaf(uv: vec2f, px: vec2f, seed: f32) -> f32 {
 // @kind field
 // @tags grain, dots, mask
 // @author lab
+// @param sparsity: f32 = 0.90 range(0.5, 0.99) "Speckle sparsity"
 fn field_speckle(uv: vec2f, px: vec2f, seed: f32) -> f32 {
-  return speckle(px, 3.0, seed, 0.90);
+  return speckle(px, 3.0, seed, mat_param(0, 0.9));
 }
 
 // @atom warp_fbm
@@ -15562,8 +15588,9 @@ fn warp_fbm(uv: vec2f, seed: f32, amount: f32) -> vec2f {
 // @kind warp
 // @tags waves, sine, domain
 // @author lab
+// @param frequency: f32 = 22.0 range(4.0, 60.0) "Wave frequency"
 fn warp_ripple(uv: vec2f, seed: f32, amount: f32) -> vec2f {
-  return uv + vec2f(sin(uv.y * 22.0 + seed), sin(uv.x * 22.0 - seed)) * amount * 0.04;
+  return uv + vec2f(sin(uv.y * mat_param(0, 22.0) + seed), sin(uv.x * mat_param(0, 22.0) - seed)) * amount * 0.04;
 }
 
 // @atom warp_swirl

@@ -137,14 +137,20 @@ const SLAB_JOINT_FNS = new Set([
 // their pattern so generator drift fails LOUD.
 // mat_pal is row-relative so the same generated functions can serve one fill
 // or Paint's packed thumbnail grid. Ground owns a different D stream entirely,
-// therefore its composition must neutralize the row-relative palette count.
-// Keep this exact drift guard paired with build-shaders.ts's generated line.
+// therefore its composition must neutralize the row-relative palette count —
+// and mat_param's section count (the same generated line appears in BOTH
+// readers, and the param reader would otherwise interpret ground cell data as
+// a param table). Keep these exact drift guards paired with build-shaders.ts.
 const MAT_PAL_COUNT_LINE = 'let n = i32(D[mat_data_base + 5u] + 0.5);';
+const MAT_PARAM_COUNT_LINE = 'let pn = i32(D[p_base] + 0.5);';
 
 function composedFillFuncsFor(fns: readonly string[]): string {
   const { prelude, bodies } = splitFillDispatch();
   if (!prelude.includes(MAT_PAL_COUNT_LINE)) {
     throw new Error('[groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output');
+  }
+  if (!prelude.includes(MAT_PARAM_COUNT_LINE)) {
+    throw new Error('[groundFormula] dispatch drift: mat_param count line not found — re-check build-shaders.ts output');
   }
   // Per-used-set composition (req_3473): the helpers prelude + just the wanted
   // material bodies (plus their transitive material calls) + a small fill_pick
@@ -163,7 +169,8 @@ function composedFillFuncsFor(fns: readonly string[]): string {
   // fail WGSL compile ("no definition in scope for identifier: U") and ALL
   // painted ground goes invisible (req_2651).
   return src.replace(D_DECL, '// (D is declared by the heightfield harness)')
-    .replace(MAT_PAL_COUNT_LINE, 'let n = 0; // ground stream carries cells, not a fill palette — baked colors only')
+    .replaceAll(MAT_PAL_COUNT_LINE, 'let n = 0; // ground stream carries cells, not a fill palette — baked colors only')
+    .replace(MAT_PARAM_COUNT_LINE, 'let pn = 0; // ground stream carries cells, not a param table — baked constants only')
     .replace(/\bU\.time\b/g, 'S.time');
 }
 

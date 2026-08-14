@@ -76,6 +76,17 @@ export function withPalette(data: number[], palette: Array<[number, number, numb
   return [...data.slice(0, 5), palette.length, ...palette.flat()];
 }
 
+/** Append a param section AFTER the palette section: count, then values, read
+ *  by mat_param in @param index order. A 5-float row gains an explicit zero
+ *  palette count first so the sections stay addressable. Pass null/empty to
+ *  keep the row as-is (mat_param falls back to baked — pixel-identical). */
+export function withParams(data: number[], params: number[] | null | undefined): number[] {
+  if (!params || params.length === 0) return data;
+  const paletteCount = data.length > 5 ? data[5]! : 0;
+  const base = data.length > 5 ? data.slice(0, 6 + paletteCount * 3) : [...data.slice(0, 5), 0];
+  return [...base, params.length, ...params];
+}
+
 export type ShaderTexturePreset = {
   id: string;
   label: string;

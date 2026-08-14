@@ -85,14 +85,57 @@ function loadBoards() {
 // ── parse one material file's header ────────────────────────────────────────
 const HEADER_FIELD_RE = /^\/\/ @([\w-]+) (.*)$/;
 
+// @param declarations (Material Lab phase 3) — opt-in named scalar knobs:
+//   // @param roughness: f32 = 0.5 range(0.0, 1.0) "Surface roughness"
+// The body writes the bare identifier; generation rewrites it to
+// mat_param(<index>, <default>) so a D[]-carried param section overrides it
+// with ZERO recompile, and absent data returns the baked default —
+// pixel-identical, the exact mat_pal discipline.
+const PARAM_LINE_RE = /^\/\/ @param ([A-Za-z_]\w*): f32 = (-?\d*\.?\d+) range\((-?\d*\.?\d+), (-?\d*\.?\d+)\) "([^"]+)"$/;
+const RESERVED_PARAM_KEYS = new Set(['uv', 'px', 'variant', 'seed', 'col', 'amount']);
+
+function parseParamLine(line, fileName) {
+  const m = PARAM_LINE_RE.exec(line);
+  if (!m) die(fileName + ': malformed @param line (expected `// @param key: f32 = 0.5 range(0.0, 1.0) "Label"`): ' + line);
+  const key = m[1];
+  if (RESERVED_PARAM_KEYS.has(key)) die(fileName + ': @param key "' + key + '" collides with a signature parameter');
+  return { key, default: Number(m[2]), min: Number(m[3]), max: Number(m[4]), label: m[5] };
+}
+
+// Rewrite each declared param's bare identifier to its mat_param read. The
+// identifier must exist in the body and must not be shadowed by a local.
+function rewriteParams(raw, params, fileName) {
+  let out = raw;
+  params.forEach((p, i) => {
+    const shadow = new RegExp('\\b(?:let|var)\\s+' + p.key + '\\b');
+    if (shadow.test(out)) die(fileName + ': @param "' + p.key + '" is shadowed by a local declaration');
+    const ident = new RegExp('\\b' + p.key + '\\b(?!\\s*:)', 'g');
+    const body = out.slice(out.indexOf('\nfn ') + 1);
+    if (!ident.test(body)) die(fileName + ': @param "' + p.key + '" is never used in the fn body');
+    ident.lastIndex = 0;
+    out = out.slice(0, out.indexOf('\nfn ') + 1) + body.replace(ident, 'mat_param(' + i + ', ' + m32(p.default) + ')');
+  });
+  return out;
+}
+
+function m32(value) {
+  const text = String(value);
+  return /[.e]/.test(text) ? text : text + '.0';
+}
+
 function parseMaterial(path, fileName) {
   const src = __fs_read(path);
   if (src === null) die('cannot read ' + path);
   const lines = src.split('\n');
   const fields = {};
+  const params = [];
   let bodyStart = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (line.startsWith('// @param ')) {
+      params.push(parseParamLine(line, fileName));
+      continue;
+    }
     const m = HEADER_FIELD_RE.exec(line);
     if (m) {
       fields[m[1]] = m[2].trim();
@@ -119,9 +162,10 @@ function parseMaterial(path, fileName) {
   }
   const tags = fields['tags'].split(',').map((s) => s.trim()).filter(Boolean);
   const body = lines.slice(bodyStart).join('\n').replace(/\n+$/, '');
+  const raw = rewriteParams(src.replace(/\n+$/, ''), params, fileName);
   return {
     fn, slug: fields['slug'], name: fields['name'], boardSlug: fields['board'],
-    variantLabels, kind, tags, author: fields['author'], raw: src.replace(/\n+$/, ''), body,
+    variantLabels, kind, tags, author: fields['author'], raw, body, params,
   };
 }
 
@@ -142,9 +186,14 @@ function parseAtom(path, fileName) {
   if (src === null) die('cannot read ' + path);
   const lines = src.split('\n');
   const fields = {};
+  const params = [];
   let bodyStart = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (line.startsWith('// @param ')) {
+      params.push(parseParamLine(line, fileName));
+      continue;
+    }
     const m = HEADER_FIELD_RE.exec(line);
     if (m) {
       fields[m[1]] = m[2].trim();
@@ -173,7 +222,8 @@ function parseAtom(path, fileName) {
     die(fileName + ': a ' + kind + ' atom must declare exactly `' + requiredSig + '` — got `' + lines[bodyStart] + '`');
   }
   const tags = fields['tags'].split(',').map((s) => s.trim()).filter(Boolean);
-  return { fn, name: fields['name'], kind, tags, author: fields['author'], raw: src.replace(/\n+$/, '') };
+  const raw = rewriteParams(src.replace(/\n+$/, ''), params, fileName);
+  return { fn, name: fields['name'], kind, tags, author: fields['author'], raw, params };
 }
 
 // ── load / update the stable id table ───────────────────────────────────────
@@ -318,14 +368,36 @@ function extractSlots(raw) {
 // invocation, so neighboring thumbnail pixels cannot leak row selection.
 const MAT_PAL_WGSL = `
 var<private> mat_data_base: u32 = 0u;
+// Composed recipes rebase a layer's slot/param indices into the recipe's own
+// flat tables by setting these before the layer's sample; every ordinary
+// single-material path leaves them at zero, so reads are unchanged.
+var<private> mat_slot_offset: i32 = 0;
+var<private> mat_param_offset: i32 = 0;
 
-fn mat_pal(i: i32, baked: vec3f) -> vec3f {
+fn mat_pal(i_in: i32, baked: vec3f) -> vec3f {
+  let i = i_in + mat_slot_offset;
   if (arrayLength(&D) < mat_data_base + 7u) { return baked; }
   let n = i32(D[mat_data_base + 5u] + 0.5);
-  if (i >= n) { return baked; }
+  if (i >= n || i < 0) { return baked; }
   let base = mat_data_base + u32(6 + i * 3);
   if (arrayLength(&D) < base + 3u) { return baked; }
   return vec3f(D[base], D[base + 1u], D[base + 2u]);
+}
+
+// The param section (Material Lab phase 3) rides AFTER the palette section:
+// D[6 + 3*paletteCount] = param count, then the values. Same defaulting law
+// as mat_pal: absent/short data ⇒ the baked constant, pixel-identical.
+fn mat_param(i_in: i32, baked: f32) -> f32 {
+  let i = i_in + mat_param_offset;
+  if (arrayLength(&D) < mat_data_base + 7u) { return baked; }
+  let n = i32(D[mat_data_base + 5u] + 0.5);
+  let p_base = mat_data_base + u32(6 + n * 3);
+  if (arrayLength(&D) < p_base + 1u) { return baked; }
+  let pn = i32(D[p_base] + 0.5);
+  if (i >= pn || i < 0) { return baked; }
+  let at = p_base + 1u + u32(i);
+  if (arrayLength(&D) < at + 1u) { return baked; }
+  return D[at];
 }
 `;
 
@@ -379,11 +451,20 @@ registryOut += '// _generated/registry.ts — GENERATED by build-shaders.ts. Do 
 registryOut += '// Run: tools/v8cli cart/editor/render3d/shaders/build-shaders.ts\n';
 registryOut += "export type MaterialKind = 'surface' | 'composition' | 'gradient';\n\n";
 registryOut += 'export type MaterialSlot = { name: string; rgb: [number, number, number] };\n\n';
+registryOut += '// @param declarations, in mat_param() index order. The D[] param section\n';
+registryOut += '// (count at D[6+3*paletteCount], then values) overrides the baked defaults.\n';
+registryOut += 'export type RegistryParam = { key: string; label: string; default: number; min: number; max: number };\n\n';
 registryOut += 'export type RegistryMaterial = {\n';
 registryOut += '  fn: string;\n  slug: string;\n  name: string;\n  board: string;\n  boardIndex: number;\n  materialId: number;\n  variantLabels: string[];\n  kind: MaterialKind;\n  tags: string[];\n  author: string;\n';
 registryOut += '  // Palette slots: the baked vec3f constants extracted from the material fn,\n';
 registryOut += '  // in mat_pal() index order. D[5]=count, D[6+i*3..]=RGB overrides them.\n';
-registryOut += '  slots: MaterialSlot[];\n};\n\n';
+registryOut += '  slots: MaterialSlot[];\n';
+registryOut += '  params: RegistryParam[];\n};\n\n';
+function paramsTs(params) {
+  return '[' + params.map((p) => '{ key: ' + JSON.stringify(p.key) + ', label: ' + JSON.stringify(p.label)
+    + ', default: ' + p.default + ', min: ' + p.min + ', max: ' + p.max + ' }').join(', ') + ']';
+}
+
 registryOut += 'export const MATERIALS: RegistryMaterial[] = [\n';
 for (const boardIdx of [...byBoard.keys()].sort((a, b) => a - b)) {
   for (const m of byBoard.get(boardIdx)) {
@@ -392,7 +473,7 @@ for (const boardIdx of [...byBoard.keys()].sort((a, b) => a - b)) {
       + ', board: ' + JSON.stringify(m.boardSlug) + ', boardIndex: ' + m.boardIndex + ', materialId: ' + m.materialId
       + ', variantLabels: ' + tsStringArray(m.variantLabels) + ', kind: ' + JSON.stringify(m.kind)
       + ', tags: ' + tsStringArray(m.tags) + ', author: ' + JSON.stringify(m.author)
-      + ',\n    slots: ' + slotsTs + ' },\n';
+      + ',\n    slots: ' + slotsTs + ', params: ' + paramsTs(m.params) + ' },\n';
   }
 }
 registryOut += '];\n\n';
@@ -416,11 +497,11 @@ registryOut += '];\n';
 // ── atoms (Material Lab building blocks) ─────────────────────────────────
 registryOut += '\n';
 registryOut += "export type AtomKind = 'field' | 'warp' | 'colormod';\n\n";
-registryOut += 'export type RegistryAtom = { fn: string; name: string; kind: AtomKind; tags: string[]; author: string };\n\n';
+registryOut += 'export type RegistryAtom = { fn: string; name: string; kind: AtomKind; tags: string[]; author: string; params: RegistryParam[] };\n\n';
 registryOut += 'export const ATOMS: RegistryAtom[] = [\n';
 for (const a of atoms) {
   registryOut += '  { fn: ' + JSON.stringify(a.fn) + ', name: ' + JSON.stringify(a.name) + ', kind: ' + JSON.stringify(a.kind)
-    + ', tags: ' + tsStringArray(a.tags) + ', author: ' + JSON.stringify(a.author) + ' },\n';
+    + ', tags: ' + tsStringArray(a.tags) + ', author: ' + JSON.stringify(a.author) + ', params: ' + paramsTs(a.params) + ' },\n';
 }
 registryOut += '];\n';
 

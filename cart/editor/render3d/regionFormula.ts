@@ -19,10 +19,12 @@
 // recompiles (hash-gated host-side), changing variant/seed/palette/scale is
 // still pure data.
 //
-// Region D layout (the palette-slot contract + region extras):
+// Region D layout (the palette-slot contract + the param section + region
+// extras — harness extras always ride AFTER the shared sections):
 //   [0] materialId  [1] variant  [2] seed  [3] quality (unused here)  [4] board
 //   [5] paletteSlotCount   [6 + 3i ..] slot i rgb   (mat_pal reads these)
-//   [6 + 3*slotCount] domainScale — material tiles per world unit (default 1)
+//   [6 + 3*slotCount] paramCount   [.. + 1 ..] param values (mat_param)
+//   [7 + 3*slotCount + paramCount] domainScale — tiles per world unit (default 1)
 //
 // The domain is NOT tiled with fract(): a lavalamp's goo must be continuous
 // across every face, and sin/fbm materials evaluate fine on unbounded coords.
@@ -81,7 +83,8 @@ fn region_rgb(p: vec3f, n: vec3f) -> vec3f {
   let seed = D[2];
   let board = i32(D[4]);
   let slotCount = u32(max(D[5], 0.0) + 0.5);
-  var scale = D[6u + slotCount * 3u];
+  let paramCount = u32(max(D[6u + slotCount * 3u], 0.0) + 0.5);
+  var scale = D[7u + slotCount * 3u + paramCount];
   if (scale <= 0.0001) { scale = 1.0; }
   let an = abs(n) + vec3f(0.0001);
   let w = an / (an.x + an.y + an.z);
@@ -117,7 +120,8 @@ export function buildRegionData(binding: LiveMaterialBinding): Float32Array | nu
   }
   const slots = mat.slots ?? [];
   const palette = slots.map((slot, i) => binding.palette?.[i] ?? slot.rgb);
-  const out = new Float32Array(6 + palette.length * 3 + 1);
+  const params = (mat.params ?? []).map((p) => p.default);
+  const out = new Float32Array(7 + palette.length * 3 + params.length + 1);
   out[0] = mat.materialId;
   out[1] = binding.variant ?? 0;
   out[2] = binding.seed ?? mat.materialId * 7.3;
@@ -129,6 +133,10 @@ export function buildRegionData(binding: LiveMaterialBinding): Float32Array | nu
     out[6 + i * 3 + 1] = g;
     out[6 + i * 3 + 2] = b;
   });
-  out[6 + palette.length * 3] = binding.scale ?? 1;
+  // The param section is explicit even at its defaults so the trailing
+  // domainScale always sits one address past it (region_rgb reads it there).
+  out[6 + palette.length * 3] = params.length;
+  params.forEach((value, i) => { out[7 + palette.length * 3 + i] = value; });
+  out[7 + palette.length * 3 + params.length] = binding.scale ?? 1;
   return out;
 }

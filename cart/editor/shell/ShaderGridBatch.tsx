@@ -17,7 +17,8 @@ export const SHADER_GRID_TUNING = Object.freeze({
 
 const THUMBNAIL_INSET = (SHADER_GRID_TUNING.cellSize - SHADER_GRID_TUNING.thumbnailSize) / 2;
 
-/** A fill row is [material, variant, seed, quality, board, paletteCount?, ...rgb]. */
+/** A fill row is [material, variant, seed, quality, board, paletteCount?,
+ *  ...rgb, paramCount?, ...params]. */
 export function isBatchableFillData(data: readonly number[]): boolean {
   if (data.length < 5 || data.some((value) => !Number.isFinite(value))) return false;
   if (data.length === 5) return true;
@@ -29,8 +30,9 @@ export function isBatchableFillData(data: readonly number[]): boolean {
 /**
  * Pack variable-length material rows behind a cell-offset table. Null entries
  * stay transparent for special/custom shaders rendered by the per-cell fallback.
- * Five-float rows receive an explicit zero palette count so mat_pal cannot read
- * the following packed row as palette metadata.
+ * Rows are completed with explicit zero palette AND param counts, so neither
+ * mat_pal nor mat_param can ever read the following packed row as metadata —
+ * inside a grid, arrayLength spans every row, so counts are the only fence.
  */
 export function packFillShaderGridData(cells: readonly (readonly number[] | null)[]): number[] {
   if (cells.length > SHADER_GRID_TUNING.maxCells) {
@@ -51,7 +53,9 @@ export function packFillShaderGridData(cells: readonly (readonly number[] | null
     if (!data || !isBatchableFillData(data)) return;
     packed[FILL_GRID_DATA.offsetStartIndex + cellIndex] = packed.length;
     packed.push(...data);
+    const paletteCount = data.length === 5 ? 0 : data[5]!;
     if (data.length === 5) packed.push(0);
+    if (data.length <= 6 + paletteCount * 3) packed.push(0);
   });
   return packed;
 }
