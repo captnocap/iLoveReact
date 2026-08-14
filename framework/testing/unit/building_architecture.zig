@@ -5,6 +5,7 @@ const std = @import("std");
 const testing = std.testing;
 const architecture = @import("building_architecture");
 const topology = @import("wall_topology");
+const mutation = @import("wall_mutation");
 
 test "facade constructs and owns one integer-u wall source" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -553,9 +554,9 @@ test "derived topology accepts T and X junctions without manufacturing rooms" {
 
 test "derived topology groups disconnected boundaries under one floor exterior" {
     var vertices = [_]architecture.types.WallVertex{
-        wallVertex("a0", 0, 0), wallVertex("a1", 16, 0),
+        wallVertex("a0", 0, 0),   wallVertex("a1", 16, 0),
         wallVertex("a2", 16, 16), wallVertex("a3", 0, 16),
-        wallVertex("b0", 32, 0), wallVertex("b1", 48, 0),
+        wallVertex("b0", 32, 0),  wallVertex("b1", 48, 0),
         wallVertex("b2", 48, 16), wallVertex("b3", 32, 16),
     };
     var edges = [_]architecture.types.WallEdge{
@@ -575,9 +576,9 @@ test "derived topology groups disconnected boundaries under one floor exterior" 
 
 test "derived topology assigns a nested reverse boundary as a hole" {
     var vertices = [_]architecture.types.WallVertex{
-        wallVertex("o0", 0, 0), wallVertex("o1", 32, 0),
+        wallVertex("o0", 0, 0),   wallVertex("o1", 32, 0),
         wallVertex("o2", 32, 32), wallVertex("o3", 0, 32),
-        wallVertex("i0", 8, 8), wallVertex("i1", 24, 8),
+        wallVertex("i0", 8, 8),   wallVertex("i1", 24, 8),
         wallVertex("i2", 24, 24), wallVertex("i3", 8, 24),
     };
     var edges = [_]architecture.types.WallEdge{
@@ -614,7 +615,7 @@ test "derived topology retains a dangling edge in the exterior walk" {
 
 test "derived topology preserves source side after reversed edge direction" {
     var vertices = [_]architecture.types.WallVertex{
-        wallVertex("v0", 0, 0), wallVertex("v1", 16, 0),
+        wallVertex("v0", 0, 0),   wallVertex("v1", 16, 0),
         wallVertex("v2", 16, 16), wallVertex("v3", 0, 16),
     };
     var edges = [_]architecture.types.WallEdge{
@@ -663,8 +664,8 @@ fn expectSameOrderedTopologyIdentity(reference: topology.DerivedTopology, candid
 
 test "derived topology face signatures and diagnostics ignore source permutations" {
     var vertices_a = [_]architecture.types.WallVertex{
-        wallVertex("v0", 0, 0), wallVertex("v1", 16, 0),
-        wallVertex("v2", 32, 0), wallVertex("v3", 32, 16),
+        wallVertex("v0", 0, 0),   wallVertex("v1", 16, 0),
+        wallVertex("v2", 32, 0),  wallVertex("v3", 32, 16),
         wallVertex("v4", 16, 16), wallVertex("v5", 0, 16),
     };
     var edges_a = [_]architecture.types.WallEdge{
@@ -678,9 +679,9 @@ test "derived topology face signatures and diagnostics ignore source permutation
     defer graph_a.deinit(testing.allocator);
 
     var vertices_b = [_]architecture.types.WallVertex{
-        wallVertex("v5", 0, 16), wallVertex("v4", 16, 16),
+        wallVertex("v5", 0, 16),  wallVertex("v4", 16, 16),
         wallVertex("v3", 32, 16), wallVertex("v2", 32, 0),
-        wallVertex("v1", 16, 0), wallVertex("v0", 0, 0),
+        wallVertex("v1", 16, 0),  wallVertex("v0", 0, 0),
     };
     var edges_b = [_]architecture.types.WallEdge{
         wallEdge("e6", "v1", "v4"), wallEdge("e5", "v5", "v0"),
@@ -694,7 +695,7 @@ test "derived topology face signatures and diagnostics ignore source permutation
 
     var vertices_c = [_]architecture.types.WallVertex{
         wallVertex("v2", 32, 0), wallVertex("v5", 0, 16),
-        wallVertex("v0", 0, 0), wallVertex("v4", 16, 16),
+        wallVertex("v0", 0, 0),  wallVertex("v4", 16, 16),
         wallVertex("v1", 16, 0), wallVertex("v3", 32, 16),
     };
     var edges_c = [_]architecture.types.WallEdge{
@@ -710,7 +711,7 @@ test "derived topology face signatures and diagnostics ignore source permutation
     var vertices_d = [_]architecture.types.WallVertex{
         wallVertex("v4", 16, 16), wallVertex("v0", 0, 0),
         wallVertex("v3", 32, 16), wallVertex("v1", 16, 0),
-        wallVertex("v5", 0, 16), wallVertex("v2", 32, 0),
+        wallVertex("v5", 0, 16),  wallVertex("v2", 32, 0),
     };
     var edges_d = [_]architecture.types.WallEdge{
         wallEdge("e1", "v1", "v2"), wallEdge("e4", "v4", "v5"),
@@ -798,7 +799,7 @@ test "derived topology diagnoses and explicitly excludes a self loop" {
 
 test "derived topology diagnoses an intersection inside opening clearance" {
     var vertices = [_]architecture.types.WallVertex{
-        wallVertex("left", 0, 0), wallVertex("right", 32, 0),
+        wallVertex("left", 0, 0),      wallVertex("right", 32, 0),
         wallVertex("bottom", 16, -16), wallVertex("top", 16, 16),
     };
     var opening = [_]architecture.types.WallOpening{.{
@@ -836,7 +837,7 @@ test "derived topology diagnoses an intersection inside opening clearance" {
 
 test "derived topology diagnoses a traversal exceeding the half-edge bound" {
     var vertices = [_]architecture.types.WallVertex{
-        wallVertex("v0", 0, 0), wallVertex("v1", 16, 0),
+        wallVertex("v0", 0, 0),   wallVertex("v1", 16, 0),
         wallVertex("v2", 16, 16), wallVertex("v3", 0, 16),
     };
     var edges = [_]architecture.types.WallEdge{
@@ -877,4 +878,1585 @@ test "facade source validation constructs and rejects normalized topology atomic
         error.topology_invalid,
         architecture.validateSource(testing.allocator, &invalid_source, &entries),
     );
+}
+
+fn emptyOwnedArchitectureSource(allocator: std.mem.Allocator) !architecture.ArchitectureSource {
+    return .{
+        .version = architecture.source_version,
+        .revision = 0,
+        .walls = .{
+            .vertices = try allocator.alloc(architecture.types.WallVertex, 0),
+            .edges = try allocator.alloc(architecture.types.WallEdge, 0),
+            .anchors = try allocator.alloc(architecture.types.WallAnchor, 0),
+        },
+    };
+}
+
+fn drawWallCommand(
+    command_id: []const u8,
+    expected_revision: u32,
+    start_x_u: f64,
+    start_z_u: f64,
+    end_x_u: f64,
+    end_z_u: f64,
+    start_magnet_vertex_id: ?[]const u8,
+    end_magnet_vertex_id: ?[]const u8,
+) mutation.Command {
+    return .{
+        .command_id = command_id,
+        .expected_revision = expected_revision,
+        .operation = .{ .draw_wall = .{
+            .floor = 0,
+            .start = .{ .x_u = start_x_u, .z_u = start_z_u },
+            .end = .{ .x_u = end_x_u, .z_u = end_z_u },
+            .start_magnet_vertex_id = start_magnet_vertex_id,
+            .end_magnet_vertex_id = end_magnet_vertex_id,
+            .support = .{ .absolute = .{ .base_y_u = 0 } },
+            .height_u = 48,
+            .thickness_u = 4,
+            .profile = .full,
+            .style_id = "build:wall:style:test",
+            .side_a_material_id = "material:a",
+            .side_b_material_id = "material:b",
+        } },
+    };
+}
+
+fn applyExpectedDraw(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    command: mutation.Command,
+) !void {
+    var result = try mutation.applyCommand(allocator, source, entries, command);
+    defer result.deinit(allocator);
+    switch (result) {
+        .receipt => {},
+        .rejection => |rejection| {
+            std.debug.print("unexpected draw rejection: {s}\n", .{rejection.detail});
+            return error.TestUnexpectedResult;
+        },
+    }
+}
+
+fn findSourceVertex(source: architecture.ArchitectureSource, id: []const u8) ?architecture.types.WallVertex {
+    for (source.walls.vertices) |vertex_value| {
+        if (std.mem.eql(u8, vertex_value.id, id)) return vertex_value;
+    }
+    return null;
+}
+
+fn findSourceEdge(source: architecture.ArchitectureSource, id: []const u8) ?architecture.types.WallEdge {
+    for (source.walls.edges) |edge_value| {
+        if (std.mem.eql(u8, edge_value.id, id)) return edge_value;
+    }
+    return null;
+}
+
+test "draw wall mutates an empty source with command-derived IDs" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("draw-empty", 0, 0, 0, 16, 0, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => |receipt| {
+            try testing.expectEqual(@as(u32, 0), receipt.source_revision_before);
+            try testing.expectEqual(@as(u32, 1), receipt.source_revision_after);
+            try testing.expectEqual(@as(usize, 3), receipt.created.len);
+            try testing.expectEqualStrings("draw-empty:v:0", receipt.created[0].id);
+            try testing.expectEqualStrings("draw-empty:v:1", receipt.created[1].id);
+            try testing.expectEqualStrings("draw-empty:e:0", receipt.created[2].id);
+            try testing.expectEqual(@as(usize, 3), receipt.forward_patch.operations.len);
+            try testing.expectEqual(@as(usize, 3), receipt.inverse_patch.operations.len);
+            for (receipt.forward_patch.operations) |operation| switch (operation) {
+                .insert => {},
+                else => return error.TestUnexpectedResult,
+            };
+            for (receipt.inverse_patch.operations) |operation| switch (operation) {
+                .remove => {},
+                else => return error.TestUnexpectedResult,
+            };
+            try testing.expectEqual(@as(usize, 64), receipt.source_hash_before.len);
+            try testing.expectEqual(@as(usize, 64), receipt.source_hash_after.len);
+            try testing.expect(!std.mem.eql(u8, receipt.source_hash_before, receipt.source_hash_after));
+            try testing.expectEqual(@as(usize, 1), receipt.affected_bounds.len);
+            try testing.expectEqual(architecture.types.AffectedBounds{
+                .floor = 0,
+                .min_x_u = -2,
+                .min_y_u = 0,
+                .min_z_u = -2,
+                .max_x_u_exclusive = 18,
+                .max_y_u_exclusive = 48,
+                .max_z_u_exclusive = 2,
+            }, receipt.affected_bounds[0]);
+        },
+        .rejection => return error.TestUnexpectedResult,
+    }
+    try testing.expectEqual(@as(u32, 1), source.revision);
+    try testing.expectEqual(@as(usize, 2), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+    try testing.expect(findSourceVertex(source, "draw-empty:v:0") != null);
+    try testing.expect(findSourceVertex(source, "draw-empty:v:1") != null);
+    try testing.expect(findSourceEdge(source, "draw-empty:e:0") != null);
+}
+
+test "draw wall exactly reuses a coincident endpoint" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("first", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("coincident", 1, 16, 0, 16, 16, null, null),
+    );
+
+    try testing.expectEqual(@as(usize, 3), source.walls.vertices.len);
+    const edge = findSourceEdge(source, "coincident:e:0").?;
+    try testing.expectEqualStrings("first:v:1", edge.start_vertex_id);
+    try testing.expectEqualStrings("coincident:v:0", edge.end_vertex_id);
+}
+
+test "draw wall reuses only an explicit magnet target" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("first", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("magnet", 1, 17, 0, 16, 16, "first:v:1", null),
+    );
+
+    try testing.expectEqual(@as(usize, 3), source.walls.vertices.len);
+    const edge = findSourceEdge(source, "magnet:e:0").?;
+    try testing.expectEqualStrings("first:v:1", edge.start_vertex_id);
+    try testing.expectEqualStrings("magnet:v:0", edge.end_vertex_id);
+}
+
+test "draw wall keeps an adjacent one-unit endpoint distinct without magnet" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("first", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("adjacent", 1, 17, 0, 17, 16, null, null),
+    );
+
+    try testing.expectEqual(@as(usize, 4), source.walls.vertices.len);
+    const start = findSourceVertex(source, "adjacent:v:0").?;
+    try testing.expectEqual(@as(architecture.Unit, 17), start.x_u);
+    try testing.expectEqual(@as(architecture.Unit, 0), start.z_u);
+}
+
+test "draw wall rejects non-integer structural input atomically" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("fractional", 0, 0.5, 0, 16, 0, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| try testing.expectEqual(
+            architecture.types.ArchitectureRejectionCode.structural_value_not_integer,
+            rejection.code,
+        ),
+    }
+    try testing.expectEqual(@as(u32, 0), source.revision);
+    try testing.expectEqual(@as(usize, 0), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 0), source.walls.edges.len);
+}
+
+test "draw wall accepts arbitrary-angle lattice endpoints" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("angle", 0, 0, 0, 7, 11, null, null),
+    );
+    const end = findSourceVertex(source, "angle:v:1").?;
+    try testing.expectEqual(@as(architecture.Unit, 7), end.x_u);
+    try testing.expectEqual(@as(architecture.Unit, 11), end.z_u);
+}
+
+test "draw wall preserves reversed drag as stable side-A direction" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("reverse", 0, 16, 0, 0, 0, null, null),
+    );
+    const edge = findSourceEdge(source, "reverse:e:0").?;
+    try testing.expectEqualStrings("reverse:v:0", edge.start_vertex_id);
+    try testing.expectEqualStrings("reverse:v:1", edge.end_vertex_id);
+    try testing.expectEqual(@as(architecture.Unit, 16), findSourceVertex(source, edge.start_vertex_id).?.x_u);
+    try testing.expectEqual(@as(architecture.Unit, 0), findSourceVertex(source, edge.end_vertex_id).?.x_u);
+}
+
+test "draw wall rejects a stale source revision without mutation" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("stale", 1, 0, 0, 16, 0, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| {
+            try testing.expectEqual(
+                architecture.types.ArchitectureRejectionCode.stale_source_revision,
+                rejection.code,
+            );
+            try testing.expectEqual(@as(u32, 1), rejection.expected_revision);
+            try testing.expectEqual(@as(u32, 0), rejection.actual_revision);
+        },
+    }
+    try testing.expectEqual(@as(u32, 0), source.revision);
+    try testing.expectEqual(@as(usize, 0), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 0), source.walls.edges.len);
+}
+
+fn findSourceVertexAtPoint(
+    source: architecture.ArchitectureSource,
+    floor: i32,
+    x_u: architecture.Unit,
+    z_u: architecture.Unit,
+) ?architecture.types.WallVertex {
+    for (source.walls.vertices) |vertex| {
+        if (vertex.floor == floor and vertex.x_u == x_u and vertex.z_u == z_u) return vertex;
+    }
+    return null;
+}
+
+fn expectDirectedSourceEdge(
+    source: architecture.ArchitectureSource,
+    start_x_u: architecture.Unit,
+    start_z_u: architecture.Unit,
+    end_x_u: architecture.Unit,
+    end_z_u: architecture.Unit,
+) !void {
+    for (source.walls.edges) |edge| {
+        const start = findSourceVertex(source, edge.start_vertex_id).?;
+        const end = findSourceVertex(source, edge.end_vertex_id).?;
+        if (start.x_u == start_x_u and start.z_u == start_z_u and
+            end.x_u == end_x_u and end.z_u == end_z_u)
+        {
+            return;
+        }
+    }
+    return error.TestExpectedEqual;
+}
+
+fn findDirectedSourceEdge(
+    source: architecture.ArchitectureSource,
+    start_x_u: architecture.Unit,
+    start_z_u: architecture.Unit,
+    end_x_u: architecture.Unit,
+    end_z_u: architecture.Unit,
+) ?architecture.types.WallEdge {
+    for (source.walls.edges) |edge| {
+        const start = findSourceVertex(source, edge.start_vertex_id).?;
+        const end = findSourceVertex(source, edge.end_vertex_id).?;
+        if (start.x_u == start_x_u and start.z_u == start_z_u and
+            end.x_u == end_x_u and end.z_u == end_z_u)
+        {
+            return edge;
+        }
+    }
+    return null;
+}
+
+fn expectSourceVertexIdAtPoint(
+    source: architecture.ArchitectureSource,
+    floor: i32,
+    x_u: architecture.Unit,
+    z_u: architecture.Unit,
+    expected_id: []const u8,
+) !void {
+    const vertex = findSourceVertexAtPoint(source, floor, x_u, z_u) orelse
+        return error.TestExpectedEqual;
+    try testing.expectEqualStrings(expected_id, vertex.id);
+}
+
+fn drawThreeVerticalCrossingTargets(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+) !void {
+    try applyExpectedDraw(
+        allocator,
+        source,
+        entries,
+        drawWallCommand("target-left", 0, 4, -4, 4, 4, null, null),
+    );
+    try applyExpectedDraw(
+        allocator,
+        source,
+        entries,
+        drawWallCommand("target-middle", 1, 8, -4, 8, 4, null, null),
+    );
+    try applyExpectedDraw(
+        allocator,
+        source,
+        entries,
+        drawWallCommand("target-right", 2, 12, -4, 12, 4, null, null),
+    );
+}
+
+test "draw wall splits one lattice-aligned X intersection" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    var base_command = drawWallCommand("base", 0, 0, 0, 16, 0, null, null);
+    base_command.operation.draw_wall.side_a_material_id = "material:base-side-a";
+    base_command.operation.draw_wall.side_b_material_id = "material:base-side-b";
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        base_command,
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("cross", 1, 8, -8, 8, 8, null, null),
+    );
+
+    try testing.expectEqual(@as(usize, 5), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 4), source.walls.edges.len);
+    try expectSourceVertexIdAtPoint(source, 0, 8, 0, "cross:v:2");
+    try expectDirectedSourceEdge(source, 0, 0, 8, 0);
+    try expectDirectedSourceEdge(source, 8, 0, 16, 0);
+    try expectDirectedSourceEdge(source, 8, -8, 8, 0);
+    try expectDirectedSourceEdge(source, 8, 0, 8, 8);
+    const first_base_child = findDirectedSourceEdge(source, 0, 0, 8, 0).?;
+    const second_base_child = findDirectedSourceEdge(source, 8, 0, 16, 0).?;
+    try testing.expectEqualStrings("material:base-side-a", first_base_child.side_a.material_id);
+    try testing.expectEqualStrings("material:base-side-b", first_base_child.side_b.material_id);
+    try testing.expectEqualStrings("material:base-side-a", second_base_child.side_a.material_id);
+    try testing.expectEqualStrings("material:base-side-b", second_base_child.side_b.material_id);
+}
+
+test "draw wall splits one lattice-aligned T intersection" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("base", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("tee", 1, 8, 0, 8, 8, null, null),
+    );
+
+    try testing.expectEqual(@as(usize, 4), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 3), source.walls.edges.len);
+    try expectSourceVertexIdAtPoint(source, 0, 8, 0, "tee:v:0");
+    try expectDirectedSourceEdge(source, 0, 0, 8, 0);
+    try expectDirectedSourceEdge(source, 8, 0, 16, 0);
+    try expectDirectedSourceEdge(source, 8, 0, 8, 8);
+}
+
+test "draw wall splits a stroke crossing three source edges" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawThreeVerticalCrossingTargets(testing.allocator, &source, &entries);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("multi", 3, 0, 0, 16, 0, null, null),
+    );
+
+    try testing.expectEqual(@as(usize, 11), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 10), source.walls.edges.len);
+    try expectSourceVertexIdAtPoint(source, 0, 4, 0, "multi:v:2");
+    try expectSourceVertexIdAtPoint(source, 0, 8, 0, "multi:v:3");
+    try expectSourceVertexIdAtPoint(source, 0, 12, 0, "multi:v:4");
+}
+
+test "draw wall orders intersection identities along a reversed stroke" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawThreeVerticalCrossingTargets(testing.allocator, &source, &entries);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("reverse-multi", 3, 16, 0, 0, 0, null, null),
+    );
+
+    try testing.expectEqual(@as(usize, 11), source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 10), source.walls.edges.len);
+    try expectSourceVertexIdAtPoint(source, 0, 12, 0, "reverse-multi:v:2");
+    try expectSourceVertexIdAtPoint(source, 0, 8, 0, "reverse-multi:v:3");
+    try expectSourceVertexIdAtPoint(source, 0, 4, 0, "reverse-multi:v:4");
+    try expectDirectedSourceEdge(source, 16, 0, 12, 0);
+    try expectDirectedSourceEdge(source, 12, 0, 8, 0);
+    try expectDirectedSourceEdge(source, 8, 0, 4, 0);
+    try expectDirectedSourceEdge(source, 4, 0, 0, 0);
+}
+
+test "draw wall rejects an off-lattice rational intersection atomically" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("diagonal-a", 0, 0, 0, 3, 3, null, null),
+    );
+
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("diagonal-b", 1, 0, 3, 3, 0, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| try testing.expectEqual(
+            architecture.types.ArchitectureRejectionCode.off_lattice_intersection,
+            rejection.code,
+        ),
+    }
+    try testing.expectEqual(@as(u32, 1), source.revision);
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+}
+
+test "draw wall rejects a collinear overlap atomically" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("overlap-a", 0, 0, 0, 16, 0, null, null),
+    );
+
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("overlap-b", 1, 8, 0, 24, 0, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| try testing.expectEqual(
+            architecture.types.ArchitectureRejectionCode.collinear_overlap,
+            rejection.code,
+        ),
+    }
+    try testing.expectEqual(@as(u32, 1), source.revision);
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+}
+
+const OpeningFixture = struct {
+    id: []const u8,
+    column_u: architecture.Unit,
+};
+
+fn installOpeningFixtures(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    edge_id: []const u8,
+    fixtures: []const OpeningFixture,
+) !void {
+    for (source.walls.edges) |*edge| {
+        if (!std.mem.eql(u8, edge.id, edge_id)) continue;
+        for (edge.openings) |*opening| opening.deinit(allocator);
+        if (edge.openings.len != 0) allocator.free(edge.openings);
+        const openings = try allocator.alloc(architecture.types.WallOpening, fixtures.len);
+        var initialized: usize = 0;
+        errdefer {
+            for (openings[0..initialized]) |*opening| opening.deinit(allocator);
+            if (openings.len != 0) allocator.free(openings);
+        }
+        for (fixtures) |fixture| {
+            const id = try allocator.dupe(u8, fixture.id);
+            errdefer allocator.free(id);
+            const kit_id = try allocator.dupe(u8, "build:wall:opening:door:test");
+            errdefer allocator.free(kit_id);
+            openings[initialized] = .{
+                .id = id,
+                .kind = .door,
+                .kit_id = kit_id,
+                .column_u = fixture.column_u,
+                .row_u = 0,
+                .facing_side = .a,
+                .hinge = .start,
+            };
+            initialized += 1;
+        }
+        edge.openings = openings;
+        return;
+    }
+    return error.TestExpectedEqual;
+}
+
+const AnchorFixture = struct {
+    id: []const u8,
+    column_u: architecture.Unit,
+};
+
+fn installAnchorFixtures(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    edge_id: []const u8,
+    fixtures: []const AnchorFixture,
+) !void {
+    for (source.walls.anchors) |*anchor| anchor.deinit(allocator);
+    if (source.walls.anchors.len != 0) allocator.free(source.walls.anchors);
+    const anchors = try allocator.alloc(architecture.types.WallAnchor, fixtures.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (anchors[0..initialized]) |*anchor| anchor.deinit(allocator);
+        if (anchors.len != 0) allocator.free(anchors);
+    }
+    for (fixtures) |fixture| {
+        const id = try allocator.dupe(u8, fixture.id);
+        errdefer allocator.free(id);
+        const owned_edge_id = try allocator.dupe(u8, edge_id);
+        errdefer allocator.free(owned_edge_id);
+        const target_piece_id = try allocator.dupe(u8, "prop:wall:test");
+        errdefer allocator.free(target_piece_id);
+        anchors[initialized] = .{
+            .id = id,
+            .edge_id = owned_edge_id,
+            .side = .b,
+            .column_u = fixture.column_u,
+            .row_u = 12,
+            .target_piece_id = target_piece_id,
+        };
+        initialized += 1;
+    }
+    source.walls.anchors = anchors;
+}
+
+fn findOpeningInSource(
+    source: architecture.ArchitectureSource,
+    opening_id: []const u8,
+) ?struct { edge_id: []const u8, opening: architecture.types.WallOpening } {
+    for (source.walls.edges) |edge| {
+        for (edge.openings) |opening| {
+            if (std.mem.eql(u8, opening.id, opening_id)) return .{
+                .edge_id = edge.id,
+                .opening = opening,
+            };
+        }
+    }
+    return null;
+}
+
+fn findAnchorInSource(
+    source: architecture.ArchitectureSource,
+    anchor_id: []const u8,
+) ?architecture.types.WallAnchor {
+    for (source.walls.anchors) |anchor| {
+        if (std.mem.eql(u8, anchor.id, anchor_id)) return anchor;
+    }
+    return null;
+}
+
+test "wall split remaps measured openings before and after the split column" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("base", 0, 0, 0, 64, 0, null, null),
+    );
+    try installOpeningFixtures(testing.allocator, &source, "base:e:0", &.{
+        .{ .id = "opening-left", .column_u = 16 },
+        .{ .id = "opening-right", .column_u = 48 },
+    });
+
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("split", 1, 32, -16, 32, 16, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .rejection => return error.TestUnexpectedResult,
+        .receipt => |receipt| {
+            try testing.expectEqual(@as(usize, 1), receipt.edge_child_remaps.len);
+            try testing.expectEqualStrings("base:e:0", receipt.edge_child_remaps[0].predecessor_edge_id);
+            try testing.expectEqualSlices(
+                architecture.Unit,
+                &.{ 0, 32 },
+                receipt.edge_child_remaps[0].child_start_columns_u,
+            );
+            try testing.expectEqual(@as(usize, 2), receipt.opening_remaps.len);
+            try testing.expectEqual(@as(usize, 2), receipt.updated.len);
+            try testing.expectEqual(architecture.types.RecordFamily.opening, receipt.updated[0].family);
+            try testing.expectEqual(architecture.types.RecordFamily.opening, receipt.updated[1].family);
+        },
+    }
+
+    const left = findOpeningInSource(source, "opening-left").?;
+    const right = findOpeningInSource(source, "opening-right").?;
+    try testing.expectEqualStrings("split:e:0", left.edge_id);
+    try testing.expectEqual(@as(architecture.Unit, 16), left.opening.column_u);
+    try testing.expectEqualStrings("split:e:1", right.edge_id);
+    try testing.expectEqual(@as(architecture.Unit, 16), right.opening.column_u);
+}
+
+test "wall split rejects an intersection through an opening occupied cell" {
+    var occupied_cells = [_]architecture.types.WallCell{.{ .column_u = 0, .row_u = 0 }};
+    var door = validDoorKit();
+    door.measurement.occupied_mask = &occupied_cells;
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("base", 0, 0, 0, 64, 0, null, null),
+    );
+    try installOpeningFixtures(testing.allocator, &source, "base:e:0", &.{
+        .{ .id = "opening-on-split", .column_u = 32 },
+    });
+
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("blocked-split", 1, 32, -16, 32, 16, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| try testing.expectEqual(
+            architecture.types.ArchitectureRejectionCode.split_intersects_surface_child,
+            rejection.code,
+        ),
+    }
+    try testing.expectEqual(@as(u32, 1), source.revision);
+    try testing.expectEqualStrings("base:e:0", findOpeningInSource(source, "opening-on-split").?.edge_id);
+}
+
+test "wall split remaps anchors on both child cell ranges" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("base", 0, 0, 0, 64, 0, null, null),
+    );
+    try installAnchorFixtures(testing.allocator, &source, "base:e:0", &.{
+        .{ .id = "anchor-left", .column_u = 8 },
+        .{ .id = "anchor-right", .column_u = 48 },
+    });
+
+    var result = try mutation.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("split", 1, 32, -16, 32, 16, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .rejection => return error.TestUnexpectedResult,
+        .receipt => |receipt| {
+            try testing.expectEqual(@as(usize, 1), receipt.edge_child_remaps.len);
+            try testing.expectEqual(@as(usize, 2), receipt.anchor_remaps.len);
+            try testing.expectEqual(@as(usize, 2), receipt.updated.len);
+            var forward_anchor_replaces: usize = 0;
+            for (receipt.forward_patch.operations) |operation| switch (operation) {
+                .replace => |delta| if (delta.family == .anchor) {
+                    forward_anchor_replaces += 1;
+                },
+                else => {},
+            };
+            var inverse_anchor_replaces: usize = 0;
+            for (receipt.inverse_patch.operations) |operation| switch (operation) {
+                .replace => |delta| if (delta.family == .anchor) {
+                    inverse_anchor_replaces += 1;
+                },
+                else => {},
+            };
+            try testing.expectEqual(@as(usize, 2), forward_anchor_replaces);
+            try testing.expectEqual(@as(usize, 2), inverse_anchor_replaces);
+        },
+    }
+
+    const left = findAnchorInSource(source, "anchor-left").?;
+    const right = findAnchorInSource(source, "anchor-right").?;
+    try testing.expectEqualStrings("split:e:0", left.edge_id);
+    try testing.expectEqual(@as(architecture.Unit, 8), left.column_u);
+    try testing.expectEqualStrings("split:e:1", right.edge_id);
+    try testing.expectEqual(@as(architecture.Unit, 16), right.column_u);
+}
+
+const SMALL_DOOR_PROFILES = [_]architecture.types.WallProfile{ .full, .half };
+const SMALL_DOOR_THICKNESSES = [_]architecture.Unit{4};
+
+fn smallDoorKit() architecture.CatalogEntry {
+    var kit = validDoorKit();
+    kit.catalog_id = @constCast("build:wall:opening:door:small");
+    kit.content_hash = @constCast(HASH_D);
+    kit.label = @constCast("Small Test Door");
+    kit.measurement.source_bounds_u = .{
+        .min_x_u = -5,
+        .min_y_u = 0,
+        .min_z_u = -2,
+        .max_x_u = 5,
+        .max_y_u = 21,
+        .max_z_u = 2,
+    };
+    kit.measurement.mount_bounds_u = .{ .min_u = -4.2, .min_v = 0, .max_u = 4.2, .max_v = 20.2 };
+    kit.measurement.footprint = .{
+        .min_column = -5,
+        .min_row = 0,
+        .max_column_exclusive = 5,
+        .max_row_exclusive = 21,
+    };
+    kit.wall_opening_compatibility = .{
+        .permitted_profiles = @constCast(SMALL_DOOR_PROFILES[0..]),
+        .permitted_thickness_u = @constCast(SMALL_DOOR_THICKNESSES[0..]),
+        .portal_class = .walk,
+    };
+    return kit;
+}
+
+fn openingCommand(
+    command_id: []const u8,
+    expected_revision: u32,
+    edge_id: []const u8,
+    opening_id: []const u8,
+    kit_id: []const u8,
+    column_u: f64,
+    row_u: f64,
+) mutation.Command {
+    return .{
+        .command_id = command_id,
+        .expected_revision = expected_revision,
+        .operation = .{ .insert_opening = .{
+            .edge_id = edge_id,
+            .opening = .{
+                .opening_id = opening_id,
+                .kind = .door,
+                .kit_id = kit_id,
+                .column_u = column_u,
+                .row_u = row_u,
+                .facing_side = .a,
+                .hinge = .start,
+            },
+        } },
+    };
+}
+
+fn configureOpeningCommand(
+    command_id: []const u8,
+    expected_revision: u32,
+    opening_id: []const u8,
+    kit_id: []const u8,
+    column_u: f64,
+    row_u: f64,
+    facing_side: architecture.types.WallSide,
+    hinge: architecture.types.WallHinge,
+) mutation.Command {
+    return .{
+        .command_id = command_id,
+        .expected_revision = expected_revision,
+        .operation = .{ .configure_opening = .{
+            .opening_id = opening_id,
+            .kind = .door,
+            .kit_id = kit_id,
+            .column_u = column_u,
+            .row_u = row_u,
+            .facing_side = facing_side,
+            .hinge = hinge,
+        } },
+    };
+}
+
+fn applyExpectedOpeningMutation(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    command: mutation.Command,
+) !void {
+    var result = try mutation.applyCommand(allocator, source, entries, command);
+    defer result.deinit(allocator);
+    switch (result) {
+        .receipt => {},
+        .rejection => |rejection| {
+            std.debug.print("unexpected opening rejection: {s}\n", .{rejection.detail});
+            return error.TestUnexpectedResult;
+        },
+    }
+}
+
+fn drawOpeningTestWall(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    profile: architecture.types.WallProfile,
+    thickness_u: f64,
+    height_u: f64,
+) !void {
+    var command = drawWallCommand("base", 0, 0, 0, 64, 0, null, null);
+    command.operation.draw_wall.profile = profile;
+    command.operation.draw_wall.thickness_u = thickness_u;
+    command.operation.draw_wall.height_u = height_u;
+    try applyExpectedDraw(allocator, source, entries, command);
+}
+
+fn expectOpeningRejection(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    command: mutation.Command,
+    expected: architecture.types.ArchitectureRejectionCode,
+) !void {
+    var result = try mutation.applyCommand(allocator, source, entries, command);
+    defer result.deinit(allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| try testing.expectEqual(expected, rejection.code),
+    }
+}
+
+test "opening insert stores only measured kit identity and placement" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("insert", 1, "base:e:0", "insert:o:0", "build:wall:opening:door:test", 16, 0),
+    );
+
+    const located = findOpeningInSource(source, "insert:o:0").?;
+    try testing.expectEqualStrings("base:e:0", located.edge_id);
+    try testing.expectEqualStrings("build:wall:opening:door:test", located.opening.kit_id);
+    try testing.expectEqual(@as(architecture.Unit, 16), located.opening.column_u);
+    try testing.expectEqual(@as(architecture.Unit, 0), located.opening.row_u);
+}
+
+test "opening move and delete mutate one stable opening identity" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("insert", 1, "base:e:0", "insert:o:0", "build:wall:opening:door:test", 16, 0),
+    );
+    try applyExpectedOpeningMutation(testing.allocator, &source, &entries, .{
+        .command_id = "move",
+        .expected_revision = 2,
+        .operation = .{ .move_opening = .{ .opening_id = "insert:o:0", .column_u = 40, .row_u = 4 } },
+    });
+    const moved = findOpeningInSource(source, "insert:o:0").?.opening;
+    try testing.expectEqual(@as(architecture.Unit, 40), moved.column_u);
+    try testing.expectEqual(@as(architecture.Unit, 4), moved.row_u);
+    try applyExpectedOpeningMutation(testing.allocator, &source, &entries, .{
+        .command_id = "delete",
+        .expected_revision = 3,
+        .operation = .{ .delete_opening = .{ .opening_id = "insert:o:0" } },
+    });
+    try testing.expect(findOpeningInSource(source, "insert:o:0") == null);
+}
+
+test "opening configure changes measured kit facing and hinge without changing ID" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit(), smallDoorKit() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("insert", 1, "base:e:0", "insert:o:0", "build:wall:opening:door:test", 16, 0),
+    );
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        configureOpeningCommand("configure", 2, "insert:o:0", "build:wall:opening:door:small", 20, 6, .b, .end),
+    );
+    const configured = findOpeningInSource(source, "insert:o:0").?.opening;
+    try testing.expectEqualStrings("build:wall:opening:door:small", configured.kit_id);
+    try testing.expectEqual(architecture.types.WallSide.b, configured.facing_side);
+    try testing.expectEqual(architecture.types.WallHinge.end, configured.hinge);
+    try testing.expectEqual(@as(architecture.Unit, 20), configured.column_u);
+    try testing.expectEqual(@as(architecture.Unit, 6), configured.row_u);
+}
+
+test "opening slots enumerate every valid anchor in row column order" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    var slots = try mutation.openingSlots(
+        testing.allocator,
+        &source,
+        &entries,
+        "base:e:0",
+        "build:wall:opening:door:test",
+    );
+    defer slots.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 675), slots.values.len);
+    try testing.expectEqual(mutation.OpeningSlot{ .column_u = 10, .row_u = 0 }, slots.values[0]);
+    try testing.expectEqual(mutation.OpeningSlot{ .column_u = 11, .row_u = 0 }, slots.values[1]);
+    try testing.expectEqual(mutation.OpeningSlot{ .column_u = 54, .row_u = 0 }, slots.values[44]);
+    try testing.expectEqual(mutation.OpeningSlot{ .column_u = 10, .row_u = 1 }, slots.values[45]);
+    try testing.expectEqual(mutation.OpeningSlot{ .column_u = 54, .row_u = 14 }, slots.values[674]);
+}
+
+test "interactive and procedural opening commands produce identical source hashes" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var interactive = try emptyOwnedArchitectureSource(testing.allocator);
+    defer interactive.deinit(testing.allocator);
+    var procedural = try emptyOwnedArchitectureSource(testing.allocator);
+    defer procedural.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &interactive, &entries, .full, 4, 48);
+    try drawOpeningTestWall(testing.allocator, &procedural, &entries, .full, 4, 48);
+    const command = openingCommand("same", 1, "base:e:0", "same:o:0", "build:wall:opening:door:test", 24, 3);
+    var interactive_result = try mutation.applyCommand(testing.allocator, &interactive, &entries, command);
+    defer interactive_result.deinit(testing.allocator);
+    var procedural_result = try mutation.applyCommand(testing.allocator, &procedural, &entries, command);
+    defer procedural_result.deinit(testing.allocator);
+    switch (interactive_result) {
+        .rejection => return error.TestUnexpectedResult,
+        .receipt => |interactive_receipt| switch (procedural_result) {
+            .rejection => return error.TestUnexpectedResult,
+            .receipt => |procedural_receipt| try testing.expectEqualStrings(
+                interactive_receipt.source_hash_after,
+                procedural_receipt.source_hash_after,
+            ),
+        },
+    }
+}
+
+test "multiple openings may use disjoint occupied masks inside overlapping envelopes" {
+    var sparse_cells = [_]architecture.types.WallCell{.{ .column_u = 0, .row_u = 0 }};
+    var sparse_door = validDoorKit();
+    sparse_door.measurement.occupied_mask = &sparse_cells;
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), sparse_door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("first", 1, "base:e:0", "first:o:0", "build:wall:opening:door:test", 20, 0),
+    );
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("second", 2, "base:e:0", "second:o:0", "build:wall:opening:door:test", 21, 0),
+    );
+    try testing.expectEqual(@as(usize, 2), source.walls.edges[0].openings.len);
+}
+
+test "opening insertion rejects measured envelope beyond a wall end" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try expectOpeningRejection(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("end", 1, "base:e:0", "end:o:0", "build:wall:opening:door:test", 9, 0),
+        .opening_out_of_bounds,
+    );
+}
+
+test "opening insertion rejects occupied mask collision" {
+    var occupied_cells = [_]architecture.types.WallCell{.{ .column_u = 0, .row_u = 0 }};
+    var door = validDoorKit();
+    door.measurement.occupied_mask = &occupied_cells;
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("first", 1, "base:e:0", "first:o:0", "build:wall:opening:door:test", 20, 0),
+    );
+    try expectOpeningRejection(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("occupied", 2, "base:e:0", "occupied:o:0", "build:wall:opening:door:test", 20, 0),
+        .opening_occupied_collision,
+    );
+}
+
+test "opening insertion rejects clearance mask collision" {
+    var occupied_cells = [_]architecture.types.WallCell{.{ .column_u = 0, .row_u = 0 }};
+    var clearance_cells = [_]architecture.types.WallCell{.{ .column_u = 2, .row_u = 0 }};
+    var door = validDoorKit();
+    door.measurement.occupied_mask = &occupied_cells;
+    door.measurement.clearance_mask = &clearance_cells;
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .full, 4, 48);
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("first", 1, "base:e:0", "first:o:0", "build:wall:opening:door:test", 20, 0),
+    );
+    try expectOpeningRejection(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("clearance", 2, "base:e:0", "clearance:o:0", "build:wall:opening:door:test", 22, 0),
+        .opening_clearance_collision,
+    );
+}
+
+test "opening insertion rejects incompatible thickness and profile" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var thick_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer thick_source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &thick_source, &entries, .full, 6, 48);
+    try expectOpeningRejection(
+        testing.allocator,
+        &thick_source,
+        &entries,
+        openingCommand("thick", 1, "base:e:0", "thick:o:0", "build:wall:opening:door:test", 16, 0),
+        .opening_incompatible_thickness,
+    );
+
+    var half_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer half_source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &half_source, &entries, .half, 4, 48);
+    try expectOpeningRejection(
+        testing.allocator,
+        &half_source,
+        &entries,
+        openingCommand("profile", 1, "base:e:0", "profile:o:0", "build:wall:opening:door:test", 16, 0),
+        .opening_incompatible_profile,
+    );
+}
+
+test "opening insertion rejects a measured kit taller than a half wall" {
+    var half_profiles = [_]architecture.types.WallProfile{.half};
+    var door = validDoorKit();
+    door.wall_opening_compatibility.?.permitted_profiles = &half_profiles;
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &source, &entries, .half, 4, 16);
+    try expectOpeningRejection(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("height", 1, "base:e:0", "height:o:0", "build:wall:opening:door:test", 16, 0),
+        .opening_incompatible_height,
+    );
+}
+
+fn alternateWallStyle() architecture.CatalogEntry {
+    var style = validWallStyle();
+    style.catalog_id = @constCast("build:wall:style:alternate");
+    style.content_hash = @constCast(HASH_C);
+    style.package_id = @constCast("package:alternate-wall-style");
+    style.label = @constCast("Alternate Test Wall");
+    return style;
+}
+
+fn applyExpectedEdgeMutation(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    command: mutation.Command,
+) !void {
+    var result = try mutation.applyCommand(allocator, source, entries, command);
+    defer result.deinit(allocator);
+    switch (result) {
+        .receipt => {},
+        .rejection => |rejection| {
+            std.debug.print("unexpected edge rejection: {s}\n", .{rejection.detail});
+            return error.TestUnexpectedResult;
+        },
+    }
+}
+
+test "edge dimensions set an exact integer absolute base height and thickness" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("wall", 0, 0, 0, 32, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "dimensions",
+        .expected_revision = 1,
+        .operation = .{ .set_edge_dimensions = .{
+            .edge_id = "wall:e:0",
+            .support = .{ .absolute = .{ .base_y_u = -16 } },
+            .height_u = 64,
+            .thickness_u = 6,
+        } },
+    });
+    const edge = findSourceEdge(source, "wall:e:0").?;
+    switch (edge.support) {
+        .absolute => |support| try testing.expectEqual(@as(architecture.Unit, -16), support.base_y_u),
+        .slab => return error.TestUnexpectedResult,
+    }
+    try testing.expectEqual(@as(architecture.Unit, 64), edge.height_u);
+    try testing.expectEqual(@as(architecture.Unit, 6), edge.thickness_u);
+}
+
+test "edge profile toggles half and full without replacing its stable ID" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("wall", 0, 0, 0, 32, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "half",
+        .expected_revision = 1,
+        .operation = .{ .set_profile = .{ .edge_id = "wall:e:0", .profile = .half } },
+    });
+    try testing.expectEqual(architecture.types.WallProfile.half, findSourceEdge(source, "wall:e:0").?.profile);
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "full",
+        .expected_revision = 2,
+        .operation = .{ .set_profile = .{ .edge_id = "wall:e:0", .profile = .full } },
+    });
+    try testing.expectEqual(architecture.types.WallProfile.full, findSourceEdge(source, "wall:e:0").?.profile);
+}
+
+test "edge style changes through a typed catalog reference" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), alternateWallStyle() };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("wall", 0, 0, 0, 32, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "style",
+        .expected_revision = 1,
+        .operation = .{ .set_style = .{ .edge_id = "wall:e:0", .style_id = "build:wall:style:alternate" } },
+    });
+    try testing.expectEqualStrings("build:wall:style:alternate", findSourceEdge(source, "wall:e:0").?.style_id);
+}
+
+test "edge side A and side B finishes mutate independently" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("wall", 0, 0, 0, 32, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "finish-a",
+        .expected_revision = 1,
+        .operation = .{ .set_side_finish = .{ .edge_id = "wall:e:0", .side = .a, .material_id = "material:new-a" } },
+    });
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "finish-b",
+        .expected_revision = 2,
+        .operation = .{ .set_side_finish = .{ .edge_id = "wall:e:0", .side = .b, .material_id = "material:new-b" } },
+    });
+    const edge = findSourceEdge(source, "wall:e:0").?;
+    try testing.expectEqualStrings("material:new-a", edge.side_a.material_id);
+    try testing.expectEqualStrings("material:new-b", edge.side_b.material_id);
+}
+
+test "deleting one edge removes only vertices orphaned by that edge" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("first", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("second", 1, 16, 0, 32, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "delete-first",
+        .expected_revision = 2,
+        .operation = .{ .delete_edge = .{ .edge_id = "first:e:0" } },
+    });
+    try testing.expect(findSourceEdge(source, "first:e:0") == null);
+    try testing.expect(findSourceVertex(source, "first:v:0") == null);
+    try testing.expect(findSourceVertex(source, "first:v:1") != null);
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+    try testing.expectEqual(@as(usize, 2), source.walls.vertices.len);
+}
+
+test "deleting the final incident edge removes its final vertices" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("wall", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "delete-final",
+        .expected_revision = 1,
+        .operation = .{ .delete_edge = .{ .edge_id = "wall:e:0" } },
+    });
+    try testing.expectEqual(@as(usize, 0), source.walls.edges.len);
+    try testing.expectEqual(@as(usize, 0), source.walls.vertices.len);
+}
+
+test "deleting a vertex cascades every incident edge and newly orphaned vertex" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("first", 0, 0, 0, 16, 0, null, null),
+    );
+    try applyExpectedDraw(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("second", 1, 16, 0, 32, 0, null, null),
+    );
+    try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
+        .command_id = "delete-junction",
+        .expected_revision = 2,
+        .operation = .{ .delete_vertex = .{ .vertex_id = "first:v:1" } },
+    });
+    try testing.expectEqual(@as(usize, 0), source.walls.edges.len);
+    try testing.expectEqual(@as(usize, 0), source.walls.vertices.len);
+}
+
+fn expectReceiptRoundTrip(
+    allocator: std.mem.Allocator,
+    mutated_source: *architecture.ArchitectureSource,
+    patch_source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    command: mutation.Command,
+) !void {
+    const revision_before = patch_source.revision;
+    var mutation_result = try mutation.applyCommand(allocator, mutated_source, entries, command);
+    defer mutation_result.deinit(allocator);
+    switch (mutation_result) {
+        .rejection => |rejection| {
+            std.debug.print("round-trip setup rejected: {s}\n", .{rejection.detail});
+            return error.TestUnexpectedResult;
+        },
+        .receipt => |*receipt| {
+            var forward_result = try mutation.applyCommand(allocator, patch_source, entries, .{
+                .command_id = "round-trip:forward",
+                .expected_revision = receipt.forward_patch.expected_revision,
+                .operation = .{ .apply_patch = &receipt.forward_patch },
+            });
+            defer forward_result.deinit(allocator);
+            switch (forward_result) {
+                .rejection => |rejection| {
+                    std.debug.print("forward patch rejected: {s}\n", .{rejection.detail});
+                    return error.TestUnexpectedResult;
+                },
+                .receipt => {},
+            }
+
+            var inverse_result = try mutation.applyCommand(allocator, patch_source, entries, .{
+                .command_id = "round-trip:inverse",
+                .expected_revision = receipt.inverse_patch.expected_revision,
+                .operation = .{ .apply_patch = &receipt.inverse_patch },
+            });
+            defer inverse_result.deinit(allocator);
+            switch (inverse_result) {
+                .rejection => |rejection| {
+                    std.debug.print("inverse patch rejected: {s}\n", .{rejection.detail});
+                    return error.TestUnexpectedResult;
+                },
+                .receipt => |inverse_receipt| {
+                    try testing.expectEqual(revision_before, patch_source.revision);
+                    try testing.expectEqualStrings(receipt.source_hash_before, inverse_receipt.source_hash_after);
+                },
+            }
+        },
+    }
+}
+
+test "draw receipt forward and inverse patches restore source identity" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try expectReceiptRoundTrip(
+        testing.allocator,
+        &mutated_source,
+        &patch_source,
+        &entries,
+        drawWallCommand("round-trip-draw", 0, 0, 0, 32, 16, null, null),
+    );
+}
+
+test "split receipt forward and inverse patches restore predecessor topology" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &mutated_source, &entries, drawWallCommand("base", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &patch_source, &entries, drawWallCommand("base", 0, 0, 0, 64, 0, null, null));
+    try expectReceiptRoundTrip(
+        testing.allocator,
+        &mutated_source,
+        &patch_source,
+        &entries,
+        drawWallCommand("round-trip-split", 1, 32, -16, 32, 16, null, null),
+    );
+}
+
+test "opening receipt forward and inverse patches restore edge bytes" {
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &mutated_source, &entries, .full, 4, 48);
+    try drawOpeningTestWall(testing.allocator, &patch_source, &entries, .full, 4, 48);
+    try expectReceiptRoundTrip(
+        testing.allocator,
+        &mutated_source,
+        &patch_source,
+        &entries,
+        openingCommand("round-trip-opening", 1, "base:e:0", "round-trip-opening:o:0", "build:wall:opening:door:test", 16, 0),
+    );
+}
+
+test "edge edit receipt forward and inverse patches restore edge bytes" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &mutated_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &patch_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try expectReceiptRoundTrip(testing.allocator, &mutated_source, &patch_source, &entries, .{
+        .command_id = "round-trip-edge-edit",
+        .expected_revision = 1,
+        .operation = .{ .set_side_finish = .{
+            .edge_id = "wall:e:0",
+            .side = .a,
+            .material_id = "material:round-trip",
+        } },
+    });
+}
+
+test "deletion receipt forward and inverse patches restore removed records" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &mutated_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &patch_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try expectReceiptRoundTrip(testing.allocator, &mutated_source, &patch_source, &entries, .{
+        .command_id = "round-trip-delete",
+        .expected_revision = 1,
+        .operation = .{ .delete_edge = .{ .edge_id = "wall:e:0" } },
+    });
+}
+
+test "anchor attach receipt forward and inverse patches restore source identity" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &mutated_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &patch_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try expectReceiptRoundTrip(testing.allocator, &mutated_source, &patch_source, &entries, .{
+        .command_id = "round-trip-anchor",
+        .expected_revision = 1,
+        .operation = .{ .attach_anchor = .{
+            .edge_id = "wall:e:0",
+            .side = .b,
+            .column_u = 16,
+            .row_u = 12,
+            .target_piece_id = "prop:wall:round-trip",
+        } },
+    });
+}
+
+test "anchor detach receipt forward and inverse patches restore source identity" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var mutated_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer mutated_source.deinit(testing.allocator);
+    var patch_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer patch_source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &mutated_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &patch_source, &entries, drawWallCommand("wall", 0, 0, 0, 32, 0, null, null));
+    try installAnchorFixtures(testing.allocator, &mutated_source, "wall:e:0", &.{.{ .id = "anchor", .column_u = 16 }});
+    try installAnchorFixtures(testing.allocator, &patch_source, "wall:e:0", &.{.{ .id = "anchor", .column_u = 16 }});
+    try expectReceiptRoundTrip(testing.allocator, &mutated_source, &patch_source, &entries, .{
+        .command_id = "round-trip-detach",
+        .expected_revision = 1,
+        .operation = .{ .detach_anchor = .{ .anchor_id = "anchor" } },
+    });
+}
+
+test "facade applies a valid wall command through its owned candidate" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    var result = try architecture.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("facade-wall", 0, 0, 0, 32, 0, null, null),
+    );
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .rejection => return error.TestUnexpectedResult,
+        .receipt => |receipt| {
+            try testing.expectEqual(@as(u32, 1), receipt.source_revision_after);
+            try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+        },
+    }
+}
+
+test "facade discards a structurally valid patch whose candidate topology is invalid" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    var draw_result = try architecture.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        drawWallCommand("facade-base", 0, 0, 0, 32, 0, null, null),
+    );
+    draw_result.deinit(testing.allocator);
+
+    var no_openings = [_]architecture.types.WallOpening{};
+    const duplicate_edge = architecture.types.WallEdge{
+        .id = @constCast("facade-duplicate:e:0"),
+        .start_vertex_id = @constCast("facade-base:v:0"),
+        .end_vertex_id = @constCast("facade-base:v:1"),
+        .support = .{ .absolute = .{ .base_y_u = 0 } },
+        .height_u = 48,
+        .thickness_u = 4,
+        .profile = .full,
+        .style_id = @constCast("build:wall:style:test"),
+        .side_a = .{ .material_id = @constCast("material:plaster") },
+        .side_b = .{ .material_id = @constCast("material:plaster") },
+        .openings = &no_openings,
+    };
+    const canonical_bytes = try architecture.types.canonicalEdgeRecordBytes(testing.allocator, &duplicate_edge);
+    defer testing.allocator.free(canonical_bytes);
+    var operations = [_]architecture.types.PatchOperation{.{ .insert = .{
+        .family = .edge,
+        .id = @constCast("facade-duplicate:e:0"),
+        .canonical_bytes = canonical_bytes,
+    } }};
+    const patch = architecture.types.ArchitecturePatch{
+        .expected_revision = 1,
+        .result_revision = 2,
+        .operations = &operations,
+    };
+    try testing.expectError(error.topology_invalid, architecture.applyCommand(
+        testing.allocator,
+        &source,
+        &entries,
+        .{
+            .command_id = "facade-invalid-topology",
+            .expected_revision = 1,
+            .operation = .{ .apply_patch = &patch },
+        },
+    ));
+    try testing.expectEqual(@as(u32, 1), source.revision);
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+    try testing.expect(findSourceEdge(source, "facade-duplicate:e:0") == null);
 }

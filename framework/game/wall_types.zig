@@ -231,6 +231,128 @@ pub const ArchitectureSource = struct {
     }
 };
 
+/// Produce a recursively owned source candidate. Transaction boundaries use this
+/// before mutation so validation failure can never require reconstructing caller state.
+pub fn cloneSource(
+    allocator: std.mem.Allocator,
+    source: *const ArchitectureSource,
+) std.mem.Allocator.Error!ArchitectureSource {
+    const vertices = try allocator.alloc(WallVertex, source.walls.vertices.len);
+    var initialized_vertices: usize = 0;
+    errdefer {
+        for (vertices[0..initialized_vertices]) |*vertex| vertex.deinit(allocator);
+        freeSlice(WallVertex, allocator, vertices);
+    }
+    for (source.walls.vertices) |vertex| {
+        vertices[initialized_vertices] = .{
+            .id = try allocator.dupe(u8, vertex.id),
+            .floor = vertex.floor,
+            .x_u = vertex.x_u,
+            .z_u = vertex.z_u,
+        };
+        initialized_vertices += 1;
+    }
+
+    const edges = try allocator.alloc(WallEdge, source.walls.edges.len);
+    var initialized_edges: usize = 0;
+    errdefer {
+        for (edges[0..initialized_edges]) |*edge| edge.deinit(allocator);
+        freeSlice(WallEdge, allocator, edges);
+    }
+    for (source.walls.edges) |edge| {
+        edges[initialized_edges] = try cloneWallEdge(allocator, edge);
+        initialized_edges += 1;
+    }
+
+    const anchors = try allocator.alloc(WallAnchor, source.walls.anchors.len);
+    var initialized_anchors: usize = 0;
+    errdefer {
+        for (anchors[0..initialized_anchors]) |*anchor| anchor.deinit(allocator);
+        freeSlice(WallAnchor, allocator, anchors);
+    }
+    for (source.walls.anchors) |anchor| {
+        const id = try allocator.dupe(u8, anchor.id);
+        errdefer allocator.free(id);
+        const edge_id = try allocator.dupe(u8, anchor.edge_id);
+        errdefer allocator.free(edge_id);
+        const target_piece_id = try allocator.dupe(u8, anchor.target_piece_id);
+        errdefer allocator.free(target_piece_id);
+        anchors[initialized_anchors] = .{
+            .id = id,
+            .edge_id = edge_id,
+            .side = anchor.side,
+            .column_u = anchor.column_u,
+            .row_u = anchor.row_u,
+            .target_piece_id = target_piece_id,
+        };
+        initialized_anchors += 1;
+    }
+
+    return .{
+        .version = source.version,
+        .revision = source.revision,
+        .walls = .{ .vertices = vertices, .edges = edges, .anchors = anchors },
+    };
+}
+
+fn cloneWallEdge(allocator: std.mem.Allocator, edge: WallEdge) std.mem.Allocator.Error!WallEdge {
+    const id = try allocator.dupe(u8, edge.id);
+    errdefer allocator.free(id);
+    const start_vertex_id = try allocator.dupe(u8, edge.start_vertex_id);
+    errdefer allocator.free(start_vertex_id);
+    const end_vertex_id = try allocator.dupe(u8, edge.end_vertex_id);
+    errdefer allocator.free(end_vertex_id);
+    var support: WallSupport = switch (edge.support) {
+        .absolute => |value| .{ .absolute = value },
+        .slab => |value| .{ .slab = .{
+            .slab_id = try allocator.dupe(u8, value.slab_id),
+            .join = value.join,
+        } },
+    };
+    errdefer support.deinit(allocator);
+    const style_id = try allocator.dupe(u8, edge.style_id);
+    errdefer allocator.free(style_id);
+    const side_a_material_id = try allocator.dupe(u8, edge.side_a.material_id);
+    errdefer allocator.free(side_a_material_id);
+    const side_b_material_id = try allocator.dupe(u8, edge.side_b.material_id);
+    errdefer allocator.free(side_b_material_id);
+    const openings = try allocator.alloc(WallOpening, edge.openings.len);
+    var initialized_openings: usize = 0;
+    errdefer {
+        for (openings[0..initialized_openings]) |*opening| opening.deinit(allocator);
+        freeSlice(WallOpening, allocator, openings);
+    }
+    for (edge.openings) |opening| {
+        const opening_id = try allocator.dupe(u8, opening.id);
+        errdefer allocator.free(opening_id);
+        const kit_id = try allocator.dupe(u8, opening.kit_id);
+        errdefer allocator.free(kit_id);
+        openings[initialized_openings] = .{
+            .id = opening_id,
+            .kind = opening.kind,
+            .kit_id = kit_id,
+            .column_u = opening.column_u,
+            .row_u = opening.row_u,
+            .facing_side = opening.facing_side,
+            .hinge = opening.hinge,
+        };
+        initialized_openings += 1;
+    }
+    return .{
+        .id = id,
+        .start_vertex_id = start_vertex_id,
+        .end_vertex_id = end_vertex_id,
+        .support = support,
+        .height_u = edge.height_u,
+        .thickness_u = edge.thickness_u,
+        .profile = edge.profile,
+        .style_id = style_id,
+        .side_a = .{ .material_id = side_a_material_id },
+        .side_b = .{ .material_id = side_b_material_id },
+        .openings = openings,
+    };
+}
+
 pub const SourceValidationError = error{
     unsupported_source_version,
     source_limit_exceeded,
@@ -414,6 +536,7 @@ pub const ArchitectureRejectionCode = enum(u16) {
     unknown_catalog_id,
     stale_source_revision,
     duplicate_command_id,
+    structural_value_not_integer,
     zero_length_edge,
     short_edge,
     off_lattice_intersection,
@@ -613,6 +736,416 @@ pub const MutationResult = union(enum) {
             .rejection => |*value| value.deinit(allocator),
         }
         self.* = undefined;
+    }
+};
+
+pub const CanonicalRecordError = std.mem.Allocator.Error || error{
+    invalid_canonical_record,
+    canonical_record_too_large,
+};
+
+pub const LocatedWallOpening = struct {
+    edge_id: []u8,
+    opening: WallOpening,
+
+    pub fn deinit(self: *LocatedWallOpening, allocator: std.mem.Allocator) void {
+        freeBytes(allocator, self.edge_id);
+        self.opening.deinit(allocator);
+        self.* = undefined;
+    }
+};
+
+pub const CanonicalRecord = union(RecordFamily) {
+    vertex: WallVertex,
+    edge: WallEdge,
+    opening: LocatedWallOpening,
+    anchor: WallAnchor,
+
+    pub fn deinit(self: *CanonicalRecord, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .vertex => |*value| value.deinit(allocator),
+            .edge => |*value| value.deinit(allocator),
+            .opening => |*value| value.deinit(allocator),
+            .anchor => |*value| value.deinit(allocator),
+        }
+        self.* = undefined;
+    }
+
+    pub fn id(self: *const CanonicalRecord) []const u8 {
+        return switch (self.*) {
+            .vertex => |value| value.id,
+            .edge => |value| value.id,
+            .opening => |value| value.opening.id,
+            .anchor => |value| value.id,
+        };
+    }
+};
+
+const canonical_record_version: u8 = 1;
+
+/// Serialize the complete source in stable-ID order. Array storage order is not
+/// semantic and therefore cannot perturb command hashes or round-trip proofs.
+pub fn canonicalSourceBytes(
+    allocator: std.mem.Allocator,
+    source: *const ArchitectureSource,
+) std.mem.Allocator.Error![]u8 {
+    var encoder = CanonicalEncoder.init(allocator);
+    defer encoder.deinit();
+    try encoder.appendInt(u16, source.version);
+    try encoder.appendInt(u32, source.revision);
+
+    const vertices = try allocator.alloc(*const WallVertex, source.walls.vertices.len);
+    defer if (vertices.len != 0) allocator.free(vertices);
+    for (source.walls.vertices, 0..) |*vertex, index| vertices[index] = vertex;
+    std.mem.sort(*const WallVertex, vertices, {}, vertexPointerLessThan);
+    try encoder.appendLength(vertices.len);
+    for (vertices) |vertex| try appendVertex(&encoder, vertex);
+
+    const edges = try allocator.alloc(*const WallEdge, source.walls.edges.len);
+    defer if (edges.len != 0) allocator.free(edges);
+    for (source.walls.edges, 0..) |*edge, index| edges[index] = edge;
+    std.mem.sort(*const WallEdge, edges, {}, edgePointerLessThan);
+    try encoder.appendLength(edges.len);
+    for (edges) |edge| try appendEdge(&encoder, edge);
+
+    const anchors = try allocator.alloc(*const WallAnchor, source.walls.anchors.len);
+    defer if (anchors.len != 0) allocator.free(anchors);
+    for (source.walls.anchors, 0..) |*anchor, index| anchors[index] = anchor;
+    std.mem.sort(*const WallAnchor, anchors, {}, anchorPointerLessThan);
+    try encoder.appendLength(anchors.len);
+    for (anchors) |anchor| try appendAnchor(&encoder, anchor);
+    return encoder.take();
+}
+
+pub fn canonicalVertexRecordBytes(
+    allocator: std.mem.Allocator,
+    vertex: *const WallVertex,
+) std.mem.Allocator.Error![]u8 {
+    var encoder = CanonicalEncoder.init(allocator);
+    defer encoder.deinit();
+    try encoder.appendByte(canonical_record_version);
+    try encoder.appendByte(@intFromEnum(RecordFamily.vertex));
+    try appendVertex(&encoder, vertex);
+    return encoder.take();
+}
+
+pub fn canonicalEdgeRecordBytes(
+    allocator: std.mem.Allocator,
+    edge: *const WallEdge,
+) std.mem.Allocator.Error![]u8 {
+    var encoder = CanonicalEncoder.init(allocator);
+    defer encoder.deinit();
+    try encoder.appendByte(canonical_record_version);
+    try encoder.appendByte(@intFromEnum(RecordFamily.edge));
+    try appendEdge(&encoder, edge);
+    return encoder.take();
+}
+
+pub fn canonicalOpeningRecordBytes(
+    allocator: std.mem.Allocator,
+    edge_id: []const u8,
+    opening: *const WallOpening,
+) std.mem.Allocator.Error![]u8 {
+    var encoder = CanonicalEncoder.init(allocator);
+    defer encoder.deinit();
+    try encoder.appendByte(canonical_record_version);
+    try encoder.appendByte(@intFromEnum(RecordFamily.opening));
+    try encoder.appendString(edge_id);
+    try appendOpening(&encoder, opening);
+    return encoder.take();
+}
+
+pub fn canonicalAnchorRecordBytes(
+    allocator: std.mem.Allocator,
+    anchor: *const WallAnchor,
+) std.mem.Allocator.Error![]u8 {
+    var encoder = CanonicalEncoder.init(allocator);
+    defer encoder.deinit();
+    try encoder.appendByte(canonical_record_version);
+    try encoder.appendByte(@intFromEnum(RecordFamily.anchor));
+    try appendAnchor(&encoder, anchor);
+    return encoder.take();
+}
+
+/// Decode one owned record from the same format emitted above. The decoder
+/// rejects trailing bytes, invalid enum tags, and lengths beyond the input.
+pub fn decodeCanonicalRecord(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+) CanonicalRecordError!CanonicalRecord {
+    var decoder = CanonicalDecoder{ .allocator = allocator, .bytes = bytes };
+    if (try decoder.readByte() != canonical_record_version) return error.invalid_canonical_record;
+    const family = std.enums.fromInt(RecordFamily, try decoder.readByte()) orelse
+        return error.invalid_canonical_record;
+    var record: CanonicalRecord = switch (family) {
+        .vertex => .{ .vertex = try decodeVertex(&decoder) },
+        .edge => .{ .edge = try decodeEdge(&decoder) },
+        .opening => .{ .opening = try decodeLocatedOpening(&decoder) },
+        .anchor => .{ .anchor = try decodeAnchor(&decoder) },
+    };
+    errdefer record.deinit(allocator);
+    if (decoder.index != bytes.len) return error.invalid_canonical_record;
+    return record;
+}
+
+fn appendVertex(encoder: *CanonicalEncoder, vertex: *const WallVertex) std.mem.Allocator.Error!void {
+    try encoder.appendString(vertex.id);
+    try encoder.appendInt(i32, vertex.floor);
+    try encoder.appendInt(Unit, vertex.x_u);
+    try encoder.appendInt(Unit, vertex.z_u);
+}
+
+fn appendEdge(encoder: *CanonicalEncoder, edge: *const WallEdge) std.mem.Allocator.Error!void {
+    try encoder.appendString(edge.id);
+    try encoder.appendString(edge.start_vertex_id);
+    try encoder.appendString(edge.end_vertex_id);
+    switch (edge.support) {
+        .absolute => |support| {
+            try encoder.appendByte(0);
+            try encoder.appendInt(Unit, support.base_y_u);
+        },
+        .slab => |support| {
+            try encoder.appendByte(1);
+            try encoder.appendString(support.slab_id);
+            try encoder.appendByte(@intFromEnum(support.join));
+        },
+    }
+    try encoder.appendInt(Unit, edge.height_u);
+    try encoder.appendInt(Unit, edge.thickness_u);
+    try encoder.appendByte(@intFromEnum(edge.profile));
+    try encoder.appendString(edge.style_id);
+    try encoder.appendString(edge.side_a.material_id);
+    try encoder.appendString(edge.side_b.material_id);
+
+    const openings = try encoder.allocator.alloc(*const WallOpening, edge.openings.len);
+    defer if (openings.len != 0) encoder.allocator.free(openings);
+    for (edge.openings, 0..) |*opening, index| openings[index] = opening;
+    std.mem.sort(*const WallOpening, openings, {}, openingPointerLessThan);
+    try encoder.appendLength(openings.len);
+    for (openings) |opening| try appendOpening(encoder, opening);
+}
+
+fn appendOpening(encoder: *CanonicalEncoder, opening: *const WallOpening) std.mem.Allocator.Error!void {
+    try encoder.appendString(opening.id);
+    try encoder.appendByte(@intFromEnum(opening.kind));
+    try encoder.appendString(opening.kit_id);
+    try encoder.appendInt(Unit, opening.column_u);
+    try encoder.appendInt(Unit, opening.row_u);
+    try encoder.appendByte(@intFromEnum(opening.facing_side));
+    try encoder.appendByte(@intFromEnum(opening.hinge));
+}
+
+fn appendAnchor(encoder: *CanonicalEncoder, anchor: *const WallAnchor) std.mem.Allocator.Error!void {
+    try encoder.appendString(anchor.id);
+    try encoder.appendString(anchor.edge_id);
+    try encoder.appendByte(@intFromEnum(anchor.side));
+    try encoder.appendInt(Unit, anchor.column_u);
+    try encoder.appendInt(Unit, anchor.row_u);
+    try encoder.appendString(anchor.target_piece_id);
+}
+
+fn decodeVertex(decoder: *CanonicalDecoder) CanonicalRecordError!WallVertex {
+    const id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(id);
+    return .{
+        .id = id,
+        .floor = try decoder.readInt(i32),
+        .x_u = try decoder.readInt(Unit),
+        .z_u = try decoder.readInt(Unit),
+    };
+}
+
+fn decodeEdge(decoder: *CanonicalDecoder) CanonicalRecordError!WallEdge {
+    const id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(id);
+    const start_vertex_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(start_vertex_id);
+    const end_vertex_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(end_vertex_id);
+    var support: WallSupport = switch (try decoder.readByte()) {
+        0 => .{ .absolute = .{ .base_y_u = try decoder.readInt(Unit) } },
+        1 => slab: {
+            const slab_id = try decoder.readOwnedString();
+            errdefer decoder.allocator.free(slab_id);
+            const join = std.enums.fromInt(SlabJoin, try decoder.readByte()) orelse
+                return error.invalid_canonical_record;
+            break :slab .{ .slab = .{ .slab_id = slab_id, .join = join } };
+        },
+        else => return error.invalid_canonical_record,
+    };
+    errdefer support.deinit(decoder.allocator);
+    const height_u = try decoder.readInt(Unit);
+    const thickness_u = try decoder.readInt(Unit);
+    const profile = std.enums.fromInt(WallProfile, try decoder.readByte()) orelse
+        return error.invalid_canonical_record;
+    const style_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(style_id);
+    const side_a_material_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(side_a_material_id);
+    const side_b_material_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(side_b_material_id);
+    const opening_count = try decoder.readLength(Limits.maximum_openings);
+    const openings = try decoder.allocator.alloc(WallOpening, opening_count);
+    var initialized_openings: usize = 0;
+    errdefer {
+        for (openings[0..initialized_openings]) |*opening| opening.deinit(decoder.allocator);
+        if (openings.len != 0) decoder.allocator.free(openings);
+    }
+    while (initialized_openings < openings.len) : (initialized_openings += 1) {
+        openings[initialized_openings] = try decodeOpening(decoder);
+    }
+    return .{
+        .id = id,
+        .start_vertex_id = start_vertex_id,
+        .end_vertex_id = end_vertex_id,
+        .support = support,
+        .height_u = height_u,
+        .thickness_u = thickness_u,
+        .profile = profile,
+        .style_id = style_id,
+        .side_a = .{ .material_id = side_a_material_id },
+        .side_b = .{ .material_id = side_b_material_id },
+        .openings = openings,
+    };
+}
+
+fn decodeOpening(decoder: *CanonicalDecoder) CanonicalRecordError!WallOpening {
+    const id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(id);
+    const kind = std.enums.fromInt(WallOpeningKind, try decoder.readByte()) orelse
+        return error.invalid_canonical_record;
+    const kit_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(kit_id);
+    return .{
+        .id = id,
+        .kind = kind,
+        .kit_id = kit_id,
+        .column_u = try decoder.readInt(Unit),
+        .row_u = try decoder.readInt(Unit),
+        .facing_side = std.enums.fromInt(WallSide, try decoder.readByte()) orelse
+            return error.invalid_canonical_record,
+        .hinge = std.enums.fromInt(WallHinge, try decoder.readByte()) orelse
+            return error.invalid_canonical_record,
+    };
+}
+
+fn decodeLocatedOpening(decoder: *CanonicalDecoder) CanonicalRecordError!LocatedWallOpening {
+    const edge_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(edge_id);
+    var opening = try decodeOpening(decoder);
+    errdefer opening.deinit(decoder.allocator);
+    return .{ .edge_id = edge_id, .opening = opening };
+}
+
+fn decodeAnchor(decoder: *CanonicalDecoder) CanonicalRecordError!WallAnchor {
+    const id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(id);
+    const edge_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(edge_id);
+    const side = std.enums.fromInt(WallSide, try decoder.readByte()) orelse
+        return error.invalid_canonical_record;
+    const column_u = try decoder.readInt(Unit);
+    const row_u = try decoder.readInt(Unit);
+    const target_piece_id = try decoder.readOwnedString();
+    errdefer decoder.allocator.free(target_piece_id);
+    return .{
+        .id = id,
+        .edge_id = edge_id,
+        .side = side,
+        .column_u = column_u,
+        .row_u = row_u,
+        .target_piece_id = target_piece_id,
+    };
+}
+
+fn vertexPointerLessThan(_: void, left: *const WallVertex, right: *const WallVertex) bool {
+    return std.mem.lessThan(u8, left.id, right.id);
+}
+
+fn edgePointerLessThan(_: void, left: *const WallEdge, right: *const WallEdge) bool {
+    return std.mem.lessThan(u8, left.id, right.id);
+}
+
+fn openingPointerLessThan(_: void, left: *const WallOpening, right: *const WallOpening) bool {
+    return std.mem.lessThan(u8, left.id, right.id);
+}
+
+fn anchorPointerLessThan(_: void, left: *const WallAnchor, right: *const WallAnchor) bool {
+    return std.mem.lessThan(u8, left.id, right.id);
+}
+
+const CanonicalEncoder = struct {
+    allocator: std.mem.Allocator,
+    bytes: std.ArrayList(u8),
+
+    fn init(allocator: std.mem.Allocator) CanonicalEncoder {
+        return .{ .allocator = allocator, .bytes = .empty };
+    }
+
+    fn deinit(self: *CanonicalEncoder) void {
+        self.bytes.deinit(self.allocator);
+        self.* = undefined;
+    }
+
+    fn take(self: *CanonicalEncoder) std.mem.Allocator.Error![]u8 {
+        return self.bytes.toOwnedSlice(self.allocator);
+    }
+
+    fn appendByte(self: *CanonicalEncoder, value: u8) std.mem.Allocator.Error!void {
+        try self.bytes.append(self.allocator, value);
+    }
+
+    fn appendLength(self: *CanonicalEncoder, value: usize) std.mem.Allocator.Error!void {
+        try self.appendInt(u64, @intCast(value));
+    }
+
+    fn appendString(self: *CanonicalEncoder, value: []const u8) std.mem.Allocator.Error!void {
+        try self.appendLength(value.len);
+        try self.bytes.appendSlice(self.allocator, value);
+    }
+
+    fn appendInt(self: *CanonicalEncoder, comptime T: type, value: T) std.mem.Allocator.Error!void {
+        var encoded: [@sizeOf(T)]u8 = undefined;
+        std.mem.writeInt(T, &encoded, value, .little);
+        try self.bytes.appendSlice(self.allocator, &encoded);
+    }
+};
+
+const CanonicalDecoder = struct {
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    index: usize = 0,
+
+    fn readByte(self: *CanonicalDecoder) CanonicalRecordError!u8 {
+        if (self.index >= self.bytes.len) return error.invalid_canonical_record;
+        const value = self.bytes[self.index];
+        self.index += 1;
+        return value;
+    }
+
+    fn readInt(self: *CanonicalDecoder, comptime T: type) CanonicalRecordError!T {
+        const end = std.math.add(usize, self.index, @sizeOf(T)) catch
+            return error.canonical_record_too_large;
+        if (end > self.bytes.len) return error.invalid_canonical_record;
+        const value = std.mem.readInt(T, self.bytes[self.index..end][0..@sizeOf(T)], .little);
+        self.index = end;
+        return value;
+    }
+
+    fn readLength(self: *CanonicalDecoder, maximum: usize) CanonicalRecordError!usize {
+        const raw = try self.readInt(u64);
+        if (raw > maximum or raw > std.math.maxInt(usize)) return error.canonical_record_too_large;
+        return @intCast(raw);
+    }
+
+    fn readOwnedString(self: *CanonicalDecoder) CanonicalRecordError![]u8 {
+        const length = try self.readLength(Limits.maximum_id_bytes);
+        const end = std.math.add(usize, self.index, length) catch
+            return error.canonical_record_too_large;
+        if (end > self.bytes.len) return error.invalid_canonical_record;
+        const result = try self.allocator.dupe(u8, self.bytes[self.index..end]);
+        self.index = end;
+        return result;
     }
 };
 

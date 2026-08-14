@@ -8,6 +8,7 @@ const architecture_scale = @import("architecture_scale");
 const wall_types = @import("wall_types");
 const building_catalog = @import("building_catalog");
 const wall_topology = @import("wall_topology");
+const wall_mutation = @import("wall_mutation");
 
 pub const types = wall_types;
 pub const catalog = building_catalog;
@@ -24,7 +25,7 @@ pub const units_per_meter: Unit = architecture_scale.units_per_meter;
 /// Section-A/B API scaffolds name every deep operation before their focused modules
 /// land. Each scaffold is replaced by its typed semantic result at the numbered step
 /// that implements that operation; callers can never mistake absence for success.
-pub const PendingOperationError = error{ architecture_operation_not_implemented };
+pub const PendingOperationError = error{architecture_operation_not_implemented};
 pub const ValidateSourceError = wall_types.SourceValidationError ||
     building_catalog.ValidationError ||
     building_catalog.SourceReferenceError ||
@@ -32,28 +33,11 @@ pub const ValidateSourceError = wall_types.SourceValidationError ||
     std.mem.Allocator.Error ||
     error{topology_invalid};
 
-pub const ArchitectureCommandTag = enum {
-    draw_wall,
-    delete_edge,
-    delete_vertex,
-    set_edge_dimensions,
-    set_profile,
-    set_style,
-    set_side_finish,
-    insert_opening,
-    move_opening,
-    delete_opening,
-    configure_opening,
-    attach_anchor,
-    detach_anchor,
-    stamp_prefab,
-};
-
-pub const ArchitectureCommandEnvelope = struct {
-    command_id: []const u8,
-    expected_revision: u32,
-    tag: ArchitectureCommandTag,
-};
+pub const ArchitectureCommand = wall_mutation.Command;
+pub const ArchitectureOperation = wall_mutation.Operation;
+pub const ArchitectureCommandEnvelope = ArchitectureCommand;
+pub const ArchitectureMutationResult = wall_types.MutationResult;
+pub const ApplyCommandError = ValidateSourceError || wall_mutation.ApplyError;
 
 pub const CompileRequest = struct {
     affected_bounds: []const wall_types.AffectedBounds = &.{},
@@ -99,12 +83,31 @@ pub fn validateSource(
     if (derived.diagnostics.len != 0) return error.topology_invalid;
 }
 
-pub fn applyCommand(allocator: std.mem.Allocator, source: *const ArchitectureSource, entries: []const CatalogEntry, command: ArchitectureCommandEnvelope) PendingOperationError!void {
-    _ = allocator;
-    _ = source;
-    _ = entries;
-    _ = command;
-    return error.architecture_operation_not_implemented;
+pub fn applyCommand(
+    allocator: std.mem.Allocator,
+    source: *ArchitectureSource,
+    entries: []const CatalogEntry,
+    command: ArchitectureCommand,
+) ApplyCommandError!ArchitectureMutationResult {
+    try validateSource(allocator, source, entries);
+    var candidate = try wall_types.cloneSource(allocator, source);
+    errdefer candidate.deinit(allocator);
+    var result = try wall_mutation.applyCommand(allocator, &candidate, entries, command);
+    switch (result) {
+        .rejection => {
+            candidate.deinit(allocator);
+            return result;
+        },
+        .receipt => {
+            validateSource(allocator, &candidate, entries) catch |err| {
+                result.deinit(allocator);
+                return err;
+            };
+            source.deinit(allocator);
+            source.* = candidate;
+            return result;
+        },
+    }
 }
 
 pub fn compile(allocator: std.mem.Allocator, source: *const ArchitectureSource, entries: []const CatalogEntry, request: CompileRequest) PendingOperationError!void {

@@ -183,8 +183,10 @@ The command allocates deterministic IDs in creation order within each family:
 ${commandId}:v:<n>
 ${commandId}:e:<n>
 ${commandId}:o:<n>
+${commandId}:a:<n>
 ```
 
+The family tokens are vertex, edge, opening, and semantic wall anchor respectively.
 `n` begins at zero per family. A command ID must be globally unique within the
 document journal. Replaying the same command against the same revision either returns
 the recorded receipt or a typed duplicate-command rejection; it never allocates a
