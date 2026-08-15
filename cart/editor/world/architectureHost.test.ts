@@ -121,11 +121,16 @@ test('measured catalog install and structured query use typed binary rows', () =
   host.__game_build_arch_catalog_query = (request: Uint8Array) => {
     const decoded = decodeArchitecturePacket(request);
     assert(decoded.sections.get(SECTION_TAG.catalogQuery)?.stride === 32, 'query row did not use fixed semantic stride');
+    // Semantic rows carry types.ArchitectureFamily (wall=0), NEVER the packet
+    // header's FamilyTag (wall=1). The first live install crashed on this exact
+    // byte (req_4470) — if this assertion fires, one codec side drifted again.
+    assert(decoded.sections.get(SECTION_TAG.catalogQuery)?.bytes[0] === 0, 'query family byte must be the 0-based entry enum (wall=0)');
     assert(decoded.sections.get(SECTION_TAG.catalogTags)?.itemCount === 2, 'query tag filters were not serialized');
     return queryResult([0]);
   };
   architectureHost.installCatalog([measuredStyle]);
   assert(installedRequest?.sections.get(SECTION_TAG.catalogEntries)?.stride === 176, 'measured catalog row stride drifted');
+  assert(installedRequest?.sections.get(SECTION_TAG.catalogEntries)?.bytes[32] === 0, 'entry family byte must be the 0-based entry enum (wall=0), not the header FamilyTag');
   assert(installedRequest?.sections.get(SECTION_TAG.catalogTags)?.itemCount === 4, 'category/theme/gameplay rows missing');
   assert(architectureHost.queryCatalog({ family: 'wall', role: 'style', requiredThemeTags: ['modern'], requiredGameplayTags: ['solid'] })[0] === 0, 'query result index drifted');
 });

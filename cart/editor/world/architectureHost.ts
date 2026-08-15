@@ -93,7 +93,6 @@ const REJECTION_NAME = Object.freeze(Object.fromEntries(
 ) as Readonly<Record<number, keyof typeof REJECTION_CODE>>);
 
 const FAMILY_TAG = Object.freeze({ none: 0, wall: 1, floor: 2, verticalLink: 3, roof: 4 } as const);
-const FAMILY_NAME = Object.freeze(['none', 'wall', 'floor', 'verticalLink', 'roof'] as const);
 const ROLE_TAG = Object.freeze({ style: 0, opening: 1, trim: 2, cap: 3, rail: 4, doorLeaf: 5 } as const);
 const ROLE_NAME = Object.freeze(['style', 'opening', 'trim', 'cap', 'rail', 'doorLeaf'] as const);
 const PROFILE_TAG = Object.freeze({ full: 0, half: 1 } as const);
@@ -454,10 +453,18 @@ const CATALOG_FLAG = Object.freeze({ mount: 1, footprint: 2, style: 4, compatibi
 const CATALOG_TAG_KIND = Object.freeze({ category: 1, theme: 2, gameplay: 3, materialHash: 4 });
 const CATALOG_MASK_KIND = Object.freeze({ occupied: 1, clearance: 2, profile: 3, thickness: 4 });
 
-function familyTag(family: ArchitectureFamily): number { return FAMILY_TAG[family]; }
+// Semantic rows (catalog entries, catalog queries) carry the native
+// `types.ArchitectureFamily` byte — 0-based with NO `none` (wall=0, floor=1,
+// verticalLink=2, roof=3). Only the packet HEADER uses FAMILY_TAG (none=0,
+// wall=1). Mixing the two shifted every installed wall row into `floor` on the
+// first real host install (req_4470); never reuse FAMILY_TAG for row bytes.
+const CATALOG_FAMILY_TAG = Object.freeze({ wall: 0, floor: 1, verticalLink: 2, roof: 3 } as const);
+const CATALOG_FAMILY_NAME = Object.freeze(['wall', 'floor', 'verticalLink', 'roof'] as const);
+
+function familyTag(family: ArchitectureFamily): number { return CATALOG_FAMILY_TAG[family]; }
 function familyName(tag: number): ArchitectureFamily {
-  const name = FAMILY_NAME[tag];
-  if (!name || name === 'none') return fail(`invalid architecture family tag ${tag}`);
+  const name = CATALOG_FAMILY_NAME[tag];
+  if (!name) return fail(`invalid architecture family tag ${tag}`);
   return name;
 }
 function roleName(tag: number): ArchitectureKitRole {

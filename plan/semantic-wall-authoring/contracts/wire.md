@@ -73,6 +73,13 @@ PacketKind
 FamilyTag
   0 none  1 wall  2 floor  3 verticalLink  4 roof
 
+FamilyTag is a PACKET-HEADER value only. Semantic rows — the catalog entry
+family byte (entry offset 32) and the catalog query family byte (query offset
+0) — carry the native entry enum instead: 0 wall, 1 floor, 2 verticalLink,
+3 roof, with no `none`. Mixing the two shifted every installed wall row into
+`floor` on the first live TS→native install (req_4470); both codecs pin the
+entry enum for row bytes and FamilyTag for headers.
+
 TargetTag
   0 none  1 topology  2 render  3 collision  4 cover  5 materials
   6 doorsPortals  7 navigation  8 rooms  9 visibility  10 audio
