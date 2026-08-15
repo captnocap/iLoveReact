@@ -152,6 +152,25 @@ walls dropped (req_4462) and can never write back as a pre-v5 or wall-carrying s
 
 Precondition: Section F exit is recorded.
 
+**PRE-SECTION-G GATE (recorded 2026-08-14, from the swarm audit in
+`HANDOFF-2026-08-14.md`).** Do not start Step 89 against the current tape. The
+native source owns more receipt information than RJAW emits: the host result drops
+the inverse patch, created/updated/removed records, edge/opening/anchor remaps, and
+face lineage; `stampPrefab` is declared in unions/wire but has no native mutation
+implementation; compile output has no wall-anchor attachment frames. Section G as
+written therefore cannot honestly deliver command undo, stable selection remap,
+one-action prefab stamps, facade lineage, or anchor transforms — and faking them
+with before/after snapshots or JS topology is forbidden. Before executing Step 89,
+author a native-completeness section (approximately fifteen steps: additive RJAW v1
+receipt sections, strict decode/rejection fixtures both sides, a bounded canonical
+prefab graph codec plus one atomic native `stampPrefab`, real face-lineage
+generation, compiled anchor-attachment rows with a right-handed transform,
+an attachment dirty target/hash, host parity tests, two native runs, a ReleaseFast
+editor ship, boundary reopen, report, section commit), insert it before the current
+Step 89, renumber Sections G–K, and pin every new numeric wire tag in
+`contracts/wire.md` before implementation. The audit's preview/UI/frozen-output and
+severance-scope findings in the handover apply to Sections H–K the same way.
+
 - [ ] 89. Create `cart/editor/world/architectureCommand.ts` with one planner/apply/inverse boundary over native mutation receipts and command IDs for draw, delete, profile, dimensions, style, side finish, opening, anchor, and prefab stamp operations.
 - [ ] 90. Create `cart/editor/world/architectureCommand.test.ts` with success/rejection, stale revision, one journal entry per command, forward/inverse byte restoration, stable selection remap, and affected-bounds propagation cases.
 - [ ] 91. Add an architecture adapter to `cart/editor/data/applicationCommands.ts` that reads one document snapshot, calls the planner once, and applies one complete receipt.
