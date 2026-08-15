@@ -97,6 +97,32 @@ class BundleReader {
   }
 }
 
+/** The bake keys carry this many hex chars of the bundle's source content hash
+ * (64 bits). The intern cache holds at most 2048 entries per loader mount, so a
+ * 64-bit prefix cannot realistically collide; the full 256-bit digest would
+ * only make every key and log line longer. */
+const BAKE_KEY_HASH_HEX_CHARS = 16;
+
+/** The engine's canonical source content hash, from the bundle header (magic +
+ * version + revision precede it). This is the bake-key identity (req_4492):
+ * revision numbers REPEAT after undo — the engine mints `revision + 1` from
+ * whatever source it is handed, and undo hands it an old one — so keying interned
+ * geometry by revision aliased distinct content and resurrected undone walls.
+ * Content-hash keys make aliasing impossible and dedup identical states. */
+export function bundleSourceHashHex(bundle: Uint8Array): string {
+  const reader = new BundleReader(bundle);
+  if (reader.u32() !== BUNDLE_MAGIC) throw new Error('bundle magic is not RJAB');
+  if (reader.u16() !== BUNDLE_VERSION) throw new Error('bundle version is unsupported');
+  reader.u32(); // sourceRevision
+  const start = reader.at();
+  reader.skip(32); // the source hash — the compiler/tuning/catalog hashes follow
+  let hex = '';
+  for (let index = 0; index < BAKE_KEY_HASH_HEX_CHARS / 2; index += 1) {
+    hex += bundle[start + index]!.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
 /** Strict fail-closed decode of the wall section's render bands. Everything
  * after the render bands belongs to other consumers and is left unread. */
 export function decodeWallRenderBands(bundle: Uint8Array): WallRenderBand[] {
@@ -344,6 +370,7 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
   }
   try {
     const bundle = architectureHost.compile(source);
+    const sourceHash = bundleSourceHashHex(bundle);
     const bands = decodeWallRenderBands(bundle);
     const floors = decodeFloorTriangles(bundle);
     const byRole = new Map<WallRenderBand['role'], WallRenderBand[]>();
@@ -355,17 +382,20 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
     const meshes: ResidentMesh[] = [];
     const refs: MeshRef[] = [];
     for (const [role, group] of byRole) {
-      // The revision is part of the key (req_4477): scene3d interns geometry
+      // The source CONTENT HASH is part of the key: scene3d interns geometry
       // IMMUTABLY per geom key (generation bumps exist only for the studio's
-      // single edit mesh), so pushing grown wall bands under a stable key drew
-      // the FIRST bake forever — walls only appeared after a loader remount
-      // reset the intern cache. Each committed revision is new immutable
-      // content and takes a fresh key, exactly the contract facades satisfy
-      // with one key per facade. Cost: a stale intern entry per superseded
-      // revision until the next loader remount (2048-entry cache; dev reloads
-      // remount constantly). The engine-side cure — mutable resident-mesh
-      // generations keyed per hash — is a named follow-up capability.
-      const key = `arch:wall:${role}:r${source.revision}`;
+      // single edit mesh), so a stable key drew the FIRST bake forever
+      // (req_4477), and a REUSABLE counter aliased distinct content — undo
+      // rewinds `source.revision`, the next edit re-mints an already-used
+      // number, and the intern cache served the pre-undo walls back (req_4492:
+      // the undone wall resurrected on the next draw). The engine's canonical
+      // source hash IS the content identity, so undo/redo land on the exact
+      // geometry they name and identical states dedup instead of re-interning.
+      // Cost: a stale intern entry per superseded state until the next loader
+      // remount (2048-entry cache; dev reloads remount constantly). The
+      // engine-side cure — mutable resident-mesh generations keyed per hash —
+      // is a named follow-up capability.
+      const key = `arch:wall:${role}:s${sourceHash}`;
       meshes.push({
         key,
         vertices: bandVertices(group),
@@ -382,8 +412,8 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
     }
     const floorFaces = new Set(floors.map(triangle => triangle.faceSignature));
     for (const [role, group] of floorsByRole) {
-      // Same revision-keyed immutable-intern law as the wall meshes above.
-      const key = `arch:floor:${role}:r${source.revision}`;
+      // Same content-hash-keyed immutable-intern law as the wall meshes above.
+      const key = `arch:floor:${role}:s${sourceHash}`;
       meshes.push({
         key,
         vertices: floorVertices(group),
