@@ -204,6 +204,14 @@ pub fn build(
         const side_a_points = surfaceEndpoints(source, derived_topology, edge, .a);
         const side_b_points = surfaceEndpoints(source, derived_topology, edge, .b);
         const top_y_m = architecture_scale.unitsToMeters(base_y_u + edge.height_u);
+        // Meters of texture per column unit for THIS edge: the true metric
+        // centerline length over the quantized column span, so span-anchored
+        // UVs keep exact density on angled walls (req_4485).
+        const column_scale_m_per_u: f32 = if (length_u == 0) 0 else blk: {
+            const delta_x_m = architecture_scale.unitsToMeters(end.x_u - start.x_u);
+            const delta_z_m = architecture_scale.unitsToMeters(end.z_u - start.z_u);
+            break :blk std.math.hypot(delta_x_m, delta_z_m) / @as(f32, @floatFromInt(length_u));
+        };
         const opening_rects = try measuredOpeningRects(allocator, edge, entries, length_u);
         defer if (opening_rects.len != 0) allocator.free(opening_rects);
         try appendFacePartitions(
@@ -215,6 +223,7 @@ pub fn build(
             side_a_normal,
             base_y_u,
             length_u,
+            column_scale_m_per_u,
             opening_rects,
         );
         try appendFacePartitions(
@@ -226,6 +235,7 @@ pub fn build(
             side_b_normal,
             base_y_u,
             length_u,
+            column_scale_m_per_u,
             opening_rects,
         );
         for (opening_rects) |rect| {
@@ -264,6 +274,7 @@ pub fn build(
                 .end,
                 null,
                 edge.side_a.material_id,
+                column_scale_m_per_u,
                 0,
                 0,
                 gap.bottom_u - base_y_u,
@@ -295,6 +306,7 @@ pub fn build(
                 .end,
                 null,
                 edge.side_a.material_id,
+                column_scale_m_per_u,
                 length_u,
                 length_u,
                 gap.bottom_u - base_y_u,
@@ -320,6 +332,7 @@ pub fn build(
             .cap,
             null,
             edge.side_a.material_id,
+            column_scale_m_per_u,
             0,
             length_u,
             edge.height_u,
@@ -415,6 +428,7 @@ fn appendFacePartitions(
     normal: Vector3,
     base_y_u: types.Unit,
     edge_length_u: types.Unit,
+    column_scale_m_per_u: f32,
     openings: []const OpeningRect,
 ) BuildError!void {
     const cuts = try builder.allocator.alloc(types.Unit, 2 + openings.len * 2);
@@ -460,6 +474,7 @@ fn appendFacePartitions(
                     normal,
                     base_y_u,
                     edge_length_u,
+                    column_scale_m_per_u,
                     column_start_u,
                     column_end_u,
                     row_cursor_u,
@@ -478,6 +493,7 @@ fn appendFacePartitions(
                 normal,
                 base_y_u,
                 edge_length_u,
+                column_scale_m_per_u,
                 column_start_u,
                 column_end_u,
                 row_cursor_u,
@@ -496,6 +512,7 @@ fn appendFaceRectangle(
     normal: Vector3,
     base_y_u: types.Unit,
     edge_length_u: types.Unit,
+    column_scale_m_per_u: f32,
     column_start_u: types.Unit,
     column_end_u: types.Unit,
     row_bottom_u: types.Unit,
@@ -516,6 +533,7 @@ fn appendFaceRectangle(
         .face,
         side,
         material_id,
+        column_scale_m_per_u,
         column_start_u,
         column_end_u,
         row_bottom_u,
@@ -598,6 +616,7 @@ fn appendOpeningGeometry(
             .pane,
             rect.opening.facing_side,
             generated_pane_material_id,
+            0,
             rect.left_u,
             rect.right_u,
             rect.bottom_u,
@@ -688,6 +707,7 @@ fn appendOpeningSurface(
         role,
         null,
         edge.side_a.material_id,
+        0,
         column_start_u,
         column_end_u,
         row_bottom_u,
@@ -982,6 +1002,7 @@ fn ownedSurfaceBand(
     role: SurfaceRole,
     side: ?types.WallSide,
     material_id: []const u8,
+    column_scale_m_per_u: f32,
     column_start_u: types.Unit,
     column_end_u: types.Unit,
     row_bottom_u: types.Unit,
@@ -1007,7 +1028,83 @@ fn ownedSurfaceBand(
         .row_top_u = row_top_u,
         .quad_m = quad_m,
         .normal = normal,
-        .uv_m = metricQuadUv(quad_m),
+        // Texture space is the AUTHORED PIECE, not the band (req_4485): when
+        // openings or coverage split a face into many bands, each band maps
+        // only the sub-rectangle of the edge-span UV space it occupies, so a
+        // texture stays spread over the whole piece distance across every
+        // cut. The column axis scales by the edge's true metric length so
+        // angled walls keep exact texture density (the pre-existing metric
+        // contract). Opening-frame strips (reveal/jamb/sill/header/pane) are
+        // kit-owned local surfaces and keep band-local metric UVs.
+        .uv_m = switch (role) {
+            .face => spanQuadUv(column_scale_m_per_u, column_start_u, column_end_u, row_bottom_u, row_top_u),
+            .cap => capQuadUv(column_scale_m_per_u, column_start_u, column_end_u, quad_m),
+            .end => endQuadUv(row_bottom_u, row_top_u, quad_m),
+            else => metricQuadUv(quad_m),
+        },
+    };
+}
+
+fn spanColumnMeters(column_scale_m_per_u: f32, column_u: types.Unit) f32 {
+    return column_scale_m_per_u * @as(f32, @floatFromInt(column_u));
+}
+
+/// Face bands: u = metric meters along the authored edge span, v = meters up
+/// the wall's row space. Corners follow verticalQuad order (start-bottom,
+/// end-bottom, end-top, start-top).
+fn spanQuadUv(
+    column_scale_m_per_u: f32,
+    column_start_u: types.Unit,
+    column_end_u: types.Unit,
+    row_bottom_u: types.Unit,
+    row_top_u: types.Unit,
+) [4]Point2Meters {
+    const u_start = spanColumnMeters(column_scale_m_per_u, column_start_u);
+    const u_end = spanColumnMeters(column_scale_m_per_u, column_end_u);
+    const v_bottom = architecture_scale.unitsToMeters(row_bottom_u);
+    const v_top = architecture_scale.unitsToMeters(row_top_u);
+    return .{
+        .{ .u = u_start, .v = v_bottom },
+        .{ .u = u_end, .v = v_bottom },
+        .{ .u = u_end, .v = v_top },
+        .{ .u = u_start, .v = v_top },
+    };
+}
+
+/// Caps run the same column axis as faces; u anchors to the edge span so
+/// future coverage splits stay continuous, v stays thickness-local.
+fn capQuadUv(
+    column_scale_m_per_u: f32,
+    column_start_u: types.Unit,
+    column_end_u: types.Unit,
+    quad_m: [4]Point3Meters,
+) [4]Point2Meters {
+    const u_start = spanColumnMeters(column_scale_m_per_u, column_start_u);
+    const u_end = spanColumnMeters(column_scale_m_per_u, column_end_u);
+    const thickness_m = pointDistance(quad_m[1], quad_m[2]);
+    return .{
+        .{ .u = u_start, .v = 0 },
+        .{ .u = u_end, .v = 0 },
+        .{ .u = u_end, .v = thickness_m },
+        .{ .u = u_start, .v = thickness_m },
+    };
+}
+
+/// End cross-sections anchor v to the wall's row space (step junctions expose
+/// partial heights); u stays thickness-local.
+fn endQuadUv(
+    row_bottom_u: types.Unit,
+    row_top_u: types.Unit,
+    quad_m: [4]Point3Meters,
+) [4]Point2Meters {
+    const width_m = pointDistance(quad_m[0], quad_m[1]);
+    const v_bottom = architecture_scale.unitsToMeters(row_bottom_u);
+    const v_top = architecture_scale.unitsToMeters(row_top_u);
+    return .{
+        .{ .u = 0, .v = v_bottom },
+        .{ .u = width_m, .v = v_bottom },
+        .{ .u = width_m, .v = v_top },
+        .{ .u = 0, .v = v_top },
     };
 }
 

@@ -79,8 +79,8 @@ const HASH_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const HASH_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const HASH_C = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const HASH_D = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-const COMPILE_ROOM_BUNDLE_HASH = "7a805e81dfdd031263eaab62108989eea4f01975f6a5b1ff03fb3a2a0836ed6a";
-const COMPILE_ROOM_SECTION_HASH = "02d34f40d42ec1b57ff5624194201c9b10fa480fa81a2f349f41a07d877aac0b";
+const COMPILE_ROOM_BUNDLE_HASH = "118a959992b2a1fc61e2e406fbb8e6b54c6701f9edde1d19e36ca0eb8b5d45be";
+const COMPILE_ROOM_SECTION_HASH = "7203792554d061254655c266ead7105e2ee08b605b1e192eb7a865adc9671a57";
 const WIRE_GOLDEN_EMPTY_SOURCE = [_]u8{
     0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x07, 0x00,
     0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -3507,6 +3507,41 @@ test "floor triangle windings agree with their stored normals" {
         const alignment = cross[0] * triangle.normal.x + cross[1] * triangle.normal.y + cross[2] * triangle.normal.z;
         try testing.expect(alignment > 0);
     }
+}
+
+test "face band UVs stay spread over the piece across opening cuts" {
+    // The texture-continuity law (req_4485): cutting an opening splits a wall
+    // face into bands, but every band's UVs are the exact sub-rectangle of the
+    // AUTHORED EDGE SPAN it occupies — the texture never restarts at a cut.
+    const door = geometryOpeningKit("kit:uv-door", .door, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try installCompileRoom(testing.allocator, &source, &entries, "compile-room", 0, 0);
+    try installGeometryOpenings(testing.allocator, &source, "compile-room-a:e:0", &.{.{
+        .id = "uv-opening",
+        .kind = .door,
+        .kit_id = "kit:uv-door",
+        .column_u = 24,
+        .row_u = 0,
+    }});
+    source.revision += 1;
+    var bundle = try compileExpected(testing.allocator, &source, &entries, .{});
+    defer bundle.deinit(testing.allocator);
+
+    var cut_face_bands: usize = 0;
+    for (bundle.wall.render_bands) |band| {
+        if (!std.mem.eql(u8, band.edge_id, "compile-room-a:e:0")) continue;
+        if (band.role != .face) continue;
+        cut_face_bands += 1;
+        try testing.expectEqual(architecture.unitsToMeters(band.column_start_u), band.uv_m[0].u);
+        try testing.expectEqual(architecture.unitsToMeters(band.column_end_u), band.uv_m[1].u);
+        try testing.expectEqual(architecture.unitsToMeters(band.row_bottom_u), band.uv_m[0].v);
+        try testing.expectEqual(architecture.unitsToMeters(band.row_top_u), band.uv_m[2].v);
+    }
+    // The door splits each side into left/right (+ header) bands; if this is
+    // ever 2 the opening did not cut and the law goes unexercised.
+    try testing.expect(cut_face_bands > 2);
 }
 
 test "compile target hashes isolate finish opening and topology edits" {
