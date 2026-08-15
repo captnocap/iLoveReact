@@ -155,6 +155,8 @@ export default function Stage(props: {
   onDrawWall: (commit: import('../world/wallTools').WallDrawCommit) => boolean;
   /** The measured style's default wall measurements — the gizmo's seed (req_4479). */
   wallDefaults: { heightU: number; thicknessU: number } | null;
+  /** A Select-tool click resolved to a wall face (req_4480). */
+  onSelectWall: (hit: { edgeId: string; side: 'a' | 'b' }) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
@@ -265,8 +267,10 @@ export default function Stage(props: {
           onStampSticker={props.onStampSticker}
           onPaintFlora={props.onPaintFlora}
           architecture={props.state.architecture}
+          architectureSelection={props.state.architectureSelection}
           onDrawWall={props.onDrawWall}
           wallDefaults={props.wallDefaults}
+          onSelectWall={props.onSelectWall}
         />
         {worldActive ? null : activeDocument.kind === 'home' ? (
           props.homeSurface

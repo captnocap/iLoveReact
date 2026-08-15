@@ -12,7 +12,7 @@ import type { PieceSelectionIntent } from '../world/selection';
 import type { WorldPrefab } from '../world/prefabs';
 import type { AuthoredFloraSpecies } from '../world/floraSpecies';
 import type { FloraPaintSample, WorldFloraBrush, WorldFloraPatch } from '../world/surfaceFlora';
-import type { ArchitectureSource } from '../world/architecture';
+import type { ArchitectureSelection, ArchitectureSource } from '../world/architecture';
 import type { WallDrawCommit } from '../world/wallTools';
 
 // BLANKBOOT req_2490: the editor's world file is ITS OWN, fresh path — the old
@@ -78,6 +78,9 @@ export default function WorldEditorSurface(props: {
   onDrawWall: (commit: WallDrawCommit) => boolean;
   /** The measured style's default measurements — the wall gizmo's seed (req_4479). */
   wallDefaults: { heightU: number; thicknessU: number } | null;
+  /** Wall selection (req_4480): the selected record + the Select-click report. */
+  architectureSelection: ArchitectureSelection;
+  onSelectWall: (hit: { edgeId: string; side: 'a' | 'b' }) => void;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -128,6 +131,8 @@ export default function WorldEditorSurface(props: {
         architecture={props.architecture}
         onDrawWall={props.onDrawWall}
         wallDefaults={props.wallDefaults}
+        architectureSelection={props.architectureSelection}
+        onSelectWall={props.onSelectWall}
         floor={props.floor}
         viewRecall={props.viewRecall}
         views={props.views}

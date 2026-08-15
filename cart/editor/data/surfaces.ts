@@ -4,14 +4,23 @@
 // workspace document's kind. Menus, keybindings, the action bar, and context menus all gate
 // on this — so it lives in one place instead of the ~6 duplicated `workspaceDocuments.find(...)`
 // lookups that used to be scattered through AppFrame / DropdownMenu / ToolOptions.
-import type { EditorState, WorkspaceDocument } from './types';
+import type { EditorState, WorkspaceDocument, WorkspaceDocumentKind } from './types';
 
 // 'playtest' (GLOBALS req_2770): the embodied drop-in tab. Deliberately NOT a
 // Command scope — no command targets it, so on the playtest tab every
 // world/model/material command grays with its surface reason and only global
 // chords fire (the loader owns WASD/Space/Shift).
-// 'animation' (req_2786): the webcam capture tab — same non-scope treatment.
+// 'animation': the shared Animation Foundry timeline — same non-scope treatment.
 export type Surface = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'knowledge';
+export type ActionBarSurface = 'world' | 'model' | 'empty';
+
+/** Section D has two real tool authorities. Every other document keeps the
+ * fixed-height region empty instead of inheriting world controls by fallthrough. */
+export function actionBarSurface(kind: WorkspaceDocumentKind): ActionBarSurface {
+  if (kind === 'world') return 'world';
+  if (kind === 'model') return 'model';
+  return 'empty';
+}
 
 function activeDoc(state: EditorState): WorkspaceDocument | undefined {
   return state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
@@ -42,6 +51,8 @@ export function activeModelDoc(state: EditorState): WorkspaceDocument | undefine
  *  Material has no selection concept → always true. */
 export function hasSelection(state: EditorState, surface: Surface): boolean {
   if (surface === 'model') return state.modelTool.sel > 0;
-  if (surface === 'world') return !!state.selectedPieceId || !!state.selectedObjectId;
+  // A selected semantic wall counts (req_4480): Del routes through the same
+  // selection-gated Edit verbs the pieces use.
+  if (surface === 'world') return !!state.selectedPieceId || !!state.selectedObjectId || state.architectureSelection.kind !== 'none';
   return true;
 }

@@ -29,7 +29,7 @@ import { encodeMeshGhost } from './meshProps';
 import { findVertexSnap, type VertexSnapHit } from './vertexSnap';
 import { isAuthoredPiece, authoredResidentKeyOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
-import { pickBuildPieceHostHit } from '../../../runtime/game/build';
+import { architectureHostLive, pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { faceRoleForHit } from './pieceSlots';
 import { stickerLocalFrom } from './pieceSkins';
 import { ensureMapSeededAsync } from '../stage/mapPaint';
@@ -40,7 +40,8 @@ import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
 import { snapWallHeightU, snapWallPoint, snapWallThicknessU, wallPointerRelease, STOREY_HEIGHT_U, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
 import { setLiveArchitecture } from './architectureBake';
-import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSource } from './architecture';
+import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource } from './architecture';
+import { architectureHost } from './architectureHost';
 import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
@@ -222,6 +223,11 @@ export default function WorldViewport(props: {
   onDrawWall: (commit: WallDrawCommit) => boolean;
   /** The measured style's default measurements — seeds the wall gizmo (req_4479). */
   wallDefaults: { heightU: number; thicknessU: number } | null;
+  /** The selected wall record (req_4480) — drawn as the cyan selection outline. */
+  architectureSelection: ArchitectureSelection;
+  /** A Select-tool click resolved to a wall face (piece picks take precedence);
+   *  null never rides this — the shared miss path clears both selections. */
+  onSelectWall: (hit: { edgeId: string; side: 'a' | 'b' }) => void;
   /** Commit a snapped preview after one Move-tool drag. */
   onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
@@ -316,6 +322,8 @@ export default function WorldViewport(props: {
   architectureRef.current = props.architecture;
   const onDrawWallRef = useRef(props.onDrawWall);
   onDrawWallRef.current = props.onDrawWall;
+  const onSelectWallRef = useRef(props.onSelectWall);
+  onSelectWallRef.current = props.onSelectWall;
   const wallAnchorRef = useRef<WallDrawGesture | null>(null);
   // The wall ghost (req_4474): the snapped lattice point under the cursor plus
   // the live anchor, projected into a storey-tall guide rectangle each render.
@@ -920,6 +928,27 @@ export default function WorldViewport(props: {
     if (len < 0.001) return null;
     return { base, top, axis: { x: vx / len, y: vy / len, pxPerMeter: len / heightM } };
   }, [stage, currentWallParams]);
+
+  // Wall pick (req_4480): the ENGINE resolves the click — the same raycast the
+  // draw tool's future opening placement uses, so picked geometry is exactly
+  // rendered geometry. Null when the host is absent, nothing is drawn, or the
+  // ray misses every wall face.
+  const pickWallAt = useCallback((px: number, py: number): { edgeId: string; side: 'a' | 'b' } | null => {
+    const source = architectureRef.current;
+    if (!architectureHostLive() || source.walls.edges.length === 0) return null;
+    const ray = stage.worldRay(px, py, rectRef.current);
+    try {
+      const hit = architectureHost.raycast(source, {
+        originMeters: [ray.origin.x, ray.origin.y, ray.origin.z],
+        direction: [ray.dir.x, ray.dir.y, ray.dir.z],
+        maximumDistanceMeters: 1000,
+      });
+      return hit ? { edgeId: hit.edgeId, side: hit.side } : null;
+    } catch (error) {
+      console.warn(`[wall] pick raycast failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }, [stage]);
 
   // Prop stacking (req_3363): the placement ray may strike a placed piece's TOP
   // FACE before the terrain — a table top is a placement surface, exactly the
@@ -1609,7 +1638,18 @@ export default function WorldViewport(props: {
     // done through a re-render-safe path.)
     const tool = toolRef.current;
     if (tool !== 'place') {
-      onSelectRef.current(pickPieceAt(d.x0, d.y0), d.selectionIntent);
+      const pieceId = pickPieceAt(d.x0, d.y0);
+      // Wall pick (req_4480): a Select click that misses every piece asks the
+      // engine's wall raycast before giving up. Pieces keep precedence — they
+      // are the finer, denser targets.
+      if (!pieceId && tool === 'select' && d.selectionIntent === 'replace') {
+        const wallHit = pickWallAt(d.x0, d.y0);
+        if (wallHit) {
+          onSelectWallRef.current(wallHit);
+          return;
+        }
+      }
+      onSelectRef.current(pieceId, d.selectionIntent);
       return;
     }
     if (!armedRef.current) { console.warn('[place] click with nothing armed'); return; }
@@ -1629,7 +1669,7 @@ export default function WorldViewport(props: {
       [{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }],
       { mode: 'click', inputAtMs: Date.now(), pointerX: d.x0, pointerY: d.y0 },
     );
-  }, [resolveSnap, groundUnder, applyMoveVertexSnap, publishSnapMark, props.onPlace, props.onMove, local, stage, pickPieceAt, currentWallParams]);
+  }, [resolveSnap, groundUnder, applyMoveVertexSnap, publishSnapMark, props.onPlace, props.onMove, local, stage, pickPieceAt, currentWallParams, pickWallAt]);
 
   // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
   // mode and report it up with the WINDOW coords (the root-mounted menu lands at the
@@ -1730,6 +1770,32 @@ export default function WorldViewport(props: {
     const look = sel ? pieceLook(sel.pieceId) : null;
     const ss = sel ? pieceScaleOf(sel) : 1;
     if (sel && look) selectedSegs.push(...boxSegments(stage, rect, sel.x, sel.y, sel.z, look.w * ss, look.h * ss, look.d * ss, sel.yawDegrees));
+  }
+  // Selected semantic wall (req_4480): the edge's face rectangle in the same
+  // cyan selection vocabulary — base and top lines plus both verticals.
+  if (props.tool !== 'place' && props.architectureSelection.kind === 'wallEdge') {
+    const selection = props.architectureSelection;
+    const edge = props.architecture.walls.edges.find((candidate) => candidate.id === selection.edgeId);
+    const startVertex = edge ? props.architecture.walls.vertices.find((vertex) => vertex.id === edge.startVertexId) : null;
+    const endVertex = edge ? props.architecture.walls.vertices.find((vertex) => vertex.id === edge.endVertexId) : null;
+    if (edge && startVertex && endVertex && edge.support.kind === 'absolute') {
+      const baseY = edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER;
+      const topY = (edge.support.baseYU + edge.heightU) / ARCHITECTURE_UNITS_PER_METER;
+      const corner = (vertex: { xU: number; zU: number }, y: number) =>
+        stage.project(vertex.xU / ARCHITECTURE_UNITS_PER_METER, y, vertex.zU / ARCHITECTURE_UNITS_PER_METER, rect);
+      const startBase = corner(startVertex, baseY);
+      const endBase = corner(endVertex, baseY);
+      const startTop = corner(startVertex, topY);
+      const endTop = corner(endVertex, topY);
+      if (startBase && endBase && startTop && endTop) {
+        selectedSegs.push(
+          startBase.x, startBase.y, endBase.x, endBase.y,
+          startTop.x, startTop.y, endTop.x, endTop.y,
+          startBase.x, startBase.y, startTop.x, startTop.y,
+          endBase.x, endBase.y, endTop.x, endTop.y,
+        );
+      }
+    }
   }
   // ── The selection gizmo (req_3367): studio handles over the selected prop.
   // Drawn at the drag preview mid-gesture so the handles ride the transform.

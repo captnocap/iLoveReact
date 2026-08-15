@@ -127,8 +127,8 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // Draw Wall (req_4473): one committed span → one engine command; measurements
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
-import { applyArchitectureCommand, architectureCommandId } from '../world/architectureCommand';
-import { emptyArchitectureSource } from '../world/architecture';
+import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand } from '../world/architectureCommand';
+import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
 import { installedWallStyles } from '../data/initialState';
 // The durable working session (req_4435): what a cold start restores, and the
@@ -4290,6 +4290,12 @@ export default function AppFrame() {
           return;
         }
         if (command.id === 'delete-selection' || command.id === WORLD_PIECE_DELETE_COMMAND_ID) {
+          // Selected semantic wall (req_4480): the edge deletes through the
+          // engine; pieces keep their existing lanes below.
+          if (current.architectureSelection.kind === 'wallEdge' && !current.selectedPieceId && current.selectedPieceIds.length === 0) {
+            deleteSelectedWallEdge();
+            return;
+          }
           if (current.selectedPieceIds.length > 1) {
             const ids = new Set(current.selectedPieceIds);
             setState((prev) => recordWorldEdit(prev, {
@@ -4943,6 +4949,42 @@ export default function AppFrame() {
     return true;
   };
 
+  /** A Select click resolved to a wall face (req_4480). One selection at a
+   *  time: picking a wall drops any piece selection, and vice versa. */
+  const selectWallEdge = (hit: { edgeId: string; side: 'a' | 'b' }) => {
+    setState((prev) => ({
+      ...prev,
+      architectureSelection: { kind: 'wallEdge', edgeId: hit.edgeId, side: hit.side },
+      selectedPieceId: null,
+      selectedPieceIds: [],
+      status: 'selected wall — Del deletes it',
+    }));
+  };
+
+  /** Delete the selected semantic wall edge through the engine (req_4480) —
+   *  one undoable world edit, same shape as drawWall. */
+  const deleteSelectedWallEdge = () => {
+    const current = stateRef.current;
+    const selection = current.architectureSelection;
+    if (selection.kind !== 'wallEdge') return;
+    const command = deleteEdgeCommand(architectureCommandId('delete-edge', current.seq), current.architecture.revision, selection.edgeId);
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED delete ${selection.edgeId}: ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `delete wall rejected: ${result.reason}` }));
+      return;
+    }
+    console.warn(`[wall] wall deleted (${selection.edgeId}) — ${result.source.walls.edges.length} edge(s) remain`);
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+      seq: prev.seq + 1,
+      contextOpen: false,
+      status: 'Wall deleted',
+    }, 'Delete wall'));
+  };
+
   /** Commit one viewport drag after its local snapped preview has settled. This
    *  is deliberately one state transition on drop — WorldViewport owns the
    *  per-pointer preview so dragging cannot put React/the live overlay on the
@@ -4986,10 +5028,13 @@ export default function AppFrame() {
     setState((prev) => {
       // A modifier miss preserves the set being built; a plain miss clears it.
       if (!id && intent !== 'replace') return prev;
+      // One selection at a time (req_4480): a piece pick or a plain miss also
+      // drops any selected wall.
       if (!id) return {
         ...prev,
         selectedPieceId: null,
         selectedPieceIds: [],
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
         status: 'cleared world selection',
       };
       if (intent === 'toggle') {
@@ -5001,6 +5046,7 @@ export default function AppFrame() {
           ...prev,
           selectedPieceId: wasSelected ? selectedPieceIds[selectedPieceIds.length - 1] ?? null : id,
           selectedPieceIds,
+          architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
           status: `${wasSelected ? 'removed' : 'added'} ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id} · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`,
         };
       }
@@ -5009,6 +5055,7 @@ export default function AppFrame() {
         ...prev,
         selectedPieceId: id,
         selectedPieceIds,
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
         status: intent === 'connected'
           ? `selected touching component · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`
           : `selected ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id}`,
@@ -11332,6 +11379,7 @@ export default function AppFrame() {
             onPaintFlora={paintWorldFlora}
             onDrawWall={drawWall}
             wallDefaults={installedWallStyles()[0]?.wallStyleDefaults ?? null}
+            onSelectWall={selectWallEdge}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}
