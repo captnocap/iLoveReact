@@ -203,7 +203,6 @@ pub fn build(
         const side_b_normal = Vector3{ .x = -side_a_normal.x, .y = 0, .z = -side_a_normal.z };
         const side_a_points = surfaceEndpoints(source, derived_topology, edge, .a);
         const side_b_points = surfaceEndpoints(source, derived_topology, edge, .b);
-        const bottom_y_m = architecture_scale.unitsToMeters(base_y_u);
         const top_y_m = architecture_scale.unitsToMeters(base_y_u + edge.height_u);
         const opening_rects = try measuredOpeningRects(allocator, edge, entries, length_u);
         defer if (opening_rects.len != 0) allocator.free(opening_rects);
@@ -241,7 +240,23 @@ pub fn build(
             );
         }
 
-        if (isOpenEndpoint(derived_topology, edge.start_vertex_id)) {
+        // End faces are COVERAGE, not topology (req_4481): an endpoint's
+        // cross-section is exposed wherever no other incident edge's body
+        // spans that height. A lone endpoint exposes its full section (the old
+        // open-end band); an equal-height junction is fully covered (no
+        // bands); a STEP junction exposes the taller wall's remainder above
+        // its neighbours — the see-through hole this replaces.
+        var start_gaps: [MAX_END_GAPS]EndGap = undefined;
+        const start_gap_count = exposedEndGaps(
+            source,
+            derived_topology,
+            edge,
+            edge.start_vertex_id,
+            base_y_u,
+            base_y_u + edge.height_u,
+            &start_gaps,
+        );
+        for (start_gaps[0..start_gap_count]) |gap| {
             try builder.appendSurface(try ownedSurfaceBand(
                 allocator,
                 edge.id,
@@ -251,13 +266,28 @@ pub fn build(
                 edge.side_a.material_id,
                 0,
                 0,
-                0,
-                edge.height_u,
-                verticalQuad(side_b_points.start, side_a_points.start, bottom_y_m, top_y_m),
+                gap.bottom_u - base_y_u,
+                gap.top_u - base_y_u,
+                verticalQuad(
+                    side_b_points.start,
+                    side_a_points.start,
+                    architecture_scale.unitsToMeters(gap.bottom_u),
+                    architecture_scale.unitsToMeters(gap.top_u),
+                ),
                 .{ .x = -direction.x, .y = 0, .z = -direction.z },
             ));
         }
-        if (isOpenEndpoint(derived_topology, edge.end_vertex_id)) {
+        var end_gaps: [MAX_END_GAPS]EndGap = undefined;
+        const end_gap_count = exposedEndGaps(
+            source,
+            derived_topology,
+            edge,
+            edge.end_vertex_id,
+            base_y_u,
+            base_y_u + edge.height_u,
+            &end_gaps,
+        );
+        for (end_gaps[0..end_gap_count]) |gap| {
             try builder.appendSurface(try ownedSurfaceBand(
                 allocator,
                 edge.id,
@@ -267,9 +297,14 @@ pub fn build(
                 edge.side_a.material_id,
                 length_u,
                 length_u,
-                0,
-                edge.height_u,
-                verticalQuad(side_a_points.end, side_b_points.end, bottom_y_m, top_y_m),
+                gap.bottom_u - base_y_u,
+                gap.top_u - base_y_u,
+                verticalQuad(
+                    side_a_points.end,
+                    side_b_points.end,
+                    architecture_scale.unitsToMeters(gap.bottom_u),
+                    architecture_scale.unitsToMeters(gap.top_u),
+                ),
                 direction,
             ));
         }
@@ -876,11 +911,68 @@ fn findHalfEdgeIndex(derived: *const topology.DerivedTopology, edge_id: []const 
     return null;
 }
 
-fn isOpenEndpoint(derived: *const topology.DerivedTopology, vertex_id: []const u8) bool {
+/// One uncovered vertical span of an endpoint's cross-section, absolute units.
+const EndGap = struct { bottom_u: types.Unit, top_u: types.Unit };
+/// Incident edges at one vertex bound the cover-span count; junctions are tiny.
+const MAX_END_GAPS = 8;
+
+/// Coverage decides end faces (req_4481): subtract every OTHER incident
+/// edge's body interval from this edge's own [bottom, top] at the vertex and
+/// return the exposed remainders. The same subtraction is the intended lane
+/// for future coverers — a slab over a cap, an opening kit over a reveal:
+/// candidate face minus covering bodies, emit what remains.
+fn exposedEndGaps(
+    source: *const types.ArchitectureSource,
+    derived: *const topology.DerivedTopology,
+    edge: *const types.WallEdge,
+    vertex_id: []const u8,
+    bottom_u: types.Unit,
+    top_u: types.Unit,
+    gaps: *[MAX_END_GAPS]EndGap,
+) usize {
+    var cover: [MAX_END_GAPS]EndGap = undefined;
+    var cover_len: usize = 0;
     for (derived.vertices) |vertex| {
-        if (std.mem.eql(u8, vertex.source_vertex_id, vertex_id)) return vertex.outgoing_half_edge_indices.len == 1;
+        if (!std.mem.eql(u8, vertex.source_vertex_id, vertex_id)) continue;
+        for (vertex.outgoing_half_edge_indices) |half_edge_index| {
+            const other_id = derived.half_edges[half_edge_index].source_edge_id;
+            if (std.mem.eql(u8, other_id, edge.id)) continue;
+            const other = findSourceEdge(source, other_id) orelse continue;
+            const other_bottom = switch (other.support) {
+                .absolute => |support| support.base_y_u,
+                .slab => continue,
+            };
+            if (cover_len >= cover.len) break;
+            cover[cover_len] = .{ .bottom_u = other_bottom, .top_u = other_bottom + other.height_u };
+            cover_len += 1;
+        }
+        break;
     }
-    return false;
+    var index: usize = 1;
+    while (index < cover_len) : (index += 1) {
+        const held = cover[index];
+        var slot = index;
+        while (slot > 0 and cover[slot - 1].bottom_u > held.bottom_u) : (slot -= 1) cover[slot] = cover[slot - 1];
+        cover[slot] = held;
+    }
+    var count: usize = 0;
+    var cursor = bottom_u;
+    for (cover[0..cover_len]) |span| {
+        if (cursor >= top_u) break;
+        const lo = @max(span.bottom_u, bottom_u);
+        const hi = @min(span.top_u, top_u);
+        if (hi <= cursor) continue;
+        if (lo > cursor and count < gaps.len) {
+            gaps[count] = .{ .bottom_u = cursor, .top_u = @min(lo, top_u) };
+            count += 1;
+        }
+        cursor = @max(cursor, hi);
+    }
+    if (cursor < top_u and count < gaps.len) {
+        gaps[count] = .{ .bottom_u = cursor, .top_u = top_u };
+        count += 1;
+    }
+    return count;
 }
 
 fn ownedSurfaceBand(

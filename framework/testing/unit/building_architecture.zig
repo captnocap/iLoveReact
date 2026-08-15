@@ -2669,6 +2669,45 @@ test "geometry seals only open wall endpoints with end caps" {
     try testing.expectEqual(@as(usize, 2), end_count);
 }
 
+test "a step junction exposes the taller wall's cross-section above its neighbour (req_4481)" {
+    // Coverage, not topology, decides end faces: chaining a 96u wall onto a
+    // 48u wall leaves the taller wall's [48,96] cross-section visible at the
+    // shared vertex — without this band the shell is see-through there.
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("low", 0, 0, 0, 16, 0, null, null));
+    var tall_command = drawWallCommand("tall", 1, 16, 0, 32, 0, null, null);
+    tall_command.operation.draw_wall.height_u = 96;
+    try applyExpectedDraw(testing.allocator, &source, &entries, tall_command);
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var low_ends: usize = 0;
+    var tall_full_ends: usize = 0;
+    var tall_step_ends: usize = 0;
+    for (bundle.surfaces) |surface| {
+        if (surface.role != .end) continue;
+        if (std.mem.startsWith(u8, surface.edge_id, "low")) {
+            low_ends += 1;
+            try testing.expectEqual(@as(architecture.Unit, 0), surface.row_bottom_u);
+            try testing.expectEqual(@as(architecture.Unit, 48), surface.row_top_u);
+        } else {
+            if (surface.row_bottom_u == 0 and surface.row_top_u == 96) {
+                tall_full_ends += 1; // the open far endpoint
+            } else {
+                tall_step_ends += 1; // the junction step face
+                try testing.expectEqual(@as(architecture.Unit, 48), surface.row_bottom_u);
+                try testing.expectEqual(@as(architecture.Unit, 96), surface.row_top_u);
+            }
+        }
+    }
+    // The low wall: one open end; its junction section is fully covered by
+    // the taller neighbour. The tall wall: one open end + one step face.
+    try testing.expectEqual(@as(usize, 1), low_ends);
+    try testing.expectEqual(@as(usize, 1), tall_full_ends);
+    try testing.expectEqual(@as(usize, 1), tall_step_ends);
+}
+
 test "geometry seals a half wall with one horizontal top cap" {
     var entries = [_]architecture.CatalogEntry{validWallStyle()};
     var source = try emptyOwnedArchitectureSource(testing.allocator);
