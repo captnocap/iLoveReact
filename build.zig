@@ -233,6 +233,16 @@ pub fn build(b: *std.Build) void {
     wall_geometry_mod.addImport("wall_types", wall_types_mod);
     wall_geometry_mod.addImport("building_catalog", building_catalog_mod);
     wall_geometry_mod.addImport("wall_topology", wall_topology_mod);
+    const floor_geometry_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/floor_geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    floor_geometry_mod.addImport("architecture_scale", architecture_scale_mod);
+    floor_geometry_mod.addImport("wall_types", wall_types_mod);
+    floor_geometry_mod.addImport("wall_topology", wall_topology_mod);
+    floor_geometry_mod.addImport("wall_geometry", wall_geometry_mod);
     const wall_compile_mod = b.createModule(.{
         .root_source_file = b.path("framework/game/wall_compile.zig"),
         .target = target,
@@ -243,6 +253,7 @@ pub fn build(b: *std.Build) void {
     wall_compile_mod.addImport("building_catalog", building_catalog_mod);
     wall_compile_mod.addImport("wall_geometry", wall_geometry_mod);
     wall_compile_mod.addImport("wall_topology", wall_topology_mod);
+    wall_compile_mod.addImport("floor_geometry", floor_geometry_mod);
     const building_architecture_mod = b.createModule(.{
         .root_source_file = b.path("framework/game/building_architecture.zig"),
         .target = target,
@@ -901,8 +912,11 @@ pub fn build(b: *std.Build) void {
         "v8__Value__Int32Value",
         "v8__Value__BooleanValue",
         "v8__Value__IsArrayBufferView",
+        "v8__Value__IsBoolean",
+        "v8__Value__IsNumber",
         "v8__Value__NumberValue",
         "v8__Value__ToString",
+        "v8__Uint8Array__New",
     }) |symbol| v8_headers_mod.addCMacro(symbol, b.fmt("rjit_{s}", .{symbol}));
     const wgpu_headers_mod = b.createModule(.{
         .root_source_file = b.path("deps/wgpu_native_zig/src/root.zig"),
@@ -1359,6 +1373,54 @@ pub fn build(b: *std.Build) void {
     const spring_arm_test_step = b.step("test-world-loader-spring-arm", "Run the spring-arm camera vs placed-prop collision tests");
     spring_arm_test_step.dependOn(&run_spring_arm_test.step);
 
+    // ── Animation Foundry 3D trajectory tests ─────────────────────
+    // The cart publishes semantic points/markers/chevrons once per document
+    // revision; WorldLoader owns fail-closed decode and static tessellation.
+    const animation_trajectory_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_loader_animation_trajectory.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    animation_trajectory_test_mod.addImport("animation_trajectory", b.createModule(.{
+        .root_source_file = b.path("framework/world_loader/animation_trajectory.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    const animation_trajectory_test = b.addTest(.{
+        .name = "world-loader-animation-trajectory-test",
+        .root_module = animation_trajectory_test_mod,
+    });
+    const run_animation_trajectory_test = b.addRunArtifact(animation_trajectory_test);
+    const animation_trajectory_test_step = b.step("test-world-loader-animation-trajectory", "Run Animation Foundry native 3D trajectory tests");
+    animation_trajectory_test_step.dependOn(&run_animation_trajectory_test.step);
+
+    // ── Process signal boundary tests ─────────────────────────────
+    // Animation Foundry pauses background ARDY generation with SIGSTOP and
+    // resumes it with SIGCONT. Keep the accepted host strings closed and pin
+    // their behavior against a real tracked child at the native layer.
+    if (os_tag == .linux) {
+        const tracked_process_mod_for_tests = b.createModule(.{
+            .root_source_file = b.path("framework/process/process.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        const process_signal_test_mod = b.createModule(.{
+            .root_source_file = b.path("framework/testing/unit/process_signal.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        process_signal_test_mod.addImport("tracked_process", tracked_process_mod_for_tests);
+        const process_signal_test = b.addTest(.{
+            .name = "process-signal-test",
+            .root_module = process_signal_test_mod,
+        });
+        const run_process_signal_test = b.addRunArtifact(process_signal_test);
+        const process_signal_test_step = b.step("test-process-signal", "Run the closed process signal and pause-resume behavior tests");
+        process_signal_test_step.dependOn(&run_process_signal_test.step);
+    }
+
     // ── Process-lifetime tests ─────────────────────────────────────
     // proc_lifetime.zig is what stops a dev host outliving its supervisor, and
     // its entry point takes `anytype` — nothing in the body is compiled until
@@ -1390,6 +1452,25 @@ pub fn build(b: *std.Build) void {
     const run_zig016_idioms_test = b.addRunArtifact(zig016_idioms_test);
     const zig016_idioms_test_step = b.step("test-zig016-idioms", "Run Zig 0.16 language-idiom tests");
     zig016_idioms_test_step.dependOn(&run_zig016_idioms_test.step);
+
+    // ── Image-cache replacement policy tests ──────────────────────
+    const image_cache_policy_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/image_cache_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    image_cache_policy_test_mod.addImport("image_cache_policy", b.createModule(.{
+        .root_source_file = b.path("framework/gpu/image_cache_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    const image_cache_policy_test = b.addTest(.{
+        .name = "image-cache-policy-test",
+        .root_module = image_cache_policy_test_mod,
+    });
+    const run_image_cache_policy_test = b.addRunArtifact(image_cache_policy_test);
+    const image_cache_policy_test_step = b.step("test-image-cache-policy", "Run bounded Image-cache replacement policy tests");
+    image_cache_policy_test_step.dependOn(&run_image_cache_policy_test.step);
 
     // ── Layout unit tests ──────────────────────────────────────────
     // Exercises the flex resolver in framework/layout.zig with concrete
@@ -2172,6 +2253,16 @@ pub fn build(b: *std.Build) void {
     wall_geometry_mod_for_tests.addImport("architecture_scale", architecture_scale_mod);
     wall_geometry_mod_for_tests.addImport("building_catalog", building_catalog_mod_for_tests);
     wall_geometry_mod_for_tests.addImport("wall_topology", wall_topology_mod_for_tests);
+    const floor_geometry_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/floor_geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    floor_geometry_mod_for_tests.addImport("architecture_scale", architecture_scale_mod);
+    floor_geometry_mod_for_tests.addImport("wall_types", wall_types_mod_for_tests);
+    floor_geometry_mod_for_tests.addImport("wall_topology", wall_topology_mod_for_tests);
+    floor_geometry_mod_for_tests.addImport("wall_geometry", wall_geometry_mod_for_tests);
     const wall_compile_mod_for_tests = b.createModule(.{
         .root_source_file = b.path("framework/game/wall_compile.zig"),
         .target = target,
@@ -2182,6 +2273,7 @@ pub fn build(b: *std.Build) void {
     wall_compile_mod_for_tests.addImport("building_catalog", building_catalog_mod_for_tests);
     wall_compile_mod_for_tests.addImport("wall_geometry", wall_geometry_mod_for_tests);
     wall_compile_mod_for_tests.addImport("wall_topology", wall_topology_mod_for_tests);
+    wall_compile_mod_for_tests.addImport("floor_geometry", floor_geometry_mod_for_tests);
     const architecture_wire_mod_for_tests = b.createModule(.{
         .root_source_file = b.path("framework/game/architecture_wire.zig"),
         .target = target,
@@ -2200,6 +2292,7 @@ pub fn build(b: *std.Build) void {
     building_architecture_test_mod.addImport("wall_mutation", wall_mutation_mod_for_tests);
     building_architecture_test_mod.addImport("wall_geometry", wall_geometry_mod_for_tests);
     building_architecture_test_mod.addImport("wall_compile", wall_compile_mod_for_tests);
+    building_architecture_test_mod.addImport("floor_geometry", floor_geometry_mod_for_tests);
     building_architecture_test_mod.addImport("architecture_wire", architecture_wire_mod_for_tests);
     const building_architecture_test = b.addTest(.{
         .name = "building-architecture-test",
@@ -2931,6 +3024,26 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     model_blob_meshdoc_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
+    const model_blob_sqlite_mod = b.createModule(.{
+        .root_source_file = b.path("framework/storage/sqlite.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const model_blob_event_bus_mod = b.createModule(.{
+        .root_source_file = b.path("framework/diag/event_bus.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_blob_event_bus_mod.addImport("../storage/sqlite.zig", model_blob_sqlite_mod);
+    const model_blob_log_mod = b.createModule(.{
+        .root_source_file = b.path("framework/diag/log.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_blob_log_mod.addImport("event_bus.zig", model_blob_event_bus_mod);
     const model_blob_mesh_edit_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
         .target = target,
@@ -2942,6 +3055,8 @@ pub fn build(b: *std.Build) void {
     // the production format owner twice in one executable.
     model_blob_mesh_edit_mod.addImport("meshdoc_format.zig", model_blob_meshdoc_mod);
     model_blob_mesh_edit_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
+    model_blob_mesh_edit_mod.addImport("../diag/log.zig", model_blob_log_mod);
+    model_blob_mesh_edit_mod.addImport("../diag/event_bus.zig", model_blob_event_bus_mod);
     const model_blob_codec_mod = b.createModule(.{
         .root_source_file = b.path("framework/tools/model_blob_codec.zig"),
         .target = target,

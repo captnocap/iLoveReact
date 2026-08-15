@@ -8,6 +8,7 @@ const topology = @import("wall_topology");
 const mutation = @import("wall_mutation");
 const geometry = @import("wall_geometry");
 const wall_compile = @import("wall_compile");
+const floor_geometry = @import("floor_geometry");
 const architecture_wire = @import("architecture_wire");
 
 comptime {
@@ -78,7 +79,7 @@ const HASH_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const HASH_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const HASH_C = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const HASH_D = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-const COMPILE_ROOM_BUNDLE_HASH = "548fcb31e7e7697cde1f73752395f836157cab002c8a3fd466260a3d612305f8";
+const COMPILE_ROOM_BUNDLE_HASH = "7a805e81dfdd031263eaab62108989eea4f01975f6a5b1ff03fb3a2a0836ed6a";
 const COMPILE_ROOM_SECTION_HASH = "02d34f40d42ec1b57ff5624194201c9b10fa480fa81a2f349f41a07d877aac0b";
 const WIRE_GOLDEN_EMPTY_SOURCE = [_]u8{
     0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x07, 0x00,
@@ -3302,6 +3303,210 @@ test "compile bundle preserves canonical room face boundary signatures" {
     try testing.expectEqualStrings(derived.faces[0].signature, room.signature);
     try testing.expectEqual(derived.faces[0].signed_area_twice, room.signed_area_twice_u);
     try testing.expectEqual(@as(usize, 4), room.boundary_half_edge_ids.len);
+}
+
+fn floorTopAreaSquareMeters(
+    triangles: []const floor_geometry.FloorTriangle,
+    signature: ?[]const u8,
+) f64 {
+    var area: f64 = 0;
+    for (triangles) |triangle| {
+        if (triangle.role != .top) continue;
+        if (signature) |value| {
+            if (!std.mem.eql(u8, triangle.face_signature, value)) continue;
+        }
+        const a = triangle.corners_m[0];
+        const b = triangle.corners_m[1];
+        const c = triangle.corners_m[2];
+        const cross_y = (@as(f64, b.z) - a.z) * (@as(f64, c.x) - a.x) -
+            (@as(f64, b.x) - a.x) * (@as(f64, c.z) - a.z);
+        area += @abs(cross_y) / 2.0;
+    }
+    return area;
+}
+
+test "derived floors fill closed rooms and skip open runs" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+
+    // A closed 4 m x 4 m room derives one plate: 16 m^2 of walkable top one
+    // lattice unit above the wall base, a mirrored underside, and a rim.
+    var closed = try emptyOwnedArchitectureSource(testing.allocator);
+    defer closed.deinit(testing.allocator);
+    try installCompileRoom(testing.allocator, &closed, &entries, "compile-room", 0, 0);
+    var closed_bundle = try compileExpected(testing.allocator, &closed, &entries, .{});
+    defer closed_bundle.deinit(testing.allocator);
+    try testing.expect(closed_bundle.floor.triangles.len > 0);
+    var saw_top = false;
+    var saw_bottom = false;
+    var saw_rim = false;
+    for (closed_bundle.floor.triangles) |triangle| {
+        switch (triangle.role) {
+            .top => {
+                saw_top = true;
+                for (triangle.corners_m) |corner| try testing.expectEqual(@as(f32, 0.0625), corner.y);
+            },
+            .bottom => {
+                saw_bottom = true;
+                for (triangle.corners_m) |corner| try testing.expectEqual(@as(f32, 0), corner.y);
+            },
+            .rim => saw_rim = true,
+        }
+        try testing.expectEqual(@as(i32, 0), triangle.floor);
+        try testing.expectEqualStrings(floor_geometry.generated_floor_material_id, triangle.material_id);
+    }
+    try testing.expect(saw_top and saw_bottom and saw_rim);
+    try testing.expectApproxEqAbs(@as(f64, 16.0), floorTopAreaSquareMeters(closed_bundle.floor.triangles, null), 0.001);
+
+    // An open three-sided run derives nothing.
+    var open = try emptyOwnedArchitectureSource(testing.allocator);
+    defer open.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &open, &entries, drawWallCommand("open-a", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &open, &entries, drawWallCommand("open-b", 1, 64, 0, 64, 64, null, null));
+    try applyExpectedDraw(testing.allocator, &open, &entries, drawWallCommand("open-c", 2, 64, 64, 0, 64, null, null));
+    var open_bundle = try compileExpected(testing.allocator, &open, &entries, .{});
+    defer open_bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), open_bundle.floor.triangles.len);
+
+    // Floors REACT to wall edits (USER RULING req_4482): deleting one boundary
+    // edge reopens the enclosure and the plate disappears with it.
+    var reopened = try architecture.types.cloneSource(testing.allocator, &closed);
+    defer reopened.deinit(testing.allocator);
+    var deletion = try mutation.applyCommand(testing.allocator, &reopened, &entries, .{
+        .command_id = "reopen",
+        .expected_revision = reopened.revision,
+        .operation = .{ .delete_edge = .{ .edge_id = "compile-room-a:e:0" } },
+    });
+    defer deletion.deinit(testing.allocator);
+    try testing.expect(deletion == .receipt);
+    var reopened_bundle = try compileExpected(testing.allocator, &reopened, &entries, .{});
+    defer reopened_bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), reopened_bundle.floor.triangles.len);
+
+    // A raised wall base lifts its plate: base 32 u tops out at 2.0625 m.
+    var raised = try emptyOwnedArchitectureSource(testing.allocator);
+    defer raised.deinit(testing.allocator);
+    const raised_walls = [_][4]f64{
+        .{ 128, 0, 192, 0 },
+        .{ 192, 0, 192, 64 },
+        .{ 192, 64, 128, 64 },
+        .{ 128, 64, 128, 0 },
+    };
+    const raised_ids = [_][]const u8{ "raised-a", "raised-b", "raised-c", "raised-d" };
+    for (raised_walls, 0..) |coordinates, index| {
+        try applyExpectedDraw(testing.allocator, &raised, &entries, drawWallCommandOnFloor(
+            raised_ids[index],
+            raised.revision,
+            0,
+            32,
+            coordinates[0],
+            coordinates[1],
+            coordinates[2],
+            coordinates[3],
+        ));
+    }
+    var raised_bundle = try compileExpected(testing.allocator, &raised, &entries, .{});
+    defer raised_bundle.deinit(testing.allocator);
+    var saw_raised_top = false;
+    for (raised_bundle.floor.triangles) |triangle| {
+        if (triangle.role != .top) continue;
+        saw_raised_top = true;
+        for (triangle.corners_m) |corner| try testing.expectEqual(@as(f32, 2.0625), corner.y);
+    }
+    try testing.expect(saw_raised_top);
+}
+
+test "derived floors keep courtyard holes open" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    // Outer 10 m courtyard wall around an inner 4 m building (3 m..7 m).
+    const rings = [_][4]f64{
+        .{ 0, 0, 160, 0 },     .{ 160, 0, 160, 160 },  .{ 160, 160, 0, 160 },  .{ 0, 160, 0, 0 },
+        .{ 48, 48, 112, 48 },  .{ 112, 48, 112, 112 }, .{ 112, 112, 48, 112 }, .{ 48, 112, 48, 48 },
+    };
+    const ids = [_][]const u8{
+        "yard-a", "yard-b", "yard-c", "yard-d",
+        "inner-a", "inner-b", "inner-c", "inner-d",
+    };
+    for (rings, 0..) |coordinates, index| {
+        try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand(
+            ids[index],
+            source.revision,
+            coordinates[0],
+            coordinates[1],
+            coordinates[2],
+            coordinates[3],
+            null,
+            null,
+        ));
+    }
+    var derived = try topology.build(testing.allocator, &source.walls);
+    defer derived.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), derived.faces.len);
+    const ring_face = for (derived.faces) |*face| {
+        if (face.hole_indices.len == 1) break face;
+    } else return error.TestExpectedEqual;
+    const inner_face = for (derived.faces) |*face| {
+        if (face.hole_indices.len == 0) break face;
+    } else return error.TestExpectedEqual;
+
+    var bundle = try compileExpected(testing.allocator, &source, &entries, .{});
+    defer bundle.deinit(testing.allocator);
+    // The courtyard ring plate excludes the hole: 100 - 16 m^2. The inner
+    // building floors itself independently.
+    try testing.expectApproxEqAbs(
+        @as(f64, 84.0),
+        floorTopAreaSquareMeters(bundle.floor.triangles, ring_face.signature),
+        0.001,
+    );
+    try testing.expectApproxEqAbs(
+        @as(f64, 16.0),
+        floorTopAreaSquareMeters(bundle.floor.triangles, inner_face.signature),
+        0.001,
+    );
+    // No courtyard-plate top may reach strictly inside the hole footprint.
+    var ring_rim_count: usize = 0;
+    for (bundle.floor.triangles) |triangle| {
+        if (!std.mem.eql(u8, triangle.face_signature, ring_face.signature)) continue;
+        if (triangle.role == .rim) ring_rim_count += 1;
+        if (triangle.role != .top) continue;
+        var centroid_x: f64 = 0;
+        var centroid_z: f64 = 0;
+        for (triangle.corners_m) |corner| {
+            centroid_x += corner.x;
+            centroid_z += corner.z;
+        }
+        centroid_x /= 3;
+        centroid_z /= 3;
+        const inside_hole = centroid_x > 3.0 and centroid_x < 7.0 and centroid_z > 3.0 and centroid_z < 7.0;
+        try testing.expect(!inside_hole);
+    }
+    // Rim wraps both boundaries: 4 outer + 4 hole segments, two triangles each.
+    try testing.expectEqual(@as(usize, 16), ring_rim_count);
+}
+
+test "floor triangle windings agree with their stored normals" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try installCompileRoom(testing.allocator, &source, &entries, "compile-room", 0, 0);
+    var bundle = try compileExpected(testing.allocator, &source, &entries, .{});
+    defer bundle.deinit(testing.allocator);
+    try testing.expect(bundle.floor.triangles.len > 0);
+    for (bundle.floor.triangles) |triangle| {
+        const a = triangle.corners_m[0];
+        const b = triangle.corners_m[1];
+        const c = triangle.corners_m[2];
+        const first = [3]f32{ b.x - a.x, b.y - a.y, b.z - a.z };
+        const second = [3]f32{ c.x - a.x, c.y - a.y, c.z - a.z };
+        const cross = [3]f32{
+            first[1] * second[2] - first[2] * second[1],
+            first[2] * second[0] - first[0] * second[2],
+            first[0] * second[1] - first[1] * second[0],
+        };
+        const alignment = cross[0] * triangle.normal.x + cross[1] * triangle.normal.y + cross[2] * triangle.normal.z;
+        try testing.expect(alignment > 0);
+    }
 }
 
 test "compile target hashes isolate finish opening and topology edits" {

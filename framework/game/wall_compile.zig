@@ -9,10 +9,12 @@ const types = @import("wall_types");
 const catalog = @import("building_catalog");
 const geometry = @import("wall_geometry");
 const topology = @import("wall_topology");
+const floor_geometry = @import("floor_geometry");
 
 pub const bundle_magic = [4]u8{ 'R', 'J', 'A', 'B' };
 pub const bundle_version: u16 = 1;
 pub const wall_section_version: u16 = 1;
+pub const floor_section_version: u16 = 1;
 pub const compiler_version = "semantic-wall-compiler-v1";
 pub const Digest = [std.crypto.hash.sha2.Sha256.digest_length]u8;
 pub const PickProxy = geometry.PickProxy;
@@ -177,6 +179,18 @@ pub const WallCompileSection = struct {
     }
 };
 
+/// Derived floor plates for enclosed rooms (USER RULING req_4482: floors react
+/// to wall edits — derived from interior faces, never authored source records).
+pub const FloorCompileSection = struct {
+    version: u16,
+    triangles: []floor_geometry.FloorTriangle,
+
+    pub fn deinit(self: *FloorCompileSection, allocator: std.mem.Allocator) void {
+        deinitOwnedSlice(floor_geometry.FloorTriangle, allocator, self.triangles);
+        self.* = undefined;
+    }
+};
+
 pub const ArchitectureCompileBundle = struct {
     magic: [4]u8,
     version: u16,
@@ -188,11 +202,13 @@ pub const ArchitectureCompileBundle = struct {
     bundle_hash: Digest,
     sections: []SectionDirectoryEntry,
     wall: WallCompileSection,
+    floor: FloorCompileSection,
     canonical_bytes: []u8,
 
     pub fn deinit(self: *ArchitectureCompileBundle, allocator: std.mem.Allocator) void {
         freeSlice(SectionDirectoryEntry, allocator, self.sections);
         self.wall.deinit(allocator);
+        self.floor.deinit(allocator);
         freeBytes(allocator, self.canonical_bytes);
         self.* = undefined;
     }
@@ -272,10 +288,19 @@ pub fn compile(
     wall.target_hashes = try buildTargetHashes(allocator, source, &wall, options);
     errdefer freeSlice(TargetHash, allocator, wall.target_hashes);
 
+    var floor = FloorCompileSection{
+        .version = floor_section_version,
+        .triangles = try buildFloorTriangles(allocator, source, &derived, options),
+    };
+    errdefer floor.deinit(allocator);
+
     const section_bytes = try encodeWallSection(allocator, source, &wall);
     defer freeBytes(allocator, section_bytes);
     const section_hash = hashBytes(section_bytes);
-    const sections = try allocator.alloc(SectionDirectoryEntry, 1);
+    const floor_bytes = try encodeFloorSection(allocator, &floor);
+    defer freeBytes(allocator, floor_bytes);
+    const floor_hash = hashBytes(floor_bytes);
+    const sections = try allocator.alloc(SectionDirectoryEntry, 2);
     errdefer allocator.free(sections);
     sections[0] = .{
         .family = .wall,
@@ -284,6 +309,14 @@ pub fn compile(
         .byte_length = @intCast(section_bytes.len),
         .item_count = wallItemCount(&wall),
         .section_hash = section_hash,
+    };
+    sections[1] = .{
+        .family = .floor,
+        .version = floor_section_version,
+        .offset = 0,
+        .byte_length = @intCast(floor_bytes.len),
+        .item_count = @intCast(floor.triangles.len),
+        .section_hash = floor_hash,
     };
     const provisional_header = try encodeBundleHeader(
         allocator,
@@ -295,6 +328,7 @@ pub fn compile(
         sections,
     );
     sections[0].offset = @intCast(provisional_header.len);
+    sections[1].offset = @intCast(provisional_header.len + section_bytes.len);
     freeBytes(allocator, provisional_header);
     const header = try encodeBundleHeader(
         allocator,
@@ -306,10 +340,11 @@ pub fn compile(
         sections,
     );
     defer freeBytes(allocator, header);
-    const canonical_bytes = try allocator.alloc(u8, header.len + section_bytes.len);
+    const canonical_bytes = try allocator.alloc(u8, header.len + section_bytes.len + floor_bytes.len);
     errdefer allocator.free(canonical_bytes);
     @memcpy(canonical_bytes[0..header.len], header);
-    @memcpy(canonical_bytes[header.len..], section_bytes);
+    @memcpy(canonical_bytes[header.len .. header.len + section_bytes.len], section_bytes);
+    @memcpy(canonical_bytes[header.len + section_bytes.len ..], floor_bytes);
     return .{
         .magic = bundle_magic,
         .version = bundle_version,
@@ -321,8 +356,27 @@ pub fn compile(
         .bundle_hash = hashBytes(canonical_bytes),
         .sections = sections,
         .wall = wall,
+        .floor = floor,
         .canonical_bytes = canonical_bytes,
     };
+}
+
+/// Interior faces become floor plates; bounds/target selection mirrors the wall
+/// products (floors ride the render target until they grow their own).
+fn buildFloorTriangles(
+    allocator: std.mem.Allocator,
+    source: *const types.ArchitectureSource,
+    derived: *const topology.DerivedTopology,
+    options: CompileOptions,
+) std.mem.Allocator.Error![]floor_geometry.FloorTriangle {
+    if (!targetSelected(options.targets, .render)) return allocator.alloc(floor_geometry.FloorTriangle, 0);
+    if (options.affected_bounds.len == 0) return floor_geometry.build(allocator, source, derived, null);
+    const included = try allocator.alloc(bool, derived.faces.len);
+    defer freeSlice(bool, allocator, included);
+    for (derived.faces, 0..) |face, face_index| {
+        included[face_index] = cycleSelected(source, derived, face.outer_boundary.half_edge_indices, options.affected_bounds);
+    }
+    return floor_geometry.build(allocator, source, derived, included);
 }
 
 fn sortGeometry(source: *const types.ArchitectureSource, bundle: *geometry.GeometryBundle) void {
@@ -1283,6 +1337,26 @@ fn encodeWallSection(
     }
     try encoder.appendLength(wall.affected_bounds.len);
     for (wall.affected_bounds) |value| try encodeBounds(&encoder, value);
+    return encoder.take();
+}
+
+fn encodeFloorSection(
+    allocator: std.mem.Allocator,
+    floor: *const FloorCompileSection,
+) std.mem.Allocator.Error![]u8 {
+    var encoder = Encoder.init(allocator);
+    defer encoder.deinit();
+    try encoder.appendInt(u16, floor.version);
+    try encoder.appendLength(floor.triangles.len);
+    for (floor.triangles) |value| {
+        try encoder.appendString(value.face_signature);
+        try encoder.appendInt(i32, value.floor);
+        try encoder.appendByte(@intFromEnum(value.role));
+        try encoder.appendString(value.material_id);
+        for (value.corners_m) |corner| try encoder.appendPoint3(corner);
+        try encoder.appendVector3(value.normal);
+        for (value.uv_m) |uv| try encoder.appendPoint2(uv);
+    }
     return encoder.take();
 }
 
