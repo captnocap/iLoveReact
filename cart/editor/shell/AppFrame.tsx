@@ -9819,7 +9819,8 @@ export default function AppFrame() {
         drawWall({ floor: 0, start: { xU: x1!, zU: z1! }, end: { xU: x2!, zU: z2! } });
         setTimeout(() => {
           const s = stateRef.current;
-          console.error(`[archdraw] after (${segment}) → status="${s.status}" edges=${s.architecture.walls.edges.length} liveMeshes=${liveArchitectureResidentMeshes().length} liveRefs=${liveArchitectureRefs().length} collideRows=${liveArchitectureCollideRows().length / 12}`);
+          const floorMeshes = liveArchitectureResidentMeshes().filter((mesh) => mesh.key.startsWith('arch:floor:')).length;
+          console.error(`[archdraw] after (${segment}) → status="${s.status}" edges=${s.architecture.walls.edges.length} liveMeshes=${liveArchitectureResidentMeshes().length} floorMeshes=${floorMeshes} liveRefs=${liveArchitectureRefs().length} collideRows=${liveArchitectureCollideRows().length / 12}`);
         }, 500);
       }, 1400 + i * 900);
     });

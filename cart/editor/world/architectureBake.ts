@@ -16,6 +16,8 @@ const BUNDLE_MAGIC = 0x42414a52; // "RJAB" little-endian
 const BUNDLE_VERSION = 1;
 const WALL_SECTION_VERSION = 1;
 const WALL_FAMILY_TAG = 0; // types.ArchitectureFamily.wall
+const FLOOR_SECTION_VERSION = 1;
+const FLOOR_FAMILY_TAG = 1; // types.ArchitectureFamily.floor
 
 export type WallRenderBand = {
   floor: number;
@@ -35,6 +37,21 @@ export type WallRenderBand = {
 };
 
 const ROLE_NAMES = ['face', 'reveal', 'jamb', 'sill', 'header', 'cap', 'end', 'pane'] as const;
+
+/** One engine-derived floor plate triangle (req_4482): floors are DERIVED from
+ * enclosed rooms and react to every wall edit — nothing here is authored. */
+export type FloorTriangle = {
+  faceSignature: string;
+  floor: number;
+  role: 'top' | 'bottom' | 'rim';
+  materialId: string;
+  /** World-space meters, engine-emitted, winding already matches the normal. */
+  corners: readonly [number, number, number][];
+  normal: [number, number, number];
+  uv: readonly [number, number][];
+};
+
+const FLOOR_ROLE_NAMES = ['top', 'bottom', 'rim'] as const;
 
 class BundleReader {
   private view: DataView;
@@ -145,6 +162,51 @@ export function decodeWallRenderBands(bundle: Uint8Array): WallRenderBand[] {
   return bands;
 }
 
+/** Strict fail-closed decode of the floor section's plate triangles. The floor
+ * family owns its own bundle-directory entry, so this seeks directly. */
+export function decodeFloorTriangles(bundle: Uint8Array): FloorTriangle[] {
+  const reader = new BundleReader(bundle);
+  if (reader.u32() !== BUNDLE_MAGIC) throw new Error('bundle magic is not RJAB');
+  if (reader.u16() !== BUNDLE_VERSION) throw new Error('bundle version is unsupported');
+  reader.u32(); // sourceRevision
+  reader.skip(32 * 4); // source/compiler/tuning/catalog hashes
+  const sectionCount = reader.length();
+  let floorOffset: number | null = null;
+  for (let index = 0; index < sectionCount; index += 1) {
+    const family = reader.u8();
+    const version = reader.u16();
+    const offset = reader.length();
+    reader.length(); // byteLength
+    reader.length(); // itemCount
+    reader.skip(32); // section hash
+    if (family === FLOOR_FAMILY_TAG) {
+      if (version !== FLOOR_SECTION_VERSION) throw new Error('floor section version is unsupported');
+      floorOffset = offset;
+    }
+  }
+  // Pre-floor bundles simply have no plates; absence is not an error.
+  if (floorOffset === null) return [];
+  reader.seek(floorOffset);
+  if (reader.u16() !== FLOOR_SECTION_VERSION) throw new Error('floor section header version mismatch');
+  const triangleCount = reader.length();
+  const triangles: FloorTriangle[] = [];
+  for (let index = 0; index < triangleCount; index += 1) {
+    const faceSignature = reader.text();
+    const floor = reader.i32();
+    const roleTag = reader.u8();
+    const role = FLOOR_ROLE_NAMES[roleTag];
+    if (!role) throw new Error(`floor triangle role tag ${roleTag} is invalid`);
+    const materialId = reader.text();
+    const corners: [number, number, number][] = [];
+    for (let corner = 0; corner < 3; corner += 1) corners.push([reader.f32(), reader.f32(), reader.f32()]);
+    const normal: [number, number, number] = [reader.f32(), reader.f32(), reader.f32()];
+    const uv: [number, number][] = [];
+    for (let corner = 0; corner < 3; corner += 1) uv.push([reader.f32(), reader.f32()]);
+    triangles.push({ faceSignature, floor, role, materialId, corners, normal, uv });
+  }
+  return triangles;
+}
+
 // Flat draw colors per surface role — placeholder look until wall materials
 // resolve through the material system.
 const ROLE_COLORS: Record<WallRenderBand['role'], [number, number, number]> = {
@@ -185,6 +247,44 @@ function bandVertices(bands: readonly WallRenderBand[]): Float32Array {
         out[cursor + 6] = u; out[cursor + 7] = v;
         cursor += 8;
       }
+    }
+  }
+  return out;
+}
+
+// Floors read as cooler, darker plates against the warm wall grays.
+const FLOOR_ROLE_COLORS: Record<FloorTriangle['role'], [number, number, number]> = {
+  top: [0.56, 0.58, 0.6],
+  bottom: [0.42, 0.43, 0.45],
+  rim: [0.48, 0.5, 0.52],
+};
+
+/** Interleave floor triangles verbatim: the engine's winding already matches
+ * each stored normal (proven native-side), so no reorientation happens here. */
+function floorVertices(triangles: readonly FloorTriangle[]): Float32Array {
+  const out = new Float32Array(triangles.length * 3 * 8);
+  let cursor = 0;
+  for (const triangle of triangles) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const [x, y, z] = triangle.corners[corner]!;
+      const [u, v] = triangle.uv[corner]!;
+      out[cursor] = x; out[cursor + 1] = y; out[cursor + 2] = z;
+      out[cursor + 3] = triangle.normal[0]; out[cursor + 4] = triangle.normal[1]; out[cursor + 5] = triangle.normal[2];
+      out[cursor + 6] = u; out[cursor + 7] = v;
+      cursor += 8;
+    }
+  }
+  return out;
+}
+
+function floorCollisionTriangles(triangles: readonly FloorTriangle[]): Float32Array {
+  const tops = triangles.filter(triangle => triangle.role === 'top');
+  const out = new Float32Array(tops.length * 9);
+  let cursor = 0;
+  for (const triangle of tops) {
+    for (const corner of triangle.corners) {
+      out[cursor] = corner[0]; out[cursor + 1] = corner[1]; out[cursor + 2] = corner[2];
+      cursor += 3;
     }
   }
   return out;
@@ -245,6 +345,7 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
   try {
     const bundle = architectureHost.compile(source);
     const bands = decodeWallRenderBands(bundle);
+    const floors = decodeFloorTriangles(bundle);
     const byRole = new Map<WallRenderBand['role'], WallRenderBand[]>();
     for (const band of bands) {
       const group = byRole.get(band.role);
@@ -273,8 +374,31 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
       });
       refs.push({ key, x: 0, y: 0, z: 0, yaw: 0 });
     }
+    const floorsByRole = new Map<FloorTriangle['role'], FloorTriangle[]>();
+    for (const triangle of floors) {
+      const group = floorsByRole.get(triangle.role);
+      if (group) group.push(triangle);
+      else floorsByRole.set(triangle.role, [triangle]);
+    }
+    const floorFaces = new Set(floors.map(triangle => triangle.faceSignature));
+    for (const [role, group] of floorsByRole) {
+      // Same revision-keyed immutable-intern law as the wall meshes above.
+      const key = `arch:floor:${role}:r${source.revision}`;
+      meshes.push({
+        key,
+        vertices: floorVertices(group),
+        color: FLOOR_ROLE_COLORS[role],
+        // The walkable top carries exact triangle narrowphase; that path
+        // requires solid (physics.zig gates on it) and demotes the mesh's
+        // welded islands to camera-only rows. Bottom/rim stay draw-only.
+        ...(role === 'top'
+          ? { solid: true, collisionTriangles: floorCollisionTriangles(group) }
+          : { solid: false }),
+      });
+      refs.push({ key, x: 0, y: 0, z: 0, yaw: 0 });
+    }
     LIVE = { source, meshes, refs, collideRows: collideRows(source, bands) };
-    console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s)`);
+    console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) + ${floors.length} floor tri(s) in ${floorFaces.size} room(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s)`);
   } catch (error) {
     console.error(`[architecture] live wall bake FAILED — walls not rendered: ${error instanceof Error ? error.message : String(error)}`);
     LIVE = { source, meshes: [], refs: [], collideRows: [] };
