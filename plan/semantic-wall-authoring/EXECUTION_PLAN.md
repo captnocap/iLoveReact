@@ -1,6 +1,6 @@
 # Execution Plan — Semantic Wall Authoring
 
-Execute sequentially unless a section says it may run after a named gate. For every completed row, follow `.agents/skills/refactor-plan/references/execution_rules.md`: reopen the changed file, append the step ID and proof to `state/completed.txt`, then write that ID to `state/current_step.txt`. Record a failure in `state/blocked.txt` and leave `current_step.txt` unchanged. Section commits use explicit paths and the repository’s required conventional commit style; never stage unrelated work or game 3D models.
+Execute in order unless a section says otherwise. Work in real increments, verify with the named tests, and commit explicit paths — never stage unrelated work or game 3D models. (The refactor-plan skill and its per-step bookkeeping ritual are DELETED per USER RULING req_4468 — weak-model-era scaffolding. The `state/` files stay as history of Sections A–F; do not resume writing them.)
 
 Every TS test “bundle” row uses this command shape with its named input/output: `RJIT_ROOT=/home/siah/creative/reactjit tools/esbuild <input> --bundle --outfile=<output> --format=iife --platform=neutral --target=es2022 --alias:@reactjit/runtime=$RJIT_ROOT/runtime --alias:@reactjit=$RJIT_ROOT/runtime`. Every TS test “run” uses `tools/v8cli <output>` as a separate command.
 
