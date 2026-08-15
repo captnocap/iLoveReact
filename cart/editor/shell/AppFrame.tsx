@@ -103,7 +103,7 @@ import {
   renameMapDocument,
   setActiveMapDocumentStem,
 } from '../data/mapDocuments';
-import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
+import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumentState';
 // The durable working session (req_4435): what a cold start restores, and the
 // record the Home surface's Continue card reads.
 import {
@@ -1694,11 +1694,11 @@ export default function AppFrame() {
   // cold restart without requiring Save. Explicit Save uses the same writers.
   // itself host-side (ensureMapSeeded registers its autosave file).
   useEffect(() => {
-    scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq, {
+    scheduleWorldSave(worldSnapshotInputFor(state), {
       enabled: persistenceSettings.autosave,
       delayMs: persistenceSettings.autosaveDelayMs,
-    }, state.worldFacades, state.worldPrefabs, state.worldFlora, state.worldViews);
-  }, [state.activeMapStem, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+    });
+  }, [state.activeMapStem, state.architecture, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
 
   // Facade quads follow the active map into every world view (req_3057) —
   // livePush reads this registry when it re-pushes resident meshes/refs.
@@ -3199,7 +3199,7 @@ export default function AppFrame() {
 
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
     const current = stateRef.current;
-    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq, current.worldFacades, current.worldPrefabs, current.worldFlora, current.worldViews);
+    const worldOk = flushWorldSave(worldSnapshotInputFor(current));
     const mapOk = flushMapDocumentPainting(current.activeMapStem);
     const globalsOk = saveGlobalsNow(current.worldGlobals);
     const ok = worldOk && mapOk && globalsOk;
@@ -3325,7 +3325,7 @@ export default function AppFrame() {
 
     const outgoingStem = state.activeMapStem;
     const outgoingZones = state.mapPaint.zones;
-    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq, state.worldFacades, state.worldPrefabs, state.worldFlora, state.worldViews)) {
+    if (!discardOutgoing && !flushWorldSave(worldSnapshotInputFor(state, { document: outgoingStem, zones: outgoingZones }))) {
       setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/world.json` }));
       return;
     }

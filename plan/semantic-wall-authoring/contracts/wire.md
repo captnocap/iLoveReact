@@ -66,7 +66,7 @@ PacketKind
  11  compileRequest              12  compileResult
  13  raycastRequest              14  raycastResult
  15  openingSlotsRequest         16  openingSlotsResult
- 17  migrateV4Request            18  migrateV4Result
+ 17  RETIRED (was migrateV4Request)   18  RETIRED (was migrateV4Result)
  19  scaleMetadataRequest        20  scaleMetadataResult
  21  catalogReadbackRequest      22  catalogReadbackResult
 
@@ -113,7 +113,10 @@ Section tags are allocated by payload family:
 30 renderBands      31 colliderBands    32 materialBindings 33 doors
 34 portals          35 gameplayBands    36 roomFaces        37 pickProxies
 38 targetHashes     40 ray              41 rayHit            42 openingSlots
-50 legacyModules    51 migrationMap     60 rejection        61 scaleMetadata
+60 rejection        61 scaleMetadata
+
+50/51 are RETIRED (were legacyModules/migrationMap). Retired numeric values stay
+reserved forever and are never reallocated (v4 wall migration deleted, req_4462).
 ```
 
 ## String table
@@ -156,8 +159,8 @@ Rejection codes are stable numeric protocol values. The initial set includes
 `trailing_bytes`, `count_limit`, `offset_out_of_range`, `section_overlap`,
 `unknown_required_section_version`, `invalid_utf8`, `invalid_tag`,
 `invalid_source`, `invalid_catalog`, `unknown_catalog_id`, `stale_source_revision`,
-`mutation_rejected`, `compile_rejected`, `raycast_rejected`, and
-`migration_rejected`.
+`mutation_rejected`, `compile_rejected`, and `raycast_rejected`. Code 19 is
+RETIRED (was `migration_rejected`) and stays reserved.
 
 If the header itself cannot be trusted, the host throws a bounded capability error
 instead of attempting to encode a rejection packet with attacker-controlled values.
@@ -194,8 +197,7 @@ compiled structure exposes a `deinit` path. No result references request memory.
 
 1. Encode/decode/encode is byte-identical for every golden packet.
 2. A measured catalog entry, empty source, source with two openings, every command,
-   every rejection, query, raycast, opening-slot, and migration packet has a golden
-   byte array.
+   every rejection, query, raycast, and opening-slot packet has a golden byte array.
 3. Each maximum accepts exactly its limit and rejects limit plus one without
    allocation proportional to the rejected count.
 4. Unknown optional sections skip by bounded length; unknown versions of required

@@ -46,8 +46,8 @@ pub const PacketKind = enum(u16) {
     raycast_result = 14,
     opening_slots_request = 15,
     opening_slots_result = 16,
-    migrate_v4_request = 17,
-    migrate_v4_result = 18,
+    // 17/18 were migrate_v4_request/result — retired with the v4 wall-migration
+    // lane (req_4462); the values stay reserved and are never reallocated.
     scale_metadata_request = 19,
     scale_metadata_result = 20,
     catalog_readback_request = 21,
@@ -107,8 +107,8 @@ pub const SectionTag = enum(u16) {
     ray = 40,
     ray_hit = 41,
     opening_slots = 42,
-    legacy_modules = 50,
-    migration_map = 51,
+    // 50/51 were legacy_modules/migration_map — retired with the v4 wall-migration
+    // lane (req_4462); the values stay reserved and are never reallocated.
     rejection = 60,
     scale_metadata = 61,
 };
@@ -132,7 +132,8 @@ pub const RejectionCode = enum(u16) {
     mutation_rejected = 16,
     compile_rejected = 17,
     raycast_rejected = 18,
-    migration_rejected = 19,
+    // 19 was migration_rejected — retired with the v4 wall-migration lane
+    // (req_4462); the value stays reserved and is never reallocated.
 };
 
 pub const CommandTag = enum(u16) {
@@ -1949,7 +1950,6 @@ pub const Service = struct {
             .compile_request => self.compileSource(allocator, &packet),
             .raycast_request => self.raycastSource(allocator, &packet),
             .opening_slots_request => self.openingSlots(allocator, &packet),
-            .migrate_v4_request => encodeRejection(allocator, .migrate_v4_result, .wall, 0, .migration_rejected, 0, 0, 0, "v4 migration is not installed"),
             .scale_metadata_request => encodeScaleMetadataResult(allocator),
             else => error.invalid_tag,
         };
@@ -2073,6 +2073,7 @@ pub const Service = struct {
         defer result.deinit(allocator);
         return encodeOpeningSlotsResult(allocator, source.revision, &result);
     }
+
 };
 
 const RawSection = struct {
@@ -2100,8 +2101,6 @@ fn validateHeaderTags(header: Header) WireError!void {
         .raycast_result,
         .opening_slots_request,
         .opening_slots_result,
-        .migrate_v4_request,
-        .migrate_v4_result,
         => true,
         else => false,
     };

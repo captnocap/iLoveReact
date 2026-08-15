@@ -127,12 +127,26 @@ Precondition: Section E exit is recorded.
 - [ ] 82. Add native migration tests for maximal straight runs, a corner, separate floors, front/back materials, each legacy edit ID to its declared integer kit, centered opening-column conversion, off-lattice coordinate rejection without rounding, conflicting modules, and stable legacy-derived IDs.
 - [ ] 83. Implement `building_architecture.migrateLegacyWallModules` in a focused `framework/game/wall_migration.zig` imported only by the facade and tests.
 - [ ] 84. Create `cart/editor/world/wallMigration.test.ts` with explicit v4 JSON fixtures for the cases from step 82 plus a malformed/ambiguous fixture that keeps the source write-protected.
-- [ ] 85. Route v1–v4 loads through `wallMigration.ts` in `worldStore.ts`; return in-memory v5 data and write v5 only through the existing successful save path.
+- [ ] 85. AMENDED by req_4462 (was: route v1–v4 loads through `wallMigration.ts`). Pre-v5 loads in `worldStore.ts` return in-memory v5 with empty architecture, DROP legacy wall-kind pieces with a loud diagnostic, preserve every ordinary piece, skip the persisted-snapshot cache so the first save rewrites the file as v5, and never write a pre-v5 shape.
 - [ ] 86. Update `AppFrame` save, flush, map-switch, and close calls to pass the named snapshot object containing architecture exactly once per call site.
-- [ ] 87. Bundle and run `worldStore.test.ts` and `wallMigration.test.ts` separately with `tools/esbuild` and `tools/v8cli`; record both pass counts plus `test-building-architecture` in `reports/sections/S074-088-persistence.md`.
-- [ ] 88. Reopen the v4 parser and v5 validator, confirm the legacy decoder can only return v5 source or an error, then commit the explicit section paths with `feat: persist and migrate semantic walls`.
+- [ ] 87. Bundle and run `worldStore.test.ts` separately with `tools/esbuild` and `tools/v8cli`; record its pass count plus `test-building-architecture` in `reports/sections/S074-088-persistence.md`. (The `wallMigration.test.ts` run is void — the file is deleted.)
+- [ ] 88. Reopen the pre-v5 parser and v5 validator, confirm the legacy decoder can only return v5 source or an error, then commit the explicit section paths with `feat: persist semantic walls without legacy migration`.
 
-Section F exit: v5 is the only writable shape; v4 imports through native semantic validation and never becomes a live fallback representation.
+**AMENDMENT (req_4462, 2026-08-14).** USER RULING, verbatim: "there is literally fuck
+all reason to keep any compatability of those. delete them all and were both in a
+better place." The entire v4 wall-migration lane was deleted the same day:
+`framework/game/wall_migration.zig`, `cart/editor/world/wallMigration.ts` and its
+fixtures, `building_architecture.migrateLegacyWallModules`, wire packet kinds 17/18,
+section tags 50/51, rejection code 19 (numeric values stay reserved forever), the
+`__game_build_arch_migrate_v4` host binding, and `architectureHost.migrateV4`.
+Steps 81–84's recorded completions describe artifacts that no longer exist; the
+governing record is `contracts/v4_migration.md` (RETIRED tombstone). Downstream:
+Section J steps 134–135 no longer have alias strings to keep anywhere — the six
+legacy edit IDs and seven base wall IDs survive only in the fixed-wall build catalog
+that severance deletes; step 142's grep gains no migration-decoder exemption.
+
+Section F exit: v5 is the only writable shape; pre-v5 documents load with legacy
+walls dropped (req_4462) and can never write back as a pre-v5 or wall-carrying shape.
 
 ## Section G — Commands, undo, prefabs, finishes, and anchors (steps 89–103, sequential)
 

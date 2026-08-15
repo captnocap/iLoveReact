@@ -150,7 +150,6 @@ fn hostArchitectureMutate(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
 fn hostArchitectureCompile(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
 fn hostArchitectureRaycast(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
 fn hostArchitectureOpeningSlots(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
-fn hostArchitectureMigrateV4(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
 fn hostArchitectureScaleMetadata(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
 fn hostArchitectureCatalogRows(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
 
@@ -355,7 +354,6 @@ pub fn registerGameBuild(_: anytype) void {
     v8_runtime.registerHostFn("__game_build_arch_compile", hostArchitectureCompile);
     v8_runtime.registerHostFn("__game_build_arch_raycast", hostArchitectureRaycast);
     v8_runtime.registerHostFn("__game_build_arch_opening_slots", hostArchitectureOpeningSlots);
-    v8_runtime.registerHostFn("__game_build_arch_migrate_v4", hostArchitectureMigrateV4);
     v8_runtime.registerHostFn("__game_build_arch_scale_metadata", hostArchitectureScaleMetadata);
     v8_runtime.registerHostFn("__game_build_arch_catalog_rows", hostArchitectureCatalogRows);
 }

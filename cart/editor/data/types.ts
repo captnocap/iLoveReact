@@ -27,7 +27,7 @@ import type { WorldFloraPatch } from '../world/surfaceFlora';
 import type { WorldPrefab } from '../world/prefabs';
 import type { WorldView } from '../world/worldViews';
 
-export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Globals' | 'Window';
+export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Animation' | 'Globals' | 'Window';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
 export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere'
@@ -451,7 +451,10 @@ export type ModelPlaceable =
   // package mesh remains the resident visual; paint strokes store only its
   // stable package-backed species id plus density.
   | { as: 'flora'; lane: FloraLane }
-  | { as: 'character'; role: CharacterRole };
+  | { as: 'character'; role: CharacterRole }
+  // Structural art installs into the measured architecture grammar. It never
+  // becomes a free-placeable `worldPieces` record.
+  | import('../world/architecture').ArchitectureKitPlaceable;
 
 export type ModelPackage = {
   id: string;
@@ -687,6 +690,13 @@ export type EditorState = {
   // WorldEditorSurface-local state); `selectedPieceId` is the focused instance
   // the Inspector edits; `armedPieceId` is the palette piece Build mode drops.
   // These retire the phantom `objects`/`selectedObjectId` mock for world work.
+  /** Canonical persisted building source. Derived topology and render products never enter EditorState. */
+  architecture: import('../world/architecture').ArchitectureSource;
+  /** Semantic selection uses stable source IDs and an explicit directed wall side. */
+  architectureSelection: import('../world/architecture').ArchitectureSelection;
+  /** Active semantic authoring verb; opening dimensions always resolve from its measured kit ID. */
+  architectureTool: import('../world/architecture').ArchitectureToolState;
+  /** Ordinary free-placeable instances remain separate from semantic architecture. */
   worldPieces: PlacedPiece[];
   /** Named, decomposable compositions captured from ordinary world pieces. */
   worldPrefabs: WorldPrefab[];

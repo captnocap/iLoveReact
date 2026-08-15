@@ -8,7 +8,6 @@ import {
   compileArchitecturePacket,
   enumerateArchitectureOpeningSlotsPacket,
   installArchitectureCatalogPacket,
-  migrateArchitectureV4Packet,
   mutateArchitecturePacket,
   queryArchitectureCatalogPacket,
   raycastArchitecturePacket,
@@ -47,7 +46,8 @@ export const PACKET_KIND = Object.freeze({
   compileRequest: 11, compileResult: 12,
   raycastRequest: 13, raycastResult: 14,
   openingSlotsRequest: 15, openingSlotsResult: 16,
-  migrateV4Request: 17, migrateV4Result: 18,
+  // 17/18 were migrateV4Request/Result — retired with the v4 wall-migration
+  // lane (req_4462); the values stay reserved and are never reallocated.
   scaleMetadataRequest: 19, scaleMetadataResult: 20,
   catalogReadbackRequest: 21, catalogReadbackResult: 22,
 } as const);
@@ -60,7 +60,9 @@ export const SECTION_TAG = Object.freeze({
   renderBands: 30, colliderBands: 31, materialBindings: 32, doors: 33,
   portals: 34, gameplayBands: 35, roomFaces: 36, pickProxies: 37,
   targetHashes: 38, ray: 40, rayHit: 41, openingSlots: 42,
-  legacyModules: 50, migrationMap: 51, rejection: 60, scaleMetadata: 61,
+  // 50/51 were legacyModules/migrationMap — retired with the v4 wall-migration
+  // lane (req_4462); the values stay reserved and are never reallocated.
+  rejection: 60, scaleMetadata: 61,
 } as const);
 
 export const REJECTION_CODE = Object.freeze({
@@ -82,7 +84,8 @@ export const REJECTION_CODE = Object.freeze({
   mutation_rejected: 16,
   compile_rejected: 17,
   raycast_rejected: 18,
-  migration_rejected: 19,
+  // 19 was migration_rejected — retired with the v4 wall-migration lane
+  // (req_4462); the value stays reserved and is never reallocated.
 } as const);
 
 const REJECTION_NAME = Object.freeze(Object.fromEntries(
@@ -1187,10 +1190,6 @@ export const architectureHost = Object.freeze({
     const slots = requireSection(result, SECTION_TAG.openingSlots, STRIDE.openingSlot);
     const slotsView = new DataView(slots.bytes.buffer, slots.bytes.byteOffset, slots.bytes.byteLength);
     return Array.from({ length: slots.itemCount }, (_, index) => ({ columnU: slotsView.getInt32(index * 8, true), rowU: slotsView.getInt32(index * 8 + 4, true) }));
-  },
-  migrateV4(canonicalLegacyModules: Uint8Array): ArchitectureSource {
-    const request = encodePacket({ kind: PACKET_KIND.migrateV4Request, family: FAMILY_TAG.wall, sections: [{ tag: SECTION_TAG.legacyModules, itemCount: 1, stride: 0, bytes: canonicalLegacyModules.slice() }] });
-    return decodeSource(requireResult(migrateArchitectureV4Packet(request), 'migrate v4', PACKET_KIND.migrateV4Result));
   },
   scaleMetadata(): ArchitectureScaleMetadata {
     const result = requireResult(readArchitectureScalePacket(emptyRequest(PACKET_KIND.scaleMetadataRequest)), 'scale metadata', PACKET_KIND.scaleMetadataResult);

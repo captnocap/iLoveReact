@@ -14,9 +14,15 @@ import {
   GENERATED_SITE_LIMITS,
   GENERATED_SITE_VERSION,
   PIECE_MODULE_METERS,
+  isWallPiece,
   type GeneratedSiteProvenance,
   type PlacedPiece,
 } from '../world/pieces';
+import {
+  emptyArchitectureSource,
+  validateArchitectureSource,
+  type ArchitectureSource,
+} from '../world/architecture';
 import { validFacade, type Facade } from '../world/facades';
 import type { MapZoneDef } from '../stage/mapPaint';
 import type { WorldObject } from './types';
@@ -32,11 +38,13 @@ import {
 } from './mapDocuments';
 
 export type WorldSave = {
-  version: 4;
+  version: 5;
   /** Must equal the containing directory stem. */
   document: string;
   /** EditorState.seq at save time — restored so minted ids never collide. */
   seq: number;
+  /** The only persisted structural-building source. */
+  architecture: ArchitectureSource;
   pieces: PlacedPiece[];
   /** Package-backed custom flora painted on terrain. */
   worldFlora: WorldFloraPatch[];
@@ -59,7 +67,12 @@ export type WorldLoadResult =
   | { status: 'missing'; save: null; migratedLegacy: false }
   | { status: 'invalid'; save: null; migratedLegacy: false; error: string };
 
-type ParseOptions = { allowLegacyV1?: boolean };
+type ParseOptions = {
+  allowLegacyV1?: boolean;
+  /** Filled with the on-disk version so a pre-v5 read never enters the
+   *  persisted-snapshot cache — the first save must rewrite the file as v5. */
+  versionOut?: { onDisk: number };
+};
 
 // A malformed document is read-only for the life of this JS context. Boot may
 // redirect to a clean recovery map, but even if that pointer write fails the
@@ -71,6 +84,7 @@ function sameWorldSnapshot(a: WorldSave | undefined, b: WorldSave): boolean {
   return !!a
     && a.document === b.document
     && a.seq === b.seq
+    && a.architecture === b.architecture
     && a.pieces === b.pieces
     && a.worldFlora === b.worldFlora
     && a.prefabs === b.prefabs
@@ -274,15 +288,31 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     prefabs?: unknown;
     worldFlora?: unknown;
     views?: unknown;
+    architecture?: unknown;
   };
   const legacy = raw.version === 1 && options.allowLegacyV1 === true;
   const priorV2 = raw.version === 2;
   const priorV3 = raw.version === 3;
-  if (raw.version !== 4 && !priorV3 && !priorV2 && !legacy) throw new Error(`unrecognized world save version ${raw.version}`);
+  const priorV4 = raw.version === 4;
+  const currentV5 = raw.version === 5;
+  if (options.versionOut) options.versionOut.onDisk = typeof raw.version === 'number' ? raw.version : 0;
+  if (!currentV5 && !priorV4 && !priorV3 && !priorV2 && !legacy) throw new Error(`unrecognized world save version ${raw.version}`);
   if (!legacy && raw.document !== expected) {
     throw new Error(`document id '${String(raw.document)}' does not match directory '${expected}'`);
   }
-  const pieces = validatedArray(raw.pieces, 'pieces', validPiece);
+  let pieces = validatedArray(raw.pieces, 'pieces', validPiece);
+  if (currentV5) {
+    const wallIndex = pieces.findIndex(piece => isWallPiece(piece.pieceId));
+    if (wallIndex >= 0) throw new Error(`pieces[${wallIndex}] is a legacy wall-kind record; v5 walls belong in architecture`);
+  } else {
+    // Fixed wall variants were deleted without a migration path (USER RULING
+    // req_4462: nothing legacy was worth preserving). Pre-v5 saves keep every
+    // ordinary piece; their wall records are dropped here, loudly.
+    const kept = pieces.filter(piece => !isWallPiece(piece.pieceId));
+    const dropped = pieces.length - kept.length;
+    if (dropped > 0) console.warn(`[world-store] dropped ${dropped} legacy wall piece(s) loading pre-v5 '${expected}' (req_4462)`);
+    pieces = kept;
+  }
   validateUniqueGeneratedSiteIds(pieces);
   const prefabs = validatedArray(raw.prefabs, 'prefabs', validWorldPrefab, true);
   validatePrefabPayloads(prefabs);
@@ -291,10 +321,13 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
   const views = validatedArray(raw.views, 'views', validWorldView, true);
   if (views.length > WORLD_VIEW_LIMITS.maxViews) throw new Error('views exceeds its bounded budget');
   validateUniqueViewIds(views);
+  const architecture = currentV5 ? raw.architecture : emptyArchitectureSource();
+  validateArchitectureSource(architecture);
   return {
-    version: 4,
+    version: 5,
     document: expected,
     seq: typeof raw.seq === 'number' && Number.isFinite(raw.seq) && raw.seq > 0 ? Math.trunc(raw.seq) : 1,
+    architecture,
     pieces,
     worldFlora,
     prefabs,
@@ -306,7 +339,19 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
 }
 
 export function emptyWorldSave(stem: string, seq = 1): WorldSave {
-  return { version: 4, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], worldFlora: [], prefabs: [], objects: [], zones: [], facades: [], views: [] };
+  return {
+    version: 5,
+    document: sanitizeMapDocumentName(stem),
+    seq: Math.max(1, Math.trunc(seq)),
+    architecture: emptyArchitectureSource(),
+    pieces: [],
+    worldFlora: [],
+    prefabs: [],
+    objects: [],
+    zones: [],
+    facades: [],
+    views: [],
+  };
 }
 
 /** Read one named document without changing any active state. Open uses the
@@ -325,14 +370,16 @@ export function readWorldSave(stem: string): WorldLoadResult {
     return { status: 'missing', save: null, migratedLegacy: false };
   }
   try {
-    const save = parseWorldSaveText(text, paths.stem, { allowLegacyV1: migratedLegacy });
+    const versionOut = { onDisk: 0 };
+    const save = parseWorldSaveText(text, paths.stem, { allowLegacyV1: migratedLegacy, versionOut });
     const result: WorldLoadResult = {
       status: 'ok',
       save,
       migratedLegacy,
     };
     writeProtectedDocuments.delete(paths.stem);
-    persistedWorldSaves.set(paths.stem, save);
+    if (versionOut.onDisk === 5) persistedWorldSaves.set(paths.stem, save);
+    else persistedWorldSaves.delete(paths.stem);
     return result;
   } catch (error) {
     writeProtectedDocuments.add(paths.stem);
@@ -342,10 +389,19 @@ export function readWorldSave(stem: string): WorldLoadResult {
 }
 
 function writeWorldSave(save: WorldSave): boolean {
+  if (save.version !== 5) return false;
   const paths = mapDocumentPaths(save.document);
   if (paths.stem !== save.document) return false;
   if (writeProtectedDocuments.has(paths.stem)) {
     console.error(`[world-store] REFUSED to overwrite malformed ${paths.world}; open/create another map or repair the file explicitly`);
+    return false;
+  }
+  try {
+    validateArchitectureSource(save.architecture);
+    const wallIndex = save.pieces.findIndex(piece => isWallPiece(piece.pieceId));
+    if (wallIndex >= 0) throw new Error(`pieces[${wallIndex}] is a legacy wall-kind record`);
+  } catch (error) {
+    console.error(`[world-store] REFUSED malformed v5 snapshot: ${error instanceof Error ? error.message : String(error)}`);
     return false;
   }
   if (sameWorldSnapshot(persistedWorldSaves.get(paths.stem), save) && exists(paths.world)) return true;
@@ -364,28 +420,32 @@ export function saveWorldNow(save: WorldSave): boolean {
   return writeWorldSave(save);
 }
 
-function snapshot(
-  stem: string,
-  pieces: readonly PlacedPiece[],
-  objects: readonly WorldObject[],
-  zones: readonly MapZoneDef[],
-  seq: number,
-  facades: readonly Facade[],
-  prefabs: readonly WorldPrefab[],
-  worldFlora: readonly WorldFloraPatch[],
-  views: readonly WorldView[],
-): WorldSave {
+export type WorldSnapshotInput = {
+  document: string;
+  seq: number;
+  architecture: ArchitectureSource;
+  pieces: readonly PlacedPiece[];
+  worldFlora: readonly WorldFloraPatch[];
+  prefabs: readonly WorldPrefab[];
+  objects: readonly WorldObject[];
+  zones: readonly MapZoneDef[];
+  facades: readonly Facade[];
+  views: readonly WorldView[];
+};
+
+function snapshot(input: WorldSnapshotInput): WorldSave {
   return {
-    version: 4,
-    document: sanitizeMapDocumentName(stem),
-    seq: Math.max(1, Math.trunc(seq)),
-    pieces: pieces as PlacedPiece[],
-    worldFlora: worldFlora as WorldFloraPatch[],
-    prefabs: prefabs as WorldPrefab[],
-    objects: objects as WorldObject[],
-    zones: zones as MapZoneDef[],
-    facades: facades as Facade[],
-    views: views as WorldView[],
+    version: 5,
+    document: sanitizeMapDocumentName(input.document),
+    seq: Math.max(1, Math.trunc(input.seq)),
+    architecture: input.architecture,
+    pieces: input.pieces as PlacedPiece[],
+    worldFlora: input.worldFlora as WorldFloraPatch[],
+    prefabs: input.prefabs as WorldPrefab[],
+    objects: input.objects as WorldObject[],
+    zones: input.zones as MapZoneDef[],
+    facades: input.facades as Facade[],
+    views: input.views as WorldView[],
   };
 }
 
@@ -403,22 +463,14 @@ function writeQueued(): void {
 }
 
 export function scheduleWorldSave(
-  stem: string,
-  pieces: readonly PlacedPiece[],
-  objects: readonly WorldObject[],
-  zones: readonly MapZoneDef[],
-  seq: number,
+  input: WorldSnapshotInput,
   options: { enabled?: boolean; delayMs?: number } = {},
-  facades: readonly Facade[] = [],
-  prefabs: readonly WorldPrefab[] = [],
-  worldFlora: readonly WorldFloraPatch[] = [],
-  views: readonly WorldView[] = [],
 ): void {
   if (options.enabled === false) {
     cancelWorldSave();
     return;
   }
-  queued = snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora, views);
+  queued = snapshot(input);
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(writeQueued, Math.max(0, options.delayMs ?? 400));
 }
@@ -434,16 +486,13 @@ export function cancelWorldSave(): void {
 /** Synchronous switch boundary: cancel the debounce and durably write the
  * outgoing document before any target state is applied. */
 export function flushWorldSave(
-  stem: string,
-  pieces: readonly PlacedPiece[],
-  objects: readonly WorldObject[],
-  zones: readonly MapZoneDef[],
-  seq: number,
-  facades: readonly Facade[] = [],
-  prefabs: readonly WorldPrefab[] = [],
-  worldFlora: readonly WorldFloraPatch[] = [],
-  views: readonly WorldView[] = [],
+  input: WorldSnapshotInput,
 ): boolean {
   cancelWorldSave();
-  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq, facades, prefabs, worldFlora, views));
+  return writeWorldSave(snapshot(input));
 }
+
+export const worldStoreTesting = Object.freeze({
+  snapshot,
+  sameWorldSnapshot,
+});

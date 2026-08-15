@@ -161,7 +161,6 @@ export const ARCHITECTURE_HOST_NAMES = {
   compile: '__game_build_arch_compile',
   raycast: '__game_build_arch_raycast',
   openingSlots: '__game_build_arch_opening_slots',
-  migrateV4: '__game_build_arch_migrate_v4',
   scaleMetadata: '__game_build_arch_scale_metadata',
   catalogRows: '__game_build_arch_catalog_rows',
 } as const;
@@ -214,10 +213,6 @@ export function raycastArchitecturePacket(request: ArchitecturePacket): Architec
 
 export function enumerateArchitectureOpeningSlotsPacket(request: ArchitecturePacket): ArchitecturePacket | null {
   return callArchitecturePacket('openingSlots', request);
-}
-
-export function migrateArchitectureV4Packet(request: ArchitecturePacket): ArchitecturePacket | null {
-  return callArchitecturePacket('migrateV4', request);
 }
 
 export function readArchitectureScalePacket(request: ArchitecturePacket): ArchitecturePacket | null {

@@ -93,10 +93,6 @@ pub const OpeningSlotsRequest = struct {
 pub const OpeningSlots = wall_mutation.OpeningSlots;
 pub const OpeningSlotsError = ValidateSourceError || wall_mutation.ApplyError;
 
-pub const LegacyWallMigrationRequest = struct {
-    canonical_v4_bytes: []const u8,
-};
-
 pub fn unitsToMeters(units: Unit) f32 {
     return architecture_scale.unitsToMeters(units);
 }
@@ -303,9 +299,3 @@ pub fn openingSlots(
     return wall_mutation.openingSlots(allocator, source, entries, request.edge_id, request.catalog_id);
 }
 
-pub fn migrateLegacyWallModules(allocator: std.mem.Allocator, entries: []const CatalogEntry, request: LegacyWallMigrationRequest) PendingOperationError!void {
-    _ = allocator;
-    _ = entries;
-    _ = request;
-    return error.architecture_operation_not_implemented;
-}

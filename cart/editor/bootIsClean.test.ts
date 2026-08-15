@@ -16,6 +16,7 @@ import { assetById, assetByIdOrNull } from './data/catalog';
 import { selectedObject, panelModeFor } from './data/content';
 import { selectionPosition } from './data/readouts';
 import { mapAuthoringSlicesFor } from './data/mapDocumentState';
+import { emptyWorldSave } from './data/worldStore';
 import { leftPanelsFor, rightPanelsFor } from './data/panelSystem';
 import { HOME_DOCUMENT, HOME_DOCUMENT_ID, WORLD_DOCUMENT, worldDocument } from './data/documents';
 import { parseSessionText, sessionDocumentsFrom, SESSION_MAX_DOCUMENTS } from './data/sessionStore';
@@ -58,10 +59,25 @@ test('opening a map arms nothing', () => {
   const slices = mapAuthoringSlicesFor(
     initialState(),
     'somemap',
-    { pieces: [], worldFlora: [], prefabs: [], facades: [], views: [], objects: [], zones: [], seq: 1 } as any,
+    emptyWorldSave('somemap'),
     [],
   );
   assert(slices.armedPieceId === null, 'opening a map re-armed a default piece');
+});
+
+test('boot owns an empty semantic architecture source without arming a tool', () => {
+  const state = initialState();
+  assert(state.architecture.version === 1 && state.architecture.revision === 0, 'boot architecture is not canonical v1');
+  assert(state.architecture.walls.vertices.length === 0 && state.architecture.walls.edges.length === 0, 'boot invented architecture');
+  assert(state.architectureSelection.kind === 'none' && state.architectureTool.kind === 'select', 'boot armed semantic authoring');
+});
+
+test('initialState clones the named world architecture snapshot', () => {
+  const architecture = { version: 1 as const, revision: 9, walls: { vertices: [], edges: [], anchors: [] } };
+  const state = initialState({ architecture });
+  assert(state.architecture.revision === 9, 'world architecture revision was not restored');
+  assert(state.architecture !== architecture && state.architecture.walls !== architecture.walls, 'world architecture was retained by reference');
+  assert(state.worldPieces.length === 0, 'semantic architecture leaked into ordinary pieces');
 });
 
 test('selectedObject returns null rather than inventing a subject', () => {

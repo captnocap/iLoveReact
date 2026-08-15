@@ -10,6 +10,14 @@ import { defaultWorldGlobals } from './globals';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
 import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
 import { authoredFloraIdFor, type AuthoredFloraSpecies } from '../world/floraSpecies';
+import {
+  cloneArchitectureSource,
+  DEFAULT_ARCHITECTURE_TOOL,
+  EMPTY_ARCHITECTURE_SELECTION,
+  emptyArchitectureSource,
+  parseArchitectureSource,
+} from '../world/architecture';
+import { installArchitectureCatalogFromPackages } from '../world/architectureCatalog';
 
 // Authored placeables: the ON-DISK MANIFEST is the source of truth (USER RULING
 // req_2718 — the package declares "I am a prop / a wall piece"); localstore is
@@ -46,7 +54,7 @@ export function bootAuthoredPieces(): AuthoredBuildPiece[] {
     if (!pkg.placeable) continue;
     // Characters (player/NPC exports, req_2771) are compile-bake material, not
     // build-bar placeables — they never join the palette.
-    if (pkg.placeable.as === 'character' || pkg.placeable.as === 'flora') continue;
+    if (pkg.placeable.as === 'character' || pkg.placeable.as === 'flora' || pkg.placeable.as === 'architecture-kit') continue;
     const kind = pkg.placeable.as === 'prop' ? ('prop' as const) : pkg.placeable.kind;
     const modelId = authoredModelIdForPackage(pkg.id);
     fromDisk.push({
@@ -88,8 +96,21 @@ export function defaultModelTool(): ModelToolSnapshot {
   return { selMode: 0, gizmoTool: 0, paint: false, pathPlane: false, pathEdges: false, focus: false, wire: false, measurements: false, playerScale: false, xray: false, persistentAdditive: false, camLock: false, camSaved: false, retopoGhostVisible: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
 }
 
-export function initialState(): EditorState {
+type InitialWorldArchitecture = { architecture?: unknown };
+
+/** Install every validated disk-declared kit atomically. No declarations means
+ * no architecture capability call, which keeps non-game isolated editor tests pure. */
+export function bootArchitectureCatalog(): void {
+  if (!MODEL_PACKAGES.some(pkg => pkg.placeable?.as === 'architecture-kit')) return;
+  installArchitectureCatalogFromPackages(MODEL_PACKAGES);
+}
+
+export function initialState(worldSave: InitialWorldArchitecture | null = null): EditorState {
   const activeMapStem = activeMapDocumentStem();
+  const architecture = worldSave?.architecture === undefined
+    ? emptyArchitectureSource()
+    : cloneArchitectureSource(parseArchitectureSource(worldSave.architecture));
+  bootArchitectureCatalog();
   return {
     openMenu: null,
     presetMenuOpen: false,
@@ -170,6 +191,9 @@ export function initialState(): EditorState {
     seq: 1,
     worldUndo: [],
     worldRedo: [],
+    architecture,
+    architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+    architectureTool: DEFAULT_ARCHITECTURE_TOOL,
     worldPieces: [],
     worldPrefabs: [],
     worldViews: [],

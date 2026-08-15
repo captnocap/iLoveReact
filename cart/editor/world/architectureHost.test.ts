@@ -40,7 +40,7 @@ const host = globalThis as any;
 const hostNames = [
   '__game_build_arch_catalog_validate', '__game_build_arch_catalog_install', '__game_build_arch_catalog_query',
   '__game_build_arch_source_validate', '__game_build_arch_mutate', '__game_build_arch_compile',
-  '__game_build_arch_raycast', '__game_build_arch_opening_slots', '__game_build_arch_migrate_v4',
+  '__game_build_arch_raycast', '__game_build_arch_opening_slots',
   '__game_build_arch_scale_metadata', '__game_build_arch_catalog_rows',
 ];
 function clearHosts(): void { for (const name of hostNames) delete host[name]; }

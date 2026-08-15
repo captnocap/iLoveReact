@@ -176,9 +176,11 @@ Owns conversion of decoded `ArchitectureCompileBundle.wall` rows into the existi
 
 Owns pure interaction state machines for wall draw and opening placement: pointer phases, active floor plane, 1/16 m lattice coordinates, explicit magnet target, cancellation, native opening-slot selection, and command construction. It consumes native pick/projection results; it does not inspect graph adjacency or infer fit from mesh bounds.
 
-### `cart/editor/world/wallMigration.ts`
+### `cart/editor/world/wallMigration.ts` — DELETED (req_4462)
 
-Owns v4 DTO recognition and migration orchestration. Structural grouping and conversion are performed by `building_architecture.migrateLegacyWallModules`; TypeScript only supplies strict parsed legacy rows, applies returned source/non-wall partitions, and formats diagnostics. It is deleted when the legacy-read window is intentionally closed.
+DELETED 2026-08-14 with the whole v4 migration lane (USER RULING req_4462: no legacy
+wall compatibility). Pre-v5 loads drop wall-kind pieces in `worldStore.ts` instead;
+see `contracts/v4_migration.md` for the tombstone.
 
 ## Existing TypeScript units
 
