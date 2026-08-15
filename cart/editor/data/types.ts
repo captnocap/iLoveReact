@@ -84,6 +84,10 @@ export type LibraryTab = 'Build' | 'Props' | 'Skins';
 // on — recent maps, continue-where-you-left-off, new. It is an ordinary
 // closeable document so it competes with nothing and can be reopened.
 export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'facade' | 'knowledge' | 'home';
+/** What the Home surface's library grid is showing (req_4464). A destination
+ *  that needs a subject it does not have sends you here filtered to it. */
+export type HomeFilter = 'all' | 'model' | 'material' | 'map';
+
 export type WorkspaceDocument = {
   id: string;
   kind: WorkspaceDocumentKind;
@@ -580,6 +584,10 @@ export type EditorState = {
    *  nothing. Never a catalog default: a focused card at boot that the user
    *  never clicked is initialization residue (req_4435). */
   activeAssetId: string | null;
+  /** Home's library grid: which subject it lists, and whether it is showing
+   *  favorites instead of recents (req_4464). */
+  homeFilter: HomeFilter;
+  homeFavorites: boolean;
   // Per-device tool memory (req_3089, GIMP semantics): each physical pointer
   // device remembers the last TOOL command it activated, keyed per surface
   // scope so a model-scope tool never fires on the world surface. Flipping

@@ -28,8 +28,8 @@ classifier({
   HW_App: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: 'theme:bg', overflow: 'hidden' } },
   // Top strip is the custom window chrome; empty space drags the borderless host
   // window, and Pressable children own their clicks.
-  HW_Chrome: { type: 'Box', style: { height: REGIONS.chrome.height, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
-  HW_Brand: { type: 'Box', style: { width: 136, height: '100%', flexDirection: 'row', alignItems: 'center', gap: 7, borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:borderSoft' } },
+  HW_Chrome: { type: 'Box', style: { height: REGIONS.chrome.height, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HW_Brand: { type: 'Box', style: { width: 30, flexShrink: 0, height: '100%', flexDirection: 'row', alignItems: 'center', gap: 7, borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:borderSoft' } },
   HW_BrandText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 2 } },
   HW_MenuBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 2, height: '100%' } },
   HW_MenuItem: { type: 'Pressable', style: { height: 28, alignItems: 'center', justifyContent: 'center', paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusLg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
@@ -37,12 +37,26 @@ classifier({
   HW_MenuText: { type: 'Text', fontSize: 11, color: 'theme:textSecondary' },
   HW_MenuTextOn: { type: 'Text', fontSize: 11, color: 'theme:text' },
   HW_Spacer: { type: 'Box', style: { flexGrow: 1, minWidth: 0 } },
-  HW_Pill: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
+  HW_Pill: { type: 'Pressable', style: { height: 24, flexShrink: 1, minWidth: 34, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_PillOn: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
   // Button labels NEVER wrap (req_2626 II) — truncate loudly instead.
   HW_PillText: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 700 }),
   HW_PillTextOn: oneLine(10, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 800 }),
-  HW_WindowControls: { type: 'Box', style: { height: '100%', flexDirection: 'row', alignItems: 'center', marginRight: -10 } },
+  // Never shrinks: losing the close button to a narrow window is not a
+  // trade-off, it is a broken window (req_4464).
+  HW_WindowControls: { type: 'Box', style: { height: '100%', flexShrink: 0, flexDirection: 'row', alignItems: 'center', marginRight: -10 } },
+  // ── WORKSPACE SWITCHER (req_4464) — the destination strip ────────────────
+  // Sits right after the menus: "where am I working" belongs beside "what can
+  // I do here". The map pill and the Editor/Play toggle keep their own group
+  // at the far right, because they answer different questions. Grouping them
+  // all into one undifferentiated row is what made this bar unreadable.
+  HW_SwitcherDivider: { type: 'Box', style: { width: 1, height: 18, marginLeft: 6, marginRight: 6, backgroundColor: 'theme:borderSoft' } },
+  HW_Switcher: { type: 'Box', style: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 2, height: 26, padding: 2, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
+  HW_SwitcherSlot: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 7, borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
+  HW_SwitcherSlotOn: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 6, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:primary' } },
+  HW_SwitcherLabel: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 700 }),
+  HW_SwitcherLabelOn: oneLine(10, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 900 }),
+
   HW_WindowButton: { type: 'Pressable', style: { width: 38, height: '100%', alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_WindowClose: { type: 'Pressable', style: { width: 38, height: '100%', alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:error' } },
   // STATUS BAR region (req_2627): the bottom dock IS the status bar.
@@ -295,42 +309,66 @@ classifier({
   HW_StageEmpty: { type: 'Box', style: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', paddingLeft: 40, paddingRight: 40 } },
   HW_StageEmptyLine: { type: 'Text', fontSize: 11, color: 'theme:textFaint', style: { fontFamily: MONO, textAlign: 'center' } },
 
-  // ── HOME, the boot surface (req_4435) ──────────────────────────────────
-  // Reads as a workbench door, not a splash screen: a masthead, two cards, the
-  // real map list, one joke. Everything here is either an action or a fact.
-  HW_Home: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', gap: 12, paddingLeft: 22, paddingRight: 22, paddingTop: 16, paddingBottom: 12, backgroundColor: 'theme:bg', overflow: 'hidden' } },
-  HW_HomeMasthead: { type: 'Box', style: { position: 'relative', flexDirection: 'column', gap: 4, paddingBottom: 12, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
-  HW_HomeBrandRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 9 } },
+  // ── HOME, the boot surface + destination hub (req_4435 / req_4464) ──────
+  // Reads as a workbench door, not a splash screen. Everything here is either
+  // an action or a real fact the app already knows: the masthead is one row,
+  // the resume cards are short, and the space that used to be a void now
+  // carries the library's own recents and favorites at thumbnail size.
+  HW_Home: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', gap: 10, paddingLeft: 22, paddingRight: 22, paddingTop: 12, paddingBottom: 10, backgroundColor: 'theme:bg', overflow: 'hidden' } },
+  HW_HomeMasthead: { type: 'Box', style: { position: 'relative', flexDirection: 'column', paddingBottom: 9, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HW_HomeBrandRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 12, height: 22 } },
   HW_HomeBrand: oneLine(13, 'theme:text', { fontFamily: MONO, fontWeight: 900, letterSpacing: 2.4 }),
+  // The quote rides the masthead line rather than owning two rows of its own:
+  // it is flavour, and flavour does not get more vertical space than the work.
+  HW_HomeQuoteInline: oneLine(10, 'theme:textFaint', { flexShrink: 1, fontFamily: MONO }),
   HW_HomeLaunch: oneLine(9, 'theme:textFaint', { fontFamily: MONO, fontWeight: 700 }),
   HW_HomeMilestone: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 19, paddingLeft: 7, paddingRight: 8, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:warning', backgroundColor: 'theme:controlBg' } },
   HW_HomeMilestoneText: oneLine(9, 'theme:warning', { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.6 }),
-  // The quote WRAPS — it is the one string here long enough to need two lines,
-  // and truncating a quotation would be worse than giving it the room.
-  HW_HomeQuote: { type: 'Text', fontSize: 11, color: 'theme:textSecondary', style: { fontFamily: MONO, lineHeight: 17, maxWidth: 720 } },
-  HW_HomeQuoteWho: oneLine(9, 'theme:textFaint', { fontFamily: MONO, fontWeight: 700 }),
 
   HW_HomeColumns: { type: 'Box', style: { flexDirection: 'row', gap: 12 } },
-  HW_HomeCard: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minWidth: 0, height: 128, flexDirection: 'column', gap: 5, padding: 12, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg' } },
-  HW_HomeCardHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 } },
+  HW_HomeCard: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minWidth: 0, flexDirection: 'column', gap: 7, padding: 11, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg' } },
+  HW_HomeCardHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7 } },
   HW_HomeCardTitle: oneLine(9, 'theme:primary', { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.4 }),
+  HW_HomeResumeRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'baseline', gap: 10 } },
   HW_HomeResumeName: oneLine(14, 'theme:text', { fontFamily: MONO, fontWeight: 900 }),
   HW_HomeResumeMeta: oneLine(9, 'theme:textDim', { fontFamily: MONO }),
-  HW_HomeNameInput: { type: 'TextInput', style: { width: '100%', height: 27, paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11, fontFamily: MONO, fontWeight: 800 } },
-  HW_HomePrimaryVerb: { type: 'Pressable', style: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:primary' }, hoverStyle: { backgroundColor: 'theme:primaryHover' } },
+  HW_HomeNameInput: { type: 'TextInput', style: { width: '100%', height: 26, paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11, fontFamily: MONO, fontWeight: 800 } },
+  HW_HomePrimaryVerb: { type: 'Pressable', style: { width: '100%', height: 27, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:primary' }, hoverStyle: { backgroundColor: 'theme:primaryHover' } },
   HW_HomePrimaryVerbText: oneLine(10, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 900 }),
-  HW_HomeVerb: { type: 'Pressable', style: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_HomeVerb: { type: 'Pressable', style: { width: '100%', height: 27, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_HomeVerbText: oneLine(10, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 800 }),
 
-  HW_HomeSectionHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 } },
-  HW_HomeMapList: { type: 'ScrollView', style: { flexGrow: 1, flexShrink: 1, minHeight: 0 }, contentContainerStyle: { flexDirection: 'column', gap: 4, paddingBottom: 4 } },
+  // Filter chips — the same subjects the chrome's destinations use, so landing
+  // here from "go to Model with nothing open" highlights the matching chip.
+  HW_HomeSectionHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 24 } },
+  HW_HomeChip: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 9, paddingRight: 10, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_HomeChipOn: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 9, paddingRight: 10, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:primary' } },
+  HW_HomeChipText: oneLine(9, 'theme:textSecondary', { fontFamily: MONO, fontWeight: 800 }),
+  HW_HomeChipTextOn: oneLine(9, 'theme:segActiveText', { fontFamily: MONO, fontWeight: 900 }),
+  HW_HomeChipDivider: { type: 'Box', style: { width: 1, height: 14, marginLeft: 4, marginRight: 4, backgroundColor: 'theme:borderSoft' } },
+
+  // The grid that fills the space the void used to occupy.
+  HW_HomeGridScroll: { type: 'ScrollView', style: { flexGrow: 1, flexShrink: 1, minHeight: 0 }, contentContainerStyle: { flexDirection: 'column', paddingBottom: 8 } },
+  HW_HomeGrid: { type: 'Box', style: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', gap: 10 } },
+  HW_HomeTile: { type: 'Pressable', style: { width: 232, flexDirection: 'row', alignItems: 'center', gap: 9, padding: 7, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg' }, hoverStyle: { borderColor: 'theme:primary' } },
+  // MUST stay 68 tall to match AssetPreview's StaticSurface cache size — a
+  // second mount of the same key at a different size resizes the cached target
+  // under a queued capture pass (req_2743/req_3136).
+  HW_HomeTileArt: { type: 'Box', style: { width: 68, height: 68, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', overflow: 'hidden' } },
+  HW_HomeTileText: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minWidth: 0, flexDirection: 'column', gap: 4 } },
+  HW_HomeTileName: oneLine(11, 'theme:text', { fontFamily: MONO, fontWeight: 800 }),
+  HW_HomeTileBadge: oneLine(8, 'theme:textFaint', { fontFamily: MONO, fontWeight: 800, letterSpacing: 0.8 }),
+  HW_HomeEmpty: { type: 'Box', style: { width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, paddingTop: 46, paddingBottom: 46 } },
+  HW_HomeEmptyLine: { type: 'Text', fontSize: 10, color: 'theme:textFaint', style: { fontFamily: MONO, textAlign: 'center' } },
+
+  HW_HomeMapColumn: { type: 'Box', style: { width: '100%', flexDirection: 'column', gap: 4 } },
   HW_HomeMapRow: { type: 'Pressable', style: { width: '100%', height: 27, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 10, paddingRight: 11, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_HomeMapRowOn: { type: 'Pressable', style: { width: '100%', height: 27, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 10, paddingRight: 11, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
   HW_HomeMapName: oneLine(11, 'theme:text', { fontFamily: MONO, fontWeight: 800 }),
   HW_HomeMapFact: oneLineColumn(9, 'theme:textDim', 74, { fontFamily: MONO, textAlign: 'right' }),
   HW_HomeMapStamp: oneLineColumn(9, 'theme:textFaint', 118, { fontFamily: MONO, textAlign: 'right' }),
 
-  HW_HomeFooter: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 26, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', paddingTop: 8 } },
+  HW_HomeFooter: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 26, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', paddingTop: 7 } },
   HW_HomeJoke: oneLine(10, 'theme:textDim', { flexGrow: 1, fontFamily: MONO }),
   HW_HomeDice: { type: 'Pressable', style: { width: 24, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_WorldEditorSurface: { type: 'Box', style: { width: '100%', height: '100%', minHeight: 0, position: 'relative', backgroundColor: '#0d141f', overflow: 'hidden' } },

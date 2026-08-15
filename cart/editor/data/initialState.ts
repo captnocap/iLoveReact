@@ -122,6 +122,8 @@ export function initialState(worldSave: InitialWorldArchitecture | null = null):
     // focus panel render their designed empty state until the user picks
     // something (req_4435).
     activeAssetId: null,
+    homeFilter: 'all',
+    homeFavorites: false,
     deviceTools: { world: { mouse: null, pen: null }, model: { mouse: null, pen: null } },
     stickerArm: { textureId: null, rot: 0, scale: 1 },
     worldFacades: [],

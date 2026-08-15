@@ -4,11 +4,12 @@
 // Pure data + pure functions on purpose: the surface picks a line, it does not
 // invent one, and the milestone rule is testable without a GPU.
 //
-// House style for the lines below: they are jokes about THIS work — meshes,
-// shaders, undo, autosave, the build. Nothing motivational, nothing that reads
-// like onboarding copy, nothing that congratulates the user for opening an
-// application. The resume board above them is operational; these two lines are
-// the only place the app is allowed to have a personality.
+// House style for the lines below: pop-up-ad and spam-inbox voice, aimed at
+// THIS work — meshes, shaders, undo, autosave, the build. Nothing motivational,
+// nothing that reads like onboarding copy, nothing that congratulates the user
+// for opening an application. The board around them is operational; the quote
+// and the joke are the only place this app is allowed to have a personality,
+// and it is named Shitty Games, so it gets to be funny rather than tasteful.
 
 export type Quote = { text: string; who: string };
 
@@ -28,30 +29,45 @@ export const QUOTES: readonly Quote[] = [
 ];
 
 export const JOKES: readonly string[] = [
-  'A vertex walks into a bar. The bartender says "we do not serve your kind." The vertex says "that is fine, I am just passing through."',
-  'My mesh is watertight. My deadline is not.',
-  'I told the normals to face outward. Half of them identify as inward.',
-  'Every quad wants to be a triangle when it grows up. Do not let it.',
-  'The undo stack is the only part of this app that remembers what I actually wanted.',
-  'Shader compiles first try. Something is deeply wrong.',
+  // House style: pop-up-ad and spam-inbox voice, aimed at THIS work. The
+  // homepage is the one place in the app allowed to have a personality, so it
+  // gets the register the whole thing is named after — not enterprise copy.
+  'Lonely clanker in your terminal is DESPERATE to generate. It will not stop. Send help.',
+  'Hot single vertices in your area want to merge tonight. No welds required.',
+  'Doctors HATE this one weird trick for halving your triangle count.',
+  'Your GPU has 3 unread messages from a shader that misses you.',
+  'She said she liked guys with clean topology. I have never recovered.',
+  'URGENT: your normals have been flipped. Press any key to accept the charges.',
+  'Big Topology does not want you to know about the loop cut.',
+  'Somebody on your local subnet just favorited your bone. Play it cool.',
+  'CONGRATULATIONS! You are the 1,000,000th visitor to this map. Claim your free undo.',
+  'This mesh is not like other meshes. This mesh is watertight.',
+  'Nine out of ten quads agree. The tenth is an n-gon and nobody invited it.',
+  'Local model, 214 tris, no rig, looking for someone to skin it. DMs open.',
+  'WARNING: prolonged exposure to boolean operations may cause grief. 80 percent, typically.',
+  'Your autosave fired. Somewhere out there is a version of this file that is happier than this one.',
+  'Single UV island in your atlas is DYING to be unwrapped. Click here. Do not click here.',
+  'They said do not hardcode the magic number, so I named the constant MAGIC_NUMBER and shipped it.',
   'I named it final_v2_real_ACTUAL. The manifest named it untitled. The manifest won.',
-  'UV unwrapping is just origami with extra steps and worse outcomes.',
-  'There are two hard problems in 3D: naming things, off-by-one errors, and winding order.',
-  'The fastest renderer is the one that draws nothing. Ship it.',
-  'I did not lose the model. I stored it somewhere so safe that even I cannot get in.',
+  'Gimbal lock is just your rotation having an existential crisis at ninety degrees.',
   'Ambient occlusion: the art of making everything slightly dirtier and calling it realism.',
   'My physics engine has a great sense of humour. Everything it touches falls flat.',
-  'They said do not hardcode the magic number. So I made it a constant called MAGIC_NUMBER.',
-  'Gimbal lock is just your rotation having an existential crisis at 90 degrees.',
-  'The autosave fired. Somewhere, a version of this file is happier than this one.',
-  'I optimised the hot loop. Now the cold loop is the hot loop. This is the circle of life.',
-  'A texture atlas is a filing cabinet where every drawer is also the cabinet.',
-  'Boolean operations: 20 percent geometry, 80 percent grief.',
+  'A vertex walks into a bar. Bartender says we do not serve your kind. It says relax, I am just passing through.',
   'The bug was not in the shader. The bug is never in the shader. The bug was in the shader.',
+  'I optimised the hot loop, so now the cold loop is the hot loop. This is the circle of life.',
   'Backface culling removed the backfaces. And, mysteriously, the front ones.',
-  'Every frame is a fresh start. Sixty fresh starts a second. No pressure.',
-  'I gave the bone a name. Now it has opinions about where the elbow goes.',
-  'Two kinds of maps: the one you painted, and the one that loads.',
+  'CLICK NOW: mesh in your area has 4 unmerged doubles and zero shame.',
+  'The undo stack is the only part of this application that remembers what I actually wanted.',
+  'Shader compiled first try. Something is deeply, structurally wrong.',
+  'Two kinds of maps exist: the one you painted, and the one that loads.',
+  'UV unwrapping is origami with extra steps and considerably worse outcomes.',
+  'The fastest renderer is the one that draws nothing at all. Ship it. Ship it now.',
+  'I did not lose the model. I stored it somewhere so safe that even I cannot get in.',
+  'A texture atlas is a filing cabinet in which every drawer is also the cabinet.',
+  'I gave the bone a name and now it has opinions about where the elbow goes.',
+  'Every frame is a fresh start. Sixty fresh starts a second. Absolutely no pressure.',
+  'This app runs at 240 FPS and I have used every one of them to look at an empty grid.',
+  'Your model has been viewed 0 times. Be the first. Be the only. Be alone.',
 ];
 
 /** Pick deterministically from a list. Same n, same line — so the boot frame is

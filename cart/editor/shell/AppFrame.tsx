@@ -9,9 +9,29 @@ import { Box } from '../../../runtime/primitives';
 import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
+import { applicationCommandMenuRows } from './applicationCommandMenu';
 import LeftRail from './LeftRail';
 import LabStackPanel from './LabStackPanel';
-import { AnimationCaptureSidePanel } from '../animation/AnimationSidePanels';
+import { createProductionAnimationApplication } from '../animation/application';
+import { ARDY_PROCESS_ENCODER_ID, ARDY_PROCESS_MODEL_IDS } from '../animation/ardyProcess';
+import { ANIMATION_CHANNEL_GROUPS } from '../animation/channelGroups';
+import { ANIMATION_COMMAND_IDS, animationMenuAvailability } from '../animation/commandRegistration';
+import { ANIMATION_PANEL_RENDERERS } from '../animation/panels';
+import type { GenerateDraftField } from '../animation/panels/GeneratePanel';
+import {
+  DEFAULT_QUEUE_BULK_DRAFT,
+  type QueueBulkDraft,
+  type QueueJobMutationDraft,
+} from '../animation/panels/QueueManager';
+import type { AnimationWorkspaceCallbacks } from '../animation/AnimationWorkspace';
+import BodyCaptureSourceControl from '../animation/BodyCaptureSourceControl';
+import { createProductionNativeTrajectoryPreview } from '../animation/nativeTrajectoryPreview';
+import { createProductionStagedPropPreview } from '../animation/nativeStagedPropHost';
+import {
+  dispatchRegistryHotkey,
+  saveCanonicalAnimationDocument,
+  syncNativeAnimationTrajectoryPreview,
+} from '../animation/shellIntegration';
 import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
@@ -69,7 +89,7 @@ import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/us
 import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
 import { subscribe } from '../../../runtime/ffi';
-import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
+import type { EditorState, Command, Asset, HomeFilter, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
 import { NO_SEMANTIC_ID, parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
@@ -327,7 +347,7 @@ import { modelDocSessionId, releaseModelDocSession, rememberMintedModelId } from
 import { ASSETS, DEFAULT_CONTENT_FOLDER, applyAssetOverrides, assetById, assetByIdOrNull, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, nextBuildStarterDocId, modelPackageById, modelPackageByName, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import { assetMatchesLibrarySearch } from '../data/librarySearch';
-import { isLibraryCollectionFolder, navigateLibraryCollection, rememberRecentLibraryItem } from '../data/libraryCollections';
+import { favoriteLibraryHits, isLibraryCollectionFolder, navigateLibraryCollection, recentLibraryHits, rememberRecentLibraryItem } from '../data/libraryCollections';
 import {
   leftPanelForFolder,
   leftPanelsFor,
@@ -381,6 +401,14 @@ import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, HOME_DOCUMENT, HOME_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument, worldDocument } from '../data/documents';
+// The destination model (req_4464) — the chrome strip's vocabulary.
+import {
+  activeDestination,
+  destinationForKey,
+  newestRecentFor,
+  openDocumentForDestination,
+  type DestinationId,
+} from './destinations';
 import { cancelGlobalsSave, saveGlobalsNow, scheduleGlobalsSave } from '../data/globalsStore';
 import { editorPersistenceSettings, editorSettings } from '../data/editorSettings';
 import { discardModelWorkingCopyState, upsertModelPackageProjection } from '../data/persistenceLifecycle';
@@ -564,6 +592,8 @@ export default function AppFrame() {
   const { path } = useRoute();
   const navigate = useNavigate();
   const playing = path === '/play';
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   const [state, setState] = useState<EditorState>(loadPersistedState);
   const characterRigApiRef = useRef<NativeCharacterRigApi | null>(null);
   if (characterRigApiRef.current === null) characterRigApiRef.current = createCharacterRigApi();
@@ -732,6 +762,7 @@ export default function AppFrame() {
     authorizedSemanticClearRef.current.delete(modelId);
   };
   const worldDurableRefs = useRef<{
+    architecture: EditorState['architecture'];
     pieces: EditorState['worldPieces'];
     objects: EditorState['objects'];
     zones: EditorState['mapPaint']['zones'];
@@ -740,17 +771,17 @@ export default function AppFrame() {
   const skipNextWorldDirtyRef = useRef(false);
   useEffect(() => {
     const previous = worldDurableRefs.current;
-    const next = { pieces: state.worldPieces, objects: state.objects, zones: state.mapPaint.zones, globals: state.worldGlobals };
+    const next = { architecture: state.architecture, pieces: state.worldPieces, objects: state.objects, zones: state.mapPaint.zones, globals: state.worldGlobals };
     worldDurableRefs.current = next;
     if (persistenceSettings.autosave) {
       if (manualWorldDirty) setManualWorldDirty(false);
       return;
     }
-    if (previous && (previous.pieces !== next.pieces || previous.objects !== next.objects || previous.zones !== next.zones || previous.globals !== next.globals)) {
+    if (previous && (previous.architecture !== next.architecture || previous.pieces !== next.pieces || previous.objects !== next.objects || previous.zones !== next.zones || previous.globals !== next.globals)) {
       if (skipNextWorldDirtyRef.current) skipNextWorldDirtyRef.current = false;
       else setManualWorldDirty(true);
     }
-  }, [state.worldPieces, state.objects, state.mapPaint.zones, state.worldGlobals, persistenceSettings.autosave]);
+  }, [state.architecture, state.worldPieces, state.objects, state.mapPaint.zones, state.worldGlobals, persistenceSettings.autosave]);
   const hotUpdateRevisionRef = useRef(0);
   useEffect(() => {
     setDevReloadPolicy(persistenceSettings.hotUpdate);
@@ -872,9 +903,132 @@ export default function AppFrame() {
     redo: LabHistoryEntry[];
   }>({ undo: [], redo: [] });
 
+  // Animation Foundry is application state, not stage state. It is created
+  // once for the mounted shell so switching documents cannot pause, reset, or
+  // duplicate the persistent batch queue and review catalog.
+  const animationApplicationRef = useRef<ReturnType<typeof createProductionAnimationApplication> | null>(null);
+  if (animationApplicationRef.current === null) {
+    animationApplicationRef.current = createProductionAnimationApplication({
+      surface: () => activeSurface(stateRef.current),
+      openQueue: () => {
+        if (playingRef.current) navigate.push('/editor');
+        selectNativeModelSession(ANIMATION_DOCUMENT);
+        setState((previous) => ({
+          ...previous,
+          workspaceDocuments: upsertDocument(previous.workspaceDocuments, ANIMATION_DOCUMENT),
+          activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
+          activeDomain: 'animation-queue',
+          leftPanelCollapsed: false,
+          materialFocused: false,
+          contextOpen: false,
+          status: 'Animation queue manager open',
+        }));
+      },
+      openReview: () => {
+        if (playingRef.current) navigate.push('/editor');
+        selectNativeModelSession(ANIMATION_DOCUMENT);
+        setState((previous) => ({
+          ...previous,
+          workspaceDocuments: upsertDocument(previous.workspaceDocuments, ANIMATION_DOCUMENT),
+          activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
+          activeDomain: previous.activeDomain === 'animation-queue' ? previous.activeDomain : 'animation-sources',
+          rightPane: 'animation-review',
+          rightPanelCollapsed: false,
+          materialFocused: false,
+          contextOpen: false,
+          status: 'Animation review open',
+        }));
+      },
+    });
+  }
+  const animationApplication = animationApplicationRef.current;
+  const animationStagedPropPreviewRef = useRef<ReturnType<typeof createProductionStagedPropPreview> | null>(null);
+  if (animationStagedPropPreviewRef.current === null) {
+    animationStagedPropPreviewRef.current = createProductionStagedPropPreview();
+  }
+  const animationStagedPropPreview = animationStagedPropPreviewRef.current;
+  const animationNativeTrajectoryPreviewRef = useRef<ReturnType<typeof createProductionNativeTrajectoryPreview> | null>(null);
+  if (animationNativeTrajectoryPreviewRef.current === null) {
+    animationNativeTrajectoryPreviewRef.current = createProductionNativeTrajectoryPreview();
+  }
+  const animationNativeTrajectoryPreview = animationNativeTrajectoryPreviewRef.current;
+  const [animationProjection, setAnimationProjection] = useState(() => animationApplication.controller.projection());
+  const [animationGenerateDraft, setAnimationGenerateDraft] = useState({
+    prompt: '',
+    durationSeconds: '4',
+    seed: '0',
+  });
+  const [animationGenerationStatus, setAnimationGenerationStatus] = useState<string | undefined>(
+    () => animationApplication.restoreIssue ?? undefined,
+  );
+  useEffect(() => {
+    const restoreIssue = animationApplication.restoreIssue;
+    if (!restoreIssue) return;
+    setState((previous) => ({
+      ...previous,
+      status: restoreIssue,
+    }));
+  }, [animationApplication]);
+  const [animationGenerating, setAnimationGenerating] = useState(false);
+  const [animationQueueBulkDraft, setAnimationQueueBulkDraft] = useState<QueueBulkDraft>(() => ({ ...DEFAULT_QUEUE_BULK_DRAFT }));
+  const [animationQueueJobDraft, setAnimationQueueJobDraft] = useState<QueueJobMutationDraft | null>(null);
+  const [animationPreviewNodeId, setAnimationPreviewNodeId] = useState<number | null>(null);
+  const [animationStagedPropProjection, setAnimationStagedPropProjection] = useState(() => animationStagedPropPreview.projection());
+  useEffect(() => animationApplication.controller.subscribe(setAnimationProjection), [animationApplication]);
+  useEffect(() => () => animationApplication.dispose(), [animationApplication]);
+  useEffect(() => () => {
+    try { animationStagedPropPreview.detach(); }
+    catch (error) { console.error(`[animation] staged prop preview did not detach cleanly: ${String(error)}`); }
+  }, [animationStagedPropPreview]);
+  useEffect(() => () => {
+    try { animationNativeTrajectoryPreview.detach(); }
+    catch (error) { console.error(`[animation] trajectory preview did not detach cleanly: ${String(error)}`); }
+  }, [animationNativeTrajectoryPreview]);
+  useEffect(() => {
+    try {
+      syncNativeAnimationTrajectoryPreview(
+        animationNativeTrajectoryPreview,
+        animationPreviewNodeId,
+        animationProjection.trajectory,
+        animationProjection.trajectoryRevision,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setState((previous) => previous.status === `Animation trajectory preview: ${message}`
+        ? previous
+        : { ...previous, status: `Animation trajectory preview: ${message}` });
+    }
+  }, [
+    animationNativeTrajectoryPreview,
+    animationPreviewNodeId,
+    animationProjection.trajectoryRevision,
+  ]);
+  useEffect(() => {
+    if (animationPreviewNodeId === null) return;
+    try {
+      setAnimationStagedPropProjection(animationStagedPropPreview.update(
+        animationProjection.sceneContext.stagedProps,
+        animationApplication.scenePropCatalog,
+        animationProjection.transport.playheadSeconds,
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setState((previous) => previous.status === `Animation prop preview: ${message}`
+        ? previous
+        : { ...previous, status: `Animation prop preview: ${message}` });
+    }
+  }, [
+    animationApplication,
+    animationPreviewNodeId,
+    animationProjection.sceneContext.stagedProps,
+    animationProjection.transport.playheadSeconds,
+    animationStagedPropPreview,
+  ]);
+
   const applicationCommandsRef = useRef<ReturnType<typeof createEditorApplicationCommands> | null>(null);
   if (applicationCommandsRef.current === null) {
     applicationCommandsRef.current = createEditorApplicationCommands({
+      animation: animationApplication.commands,
       activeSurface: () => activeSurface(stateRef.current),
       blockedReason: () => blockingNowRef.current(stateRef.current)?.label ?? null,
       floorIndex: () => stateRef.current.floorIndex,
@@ -1605,6 +1759,8 @@ export default function AppFrame() {
     }
     return outcome;
   };
+  const invokeApplicationCommandRef = useRef(invokeApplicationCommand);
+  invokeApplicationCommandRef.current = invokeApplicationCommand;
   const refuseBlocked = (block: BlockingOverlay) =>
     setState((prev) => ({ ...prev, status: `resolve ${block.label} first — finish or cancel it before doing anything else` }));
   /** Wrap a handler so it is inert (with the honest status) while a blocker is open. */
@@ -3197,6 +3353,29 @@ export default function AppFrame() {
     }));
   };
 
+  const saveAnimationNow = (reason = 'Saved'): boolean => {
+    try {
+      const receipt = saveCanonicalAnimationDocument('animation', animationApplication.controller);
+      if (!receipt.handled) return false;
+      setState((previous) => ({
+        ...previous,
+        openMenu: null,
+        actionMenu: 'File',
+        status: `${reason} animation → ${receipt.path}`,
+      }));
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setState((previous) => ({
+        ...previous,
+        openMenu: null,
+        actionMenu: 'File',
+        status: `${reason} animation failed: ${message}`,
+      }));
+      return false;
+    }
+  };
+
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
     const current = stateRef.current;
     const worldOk = flushWorldSave(worldSnapshotInputFor(current));
@@ -3240,6 +3419,11 @@ export default function AppFrame() {
     ? contextualLeftPanels.find((pane) => pane.id === activeLeftPanel) ?? null
     : null;
   const leftGutterPresent = activeLeftPanelDefinition !== null;
+  const contextualRightPanels = rightPanelsFor(activeDocumentKind, labUiActive);
+  const activeRightPanel = resolvedPanelIdOrNull(contextualRightPanels, state.rightPane);
+  const activeRightPanelDefinition = activeRightPanel
+    ? contextualRightPanels.find((pane) => pane.id === activeRightPanel) ?? null
+    : null;
   // The Asset Explorer is one pane, so document/tool context changes never
   // project category-specific roots over its remembered tree navigation.
   const effectiveContentFolder = state.contentFolder;
@@ -4193,6 +4377,10 @@ export default function AppFrame() {
     }
     if (command.id === 'save-snapshot') {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      if (doc?.kind === 'animation') {
+        saveAnimationNow();
+        return;
+      }
       const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
       if (!pkg) {
         saveWorldNowAll();
@@ -4445,7 +4633,8 @@ export default function AppFrame() {
       return;
     }
     // Globals → Animation (req_2786): the CAPTURE tab — webcam feed beside the
-    // exported player model with live pose sync; record grows from here.
+    // exported player model with live pose sync; every authoring source lands on
+    // the same Foundry timeline.
     if (command.id === 'globals-animation') {
       selectNativeModelSession(ANIMATION_DOCUMENT);
       setState((prev) => ({
@@ -4454,7 +4643,11 @@ export default function AppFrame() {
         actionMenu: 'Globals',
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, ANIMATION_DOCUMENT),
         activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
-        status: 'animation capture opened — stand in front of the webcam; the exported player model mirrors the tracked pose',
+        activeDomain: 'animation-sources',
+        leftPanelCollapsed: false,
+        rightPane: 'animation-generate',
+        rightPanelCollapsed: false,
+        status: 'Animation Foundry open — choose one source, then author onto the shared timeline',
       }));
       return;
     }
@@ -5260,6 +5453,21 @@ export default function AppFrame() {
   }));
 
   const pressRightPanel = (pressed: RightPanelId) => {
+    const current = stateRef.current;
+    const currentDocumentKind = current.workspaceDocuments
+      .find((document) => document.id === current.activeWorkspaceDocumentId)?.kind ?? 'world';
+    const currentPanel = resolvedPanelIdOrNull(
+      rightPanelsFor(currentDocumentKind, currentDocumentKind === 'material' && !!current.labActiveRecipeId),
+      current.rightPane,
+    );
+    // Entering Review is a controller operation: it reads the real catalog,
+    // starts prefetch/autoplay, and produces the designed empty projection.
+    // Its application callback owns selecting/opening the rail destination.
+    if (pressed === 'animation-review' && currentDocumentKind === 'animation'
+        && (currentPanel !== pressed || current.rightPanelCollapsed || animationApplication.controller.projection().review === null)) {
+      invokeApplicationCommand(ANIMATION_COMMAND_IDS.reviewOpen, {}, 'animation review rail');
+      return;
+    }
     setState((prev) => {
       const documentKind = prev.workspaceDocuments.find((doc) => doc.id === prev.activeWorkspaceDocumentId)?.kind ?? 'world';
       const labActive = documentKind === 'material' && !!prev.labActiveRecipeId;
@@ -9404,6 +9612,35 @@ export default function AppFrame() {
       recallWorldViewSlotRef.current(slot);
       return;
     }
+    // Focused text inputs have first refusal in engine.zig and do not publish
+    // consumed arrows/backspace/printable keys onto this bus. Everything that
+    // reaches this point can therefore resolve through the real application
+    // registry without a parallel JS focus registry. Review mode exists only
+    // while its real rail panel is open; collapsing it immediately gives the
+    // arrows and Z back to their ordinary surface behavior.
+    const documentKind = s.workspaceDocuments
+      .find((document) => document.id === s.activeWorkspaceDocumentId)?.kind ?? 'world';
+    const reviewPanelOpen = documentKind === 'animation'
+      && !s.rightPanelCollapsed
+      && resolvedPanelIdOrNull(rightPanelsFor(documentKind, false), s.rightPane) === 'animation-review';
+    // Destination keys (req_4464): F1..F7 go to a place. They sit ABOVE the
+    // command registry because a destination is navigation, not an edit — it
+    // never belongs to a surface and must work identically from every one of
+    // them. Modifiers are excluded so Ctrl/Shift+F-keys stay free.
+    if (!mods.ctrl && !mods.shift && !mods.alt && !mods.meta) {
+      const destination = destinationForKey(key);
+      if (destination) { goToDestinationRef.current(destination.id); return; }
+    }
+    const registryHandled = dispatchRegistryHotkey(
+      applicationCommandsRef.current!,
+      key,
+      mods,
+      reviewPanelOpen
+        ? { surface: 'animation', animationMode: 'review' }
+        : { surface: activeSurface(s) },
+      (commandId) => { invokeApplicationCommandRef.current(commandId, {}, 'hotkey'); },
+    );
+    if (registryHandled) return;
     const id = commandForKeyEvent(s, key, mods);
     if (id) runCommandRef.current(id, 'hotkey');
   }), []);
@@ -9775,6 +10012,83 @@ export default function AppFrame() {
     activateWorldBible();
   };
 
+  // ── DESTINATIONS (req_4464) ───────────────────────────────────────────────
+  //
+  // The chrome strip's router. Before this there was no front door to the model
+  // studio, the animation foundry or the material lab at all — you reached them
+  // sideways, by clicking a row in the asset tree or finding the right entry
+  // inside the Globals menu, and nothing in the UI said they existed.
+  //
+  // THE RULE: every destination always goes somewhere. One that needs a subject
+  // and has none lands on HOME filtered to that subject, which is where the
+  // recents and favorites with thumbnails live — a front door that opens onto
+  // a picker, never a front door that does nothing.
+
+  /** Open (or re-focus) Home, optionally scoped to one kind of subject. */
+  const openHome = (filter: HomeFilter = 'all', reason?: string) => {
+    setState((prev) => ({
+      ...prev,
+      workspaceDocuments: upsertDocument(prev.workspaceDocuments, HOME_DOCUMENT),
+      activeWorkspaceDocumentId: HOME_DOCUMENT_ID,
+      homeFilter: filter,
+      homeFavorites: filter === 'all' ? prev.homeFavorites : false,
+      openMenu: null,
+      contextOpen: false,
+      status: reason ?? 'home',
+    }));
+  };
+
+  const goToDestination = (id: DestinationId) => {
+    const current = stateRef.current;
+    const documents = current.workspaceDocuments;
+    const preferred = current.activeWorkspaceDocumentId;
+    // A destination you are already standing in re-opens its own picker rather
+    // than doing nothing on the second press — pressing Model twice is a
+    // request to change models.
+    const alreadyHere = activeDestination(documents.find((doc) => doc.id === preferred) ?? null) === id;
+
+    if (id === 'home') { openHome('all'); return; }
+    if (id === 'bible') { openWorldBible(); return; }
+    if (id === 'motion') { runCommand('globals-animation', 'switcher'); return; }
+    if (id === 'playtest') { runCommand('globals-physics', 'switcher'); return; }
+    if (id === 'world') {
+      const world = documents.find((doc) => doc.id === WORLD_DOCUMENT_ID);
+      if (world) selectWorkspaceDocument(WORLD_DOCUMENT_ID);
+      else setState((prev) => ({
+        ...prev,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, worldDocument(prev.activeMapName)),
+        activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,
+        status: `world — ${prev.activeMapName}`,
+      }));
+      return;
+    }
+    if (id === 'model') {
+      const open = alreadyHere ? null : openDocumentForDestination('model', documents, preferred);
+      if (open) { selectWorkspaceDocument(open.id); return; }
+      const recentId = alreadyHere ? null : newestRecentFor('model', current.recentLibraryKeys ?? []);
+      const model = recentId
+        ? effectiveModelPackage(recentId, current.modelOverrides, current.modelDupes)
+        : null;
+      if (model) { openModelDocument(model); return; }
+      openHome('model', alreadyHere ? 'pick a model to open in the studio' : 'no model open yet — pick one, or File → New Mesh');
+      return;
+    }
+    if (id === 'material') {
+      const open = alreadyHere ? null : openDocumentForDestination('material', documents, preferred);
+      if (open) { selectWorkspaceDocument(open.id); return; }
+      const recentId = alreadyHere ? null : newestRecentFor('material', current.recentLibraryKeys ?? []);
+      const asset = recentId ? assetByIdOrNull(recentId, current.assetOverrides) : null;
+      if (asset) { focusMaterialDocument(undefined, asset.id); return; }
+      openHome('material', alreadyHere ? 'pick a material to open in the lab' : 'no material open yet — pick one to open the Material Lab');
+      return;
+    }
+  };
+
+  // The keydown bus subscribes ONCE with empty deps, so the destination router
+  // reaches it through a ref — same pattern as runCommandRef beside it.
+  const goToDestinationRef = useRef<(id: DestinationId) => void>(() => {});
+  goToDestinationRef.current = goToDestination;
+
   const selectWorkspaceDocument = (activeWorkspaceDocumentId: string, bypassUnsavedPrompt = false) => {
     if (!bypassUnsavedPrompt && !persistenceSettings.autosave && state.activeWorkspaceDocumentId !== activeWorkspaceDocumentId) {
       const currentDoc = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
@@ -9823,7 +10137,7 @@ export default function AppFrame() {
           rightPane: 'lab',
           rightPanelCollapsed: false,
         } : gainingFocus && doc.kind === 'animation' ? {
-          activeDomain: 'animation-capture',
+          activeDomain: 'animation-sources',
           leftPanelCollapsed: false,
           rightPane: 'animation-generate',
           rightPanelCollapsed: false,
@@ -9895,6 +10209,19 @@ export default function AppFrame() {
       );
       return;
     }
+    if (!bypassUnsavedPrompt && state.activeWorkspaceDocumentId === documentId) {
+      const currentDoc = state.workspaceDocuments.find((doc) => doc.id === documentId);
+      if (currentDoc?.kind === 'animation' && animationApplication.controller.projection().dirty) {
+        requestUnsavedDecision(
+          currentDoc.title,
+          () => { if (saveAnimationNow('Saved')) closeWorkspaceDocument(documentId, true); },
+          () => closeWorkspaceDocument(documentId, true),
+          () => setState((previous) => ({ ...previous, status: 'Animation close canceled' })),
+          { save: 'Save animation', discard: 'Keep draft & close' },
+        );
+        return;
+      }
+    }
     // Prompt whenever closing WOULD LOSE WORK. Autosave alone is not that proof:
     // it is bounded to models that already exist on disk, so a brand-new model —
     // exactly the one whose edits are least recoverable — was closed silently
@@ -9962,6 +10289,17 @@ export default function AppFrame() {
   const visibleModels = useMemo(
     () => visibleModelPackages(state.modelOverrides, state.modelDupes),
     [state.modelOverrides, state.modelDupes],
+  );
+  // Home reports the ASSET EXPLORER's own collections (req_4464) — the same
+  // recents and favorites, resolved by the same helpers. A second history here
+  // would be a second truth that drifts from the one the tree shows.
+  const homeRecentHits = useMemo(
+    () => recentLibraryHits(state.recentLibraryKeys ?? [], catalogAssets, visibleModels),
+    [state.recentLibraryKeys, catalogAssets, visibleModels],
+  );
+  const homeFavoriteHits = useMemo(
+    () => favoriteLibraryHits(catalogAssets, visibleModels),
+    [catalogAssets, visibleModels],
   );
   const libraryMenuModel = libraryMenuModelId
     ? visibleModels.find((model) => model.id === libraryMenuModelId) ?? null
@@ -10316,9 +10654,260 @@ export default function AppFrame() {
   const activeLabSidePanel = activeLeftPanelDefinition?.renderer === 'lab-stack' && activeLabRecipeNow
     ? <LabStackPanel recipe={activeLabRecipeNow} selected={state.labSelectedLayer} soloStage={state.labSoloStage} handlers={labHandlers} />
     : null;
-  const activeAnimationSidePanel = activeLeftPanelDefinition?.renderer === 'animation-capture'
-    ? <AnimationCaptureSidePanel />
-    : null;
+  const animationTargetPackage = currentPlayerCharacter();
+  const animationCommandProjection = animationApplication.commands.projection();
+  const invokeAnimationPanelCommand = (commandId: string, payload?: unknown) => {
+    const generationCommand = commandId === ANIMATION_COMMAND_IDS.generateInteractive
+      || commandId === ANIMATION_COMMAND_IDS.timelineExtend;
+    if (generationCommand) {
+      setAnimationGenerating(true);
+      setAnimationGenerationStatus(commandId === ANIMATION_COMMAND_IDS.timelineExtend ? 'Extending motion…' : 'Generating motion…');
+    }
+    const outcome = invokeApplicationCommand(commandId, payload ?? {}, 'animation panel');
+    if (outcome.status === 'rejected') {
+      if (generationCommand) setAnimationGenerating(false);
+      setAnimationGenerationStatus(outcome.reason);
+      return;
+    }
+    if (commandId === ANIMATION_COMMAND_IDS.queueAddBulk) setAnimationQueueBulkDraft({ ...DEFAULT_QUEUE_BULK_DRAFT });
+    if (commandId === ANIMATION_COMMAND_IDS.queueEdit || commandId === ANIMATION_COMMAND_IDS.queueDuplicate) {
+      setAnimationQueueJobDraft(null);
+    }
+    const result = outcome.result as unknown;
+    const pending = result !== null && typeof result === 'object'
+      && typeof (result as { then?: unknown }).then === 'function';
+    if (!pending) {
+      if (generationCommand) {
+        setAnimationGenerating(false);
+        setAnimationGenerationStatus(commandId === ANIMATION_COMMAND_IDS.timelineExtend ? 'Motion extended' : 'Motion generated');
+      }
+      return;
+    }
+    void Promise.resolve(result).then(() => {
+      if (!generationCommand) return;
+      setAnimationGenerating(false);
+      setAnimationGenerationStatus(commandId === ANIMATION_COMMAND_IDS.timelineExtend ? 'Motion extended' : 'Motion generated');
+    }).catch((error) => {
+      if (generationCommand) setAnimationGenerating(false);
+      const message = error instanceof Error ? error.message : String(error);
+      setAnimationGenerationStatus(message);
+      setState((previous) => ({ ...previous, status: `Animation: ${message}` }));
+    });
+  };
+
+  const activeAnimationSidePanel = (() => {
+    const renderer = activeLeftPanelDefinition?.renderer;
+    if (renderer === 'animation-sources') {
+      const Panel = ANIMATION_PANEL_RENDERERS['animation-sources'];
+      return <Panel
+        projection={animationProjection.sources}
+        commands={{
+          activate: ANIMATION_COMMAND_IDS.sourceActivate,
+          deactivate: ANIMATION_COMMAND_IDS.sourceDeactivate,
+          captureBegin: ANIMATION_COMMAND_IDS.captureBegin,
+          captureFinish: ANIMATION_COMMAND_IDS.captureFinish,
+          captureCancel: ANIMATION_COMMAND_IDS.captureCancel,
+        }}
+        bodyCaptureRecording={animationCommandProjection.bodyCaptureRecording}
+        setup={animationPreviewNodeId ? (
+          <BodyCaptureSourceControl
+            targetPackage={animationTargetPackage}
+            nodeId={animationPreviewNodeId}
+            onAdapter={(adapter) => animationApplication.registerBodyCapture(adapter)}
+          />
+        ) : null}
+        onCommand={invokeAnimationPanelCommand}
+      />;
+    }
+    if (renderer === 'animation-queue') {
+      const Panel = ANIMATION_PANEL_RENDERERS['animation-queue'];
+      return <Panel
+        projection={animationProjection.batch}
+        hasRunnableWork={animationCommandProjection.batchHasWork}
+        commands={{
+          start: ANIMATION_COMMAND_IDS.queueStart,
+          pause: ANIMATION_COMMAND_IDS.queuePause,
+          resume: ANIMATION_COMMAND_IDS.queueResume,
+          stop: ANIMATION_COMMAND_IDS.queueStop,
+          openManager: ANIMATION_COMMAND_IDS.queueOpen,
+        }}
+        onCommand={invokeAnimationPanelCommand}
+      />;
+    }
+    if (renderer === 'animation-queue-manager') {
+      const Panel = ANIMATION_PANEL_RENDERERS['animation-queue-manager'];
+      return <Panel
+        projection={{
+          queue: animationApplication.repository.snapshot().queue,
+          batch: animationProjection.batch,
+          bulkDraft: animationQueueBulkDraft,
+          jobDraft: animationQueueJobDraft,
+        }}
+        hasRunnableWork={animationCommandProjection.batchHasWork}
+        commands={{
+          addBulk: ANIMATION_COMMAND_IDS.queueAddBulk,
+          edit: ANIMATION_COMMAND_IDS.queueEdit,
+          duplicate: ANIMATION_COMMAND_IDS.queueDuplicate,
+          reorder: ANIMATION_COMMAND_IDS.queueReorder,
+          cancel: ANIMATION_COMMAND_IDS.queueCancel,
+          start: ANIMATION_COMMAND_IDS.queueStart,
+          pause: ANIMATION_COMMAND_IDS.queuePause,
+          resume: ANIMATION_COMMAND_IDS.queueResume,
+          stop: ANIMATION_COMMAND_IDS.queueStop,
+        }}
+        onBulkDraftChange={setAnimationQueueBulkDraft}
+        onJobDraftOpen={setAnimationQueueJobDraft}
+        onJobDraftChange={setAnimationQueueJobDraft}
+        onJobDraftClose={() => setAnimationQueueJobDraft(null)}
+        onCommand={invokeAnimationPanelCommand}
+      />;
+    }
+    return null;
+  })();
+
+  const activeAnimationFocusPanel = (() => {
+    const renderer = activeRightPanelDefinition?.renderer;
+    if (renderer === 'animation-generate') {
+      const Panel = ANIMATION_PANEL_RENDERERS['animation-generate'];
+      return <Panel
+        projection={{
+          ...animationGenerateDraft,
+          modelId: ARDY_PROCESS_MODEL_IDS.core40,
+          encoderId: ARDY_PROCESS_ENCODER_ID,
+          modelLabel: 'ARDY Core 40',
+          encoderLabel: 'LLM2Vec',
+          atSeconds: animationProjection.transport.playheadSeconds,
+          selection: animationProjection.selection,
+          channels: animationProjection.selection?.channels.length
+            ? animationProjection.selection.channels
+            : animationProjection.document?.channels ?? [],
+          generating: animationGenerating,
+          canGenerate: animationCommandProjection.surface === 'animation',
+          canExtend: animationCommandProjection.continuationAvailable,
+          status: animationGenerationStatus,
+        }}
+        commands={{
+          generate: ANIMATION_COMMAND_IDS.generateInteractive,
+          extend: ANIMATION_COMMAND_IDS.timelineExtend,
+        }}
+        onDraftChange={(field: GenerateDraftField, value: string) => setAnimationGenerateDraft((current) => ({ ...current, [field]: value }))}
+        onCommand={invokeAnimationPanelCommand}
+      />;
+    }
+    if (renderer === 'animation-scene-context') {
+      const Panel = ANIMATION_PANEL_RENDERERS['animation-scene-context'];
+      return <Panel
+        projection={animationProjection.sceneContext}
+        propPreview={animationStagedPropProjection}
+        selectedRange={animationProjection.selection?.range ?? null}
+        commands={{
+          addProp: ANIMATION_COMMAND_IDS.scenePropAdd,
+          removeProp: ANIMATION_COMMAND_IDS.scenePropRemove,
+          transformProp: ANIMATION_COMMAND_IDS.scenePropTransform,
+          setRange: ANIMATION_COMMAND_IDS.scenePropRange,
+          setProfile: ANIMATION_COMMAND_IDS.scenePropProfile,
+          conformContacts: ANIMATION_COMMAND_IDS.contactConform,
+        }}
+        conformUnavailableReason="Installed ARDY does not support semantic surface-contact conditioning. Diagnostics remain read-only."
+        onCommand={invokeAnimationPanelCommand}
+      />;
+    }
+    if (renderer === 'animation-review' && animationProjection.review) {
+      const Panel = ANIMATION_PANEL_RENDERERS['animation-review'];
+      return <Panel
+        projection={animationProjection.review}
+        undoDepth={animationCommandProjection.reviewUndoDepth}
+        commands={{
+          dislike: ANIMATION_COMMAND_IDS.reviewDislike,
+          like: ANIMATION_COMMAND_IDS.reviewLike,
+          superlike: ANIMATION_COMMAND_IDS.reviewSuperlike,
+          undo: ANIMATION_COMMAND_IDS.reviewUndo,
+          setPlaybackRate: ANIMATION_COMMAND_IDS.reviewSetPlaybackRate,
+          setFilter: ANIMATION_COMMAND_IDS.reviewSetFilter,
+        }}
+        onCommand={invokeAnimationPanelCommand}
+      />;
+    }
+    return null;
+  })();
+
+  const selectedAnimationChannels = animationProjection.selection?.channels.length
+    ? animationProjection.selection.channels
+    : animationProjection.document?.channels ?? [];
+  const extendDuration = Number(animationGenerateDraft.durationSeconds);
+  const extendSeed = Number(animationGenerateDraft.seed);
+  const extendDraftValid = animationGenerateDraft.prompt.trim().length > 0
+    && Number.isFinite(extendDuration) && extendDuration >= 0.5
+    && Number.isSafeInteger(extendSeed) && extendSeed >= 0
+    && selectedAnimationChannels.length > 0;
+  const animationWorkspaceCallbacks: AnimationWorkspaceCallbacks = {
+    onPlay: () => animationApplication.controller.play(),
+    onPause: () => animationApplication.controller.pause(),
+    onStop: () => animationApplication.controller.stop(),
+    onSeek: (timeSeconds) => invokeAnimationPanelCommand(ANIMATION_COMMAND_IDS.timelineScrub, { seconds: timeSeconds }),
+    onClearSelection: () => invokeAnimationPanelCommand(ANIMATION_COMMAND_IDS.timelineClearSelection),
+    onSelectRange: (range) => {
+      const document = animationProjection.document;
+      if (!document) return;
+      const current = animationProjection.selection;
+      const groupIds = current?.channelGroups?.length
+        ? current.channelGroups
+        : ANIMATION_CHANNEL_GROUPS
+          .filter((group) => group.includesRoot || group.channels.some((channel) => document.channels.includes(channel)))
+          .map((group) => group.id);
+      animationApplication.controller.select({
+        range,
+        channels: current?.channels.length ? current.channels : document.channels,
+        ...(current ? (current.includeRoot ? { includeRoot: true } : {}) : { includeRoot: true }),
+        ...(current?.contactChannels?.length ? { contactChannels: current.contactChannels } : {}),
+        ...(groupIds.length ? { channelGroups: groupIds } : {}),
+      });
+    },
+    onToggleChannelGroup: (groupId) => {
+      const document = animationProjection.document;
+      if (!document) return;
+      const current = animationProjection.selection;
+      const selected = new Set(current?.channelGroups ?? []);
+      if (selected.has(groupId)) selected.delete(groupId);
+      else selected.add(groupId);
+      if (selected.size === 0) {
+        animationApplication.controller.select(null);
+        return;
+      }
+      const groups = ANIMATION_CHANNEL_GROUPS.filter((group) => selected.has(group.id));
+      const channels = [...new Set(groups.flatMap((group) => group.id === 'face'
+        ? document.channels.filter((channel) => /^(?:face|brow|eye|eyelid|cheek|nose|jaw|mouth|lip|tongue)(?:_|$)/.test(channel))
+        : group.channels.filter((channel) => document.channels.includes(channel))))];
+      const includeRoot = groups.some((group) => group.includesRoot);
+      const contactChannels = [...new Set(groups.flatMap((group) => (group.contactChannels ?? [])
+        .filter((channel) => document.contacts?.some((contact) => contact.channel === channel))))];
+      if (channels.length === 0 && !includeRoot && contactChannels.length === 0) {
+        setAnimationGenerationStatus(`${groupId} has no lanes in this animation`);
+        return;
+      }
+      animationApplication.controller.select({
+        range: current?.range ?? { startSeconds: 0, endSeconds: document.durationSeconds },
+        channels,
+        ...(includeRoot ? { includeRoot: true } : {}),
+        ...(contactChannels.length ? { contactChannels } : {}),
+        channelGroups: groups.map((group) => group.id),
+      });
+    },
+    ...(animationCommandProjection.continuationAvailable && extendDraftValid ? {
+      onExtend: () => invokeAnimationPanelCommand(ANIMATION_COMMAND_IDS.timelineExtend, {
+        prompt: animationGenerateDraft.prompt.trim(),
+        durationSeconds: extendDuration,
+        seed: extendSeed,
+        modelId: ARDY_PROCESS_MODEL_IDS.core40,
+        encoderId: ARDY_PROCESS_ENCODER_ID,
+        channels: selectedAnimationChannels,
+        seamPolicy: 'contact-aware-blend',
+      }),
+    } : {}),
+    onCameraReset: () => invokeAnimationPanelCommand(ANIMATION_COMMAND_IDS.cameraReset),
+    onFrameActor: () => invokeAnimationPanelCommand(ANIMATION_COMMAND_IDS.cameraFrameActor),
+    onFrameTrajectory: () => invokeAnimationPanelCommand(ANIMATION_COMMAND_IDS.cameraFrameTrajectory),
+  };
 
   // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
   // track edits while the menu stays open — Rotate keeps it open) + the RANKED
@@ -10347,6 +10936,7 @@ export default function AppFrame() {
     const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
     const modelId = doc?.kind === 'model' ? doc.sourceId : null;
     const pkg = modelId ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes) : null;
+    if (animationApplication.controller.projection().dirty && !saveAnimationNow('Saved before exit')) return false;
     if (pkg && current.modelDirty[pkg.id] && !saveActiveModelNow('Saved before exit', 'explicit')) return false;
     if (manualWorldDirty && !saveWorldNowAll('Saved before exit')) return false;
     return true;
@@ -10357,9 +10947,15 @@ export default function AppFrame() {
     const modelId = doc?.kind === 'model' ? doc.sourceId : null;
     const pkg = modelId ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes) : null;
     const modelDirty = Boolean(pkg && current.modelDirty[pkg.id]);
-    if (!persistenceSettings.autosave && (modelDirty || manualWorldDirty)) {
+    const animationDirty = animationApplication.controller.projection().dirty;
+    if (!persistenceSettings.autosave && (animationDirty || modelDirty || manualWorldDirty)) {
+      const dirtyLabels = [
+        ...(animationDirty ? ['Animation'] : []),
+        ...(modelDirty ? [doc?.title ?? 'Model'] : []),
+        ...(manualWorldDirty ? [current.activeMapName] : []),
+      ];
       requestUnsavedDecision(
-        modelDirty && manualWorldDirty ? 'Current model and world' : (modelDirty ? (doc?.title ?? 'Model') : current.activeMapName),
+        dirtyLabels.join(', '),
         () => { if (saveDirtyWorkspaceForClose()) closeHostWindow(); },
         closeHostWindow,
       );
@@ -10368,6 +10964,7 @@ export default function AppFrame() {
     if (persistenceSettings.autosave) {
       // A never-saved model deliberately has no autosave target and is discarded
       // on process exit. Once a manifest exists, the latest edit is flushed.
+      if (animationDirty && !saveAnimationNow('Autosaved before exit')) return;
       if (pkg && modelDirty && isMaterialized(pkg.kind, pkg.id) && !saveActiveModelNow('Autosaved before exit', 'background')) return;
       if (!saveWorldNowAll('Autosaved before exit')) return;
     }
@@ -10409,6 +11006,39 @@ export default function AppFrame() {
     closeEditorNormally();
   };
 
+  // The top-level Animation menu is a projection of the same application
+  // registry used by panels, hotkeys, remote peers, and automation. The legacy
+  // COMMANDS table stays out of this path, so C-tier commands cannot acquire a
+  // second callback or toolbar identity during presentation.
+  const animationMenuAvailabilityKey = [
+    animationCommandProjection.surface,
+    animationCommandProjection.hasDocument,
+    animationCommandProjection.hasSelection,
+    animationCommandProjection.hasTrajectory,
+    animationCommandProjection.activeSourceId,
+    animationCommandProjection.batchState,
+    animationCommandProjection.batchHasWork,
+    animationCommandProjection.reviewHasTake,
+    animationCommandProjection.reviewUndoDepth,
+    animationCommandProjection.reviewRedoDepth,
+    animationCommandProjection.cameraAttached,
+    animationCommandProjection.continuationAvailable,
+    animationCommandProjection.bodyCaptureAvailable,
+    animationCommandProjection.bodyCaptureRecording,
+    animationCommandProjection.sceneContextAvailable,
+    animationCommandProjection.contactConformAvailable,
+    animationCommandProjection.npcQueryAvailable,
+  ].join('|');
+  const openApplicationMenuRows = useMemo(() => state.openMenu === 'Animation'
+    ? applicationCommandMenuRows(
+        applicationCommandsRef.current!.commandsByMenu('Animation'),
+        (commandId) => animationMenuAvailability(
+          commandId,
+          applicationCommandsRef.current!.availability(commandId, {}, 'menu'),
+        ),
+      )
+    : [], [state.openMenu, animationMenuAvailabilityKey]);
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
@@ -10417,7 +11047,8 @@ export default function AppFrame() {
           activeCommand={activeCommand}
           onMenu={guarded((menu: Menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu })))}
           onCommand={runCommand}
-          onWorldBible={guarded(openWorldBible)}
+          destination={activeDestination(activeWorkspaceDocument)}
+          onDestination={guarded(goToDestination)}
           onClose={closeEditor}
         />
       </RenderProbe>
@@ -10440,7 +11071,7 @@ export default function AppFrame() {
             onPane={pressLeftPanel}
           />
         </RenderProbe> : null}
-        {leftGutterPresent && !state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activeLabSidePanel ? 'Lab Stack Panel' : activeAnimationSidePanel ? 'Animation Capture Panel' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
+        {leftGutterPresent && !state.leftPanelCollapsed ? <RenderProbe id={activeWorldBibleSidePanel ? 'World Bible Index' : activeLabSidePanel ? 'Lab Stack Panel' : activeAnimationSidePanel ? 'Animation Foundry Panel' : activePaintSidePanel ? 'Paint Side Panel' : 'Content Browser'}>
           {activeWorldBibleSidePanel ?? activeLabSidePanel ?? activeAnimationSidePanel ?? activePaintSidePanel ?? <LibraryPanel
             state={state}
             catalogAssets={catalogAssets}
@@ -10488,15 +11119,63 @@ export default function AppFrame() {
             state={workspaceState}
             mapSwitchPending={mapSwitchPending}
             activeAsset={activeAsset}
+            animation={{
+              projection: animationProjection,
+              callbacks: animationWorkspaceCallbacks,
+              targetPackage: animationTargetPackage,
+              onPreviewMounted: (nodeId) => {
+                const target = animationApplication.controller.projection().preview.target;
+                if (target?.previewId !== String(nodeId)) {
+                  animationApplication.controller.attachPreview({
+                    previewId: String(nodeId),
+                    cameraNodeId: String(nodeId),
+                    mannequinNodeId: 'player',
+                  });
+                }
+                animationStagedPropPreview.attach(nodeId);
+                animationNativeTrajectoryPreview.attach(nodeId);
+                setAnimationPreviewNodeId(nodeId);
+              },
+              onPreviewUnmounted: (nodeId) => {
+                setAnimationPreviewNodeId((current) => current === nodeId ? null : current);
+                try {
+                  animationStagedPropPreview.detach();
+                  setAnimationStagedPropProjection(animationStagedPropPreview.projection());
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  setState((previous) => ({ ...previous, status: `Animation prop preview detach: ${message}` }));
+                }
+                try {
+                  animationNativeTrajectoryPreview.detach();
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  setState((previous) => ({ ...previous, status: `Animation trajectory preview detach: ${message}` }));
+                }
+                const target = animationApplication.controller.projection().preview.target;
+                if (target?.previewId === String(nodeId)) animationApplication.controller.detachPreview();
+              },
+              onPreviewError: (message) => {
+                setAnimationGenerationStatus(message);
+                setState((previous) => ({ ...previous, status: message }));
+              },
+            }}
             homeSurface={(
               <HomeSurface
                 session={bootSession}
                 maps={homeMapDocuments}
+                recents={homeRecentHits}
+                favorites={homeFavoriteHits}
                 launch={launchNumberRef.current}
                 currentStem={state.activeMapStem}
+                filter={state.homeFilter}
+                showFavorites={state.homeFavorites}
+                onFilter={(homeFilter) => setState((prev) => ({ ...prev, homeFilter }))}
+                onShowFavorites={(homeFavorites) => setState((prev) => ({ ...prev, homeFavorites }))}
                 onContinue={continueSession}
                 onOpenMap={(stem) => leaveHomeFor(() => openMapDocument(stem))}
                 onNewMap={(name) => leaveHomeFor(() => createNewMap(name))}
+                onOpenModel={(model) => leaveHomeFor(() => openModelDocument(model))}
+                onOpenMaterial={(asset) => leaveHomeFor(() => focusMaterialDocument(undefined, asset.id))}
               />
             )}
             selectedPartCount={selectedPartCount}
@@ -10602,6 +11281,7 @@ export default function AppFrame() {
         {rightPanelsFor(activeDocumentKind, labUiActive).length > 0 ? <RenderProbe id="Inspector">
           <Inspector
             state={state}
+            animationPanel={activeAnimationFocusPanel}
             activeObject={activeObject}
             activeAsset={activeObject ? assetById(activeObject.assetId, state.assetOverrides) : null}
             onPane={pressRightPanel}
@@ -10755,6 +11435,17 @@ export default function AppFrame() {
           nativeUpdateOpen={nativeUpdateNotice?.collapsed === false}
           onNativeUpdate={() => setNativeUpdateNotice((current) => current ? { ...current, collapsed: !current.collapsed } : null)}
           loreStatus={blobService}
+          onFpsSample={(fps) => animationApplication.controller.reportEditorFps(fps)}
+          animationQueue={{
+            runState: animationProjection.batch.runState,
+            current: animationProjection.batch.current
+              ? { jobId: animationProjection.batch.current.jobId, seed: animationProjection.batch.current.seed }
+              : null,
+            generated: animationProjection.batch.stats.generated,
+            rejected: animationProjection.batch.stats.autoRejected,
+            pending: animationProjection.batch.stats.pending,
+            pressureSuspended: animationProjection.batch.pressureSuspended,
+          }}
           onLore={() => setState((current) => {
             const document = current.workspaceDocuments.find((row) => row.id === current.activeWorkspaceDocumentId);
             return document?.kind === 'model'
@@ -11011,7 +11702,16 @@ export default function AppFrame() {
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
           <C.HW_MenuDismiss onPress={() => setState((prev) => ({ ...prev, openMenu: null }))} />
-          <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
+          <DropdownMenu
+            state={state}
+            onCommand={runCommand}
+            onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)}
+            applicationRows={openApplicationMenuRows}
+            onApplicationCommand={(commandId, args, source) => {
+              invokeApplicationCommand(commandId, args, source);
+              setState((previous) => previous.openMenu === null ? previous : { ...previous, openMenu: null });
+            }}
+          />
         </RenderProbe>
       ) : null}
       {importPlan ? (

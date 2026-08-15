@@ -134,9 +134,25 @@ export function modifiersFromKeyEvent(e: any): Modifiers {
  *  exercise the REAL keyboard pipeline end-to-end: bridge → __keydown bus → AppFrame's
  *  normalized subscription → this keymap → runCommand → host door. `parts` is
  *  ['ctrl','shift',...,'<key>'] — modifiers first, the key name last. */
+// EXTENDED keys the harness can drive. SDL3 sets bit 30 on these, and the JS
+// decoder (runtime/hooks/useIFTTT.ts SDL_KEY_NAMES) names them — but the
+// synthetic edge below could only build single characters, escape and enter,
+// so nothing bound to an F-key or an arrow was reachable headlessly at all.
+// The destination strip (req_4464) lives on F1..F7, so this table is what
+// makes navigation verifiable from a shot instead of only by hand.
+const SYNTHETIC_EXTENDED_KEYS: Record<string, number> = {
+  escape: 27, enter: 13, tab: 9, space: 32, backspace: 8, delete: 127,
+  left: 0x40000050, up: 0x40000052, right: 0x4000004f, down: 0x40000051,
+  f1: 0x4000003a, f2: 0x4000003b, f3: 0x4000003c, f4: 0x4000003d,
+  f5: 0x4000003e, f6: 0x4000003f, f7: 0x40000040, f8: 0x40000041,
+  f9: 0x40000042, f10: 0x40000043, f11: 0x40000044, f12: 0x40000045,
+  insert: 0x40000049, home: 0x4000004a, end: 0x4000004d,
+  pageup: 0x4000004b, pagedown: 0x4000004e,
+};
+
 export function syntheticKeyEdge(parts: string[]): { sym: number; mod: number } {
-  const keyName = parts[parts.length - 1] ?? '';
-  const sym = keyName.length === 1 ? keyName.charCodeAt(0) : keyName === 'escape' ? 27 : keyName === 'enter' ? 13 : 0;
+  const keyName = (parts[parts.length - 1] ?? '').toLowerCase();
+  const sym = keyName.length === 1 ? keyName.charCodeAt(0) : SYNTHETIC_EXTENDED_KEYS[keyName] ?? 0;
   let mod = 0;
   if (parts.includes('ctrl')) mod |= 0x00c0;
   if (parts.includes('shift')) mod |= 0x0003;
