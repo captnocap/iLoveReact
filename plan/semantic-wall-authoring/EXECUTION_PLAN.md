@@ -148,28 +148,50 @@ that severance deletes; step 142's grep gains no migration-decoder exemption.
 Section F exit: v5 is the only writable shape; pre-v5 documents load with legacy
 walls dropped (req_4462) and can never write back as a pre-v5 or wall-carrying shape.
 
-## Section G — Commands, undo, prefabs, finishes, and anchors (steps 89–103, sequential)
+## Section G′ — VERTICAL SLICE: draw, see, undo, save (steps 89–96, sequential)
+
+**AMENDMENT (req_4466/req_4467, 2026-08-14).** The user rejected the tape's
+bottom-up shape after Section F: ~70 further steps stood between the finished
+engine and the first touchable wall, with undo sequenced behind plumbing. USER
+POSITION, verbatim: "i would literally make undo before i made just about any of
+the rest of it." This section replaces that ordering with the minimal loop a
+person can actually use: draw a wall in the live editor, see it, undo it, save
+and reload it. The original Sections G–H remain below as the deferred full
+build-out; the slice absorbs their smallest honest core. Prefabs are deferred to
+the back of the tape pending the user's call (req_4465 explained that "prefab
+stamp" is the V24 clone-a-building tool; the user has not yet re-ruled). Anchors
+(wall-mounted props) land when wall-mounted props matter. The swarm audit's
+receipt-plumbing gate now gates only the DEFERRED full command section, not the
+slice: slice undo restores the prior retained `ArchitectureSource` snapshot —
+honest here because the persisted source is bounded authored data already held in
+React state, native revalidates every applied source, and no derived topology is
+ever reconstructed in JS. Selection may reset on undo in the slice; stable
+selection remap stays with the deferred receipt work.
 
 Precondition: Section F exit is recorded.
 
-**PRE-SECTION-G GATE (recorded 2026-08-14, from the swarm audit in
-`HANDOFF-2026-08-14.md`).** Do not start Step 89 against the current tape. The
-native source owns more receipt information than RJAW emits: the host result drops
-the inverse patch, created/updated/removed records, edge/opening/anchor remaps, and
-face lineage; `stampPrefab` is declared in unions/wire but has no native mutation
-implementation; compile output has no wall-anchor attachment frames. Section G as
-written therefore cannot honestly deliver command undo, stable selection remap,
-one-action prefab stamps, facade lineage, or anchor transforms — and faking them
-with before/after snapshots or JS topology is forbidden. Before executing Step 89,
-author a native-completeness section (approximately fifteen steps: additive RJAW v1
-receipt sections, strict decode/rejection fixtures both sides, a bounded canonical
-prefab graph codec plus one atomic native `stampPrefab`, real face-lineage
-generation, compiled anchor-attachment rows with a right-handed transform,
-an attachment dirty target/hash, host parity tests, two native runs, a ReleaseFast
-editor ship, boundary reopen, report, section commit), insert it before the current
-Step 89, renumber Sections G–K, and pin every new numeric wire tag in
-`contracts/wire.md` before implementation. The audit's preview/UI/frozen-output and
-severance-scope findings in the handover apply to Sections H–K the same way.
+- [ ] 89. Author one seed measured wall-style declaration (and one door opening-kit declaration) as validated on-disk architecture-kit manifest data — never code defaults — so `bootArchitectureCatalog()` installs a non-empty palette before the Export Architecture Kit dialog exists; add an `architectureCatalog.test.ts` case proving the seed rows validate, install, and project into the palette.
+- [ ] 90. Create `cart/editor/world/wallTools.ts` (condensed from old steps 109–110): click-click draw on the integer lattice from floor-plane picks, explicit vertex magnet targets, Escape cancel, non-integer rejection, and one semantic draw-wall command per committed gesture; test file covers draw, cancel, snap, and rejection.
+- [ ] 91. Create `cart/editor/world/architectureCommand.ts` (slice scope): apply draw-wall and delete-edge through `architectureHost.mutate`, one journal entry per command retaining the prior source snapshot, undo/redo restoring retained snapshots with native re-validation; wire the existing undo/redo verbs in `applicationCommands.ts` to it; tests cover apply, rejection, stale revision, and undo/redo byte restoration.
+- [ ] 92. Create `framework/world_loader/live_wall_bundle.zig` (condensed from old step 107, slice scope): decode the compile bundle's wall render/collider rows and replace-all retained wall outputs through `live_inputs.zig` set/apply/clear — no target-hash retention yet; add a focused native test target beside the existing `test-world-*` targets.
+- [ ] 93. Add one derived compile effect: architecture source change → native compile → push the wall bundle to the live host beside ordinary piece pushes; walls render in the world viewport with collision.
+- [ ] 94. Add the wall draw/delete tool entries to the Build action bar from the installed catalog palette (BuildBar slice scope), route viewport gestures through `wallTools.ts`, and dispatch semantic commands only on gesture commit.
+- [ ] 95. Bundle and run the wallTools, architectureCommand, architectureCatalog, applicationCommands, and world-store suites; run `test-building-architecture` and the new live-wall native target; run `SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor`; record everything in `reports/sections/S089-096-slice.md`.
+- [ ] 96. Ask the user to draw walls in the editor, undo/redo them, save, reload, and confirm the loop feels right; apply only reported defects, then commit the explicit slice paths with `feat: draw semantic walls live with undo`.
+
+Slice exit: a person can draw a wall, see it with collision, undo it, redo it,
+save, and reload — before any further plumbing lands.
+
+## Deferred Section G — full commands, receipts, finishes, and anchors (old steps 89–103)
+
+Precondition: Slice exit is recorded. Before executing this section, author the
+swarm audit's native-completeness insertion (HANDOFF-2026-08-14.md): additive RJAW
+receipt sections (inverse patch, mutation records, remaps, face lineage), strict
+decode/rejection fixtures on both sides, compiled anchor-attachment rows, an
+attachment dirty target/hash, and — only if the user re-rules prefabs in — the
+bounded prefab graph codec plus one atomic native `stampPrefab`. Pin every new
+numeric wire tag in `contracts/wire.md` before implementation. The audit's
+preview/UI/frozen-output and severance-scope findings apply to Sections H–K.
 
 - [ ] 89. Create `cart/editor/world/architectureCommand.ts` with one planner/apply/inverse boundary over native mutation receipts and command IDs for draw, delete, profile, dimensions, style, side finish, opening, anchor, and prefab stamp operations.
 - [ ] 90. Create `cart/editor/world/architectureCommand.test.ts` with success/rejection, stale revision, one journal entry per command, forward/inverse byte restoration, stable selection remap, and affected-bounds propagation cases.
