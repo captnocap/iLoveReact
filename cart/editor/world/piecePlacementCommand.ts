@@ -7,6 +7,7 @@
 // filesystem dependency. A command authority can therefore run it against the
 // editor adapter or a headless/in-memory adapter through the same entrance.
 import {
+  isWallPiece,
   placementSlotKey,
   WORLD_PIECE_AUTHORING_TUNING,
   type MaterialRef,
@@ -156,6 +157,12 @@ function validateCandidateStructure(candidate: PiecePlacementCandidate, index: n
   }
   if (typeof candidate.pieceId !== 'string' || candidate.pieceId.length === 0) {
     reject('invalid-candidate', `candidate ${index} has no semantic piece id`, index);
+  }
+  // Legacy wall pieces cannot be placed (req_4474): a v5 world save REFUSES any
+  // wall-kind piece record (worldStore, req_4462), so one placement would brick
+  // every save of the map until it was deleted. Walls are drawn (G), never placed.
+  if (isWallPiece(candidate.pieceId)) {
+    reject('invalid-candidate', `candidate ${index} is a retired wall piece — draw walls with the Draw Wall tool (G)`, index);
   }
   if (![candidate.x, candidate.y, candidate.z, candidate.yawDegrees].every(finite)) {
     reject('invalid-candidate', `candidate ${index} has a non-finite transform`, index);

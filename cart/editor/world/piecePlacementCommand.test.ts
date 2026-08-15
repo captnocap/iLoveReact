@@ -191,6 +191,21 @@ test('a staircase stands on the floor of its cell instead of evicting it (req_35
   same(again.next.pieces.map((p) => p.id), ['floor-1', 'bp_3'], 'stairs-over-stairs left the world wrong');
 });
 
+test('retired wall pieces cannot be placed — walls are drawn, never placed (req_4474)', () => {
+  // A v5 world save REFUSES wall-kind piece records (worldStore req_4462), so
+  // one palette placement would silently brick every save of the map.
+  const before = world([], 3);
+  let error: unknown;
+  try {
+    planPiecePlacement(before, {
+      documentId: 'main', candidates: [candidate(1.5, 1.5, { pieceId: 'wall.concrete.common' })], gestureMode: 'click',
+    }, policy);
+  } catch (caught) { error = caught; }
+  assert(error instanceof PiecePlacementRejected && error.code === 'invalid-candidate', 'wall placement was not rejected');
+  assert((error as Error).message.includes('Draw Wall'), 'rejection does not point at the Draw Wall tool');
+  assert(before.nextPieceId === 3 && before.pieces.length === 0, 'rejected wall placement mutated world state');
+});
+
 test('duplicate submitted footprints reject the whole batch without allocation', () => {
   const before = world([], 5);
   let error: unknown;
