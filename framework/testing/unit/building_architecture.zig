@@ -8,10 +8,12 @@ const topology = @import("wall_topology");
 const mutation = @import("wall_mutation");
 const geometry = @import("wall_geometry");
 const wall_compile = @import("wall_compile");
+const architecture_wire = @import("architecture_wire");
 
 comptime {
     _ = geometry.GeometryBundle;
     _ = wall_compile.ArchitectureCompileBundle;
+    _ = architecture_wire.Packet;
 }
 
 test "facade constructs and owns one integer-u wall source" {
@@ -78,6 +80,77 @@ const HASH_C = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 const HASH_D = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 const COMPILE_ROOM_BUNDLE_HASH = "a225e819f3c1b1735becbd5e2c7407150686c980ff6f29858fb9f13db0b1b15d";
 const COMPILE_ROOM_SECTION_HASH = "79c29b454e6ee8b00c2ef929a38eb0b463eb94e5d7a5f9e9a627c12c9c06508d";
+const WIRE_GOLDEN_EMPTY_SOURCE = [_]u8{
+    0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x07, 0x00,
+    0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const WIRE_GOLDEN_MEASURED_KIT = [_]u8{
+    0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x03, 0x00,
+    0x76, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00,
+    0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
+    0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00,
+    0xf8, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+    0xfe, 0xff, 0xff, 0xff, 0x08, 0x00, 0x00, 0x00,
+    0x20, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+} ++ "prop:wall:doors:golden".*;
+const WIRE_GOLDEN_TWO_OPENINGS = [_]u8{
+    0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x07, 0x00,
+    0xe0, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0xc8, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x70, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x78, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0xa8, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
+    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+} ++ ([_]u8{0} ** 48) ++ [_]u8{
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+} ++ "wall-aopening-aopening-b".*;
+const WIRE_GOLDEN_QUERY_REQUEST = [_]u8{
+    0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x05, 0x00,
+    0x65, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00,
+    0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x17, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x00, 0x00,
+    0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+} ++ "modernvehicle".*;
+const WIRE_GOLDEN_QUERY_RESULT = [_]u8{
+    0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x06, 0x00,
+    0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x17, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+};
 const EMPTY_STRINGS = [_][]u8{};
 const EMPTY_CELLS = [_]architecture.types.WallCell{};
 const STYLE_PATH = [_][]u8{ @constCast("Wall"), @constCast("Styles") };
@@ -3342,4 +3415,348 @@ test "raycast returns stable IDs and exact local wall units" {
     try testing.expect(result.hit.?.opening_id == null);
     try testing.expectEqual(@as(architecture.Unit, 32), result.hit.?.column_u);
     try testing.expectEqual(@as(architecture.Unit, 16), result.hit.?.row_u);
+}
+
+fn makeWirePacket(
+    allocator: std.mem.Allocator,
+    kind: architecture_wire.PacketKind,
+    family: architecture_wire.FamilyTag,
+    revision: u32,
+    sections_input: []const struct {
+        tag: architecture_wire.SectionTag,
+        item_count: u32,
+        stride: u32,
+        bytes: []const u8,
+    },
+    strings: []const u8,
+) !architecture_wire.Packet {
+    const sections = try allocator.alloc(architecture_wire.Section, sections_input.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (sections[0..initialized]) |*section| section.deinit(allocator);
+        if (sections.len != 0) allocator.free(sections);
+    }
+    for (sections_input) |input| {
+        sections[initialized] = .{
+            .tag = input.tag,
+            .version = 1,
+            .item_count = input.item_count,
+            .element_stride = input.stride,
+            .bytes = try allocator.dupe(u8, input.bytes),
+        };
+        initialized += 1;
+    }
+    const string_table = try allocator.dupe(u8, strings);
+    return .{
+        .header = .{
+            .kind = kind,
+            .source_revision = revision,
+            .family = family,
+            .target = .none,
+        },
+        .sections = sections,
+        .string_table = string_table,
+    };
+}
+
+fn expectWireRoundTrip(packet: *const architecture_wire.Packet) ![]u8 {
+    const bytes = try architecture_wire.encode(testing.allocator, packet);
+    errdefer testing.allocator.free(bytes);
+    var decoded = try architecture_wire.decode(testing.allocator, bytes);
+    defer decoded.deinit(testing.allocator);
+    const reencoded = try architecture_wire.encode(testing.allocator, &decoded);
+    defer testing.allocator.free(reencoded);
+    try testing.expectEqualSlices(u8, bytes, reencoded);
+    return bytes;
+}
+
+fn writeWireInt(comptime T: type, bytes: []u8, offset: usize, value: T) void {
+    std.mem.writeInt(T, bytes[offset..][0..@sizeOf(T)], value, .little);
+}
+
+fn emptyWireHeader(kind: architecture_wire.PacketKind) [architecture_wire.header_bytes]u8 {
+    var bytes = [_]u8{0} ** architecture_wire.header_bytes;
+    writeWireInt(u32, &bytes, 0, architecture_wire.magic);
+    writeWireInt(u16, &bytes, 4, architecture_wire.packet_version);
+    writeWireInt(u16, &bytes, 6, @intFromEnum(kind));
+    writeWireInt(u32, &bytes, 8, architecture_wire.header_bytes);
+    writeWireInt(u32, &bytes, 24, architecture_wire.header_bytes);
+    writeWireInt(u32, &bytes, 28, architecture_wire.header_bytes);
+    return bytes;
+}
+
+test "wire golden measured architecture kit entry round trips" {
+    const catalog_id = "prop:wall:doors:golden";
+    var entry_row = [_]u8{0} ** 32;
+    writeWireInt(u32, &entry_row, 0, 0);
+    writeWireInt(u32, &entry_row, 4, catalog_id.len);
+    writeWireInt(i32, &entry_row, 8, -8);
+    writeWireInt(i32, &entry_row, 12, 0);
+    writeWireInt(i32, &entry_row, 16, -2);
+    writeWireInt(i32, &entry_row, 20, 8);
+    writeWireInt(i32, &entry_row, 24, 32);
+    writeWireInt(i32, &entry_row, 28, 2);
+    var packet = try makeWirePacket(testing.allocator, .catalog_install_request, .wall, 0, &.{.{
+        .tag = .catalog_entries,
+        .item_count = 1,
+        .stride = entry_row.len,
+        .bytes = &entry_row,
+    }}, catalog_id);
+    defer packet.deinit(testing.allocator);
+    const bytes = try expectWireRoundTrip(&packet);
+    defer testing.allocator.free(bytes);
+    try testing.expectEqualSlices(u8, &WIRE_GOLDEN_MEASURED_KIT, bytes);
+}
+
+test "wire golden empty source round trips" {
+    const source_row = [_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    var packet = try makeWirePacket(testing.allocator, .source_validate_request, .wall, 0, &.{.{
+        .tag = .source_header,
+        .item_count = 1,
+        .stride = source_row.len,
+        .bytes = &source_row,
+    }}, "");
+    defer packet.deinit(testing.allocator);
+    const bytes = try expectWireRoundTrip(&packet);
+    defer testing.allocator.free(bytes);
+    try testing.expectEqualSlices(u8, &WIRE_GOLDEN_EMPTY_SOURCE, bytes);
+}
+
+test "wire golden source with two openings round trips" {
+    const source_row = [_]u8{ 1, 0, 0, 0, 7, 0, 0, 0 };
+    const vertex_rows = [_]u8{0} ** 48;
+    var opening_rows = [_]u8{0} ** 32;
+    writeWireInt(i32, &opening_rows, 8, 8);
+    writeWireInt(i32, &opening_rows, 24, 24);
+    var packet = try makeWirePacket(testing.allocator, .source_validate_request, .wall, 7, &.{
+        .{ .tag = .source_header, .item_count = 1, .stride = 8, .bytes = &source_row },
+        .{ .tag = .vertices, .item_count = 2, .stride = 24, .bytes = &vertex_rows },
+        .{ .tag = .openings, .item_count = 2, .stride = 16, .bytes = &opening_rows },
+    }, "wall-aopening-aopening-b");
+    defer packet.deinit(testing.allocator);
+    const bytes = try expectWireRoundTrip(&packet);
+    defer testing.allocator.free(bytes);
+    try testing.expectEqualSlices(u8, &WIRE_GOLDEN_TWO_OPENINGS, bytes);
+}
+
+test "wire catalog query filters and results round trip" {
+    var query_row = [_]u8{0} ** 24;
+    writeWireInt(u16, &query_row, 0, @intFromEnum(architecture.types.ArchitectureFamily.wall));
+    writeWireInt(u16, &query_row, 2, @intFromEnum(architecture.types.ArchitectureKitRole.opening));
+    writeWireInt(i32, &query_row, 4, 32);
+    writeWireInt(i32, &query_row, 8, 48);
+    const result_rows = [_]u8{ 0, 0, 0, 0, 3, 0, 0, 0 };
+    var request = try makeWirePacket(testing.allocator, .catalog_query_request, .wall, 0, &.{.{
+        .tag = .catalog_query,
+        .item_count = 1,
+        .stride = query_row.len,
+        .bytes = &query_row,
+    }}, "modernvehicle");
+    defer request.deinit(testing.allocator);
+    const request_bytes = try expectWireRoundTrip(&request);
+    defer testing.allocator.free(request_bytes);
+    try testing.expectEqualSlices(u8, &WIRE_GOLDEN_QUERY_REQUEST, request_bytes);
+    var result = try makeWirePacket(testing.allocator, .catalog_query_result, .wall, 0, &.{.{
+        .tag = .catalog_query,
+        .item_count = 2,
+        .stride = 4,
+        .bytes = &result_rows,
+    }}, "");
+    defer result.deinit(testing.allocator);
+    const result_bytes = try expectWireRoundTrip(&result);
+    defer testing.allocator.free(result_bytes);
+    try testing.expectEqualSlices(u8, &WIRE_GOLDEN_QUERY_RESULT, result_bytes);
+}
+
+test "wire covers every command tag" {
+    for (std.enums.values(architecture_wire.CommandTag)) |tag| {
+        var command_row = [_]u8{0} ** 4;
+        writeWireInt(u16, &command_row, 0, @intFromEnum(tag));
+        var packet = try makeWirePacket(testing.allocator, .mutate_request, .wall, 9, &.{.{
+            .tag = .command,
+            .item_count = 1,
+            .stride = command_row.len,
+            .bytes = &command_row,
+        }}, @tagName(tag));
+        defer packet.deinit(testing.allocator);
+        const bytes = try expectWireRoundTrip(&packet);
+        defer testing.allocator.free(bytes);
+    }
+}
+
+test "wire covers every protocol and mutation rejection tag" {
+    for (std.enums.values(architecture_wire.RejectionCode)) |code| {
+        var row = [_]u8{0} ** 32;
+        writeWireInt(u16, &row, 0, @intFromEnum(code));
+        var packet = try makeWirePacket(testing.allocator, .mutate_result, .wall, 9, &.{.{
+            .tag = .rejection,
+            .item_count = 1,
+            .stride = row.len,
+            .bytes = &row,
+        }}, @tagName(code));
+        defer packet.deinit(testing.allocator);
+        const bytes = try expectWireRoundTrip(&packet);
+        defer testing.allocator.free(bytes);
+    }
+    for (std.enums.values(architecture_wire.MutationRejectionTag)) |code| {
+        var row = [_]u8{0} ** 32;
+        writeWireInt(u16, &row, 0, @intFromEnum(architecture_wire.RejectionCode.mutation_rejected));
+        writeWireInt(u16, &row, 2, @intFromEnum(code));
+        var packet = try makeWirePacket(testing.allocator, .mutate_result, .wall, 9, &.{.{
+            .tag = .rejection,
+            .item_count = 1,
+            .stride = row.len,
+            .bytes = &row,
+        }}, @tagName(code));
+        defer packet.deinit(testing.allocator);
+        const bytes = try expectWireRoundTrip(&packet);
+        defer testing.allocator.free(bytes);
+    }
+}
+
+test "wire rejects a short header" {
+    const bytes = [_]u8{0} ** (architecture_wire.header_bytes - 1);
+    try testing.expectError(error.short_packet, architecture_wire.decode(testing.allocator, &bytes));
+}
+
+test "wire rejects bad magic" {
+    var bytes = emptyWireHeader(.scale_metadata_request);
+    bytes[0] = 'X';
+    try testing.expectError(error.bad_magic, architecture_wire.decode(testing.allocator, &bytes));
+}
+
+test "wire rejects a future packet version" {
+    var bytes = emptyWireHeader(.scale_metadata_request);
+    writeWireInt(u16, &bytes, 4, architecture_wire.packet_version + 1);
+    try testing.expectError(error.unsupported_packet_version, architecture_wire.decode(testing.allocator, &bytes));
+}
+
+test "wire rejects an excessive section count before allocation" {
+    var bytes = emptyWireHeader(.scale_metadata_request);
+    writeWireInt(u32, &bytes, 20, architecture_wire.Limits.maximum_sections + 1);
+    try testing.expectError(error.count_limit, architecture_wire.decode(testing.allocator, &bytes));
+}
+
+test "wire rejects an invalid string-table offset" {
+    var bytes = emptyWireHeader(.scale_metadata_request);
+    writeWireInt(u32, &bytes, 28, architecture_wire.header_bytes + 1);
+    try testing.expectError(error.offset_out_of_range, architecture_wire.decode(testing.allocator, &bytes));
+}
+
+test "wire rejects trailing bytes" {
+    const header = emptyWireHeader(.scale_metadata_request);
+    var bytes = [_]u8{0} ** (architecture_wire.header_bytes + 1);
+    @memcpy(bytes[0..architecture_wire.header_bytes], &header);
+    try testing.expectError(error.trailing_bytes, architecture_wire.decode(testing.allocator, &bytes));
+}
+
+test "wire encode decode encode identity is byte exact" {
+    const source_row = [_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    var packet = try makeWirePacket(testing.allocator, .source_validate_request, .wall, 0, &.{.{
+        .tag = .source_header,
+        .item_count = 1,
+        .stride = source_row.len,
+        .bytes = &source_row,
+    }}, "identity");
+    defer packet.deinit(testing.allocator);
+    const bytes = try expectWireRoundTrip(&packet);
+    defer testing.allocator.free(bytes);
+}
+
+test "architecture service dispatches bounded scale metadata through the real semantic switch" {
+    var service: architecture_wire.Service = .{};
+    defer service.deinit(testing.allocator);
+    var request = try makeWirePacket(testing.allocator, .scale_metadata_request, .none, 0, &.{}, "");
+    defer request.deinit(testing.allocator);
+    const request_bytes = try architecture_wire.encode(testing.allocator, &request);
+    defer testing.allocator.free(request_bytes);
+    const result_bytes = try service.handle(testing.allocator, request_bytes);
+    defer testing.allocator.free(result_bytes);
+    var result = try architecture_wire.decode(testing.allocator, result_bytes);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(architecture_wire.PacketKind.scale_metadata_result, result.header.kind);
+    const section = result.findSection(.scale_metadata) orelse return error.TestExpectedEqual;
+    try testing.expectEqual(@as(u32, 1), section.item_count);
+    try testing.expectEqual(architecture_wire.scale_metadata_stride, section.element_stride);
+}
+
+test "architecture service installs measured catalog and validates an empty semantic source" {
+    var service: architecture_wire.Service = .{};
+    defer service.deinit(testing.allocator);
+    const entries = [_]architecture.CatalogEntry{validWallStyle()};
+    const install_request = try architecture_wire.encodeCatalogPacket(testing.allocator, .catalog_install_request, &entries);
+    defer testing.allocator.free(install_request);
+    const install_result_bytes = try service.handle(testing.allocator, install_request);
+    defer testing.allocator.free(install_result_bytes);
+    var install_result = try architecture_wire.decode(testing.allocator, install_result_bytes);
+    defer install_result.deinit(testing.allocator);
+    try testing.expectEqual(architecture_wire.PacketKind.catalog_install_result, install_result.header.kind);
+    try testing.expect(install_result.findSection(.rejection) == null);
+
+    const source = architecture.ArchitectureSource{
+        .revision = 0,
+        .walls = .{ .vertices = &.{}, .edges = &.{}, .anchors = &.{} },
+    };
+    const validate_request = try architecture_wire.encodeSourcePacket(testing.allocator, .source_validate_request, &source);
+    defer testing.allocator.free(validate_request);
+    const validate_result_bytes = try service.handle(testing.allocator, validate_request);
+    defer testing.allocator.free(validate_result_bytes);
+    var validate_result = try architecture_wire.decode(testing.allocator, validate_result_bytes);
+    defer validate_result.deinit(testing.allocator);
+    try testing.expectEqual(architecture_wire.PacketKind.source_validate_result, validate_result.header.kind);
+    try testing.expect(validate_result.findSection(.rejection) == null);
+}
+
+test "architecture service queries measured rows and returns one owned draw mutation" {
+    var service: architecture_wire.Service = .{};
+    defer service.deinit(testing.allocator);
+    const entries = [_]architecture.CatalogEntry{validWallStyle()};
+    const install_request = try architecture_wire.encodeCatalogPacket(testing.allocator, .catalog_install_request, &entries);
+    defer testing.allocator.free(install_request);
+    const install_result = try service.handle(testing.allocator, install_request);
+    defer testing.allocator.free(install_result);
+
+    const query_request = try architecture_wire.encodeCatalogQueryPacket(testing.allocator, .{ .family = .wall, .role = .style });
+    defer testing.allocator.free(query_request);
+    const query_result_bytes = try service.handle(testing.allocator, query_request);
+    defer testing.allocator.free(query_result_bytes);
+    var query_result = try architecture_wire.decode(testing.allocator, query_result_bytes);
+    defer query_result.deinit(testing.allocator);
+    const query_rows = query_result.findSection(.catalog_query) orelse return error.TestExpectedEqual;
+    try testing.expectEqual(@as(u32, 1), query_rows.item_count);
+    try testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, query_rows.bytes[0..4], .little));
+
+    const source = architecture.ArchitectureSource{
+        .revision = 0,
+        .walls = .{ .vertices = &.{}, .edges = &.{}, .anchors = &.{} },
+    };
+    const command = architecture.ArchitectureCommand{
+        .command_id = "host-draw",
+        .expected_revision = 0,
+        .operation = .{ .draw_wall = .{
+            .floor = 0,
+            .start = .{ .x_u = 0, .z_u = 0 },
+            .end = .{ .x_u = 16, .z_u = 0 },
+            .support = .{ .absolute = .{ .base_y_u = 0 } },
+            .height_u = 48,
+            .thickness_u = 4,
+            .profile = .full,
+            .style_id = "build:wall:style:test",
+            .side_a_material_id = "material:a",
+            .side_b_material_id = "material:b",
+        } },
+    };
+    const mutate_request = try architecture_wire.encodeMutationRequest(testing.allocator, &source, command);
+    defer testing.allocator.free(mutate_request);
+    const mutate_result_bytes = try service.handle(testing.allocator, mutate_request);
+    defer testing.allocator.free(mutate_result_bytes);
+    var mutate_result = try architecture_wire.decode(testing.allocator, mutate_result_bytes);
+    defer mutate_result.deinit(testing.allocator);
+    try testing.expect(mutate_result.findSection(.rejection) == null);
+    var mutated_source = try architecture_wire.decodeSource(testing.allocator, &mutate_result);
+    defer mutated_source.deinit(testing.allocator);
+    try testing.expectEqual(@as(u32, 1), mutated_source.revision);
+    try testing.expectEqual(@as(usize, 2), mutated_source.walls.vertices.len);
+    try testing.expectEqual(@as(usize, 1), mutated_source.walls.edges.len);
+    try testing.expectEqualStrings("host-draw:e:0", mutated_source.walls.edges[0].id);
 }

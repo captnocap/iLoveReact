@@ -192,6 +192,76 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const wall_types_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_types.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_types_mod.addImport("architecture_scale", architecture_scale_mod);
+    const building_catalog_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/building_catalog.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    building_catalog_mod.addImport("architecture_scale", architecture_scale_mod);
+    building_catalog_mod.addImport("wall_types", wall_types_mod);
+    const wall_topology_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_topology.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_topology_mod.addImport("wall_types", wall_types_mod);
+    const wall_mutation_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_mutation.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_mutation_mod.addImport("wall_types", wall_types_mod);
+    wall_mutation_mod.addImport("building_catalog", building_catalog_mod);
+    wall_mutation_mod.addImport("wall_topology", wall_topology_mod);
+    const wall_geometry_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_geometry_mod.addImport("architecture_scale", architecture_scale_mod);
+    wall_geometry_mod.addImport("wall_types", wall_types_mod);
+    wall_geometry_mod.addImport("building_catalog", building_catalog_mod);
+    wall_geometry_mod.addImport("wall_topology", wall_topology_mod);
+    const wall_compile_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/wall_compile.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    wall_compile_mod.addImport("wall_types", wall_types_mod);
+    wall_compile_mod.addImport("building_catalog", building_catalog_mod);
+    wall_compile_mod.addImport("wall_geometry", wall_geometry_mod);
+    wall_compile_mod.addImport("wall_topology", wall_topology_mod);
+    const building_architecture_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/building_architecture.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    building_architecture_mod.addImport("architecture_scale", architecture_scale_mod);
+    building_architecture_mod.addImport("wall_types", wall_types_mod);
+    building_architecture_mod.addImport("building_catalog", building_catalog_mod);
+    building_architecture_mod.addImport("wall_topology", wall_topology_mod);
+    building_architecture_mod.addImport("wall_mutation", wall_mutation_mod);
+    building_architecture_mod.addImport("wall_compile", wall_compile_mod);
+    const architecture_wire_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/architecture_wire.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    architecture_wire_mod.addImport("building_architecture", building_architecture_mod);
 
     const root_mod = b.createModule(.{
         .root_source_file = b.path(app_source),
@@ -201,6 +271,8 @@ pub fn build(b: *std.Build) void {
     root_mod.addOptions("build_options", options);
     root_mod.addImport("dev_module_abi", dev_module_abi_mod);
     root_mod.addImport("architecture_scale", architecture_scale_mod);
+    root_mod.addImport("building_architecture", building_architecture_mod);
+    root_mod.addImport("architecture_wire", architecture_wire_mod);
     // The cart bundle rides in as a named module: v8_app.zig lives in
     // framework/ and @embedFile can't reach a file outside the module root,
     // absolute path or not — a module name resolves like @import and has no
@@ -975,6 +1047,8 @@ pub fn build(b: *std.Build) void {
     game_module_mod.addOptions("build_options", options);
     game_module_mod.addImport("dev_module_abi", dev_module_abi_mod);
     game_module_mod.addImport("architecture_scale", architecture_scale_mod);
+    game_module_mod.addImport("building_architecture", building_architecture_mod);
+    game_module_mod.addImport("architecture_wire", architecture_wire_mod);
     game_module_mod.addImport("wgpu", wgpu_headers_mod);
     game_module_mod.addImport("tls", tls_mod);
     game_module_mod.addImport("pg", pg_dep.module("pg"));
@@ -2108,17 +2182,25 @@ pub fn build(b: *std.Build) void {
     wall_compile_mod_for_tests.addImport("building_catalog", building_catalog_mod_for_tests);
     wall_compile_mod_for_tests.addImport("wall_geometry", wall_geometry_mod_for_tests);
     wall_compile_mod_for_tests.addImport("wall_topology", wall_topology_mod_for_tests);
+    const architecture_wire_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/architecture_wire.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
     building_architecture_mod_for_tests.addImport("architecture_scale", architecture_scale_mod);
     building_architecture_mod_for_tests.addImport("wall_types", wall_types_mod_for_tests);
     building_architecture_mod_for_tests.addImport("building_catalog", building_catalog_mod_for_tests);
     building_architecture_mod_for_tests.addImport("wall_topology", wall_topology_mod_for_tests);
     building_architecture_mod_for_tests.addImport("wall_mutation", wall_mutation_mod_for_tests);
     building_architecture_mod_for_tests.addImport("wall_compile", wall_compile_mod_for_tests);
+    architecture_wire_mod_for_tests.addImport("building_architecture", building_architecture_mod_for_tests);
     building_architecture_test_mod.addImport("building_architecture", building_architecture_mod_for_tests);
     building_architecture_test_mod.addImport("wall_topology", wall_topology_mod_for_tests);
     building_architecture_test_mod.addImport("wall_mutation", wall_mutation_mod_for_tests);
     building_architecture_test_mod.addImport("wall_geometry", wall_geometry_mod_for_tests);
     building_architecture_test_mod.addImport("wall_compile", wall_compile_mod_for_tests);
+    building_architecture_test_mod.addImport("architecture_wire", architecture_wire_mod_for_tests);
     const building_architecture_test = b.addTest(.{
         .name = "building-architecture-test",
         .root_module = building_architecture_test_mod,

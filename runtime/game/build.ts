@@ -144,3 +144,86 @@ export function validateBuildPlacement(
 export function buildCatalogCount(): number {
   return callHost<number>('__game_build_catalog_count', 0);
 }
+
+// Semantic architecture uses one bounded/versioned Uint8Array protocol. These
+// functions deliberately do not parse packets: the active editor owns DTO
+// serialization while native owns catalog validation, topology, mutation, and
+// compilation. Keeping this door byte-only prevents domain logic from leaking
+// into the generic runtime ingredient wrapper.
+export type ArchitecturePacket = Uint8Array;
+
+export const ARCHITECTURE_HOST_NAMES = {
+  catalogValidate: '__game_build_arch_catalog_validate',
+  catalogInstall: '__game_build_arch_catalog_install',
+  catalogQuery: '__game_build_arch_catalog_query',
+  sourceValidate: '__game_build_arch_source_validate',
+  mutate: '__game_build_arch_mutate',
+  compile: '__game_build_arch_compile',
+  raycast: '__game_build_arch_raycast',
+  openingSlots: '__game_build_arch_opening_slots',
+  migrateV4: '__game_build_arch_migrate_v4',
+  scaleMetadata: '__game_build_arch_scale_metadata',
+  catalogRows: '__game_build_arch_catalog_rows',
+} as const;
+
+export type ArchitectureHostOperation = keyof typeof ARCHITECTURE_HOST_NAMES;
+
+export function architectureHostLive(): boolean {
+  return hasHost(ARCHITECTURE_HOST_NAMES.sourceValidate)
+    && hasHost(ARCHITECTURE_HOST_NAMES.mutate)
+    && hasHost(ARCHITECTURE_HOST_NAMES.compile);
+}
+
+function callArchitecturePacket(
+  operation: ArchitectureHostOperation,
+  request: ArchitecturePacket,
+): ArchitecturePacket | null {
+  const hostName = ARCHITECTURE_HOST_NAMES[operation];
+  if (!hasHost(hostName)) return null;
+  const result = callHost<unknown>(hostName, null, request);
+  return result instanceof Uint8Array ? result : null;
+}
+
+export function validateArchitectureCatalogPacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('catalogValidate', request);
+}
+
+export function installArchitectureCatalogPacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('catalogInstall', request);
+}
+
+export function queryArchitectureCatalogPacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('catalogQuery', request);
+}
+
+export function validateArchitectureSourcePacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('sourceValidate', request);
+}
+
+export function mutateArchitecturePacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('mutate', request);
+}
+
+export function compileArchitecturePacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('compile', request);
+}
+
+export function raycastArchitecturePacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('raycast', request);
+}
+
+export function enumerateArchitectureOpeningSlotsPacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('openingSlots', request);
+}
+
+export function migrateArchitectureV4Packet(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('migrateV4', request);
+}
+
+export function readArchitectureScalePacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('scaleMetadata', request);
+}
+
+export function readMeasuredArchitectureCatalogPacket(request: ArchitecturePacket): ArchitecturePacket | null {
+  return callArchitecturePacket('catalogRows', request);
+}

@@ -31,6 +31,7 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const build = @import("game/build.zig");
+const architecture_wire = @import("architecture_wire");
 
 // ── V8 arg / return helpers (same shapes as v8_bindings_game_physics.zig) ─────
 
@@ -88,6 +89,70 @@ fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
     const ab = v8.ArrayBuffer.initWithBackingStore(iso, &shared);
     info.getReturnValue().set(ab);
 }
+
+const architecture_allocator = std.heap.page_allocator;
+var architecture_service: architecture_wire.Service = .{};
+
+fn architectureBytesDeleter(data: ?*anyopaque, _: usize, deleter_data: ?*anyopaque) callconv(.c) void {
+    if (data) |raw| {
+        const length: *usize = @ptrCast(@alignCast(deleter_data.?));
+        const pointer: [*]u8 = @ptrCast(raw);
+        architecture_allocator.free(pointer[0..length.*]);
+        architecture_allocator.destroy(length);
+    }
+}
+
+/// Transfer an owned architecture packet to V8 without copying it a second time.
+/// The backing-store deleter returns the exact page-allocator slice on GC.
+fn setReturnArchitectureBytes(info: v8.FunctionCallbackInfo, bytes: []u8) void {
+    const length = architecture_allocator.create(usize) catch {
+        architecture_allocator.free(bytes);
+        setReturnNull(info);
+        return;
+    };
+    length.* = bytes.len;
+    const backing_store = v8.c.v8__ArrayBuffer__NewBackingStore2(
+        @ptrCast(bytes.ptr),
+        bytes.len,
+        architectureBytesDeleter,
+        @ptrCast(length),
+    ) orelse {
+        architecture_allocator.free(bytes);
+        architecture_allocator.destroy(length);
+        setReturnNull(info);
+        return;
+    };
+    var shared = v8.c.v8__BackingStore__TO_SHARED_PTR(backing_store);
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const array_buffer = v8.ArrayBuffer.initWithBackingStore(info.getIsolate(), &shared);
+    const result = v8.Uint8Array.init(array_buffer, 0, bytes.len);
+    info.getReturnValue().set(result.toValue());
+}
+
+fn hostArchitecturePacket(info_c: ?*const v8.c.FunctionCallbackInfo) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const request = argBytes(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const result = architecture_service.handle(architecture_allocator, request) catch {
+        setReturnNull(info);
+        return;
+    };
+    setReturnArchitectureBytes(info, result);
+}
+
+fn hostArchitectureCatalogValidate(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureCatalogInstall(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureCatalogQuery(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureSourceValidate(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureMutate(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureCompile(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureRaycast(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureOpeningSlots(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureMigrateV4(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureScaleMetadata(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
+fn hostArchitectureCatalogRows(info: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void { hostArchitecturePacket(info); }
 
 inline fn nowNs(info: v8.FunctionCallbackInfo) i64 {
     return @as(i64, @truncate(std.Io.Clock.now(.awake, v8_runtime.hostContext(info.getIsolate()).io).toNanoseconds()));
@@ -282,4 +347,15 @@ pub fn registerGameBuild(_: anytype) void {
     v8_runtime.registerHostFn("__game_build_validate", hostValidate);
     v8_runtime.registerHostFn("__game_build_catalog_count", hostCatalogCount);
     v8_runtime.registerHostFn("__game_build_catalog_rows", hostCatalogRows);
+    v8_runtime.registerHostFn("__game_build_arch_catalog_validate", hostArchitectureCatalogValidate);
+    v8_runtime.registerHostFn("__game_build_arch_catalog_install", hostArchitectureCatalogInstall);
+    v8_runtime.registerHostFn("__game_build_arch_catalog_query", hostArchitectureCatalogQuery);
+    v8_runtime.registerHostFn("__game_build_arch_source_validate", hostArchitectureSourceValidate);
+    v8_runtime.registerHostFn("__game_build_arch_mutate", hostArchitectureMutate);
+    v8_runtime.registerHostFn("__game_build_arch_compile", hostArchitectureCompile);
+    v8_runtime.registerHostFn("__game_build_arch_raycast", hostArchitectureRaycast);
+    v8_runtime.registerHostFn("__game_build_arch_opening_slots", hostArchitectureOpeningSlots);
+    v8_runtime.registerHostFn("__game_build_arch_migrate_v4", hostArchitectureMigrateV4);
+    v8_runtime.registerHostFn("__game_build_arch_scale_metadata", hostArchitectureScaleMetadata);
+    v8_runtime.registerHostFn("__game_build_arch_catalog_rows", hostArchitectureCatalogRows);
 }

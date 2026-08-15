@@ -36,6 +36,8 @@ pub const ValidateSourceError = wall_types.SourceValidationError ||
 
 pub const ArchitectureCommand = wall_mutation.Command;
 pub const ArchitectureOperation = wall_mutation.Operation;
+pub const ArchitectureCommandSupport = wall_mutation.CommandSupport;
+pub const ArchitectureConfigureOpening = wall_mutation.ConfigureOpening;
 pub const ArchitectureCommandEnvelope = ArchitectureCommand;
 pub const ArchitectureMutationResult = wall_types.MutationResult;
 pub const ApplyCommandError = ValidateSourceError || wall_mutation.ApplyError;
@@ -88,6 +90,8 @@ pub const OpeningSlotsRequest = struct {
     edge_id: []const u8,
     catalog_id: []const u8,
 };
+pub const OpeningSlots = wall_mutation.OpeningSlots;
+pub const OpeningSlotsError = ValidateSourceError || wall_mutation.ApplyError;
 
 pub const LegacyWallMigrationRequest = struct {
     canonical_v4_bytes: []const u8,
@@ -289,12 +293,14 @@ fn addScaled(origin: [3]f64, direction: [3]f64, scale: f64) [3]f64 {
     };
 }
 
-pub fn openingSlots(allocator: std.mem.Allocator, source: *const ArchitectureSource, entries: []const CatalogEntry, request: OpeningSlotsRequest) PendingOperationError!void {
-    _ = allocator;
-    _ = source;
-    _ = entries;
-    _ = request;
-    return error.architecture_operation_not_implemented;
+pub fn openingSlots(
+    allocator: std.mem.Allocator,
+    source: *const ArchitectureSource,
+    entries: []const CatalogEntry,
+    request: OpeningSlotsRequest,
+) OpeningSlotsError!OpeningSlots {
+    try validateSource(allocator, source, entries);
+    return wall_mutation.openingSlots(allocator, source, entries, request.edge_id, request.catalog_id);
 }
 
 pub fn migrateLegacyWallModules(allocator: std.mem.Allocator, entries: []const CatalogEntry, request: LegacyWallMigrationRequest) PendingOperationError!void {
