@@ -11,7 +11,7 @@ import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
-export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Globals', 'Window'];
+export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Animation', 'Globals', 'Window'];
 export const MENU_DROPDOWN_WIDTH = 420;
 
 // The starter primitives under File → New Mesh (fresh document) and Edit → Mesh → Add Primitive
@@ -197,6 +197,9 @@ export const COMMANDS: Command[] = [
   // prop — the rotating business-sign. Visual only; the collider keeps the placed yaw.
   { id: WORLD_PIECE_SPIN_COMMAND_ID, menu: 'Build', name: 'Spin Piece', icon: 'Orbit', key: '', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   { id: WORLD_PIECE_DELETE_COMMAND_ID, menu: 'Edit', name: 'Delete World Piece', icon: 'Trash2', key: 'Del', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
+  // Clear All Walls (req_4476): drop every drawn semantic wall in one undoable
+  // edit — the bulk relief until the per-edge delete verb lands (plan G′ tail).
+  { id: 'clear-walls', menu: 'Edit', name: 'Clear All Walls', icon: 'Trash2', key: '', context: true, native: true, undoable: true, scope: 'world' },
   // Paint Faces (req_2879): an armable brush MODE — touch a placed piece's face and the
   // browser's active material lands in THAT face's slot (front vs back stay separate, so the
   // exterior and interior of one wall paint independently). A drag sweeps across faces. Not
@@ -321,6 +324,7 @@ export const COMMANDS: Command[] = [
   // exact shift-selected set. The id keeps its old spelling for persisted keymaps, but
   // the operation is NEVER based on outliner order (req_2811 / req_2870).
   { id: 'mesh-duplicate-part', menu: 'Edit', scope: 'model', name: 'Duplicate Part', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-linear-array', menu: 'Edit', scope: 'model', name: 'Linear Array...', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-path-array', menu: 'Edit', scope: 'model', name: 'Path Array...', icon: 'Route', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-x', menu: 'Edit', scope: 'model', name: 'Mirror Part X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-y', menu: 'Edit', scope: 'model', name: 'Mirror Part Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
@@ -481,7 +485,7 @@ const MESH_SUBMENU: MenuNode = {
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-edge-tubes'), cmd('mesh-edge-split'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
-    cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
+    cmd('mesh-duplicate-part'), cmd('mesh-linear-array'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
     section('Paint'), cmd('mesh-paint'), cmd('mesh-paint-fill'), cmd('mesh-paint-brush'), cmd('mesh-paint-pen'), cmd('mesh-paint-safety'), cmd('mesh-paint-detail'),
     { kind: 'sub', id: 'Paint Resolution', label: 'Paint Resolution', icon: 'Grid3x3', scope: 'model', children: PAINT_RES_COMMANDS.map((c) => cmd(c.id)) },
   ],
@@ -511,10 +515,13 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
       ],
     },
   ],
-  Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), MESH_SUBMENU],
+  Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), cmd('clear-walls'), MESH_SUBMENU],
   View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('mesh-measurements'), cmd('mesh-player-scale'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('draw-wall'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
+  // Registry-projected C-tier commands are appended by the existing root
+  // DropdownMenu. They deliberately do not enter this compatibility table.
+  Animation: [],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
 };
@@ -531,6 +538,20 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
 const MESH_TOOL_IDS = ['mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-persistent-additive', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-path-plane', 'mesh-path-edges', 'mesh-curve-pull', 'mesh-focus', 'mesh-wire', 'mesh-measurements', 'mesh-player-scale', 'mesh-xray', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
+
+// Section D is the small, permanent muscle-memory strip. It is deliberately a
+// projection of the full tool vocabulary below: specialist drawing, navigation
+// and viewport-diagnostic commands stay in the model context/menu surfaces.
+const MESH_ACTION_BAR_IDS = [
+  'mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face',
+  'mesh-move', 'mesh-scale', 'mesh-rotate',
+  'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z',
+  'mesh-paint',
+] as const;
+
+export function meshActionBarCommands(): Command[] {
+  return MESH_ACTION_BAR_IDS.map(commandById);
+}
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -588,7 +609,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
 export function meshPartCommands(hasActivePart: boolean, selectedPartCount: number): Command[] {
   const out: Command[] = [];
   if (hasActivePart) {
-    out.push(commandById('mesh-duplicate-part'), commandById('mesh-path-array'), commandById('mesh-mirror-x'), commandById('mesh-mirror-y'), commandById('mesh-mirror-z'));
+    out.push(commandById('mesh-duplicate-part'), commandById('mesh-linear-array'), commandById('mesh-path-array'), commandById('mesh-mirror-x'), commandById('mesh-mirror-y'), commandById('mesh-mirror-z'));
     if (selectedPartCount >= 2) out.push(commandById('mesh-merge-down'));
   }
   out.push(commandById('mesh-import-part'));
@@ -646,7 +667,7 @@ export function modelContextMenuLayout(hasActivePart: boolean, selectedPartCount
     // Paint Faces stays direct. Any future always-on tool also stays visible until
     // it is intentionally assigned to a family above.
     directToolCommands: meshToolCommands().filter((command) => !MODEL_CONTEXT_GROUPED_TOOL_IDS.has(command.id)),
-    // Duplicate / path array / structural merge / import are primary part verbs. Only mirrored
+    // Duplicate / linear array / path array / structural merge / import are primary part verbs. Only mirrored
     // duplication moves into Mirror, where all six axis controls live together.
     directPartCommands: partCommands.filter((command) => !MODEL_CONTEXT_MIRROR_PART_IDS.has(command.id)),
   };

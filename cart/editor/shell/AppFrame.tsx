@@ -128,6 +128,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { applyArchitectureCommand, architectureCommandId } from '../world/architectureCommand';
+import { emptyArchitectureSource } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
 import { installedWallStyles } from '../data/initialState';
 // The durable working session (req_4435): what a cold start restores, and the
@@ -4092,6 +4093,27 @@ export default function AppFrame() {
       }
       return;
     }
+    // Clear All Walls (req_4476): one undoable edit drops every drawn semantic
+    // wall — bulk relief until the per-edge delete verb lands. Ctrl+Z restores.
+    if (commandId === 'clear-walls') {
+      const edges = stateRef.current.architecture.walls.edges.length;
+      if (edges === 0) {
+        setState((prev) => ({ ...prev, openMenu: null, contextOpen: false, status: 'no drawn walls to clear' }));
+        return;
+      }
+      setState((prev) => {
+        const next: EditorState = {
+          ...prev,
+          architecture: emptyArchitectureSource(),
+          seq: prev.seq + 1,
+          openMenu: null,
+          contextOpen: false,
+          status: `cleared ${edges} drawn wall${edges === 1 ? '' : 's'} — Ctrl+Z restores them`,
+        };
+        return recordWorldEdit(prev, next, 'Clear all walls');
+      });
+      return;
+    }
     // Paint resolution (Edit → Mesh → Paint → Paint Resolution): set exact texels/triangle on the
     // viewer. The host clamps dense meshes to the atlas budget; the readout reflects what took.
     if (commandId.startsWith('mesh-paint-res-')) {
@@ -4896,6 +4918,7 @@ export default function AppFrame() {
     const current = stateRef.current;
     const style = installedWallStyles()[0];
     if (!style) {
+      console.warn('[wall] draw REFUSED — no measured wall style is installed');
       setState((prev) => ({ ...prev, status: 'draw wall: no measured wall style is installed — export or seed one first' }));
       return;
     }
@@ -4903,9 +4926,11 @@ export default function AppFrame() {
     const command = wallDrawCommand(commandId, current.architecture.revision, commit, style);
     const result = applyArchitectureCommand(current.architecture, command);
     if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED draw (${commit.start.xU},${commit.start.zU})→(${commit.end.xU},${commit.end.zU}): ${result.reason}`);
       setState((prev) => ({ ...prev, status: `draw wall rejected: ${result.reason}` }));
       return;
     }
+    console.warn(`[wall] wall drawn (${commit.start.xU},${commit.start.zU})→(${commit.end.xU},${commit.end.zU}) — ${result.source.walls.edges.length} edge(s) total`);
     setState((prev) => {
       const next: EditorState = {
         ...prev,

@@ -321,10 +321,22 @@ export default function WorldViewport(props: {
   const [wallGhost, setWallGhost] = useState<{ anchor: WallLatticePoint | null; cursor: WallLatticePoint | null }>({ anchor: null, cursor: null });
   useEffect(() => {
     if (props.tool !== 'drawWall') {
+      // req_4476 diagnostic: an anchor dying HERE means the tool flickered away
+      // from drawWall between clicks — name the tool it left for.
+      if (wallAnchorRef.current) console.warn(`[wall] anchor CANCELLED — tool left drawWall for '${props.tool}'`);
       wallAnchorRef.current = null;
       setWallGhost((prev) => (prev.anchor || prev.cursor ? { anchor: null, cursor: null } : prev));
     }
   }, [props.tool]);
+  // req_4476 diagnostic: every drawWall-adjacent tool transition, logged from
+  // render so the event ring shows the exact flicker sequence.
+  const toolTraceRef = useRef(props.tool);
+  if (toolTraceRef.current !== props.tool) {
+    if (toolTraceRef.current === 'drawWall' || props.tool === 'drawWall') {
+      console.warn(`[wall] tool ${toolTraceRef.current} → ${props.tool}`);
+    }
+    toolTraceRef.current = props.tool;
+  }
   const onPieceContextRef = useRef(props.onPieceContext);
   onPieceContextRef.current = props.onPieceContext;
   const onPaintFacesRef = useRef(props.onPaintFaces);

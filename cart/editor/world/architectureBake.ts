@@ -223,6 +223,11 @@ let LIVE: LiveArchitecture = { source: null, meshes: [], refs: [], collideRows: 
 export function setLiveArchitecture(source: ArchitectureSource): void {
   if (LIVE.source === source) return;
   if (!architectureHostLive() || source.walls.edges.length === 0) {
+    // req_4476 diagnostic: a capability-absent host silently rendering zero
+    // walls is indistinguishable from every other blank — say it.
+    if (source.walls.edges.length > 0) {
+      console.warn(`[architecture] live bake SKIPPED — host capability absent; ${source.walls.edges.length} edge(s) will not render live`);
+    }
     LIVE = { source, meshes: [], refs: [], collideRows: [] };
     return;
   }
@@ -248,6 +253,7 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
       refs.push({ key, x: 0, y: 0, z: 0, yaw: 0 });
     }
     LIVE = { source, meshes, refs, collideRows: collideRows(source, bands) };
+    console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s)`);
   } catch (error) {
     console.error(`[architecture] live wall bake FAILED — walls not rendered: ${error instanceof Error ? error.message : String(error)}`);
     LIVE = { source, meshes: [], refs: [], collideRows: [] };
