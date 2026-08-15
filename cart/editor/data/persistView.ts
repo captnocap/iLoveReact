@@ -16,6 +16,7 @@
 // painted map reloads host-side from its RMAP on the same boot.
 import { getHotState, setHotState } from '../../../runtime/hooks/useHotState';
 import { initialState, defaultModelTool } from './initialState';
+import { setAuthoredPieces } from '../world/authoredRegistry';
 import { readWorldSave } from './worldStore';
 import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
@@ -27,6 +28,11 @@ import { commandExists, MENUS } from './commands';
 import { HOME_DOCUMENT, HOME_DOCUMENT_ID, WORLD_DOCUMENT_ID } from './documents';
 import { normalizeContentFolderId, normalizeLeftPanelId, normalizeRightPanelId } from './panelSystem';
 import type { EditorState } from './types';
+import {
+  cloneArchitectureSource,
+  DEFAULT_ARCHITECTURE_TOOL,
+  EMPTY_ARCHITECTURE_SELECTION,
+} from '../world/architecture';
 
 const VIEW_HOT_KEY = 'editor:view:v2';
 const MODEL_WORK_HOT_KEY = 'editor:model-work:v1';
@@ -67,6 +73,13 @@ const RESET_ON_RELOAD: Partial<EditorState> = {
  *  map-authored slices always remain the named document's values. */
 export function loadPersistedState(): EditorState {
   const base = initialState();
+  // The authored registry must be live BEFORE the world parse (req_4474): the
+  // pre-v5 wall drop (worldStore req_4462) asks isWallPiece, which resolves
+  // authored pieces' kinds through this registry. Populated only by AppFrame's
+  // post-render effect, an authored wall-kind piece parsed as kind-unknown here,
+  // survived the load, and then poisoned EVERY save — writeWorldSave (registry
+  // live by then) refused the whole snapshot, so the map could never persist.
+  setAuthoredPieces(base.authoredBuildPieces);
   let load = readWorldSave(base.activeMapStem);
   let bootStatus: string | null = null;
   if (load.status === 'invalid') {
@@ -87,6 +100,7 @@ export function loadPersistedState(): EditorState {
   }
   const world = load.status === 'ok' ? load.save : null;
   if (world) {
+    base.architecture = cloneArchitectureSource(world.architecture);
     base.worldPieces = world.pieces;
     base.worldFlora = world.worldFlora;
     base.worldPrefabs = world.prefabs;
@@ -160,6 +174,9 @@ export function loadPersistedState(): EditorState {
     ...RESET_ON_RELOAD,
     activeMapStem: base.activeMapStem,
     activeMapName: base.activeMapName,
+    architecture: base.architecture,
+    architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+    architectureTool: DEFAULT_ARCHITECTURE_TOOL,
     worldPieces: base.worldPieces,
     worldFlora: base.worldFlora,
     worldPrefabs: base.worldPrefabs,
@@ -229,6 +246,9 @@ export function persistState(state: EditorState): void {
     redo: _redo,
     worldUndo: _worldUndo,
     worldRedo: _worldRedo,
+    architecture: _architecture,
+    architectureSelection: _architectureSelection,
+    architectureTool: _architectureTool,
     ...view
   } = state;
   // Store the chrome/view shape but redact every per-map authored slice. This

@@ -7,6 +7,7 @@ import {
   type WorldSnapshotInput,
 } from './worldStore';
 import { cloneArchitectureSource, type ArchitectureSource } from '../world/architecture';
+import { setAuthoredPieces } from '../world/authoredRegistry';
 import { createMapDocument, mapDocumentPaths } from './mapDocuments';
 import { readFile, remove, writeFile } from '../../../runtime/hooks/fs';
 import type { PlacedPiece } from '../world/pieces';
@@ -147,6 +148,27 @@ test('pre-v5 loads drop legacy wall pieces and keep every ordinary piece (req_44
   assert(loaded.pieces.map(piece => piece.id).join('|') === 'floor|prop', 'wall drop disturbed ordinary pieces');
   assert(loaded.architecture.walls.edges.length === 0, 'pre-v5 load invented architecture');
   assert(loaded.seq === 7, 'pre-v5 seq was lost');
+});
+
+test('authored wall-kind pieces drop at pre-v5 load like catalog walls (req_4474)', () => {
+  // The registry-timing disease: kind resolves through the authored registry,
+  // so a door-wall export parsed as kind-unknown survived the req_4462 drop,
+  // then poisoned every save once the registry was live. The load-time drop
+  // must see the same registry the save-time refusal sees.
+  setAuthoredPieces([{ id: 'model:starter:build:door-wall:1', modelId: 'door-wall', pkgId: 'starter:door-wall', label: 'Door Wall', kind: 'wall', hex: '#cccccc' }]);
+  try {
+    const v4: any = {
+      version: 4,
+      document: 'v4-authored-wall-drop',
+      seq: 2,
+      pieces: [ordinaryPiece('floor'), ordinaryPiece('doomed-door-wall', 'model:starter:build:door-wall:1')],
+      objects: [], zones: [],
+    };
+    const loaded = parseWorldSaveText(JSON.stringify(v4), 'v4-authored-wall-drop');
+    assert(loaded.pieces.map(piece => piece.id).join('|') === 'floor', 'authored wall-kind piece survived the pre-v5 drop');
+  } finally {
+    setAuthoredPieces([]);
+  }
 });
 
 test('a v4 document on disk rewrites as v5 on the first save after load', () => {
