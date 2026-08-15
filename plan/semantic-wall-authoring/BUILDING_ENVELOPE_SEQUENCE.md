@@ -29,6 +29,18 @@ The wall deliverable stays bounded: editable spans/openings, detected rooms, one
 
 ## 2. Dual-sided floor slabs
 
+### Interim ruled lane: derived enclosure floors (req_4482, 2026-08-15)
+
+Before this slab phase begins, the engine already floors every enclosed room:
+each interior topology face compiles to a derived plate (`floor_geometry.zig`,
+floor-family bundle section) — 1 u thick, rising from the lowest boundary wall
+base, courtyard holes kept open. USER RULING: these floors are DERIVED, never
+authored — "the floor has to react with it" when walls move, reshape, or are
+deleted, and "the user will still end up with an actual floor tool but this is
+to quickly solve for enclosed shapes." When the authored `FloorSlab` family
+below lands, an authored slab should supersede the derived plate for its room;
+do not migrate derived plates into records — they are compiler output.
+
 ### Current problem
 
 The active editor treats a floor as a rectangular drag-fill of independent 3 m plate pieces. Each plate has its own transform and replacement slot. There is no durable boundary, shared vertex, hole, stair/atrium cutout, room binding, ceiling identity, or one surface spanning a storey. A staircase currently remains on top of an uncut plate. The previous-era 3×3 micro-grid preserved useful 1 m gameplay surface meaning, but tying that field to a 3 m authored module conflicts with V24’s “grid is substrate” rule.
