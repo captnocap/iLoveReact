@@ -18,6 +18,7 @@ import {
   parseArchitectureSource,
 } from '../world/architecture';
 import { installArchitectureCatalogFromPackages } from '../world/architectureCatalog';
+import { architectureHostLive } from '../../../runtime/game/build';
 
 // Authored placeables: the ON-DISK MANIFEST is the source of truth (USER RULING
 // req_2718 — the package declares "I am a prop / a wall piece"); localstore is
@@ -102,6 +103,13 @@ type InitialWorldArchitecture = { architecture?: unknown };
  * no architecture capability call, which keeps non-game isolated editor tests pure. */
 export function bootArchitectureCatalog(): void {
   if (!MODEL_PACKAGES.some(pkg => pkg.placeable?.as === 'architecture-kit')) return;
+  // Headless contexts (test bundles, hostless carts) have kits on disk but no
+  // native capability; skipping is correct there. With a live host the install
+  // stays loud — any real failure still throws.
+  if (!architectureHostLive()) {
+    console.warn('[architecture] host capability absent — disk architecture kits not installed this session');
+    return;
+  }
   installArchitectureCatalogFromPackages(MODEL_PACKAGES);
 }
 
