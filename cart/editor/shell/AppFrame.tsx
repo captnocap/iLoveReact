@@ -4914,13 +4914,13 @@ export default function AppFrame() {
    *  adopted wholesale; the retained prior source is the undo snapshot (rides
    *  WORLD_UNDO_KEYS like every other world slice). Measurements come from the
    *  first installed measured wall style — never typed-in numbers. */
-  const drawWall = (commit: WallDrawCommit) => {
+  const drawWall = (commit: WallDrawCommit): boolean => {
     const current = stateRef.current;
     const style = installedWallStyles()[0];
     if (!style) {
       console.warn('[wall] draw REFUSED — no measured wall style is installed');
       setState((prev) => ({ ...prev, status: 'draw wall: no measured wall style is installed — export or seed one first' }));
-      return;
+      return false;
     }
     const commandId = architectureCommandId('draw', current.seq);
     const command = wallDrawCommand(commandId, current.architecture.revision, commit, style);
@@ -4928,7 +4928,7 @@ export default function AppFrame() {
     if (result.status === 'rejected') {
       console.warn(`[wall] engine REJECTED draw (${commit.start.xU},${commit.start.zU})→(${commit.end.xU},${commit.end.zU}): ${result.reason}`);
       setState((prev) => ({ ...prev, status: `draw wall rejected: ${result.reason}` }));
-      return;
+      return false;
     }
     console.warn(`[wall] wall drawn (${commit.start.xU},${commit.start.zU})→(${commit.end.xU},${commit.end.zU}) — ${result.source.walls.edges.length} edge(s) total`);
     setState((prev) => {
@@ -4940,6 +4940,7 @@ export default function AppFrame() {
       };
       return recordWorldEdit(prev, next, 'Draw wall');
     });
+    return true;
   };
 
   /** Commit one viewport drag after its local snapped preview has settled. This
@@ -11330,6 +11331,7 @@ export default function AppFrame() {
             onPaintFaces={paintPieceFaces}
             onPaintFlora={paintWorldFlora}
             onDrawWall={drawWall}
+            wallDefaults={installedWallStyles()[0]?.wallStyleDefaults ?? null}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}

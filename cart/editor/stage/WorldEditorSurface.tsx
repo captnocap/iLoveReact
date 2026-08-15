@@ -74,7 +74,10 @@ export default function WorldEditorSurface(props: {
   onPaintFlora: (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => void;
   /** Semantic wall source + one committed draw span (req_4473). */
   architecture: ArchitectureSource;
-  onDrawWall: (commit: WallDrawCommit) => void;
+  /** Returns engine acceptance — a reject keeps the anchor put (req_4479). */
+  onDrawWall: (commit: WallDrawCommit) => boolean;
+  /** The measured style's default measurements — the wall gizmo's seed (req_4479). */
+  wallDefaults: { heightU: number; thicknessU: number } | null;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -124,6 +127,7 @@ export default function WorldEditorSurface(props: {
         onMove={props.onMove}
         architecture={props.architecture}
         onDrawWall={props.onDrawWall}
+        wallDefaults={props.wallDefaults}
         floor={props.floor}
         viewRecall={props.viewRecall}
         views={props.views}

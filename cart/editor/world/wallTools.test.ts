@@ -2,11 +2,17 @@ import {
   beginWallDraw,
   commitWallDraw,
   IDLE_WALL_GESTURE,
+  snapWallHeightU,
   snapWallPoint,
+  snapWallThicknessU,
   wallDrawCommand,
   wallPointerRelease,
   wallVertexMagnet,
+  WALL_HEIGHT_MAX_U,
+  WALL_HEIGHT_MIN_U,
   WALL_SNAP_U,
+  WALL_THICKNESS_MAX_U,
+  WALL_THICKNESS_MIN_U,
 } from './wallTools';
 import { emptyArchitectureSource, type ArchitectureSource } from './architecture';
 import type { ArchitectureCatalogEntry } from './architectureHost';
@@ -165,6 +171,43 @@ test('a drag that ends off the map or on its own start falls back to anchoring',
   const offMapDrag = wallPointerRelease(source, 0, null, { xU: 16, zU: 16 }, null, true);
   assert(offMapDrag.kind === 'anchor', 'off-map drag did not fall back to anchoring');
   assert(offMapDrag.kind === 'anchor' && offMapDrag.gesture.start.xU === 16, 'fallback anchor drifted');
+});
+
+test('a chained anchor re-magnetizes onto the vertex the engine minted (req_4479)', () => {
+  // The chain sets the anchor at the committed end BEFORE the engine's new
+  // vertex exists; by the next release the source carries it, and the commit
+  // must reuse it exactly — a coincident twin vertex would break the corner.
+  const anchor = { kind: 'anchored', floor: 0, start: { xU: 96, zU: 0 } } as const;
+  const source = sourceWithVertex('v:chain-end', 0, 96, 0);
+  const routed = wallPointerRelease(source, 0, anchor, { xU: 96, zU: 0 }, { xU: 96, zU: 48 }, false);
+  assert(routed.kind === 'commit', `chained release did not commit: ${routed.kind}`);
+  assert(routed.kind === 'commit' && routed.commit.startMagnetVertexId === 'v:chain-end',
+    'chained start did not magnetize onto the minted vertex');
+});
+
+test('gizmo measurements override the style defaults on the command (req_4479)', () => {
+  const source = emptyArchitectureSource();
+  const gesture = beginWallDraw(source, 0, { xU: 0, zU: 0 });
+  const outcome = commitWallDraw(source, gesture, { xU: 48, zU: 0 });
+  assert(outcome.status === 'committed', 'draw did not commit');
+  const command = wallDrawCommand('draw:3', 0, { ...outcome.commit, heightU: 96, thicknessU: 8 }, measuredStyle);
+  assert(command.kind === 'drawWall' && command.heightU === 96 && command.thicknessU === 8,
+    'gizmo overrides did not reach the command');
+  const defaulted = wallDrawCommand('draw:4', 0, outcome.commit, measuredStyle);
+  assert(defaulted.kind === 'drawWall' && defaulted.heightU === 48 && defaulted.thicknessU === 4,
+    'absent overrides no longer fall back to the style defaults');
+  let threw = false;
+  try { wallDrawCommand('draw:5', 0, { ...outcome.commit, heightU: 2.5 }, measuredStyle); } catch { threw = true; }
+  assert(threw, 'a fractional height override was accepted');
+});
+
+test('gizmo snaps clamp to the measurement laws (req_4479)', () => {
+  assert(snapWallHeightU(49) === 48, 'height did not snap to quarter-metres');
+  assert(snapWallHeightU(-100) === WALL_HEIGHT_MIN_U, 'height fell below its floor');
+  assert(snapWallHeightU(100000) === WALL_HEIGHT_MAX_U, 'height escaped its ceiling');
+  assert(snapWallThicknessU(2.4) === 2, 'thickness did not snap to whole u');
+  assert(snapWallThicknessU(0) === WALL_THICKNESS_MIN_U, 'thickness fell to zero');
+  assert(snapWallThicknessU(999) === WALL_THICKNESS_MAX_U, 'thickness escaped its ceiling');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

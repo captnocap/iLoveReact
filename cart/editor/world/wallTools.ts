@@ -18,6 +18,27 @@ export const WALL_MAGNET_RADIUS_U = 8;
 /** Storeys are 3 m — 48 u. Wall bases sit on their storey; the ghost guide
  * draws one storey tall. */
 export const STOREY_HEIGHT_U = 48;
+/** Gizmo adjustment laws (req_4479): height snaps to quarter-metres, thickness
+ * to whole u. Clamps are generous by ruling — the engine owns real limits. */
+export const WALL_HEIGHT_SNAP_U = 4;
+export const WALL_HEIGHT_MIN_U = 4;
+export const WALL_HEIGHT_MAX_U = 480;
+export const WALL_THICKNESS_SNAP_U = 1;
+export const WALL_THICKNESS_MIN_U = 1;
+export const WALL_THICKNESS_MAX_U = 32;
+
+function snapClamp(raw: number, snap: number, min: number, max: number): number {
+  if (!Number.isFinite(raw)) return min;
+  return Math.min(max, Math.max(min, Math.round(raw / snap) * snap));
+}
+
+export function snapWallHeightU(raw: number): number {
+  return snapClamp(raw, WALL_HEIGHT_SNAP_U, WALL_HEIGHT_MIN_U, WALL_HEIGHT_MAX_U);
+}
+
+export function snapWallThicknessU(raw: number): number {
+  return snapClamp(raw, WALL_THICKNESS_SNAP_U, WALL_THICKNESS_MIN_U, WALL_THICKNESS_MAX_U);
+}
 
 export type WallLatticePoint = { xU: number; zU: number };
 
@@ -33,6 +54,10 @@ export type WallDrawCommit = {
   end: WallLatticePoint;
   startMagnetVertexId?: string;
   endMagnetVertexId?: string;
+  /** Gizmo-adjusted measurements (req_4479). Absent = the measured style's
+   * defaults. Whole u, engine-validated like every structural number. */
+  heightU?: number;
+  thicknessU?: number;
 };
 
 /** Snap a ground-plane pick (meters) onto the integer lattice. Returns null for
@@ -134,7 +159,12 @@ export function wallPointerRelease(
 ): WallPointerRelease {
   if (anchor && anchor.kind === 'anchored') {
     if (!upPoint) return { kind: 'miss', reason: 'release landed off the map' };
-    const outcome = commitWallDraw(source, anchor, upPoint);
+    // Re-derive the anchor's magnet against the CURRENT source: a chained
+    // anchor (req_4479) sits on a vertex the engine minted AFTER the anchor
+    // was taken, and magnetizing it now makes the shared corner exact vertex
+    // reuse instead of a coincident twin.
+    const rebound = beginWallDraw(source, anchor.floor, anchor.start);
+    const outcome = commitWallDraw(source, rebound, upPoint);
     if (outcome.status === 'committed') return { kind: 'commit', commit: outcome.commit };
     return { kind: 'miss', reason: outcome.reason };
   }
@@ -160,6 +190,11 @@ export function wallDrawCommand(
   if (style.family !== 'wall' || style.role !== 'style' || !style.wallStyleDefaults) {
     throw new Error(`catalog entry '${style.catalogId}' is not a measured wall style`);
   }
+  // The style measures the DEFAULTS; the gizmo may adjust a draw (req_4479).
+  const heightU = commit.heightU ?? style.wallStyleDefaults.heightU;
+  const thicknessU = commit.thicknessU ?? style.wallStyleDefaults.thicknessU;
+  if (!Number.isSafeInteger(heightU) || heightU <= 0) throw new Error(`wall height ${heightU}u is not a positive whole unit`);
+  if (!Number.isSafeInteger(thicknessU) || thicknessU <= 0) throw new Error(`wall thickness ${thicknessU}u is not a positive whole unit`);
   return {
     commandId,
     expectedRevision,
@@ -172,8 +207,8 @@ export function wallDrawCommand(
     // Slab support arrives with the floor family — until then the base is the
     // storey's absolute height.
     support: { kind: 'absolute', baseYU: commit.floor * STOREY_HEIGHT_U },
-    heightU: style.wallStyleDefaults.heightU,
-    thicknessU: style.wallStyleDefaults.thicknessU,
+    heightU,
+    thicknessU,
     profile: style.wallStyleDefaults.profile,
     styleId: style.catalogId,
     sideAMaterialId: style.catalogId,

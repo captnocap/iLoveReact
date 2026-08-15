@@ -2,8 +2,9 @@
 // viewport — world / model / playtest / animation / material-focus surfaces +
 // their in-viewport docks (BuildBar, MapPaintDock). Section F (StageTabs)
 // renders below the viewport inside this same panel.
-import { useMemo, type ReactNode } from 'react';
+import { createElement, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { C } from '../workspace.cls';
+import { Box, Text } from '../../../runtime/primitives';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { WorldView } from '../world/worldViews';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
@@ -12,7 +13,9 @@ import type { OklchColor } from '../../../runtime/paint/colors';
 import { effectiveModelPackage } from '../data/content';
 import { WORLD_DOCUMENT_ID, modelDocument, worldDocument } from '../data/documents';
 import ContextMenu from '../shell/ContextMenu';
-import AnimationCaptureSurface from './AnimationCaptureSurface';
+import { AnimationWorkspace } from '../animation/AnimationWorkspace';
+import { ANIMATION_CHANNEL_GROUPS } from '../animation/channelGroups';
+import { ANIMATION_PREVIEW_WORLD_PROPS } from '../animation/previewWorld';
 import MaterialFocusSurface from './MaterialFocusSurface';
 import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurface';
 import PlaytestSurface from './PlaytestSurface';
@@ -29,13 +32,88 @@ import type { FloraPaintSample, WorldFloraBrush } from '../world/surfaceFlora';
 import type { PaintLayoutKeepLiveOptions } from '../model/paintLayoutConflict';
 import type { CharacterRigApi, CharacterRigSnapshot } from '../../../runtime/skeleton';
 import { MODEL_PACKAGES, assetByIdOrNull } from '../data/catalog';
-import { playerCharacterPackage } from '../world/playerCharacterLoader';
 import { characterRigViewportShouldOwnInput } from './characterRigViewport';
+import type { AnimationWorkspaceBridge } from './Workspace';
+import { pushPlayerCharacter, resolvePlayerCharacter } from '../world/playerCharacterLoader';
+import { playerCharacterMountGate } from '../world/playerCharacterGate';
+
+const ANIMATION_PREVIEW_MOUNT = Object.freeze({ pollMs: 32, maximumPolls: 120 });
+
+/** The Foundry preview is one isolated native player stage. It shares the
+ * WorldLoader character/motion/prop doors without loading the authored game
+ * world. Its node identity is attached after host mount and detached with this
+ * viewport only; queue/catalog lifetime remains in AppFrame. */
+function AnimationPreviewWorld(props: Pick<AnimationWorkspaceBridge, 'targetPackage' | 'onPreviewMounted' | 'onPreviewUnmounted' | 'onPreviewError'>) {
+  const targetResolution = useMemo(() => resolvePlayerCharacter(props.targetPackage), [props.targetPackage]);
+  const stagedTarget = useMemo(() => pushPlayerCharacter(props.targetPackage), [props.targetPackage]);
+  const targetGate = playerCharacterMountGate(targetResolution, stagedTarget);
+  const loaderRef = useRef<any>(null);
+  const mountedRef = useRef(props.onPreviewMounted);
+  const unmountedRef = useRef(props.onPreviewUnmounted);
+  const errorRef = useRef(props.onPreviewError);
+  mountedRef.current = props.onPreviewMounted;
+  unmountedRef.current = props.onPreviewUnmounted;
+  errorRef.current = props.onPreviewError;
+  useEffect(() => {
+    if (!targetGate.ready) {
+      errorRef.current(`Animation preview unavailable: ${targetGate.reason}`);
+      return;
+    }
+    let attachedNodeId = 0;
+    let polls = 0;
+    let lastError = 'the WorldLoader host did not publish a native node id';
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const acquire = (): boolean => {
+      const nodeId = Number(loaderRef.current?.id ?? 0);
+      if (!Number.isSafeInteger(nodeId) || nodeId < 1) return false;
+      try {
+        mountedRef.current(nodeId);
+        attachedNodeId = nodeId;
+        return true;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        return false;
+      }
+    };
+    if (!acquire()) {
+      timer = setInterval(() => {
+        polls += 1;
+        if (acquire() || polls >= ANIMATION_PREVIEW_MOUNT.maximumPolls) {
+          if (timer) clearInterval(timer);
+          timer = null;
+          if (attachedNodeId === 0) errorRef.current(`Animation preview unavailable: ${lastError}`);
+        }
+      }, ANIMATION_PREVIEW_MOUNT.pollMs);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+      if (attachedNodeId > 0) unmountedRef.current(attachedNodeId);
+    };
+  }, []);
+  if (!targetGate.ready) {
+    return (
+      <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d141f' }}>
+        <Box style={{ maxWidth: 560, padding: 16, gap: 7, borderWidth: 1, borderColor: '#70433b', borderRadius: 7, backgroundColor: '#271614' }}>
+          <Text style={{ color: '#f0aa98', fontSize: 12, fontFamily: 'monospace', fontWeight: 700, textAlign: 'center' }}>ANIMATION PREVIEW BLOCKED</Text>
+          <Text style={{ color: '#d6b0a8', fontSize: 10, fontFamily: 'monospace', textAlign: 'center' }}>{targetGate.reason}</Text>
+          <Text style={{ color: '#9f8a86', fontSize: 9, fontFamily: 'monospace', textAlign: 'center' }}>Fit, bind, save, and declare one welded player character.</Text>
+        </Box>
+      </Box>
+    );
+  }
+  return createElement('WorldLoader', {
+    ref: loaderRef,
+    ...ANIMATION_PREVIEW_WORLD_PROPS,
+    testID: 'editor-animation-foundry-preview',
+    style: { width: '100%', height: '100%', backgroundColor: '#0d141f' },
+  });
+}
 
 export default function Stage(props: {
   state: EditorState;
   mapSwitchPending: boolean;
   activeAsset: Asset | null;
+  animation: AnimationWorkspaceBridge;
   /** The Home surface node — Stage places it, AppFrame builds it. */
   homeSurface: ReactNode;
   onWorkspaceDocument: (id: string) => void;
@@ -71,8 +149,12 @@ export default function Stage(props: {
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onPaintFlora: (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => void;
-  /** Draw Wall (req_4473): one committed semantic wall span from the viewport. */
-  onDrawWall: (commit: import('../world/wallTools').WallDrawCommit) => void;
+  /** Draw Wall (req_4473): one committed semantic wall span from the viewport.
+   * Returns whether the engine accepted it — a reject keeps the anchor put
+   * (req_4479) so the user retries the same span, not a chained one. */
+  onDrawWall: (commit: import('../world/wallTools').WallDrawCommit) => boolean;
+  /** The measured style's default wall measurements — the gizmo's seed (req_4479). */
+  wallDefaults: { heightU: number; thicknessU: number } | null;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
@@ -117,9 +199,10 @@ export default function Stage(props: {
     for (const model of props.state.modelDupes) current.set(model.id, model);
     return [...current.values()].filter((model) => model.placeable?.as === 'character');
   }, [props.state.modelDupes]);
-  // A retired segmented package may retain its historical player declaration
-  // on disk, but it cannot shadow the current bound welded target in capture.
-  const capturePlayer = playerCharacterPackage(playtestCharacterPackages);
+  const animationTargetMeshes = props.animation.targetPackage?.skeleton?.meshes;
+  const animationPreviewKey = props.animation.targetPackage && animationTargetMeshes?.kind === 'skinned'
+    ? `${props.animation.targetPackage.id}:${animationTargetMeshes.geometryPath ?? ''}:${animationTargetMeshes.binding?.artifactHash ?? ''}`
+    : 'animation-player-unavailable';
   // Tab titles are DERIVED from the live model, not the doc's frozen snapshot — a model's
   // name (e.g. a generic "Model 3") can change out from under an old persisted doc, and the
   // tab must follow it rather than show a stale seed name like "Cone 1" (req_2406).
@@ -183,13 +266,25 @@ export default function Stage(props: {
           onPaintFlora={props.onPaintFlora}
           architecture={props.state.architecture}
           onDrawWall={props.onDrawWall}
+          wallDefaults={props.wallDefaults}
         />
         {worldActive ? null : activeDocument.kind === 'home' ? (
           props.homeSurface
         ) : activeDocument.kind === 'knowledge' ? (
           <WorldBibleSurface />
         ) : activeDocument.kind === 'animation' ? (
-          <AnimationCaptureSurface targetPackage={capturePlayer} />
+          <AnimationWorkspace
+            projection={props.animation.projection}
+            channelGroups={ANIMATION_CHANNEL_GROUPS}
+            previewNode={<AnimationPreviewWorld
+              key={animationPreviewKey}
+              targetPackage={props.animation.targetPackage}
+              onPreviewMounted={props.animation.onPreviewMounted}
+              onPreviewUnmounted={props.animation.onPreviewUnmounted}
+              onPreviewError={props.animation.onPreviewError}
+            />}
+            callbacks={props.animation.callbacks}
+          />
         ) : activeDocument.kind === 'playtest' ? (
           <PlaytestSurface
             globals={props.state.worldGlobals}
