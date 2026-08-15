@@ -6,6 +6,13 @@ const testing = std.testing;
 const architecture = @import("building_architecture");
 const topology = @import("wall_topology");
 const mutation = @import("wall_mutation");
+const geometry = @import("wall_geometry");
+const wall_compile = @import("wall_compile");
+
+comptime {
+    _ = geometry.GeometryBundle;
+    _ = wall_compile.ArchitectureCompileBundle;
+}
 
 test "facade constructs and owns one integer-u wall source" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -69,6 +76,8 @@ const HASH_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const HASH_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const HASH_C = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const HASH_D = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+const COMPILE_ROOM_BUNDLE_HASH = "a225e819f3c1b1735becbd5e2c7407150686c980ff6f29858fb9f13db0b1b15d";
+const COMPILE_ROOM_SECTION_HASH = "79c29b454e6ee8b00c2ef929a38eb0b463eb94e5d7a5f9e9a627c12c9c06508d";
 const EMPTY_STRINGS = [_][]u8{};
 const EMPTY_CELLS = [_]architecture.types.WallCell{};
 const STYLE_PATH = [_][]u8{ @constCast("Wall"), @constCast("Styles") };
@@ -2459,4 +2468,878 @@ test "facade discards a structurally valid patch whose candidate topology is inv
     try testing.expectEqual(@as(u32, 1), source.revision);
     try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
     try testing.expect(findSourceEdge(source, "facade-duplicate:e:0") == null);
+}
+
+fn buildExpectedGeometry(
+    allocator: std.mem.Allocator,
+    source: *const architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+) !geometry.GeometryBundle {
+    var derived = try topology.build(allocator, &source.walls);
+    defer derived.deinit(allocator);
+    return geometry.build(allocator, source, entries, &derived);
+}
+
+fn findGeometrySurface(
+    bundle: *const geometry.GeometryBundle,
+    edge_id: []const u8,
+    role: geometry.SurfaceRole,
+    side: ?architecture.types.WallSide,
+) ?*const geometry.SurfaceBand {
+    for (bundle.surfaces) |*surface| {
+        if (!std.mem.eql(u8, surface.edge_id, edge_id)) continue;
+        if (surface.role == role and surface.side == side) return surface;
+    }
+    return null;
+}
+
+fn findJunctionKind(bundle: *const geometry.GeometryBundle, kind: geometry.JunctionKind) ?*const geometry.JunctionPatch {
+    for (bundle.junctions) |*junction| if (junction.kind == kind) return junction;
+    return null;
+}
+
+test "geometry lowers one solid span into two directed face bands" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("solid", 0, 0, 0, 16, 0, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expect(findGeometrySurface(&bundle, "solid:e:0", .face, .a) != null);
+    try testing.expect(findGeometrySurface(&bundle, "solid:e:0", .face, .b) != null);
+}
+
+test "geometry preserves side A and side B outward normals" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("normals", 0, 0, 0, 16, 0, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    const side_a = findGeometrySurface(&bundle, "normals:e:0", .face, .a).?;
+    const side_b = findGeometrySurface(&bundle, "normals:e:0", .face, .b).?;
+    try testing.expectApproxEqAbs(@as(f32, 1), side_a.normal.z, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -1), side_b.normal.z, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), side_a.normal.x, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), side_b.normal.x, 0.0001);
+}
+
+test "geometry classifies a 90 degree two-edge join as a bounded miter" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("right-a", 0, 0, 0, 16, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("right-b", 1, 16, 0, 16, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    const junction = findJunctionKind(&bundle, .miter).?;
+    try testing.expect(junction.miter_ratio > 1 and junction.miter_ratio < architecture.types.wall_tuning.miter_limit_ratio);
+}
+
+test "geometry classifies a 45 degree two-edge join as a bounded miter" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("diag-a", 0, 0, 0, 16, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("diag-b", 1, 16, 0, 32, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    const junction = findJunctionKind(&bundle, .miter).?;
+    try testing.expect(junction.miter_ratio <= architecture.types.wall_tuning.miter_limit_ratio);
+}
+
+test "geometry falls back to a bevel above miter ratio four" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("sharp-a", 0, 0, 0, 1024, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("sharp-b", 1, 0, 0, 1024, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    const junction = findJunctionKind(&bundle, .bevel).?;
+    try testing.expect(junction.miter_ratio > architecture.types.wall_tuning.miter_limit_ratio);
+}
+
+test "geometry emits one tee junction for a split T" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("tee-base", 0, -16, 0, 16, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("tee-stem", 1, 0, 0, 0, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 3), findJunctionKind(&bundle, .tee).?.incident_edge_count);
+}
+
+test "geometry emits one cross junction for a split X" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("cross-base", 0, -16, 0, 16, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("cross-stem", 1, 0, -16, 0, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 4), findJunctionKind(&bundle, .cross).?.incident_edge_count);
+}
+
+test "geometry seals only open wall endpoints with end caps" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ends", 0, 0, 0, 16, 0, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var end_count: usize = 0;
+    for (bundle.surfaces) |surface| if (surface.role == .end) {
+        end_count += 1;
+    };
+    try testing.expectEqual(@as(usize, 2), end_count);
+}
+
+test "geometry seals a half wall with one horizontal top cap" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    var command = drawWallCommand("half", 0, 0, 0, 16, 0, null, null);
+    command.operation.draw_wall.profile = .half;
+    command.operation.draw_wall.height_u = 16;
+    try applyExpectedDraw(testing.allocator, &source, &entries, command);
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expect(findGeometrySurface(&bundle, "half:e:0", .cap, null) != null);
+}
+
+fn geometryOpeningKit(
+    catalog_id: []const u8,
+    kind: architecture.types.WallOpeningKind,
+    min_column: architecture.Unit,
+    max_column_exclusive: architecture.Unit,
+    min_row: architecture.Unit,
+    max_row_exclusive: architecture.Unit,
+    portal_class: architecture.types.PortalClass,
+) architecture.CatalogEntry {
+    var kit = validDoorKit();
+    kit.catalog_id = @constCast(catalog_id);
+    kit.package_id = @constCast(catalog_id);
+    kit.label = @constCast(catalog_id);
+    kit.semantic_kind = .{ .wall_opening = kind };
+    kit.measurement.source_bounds_u = .{
+        .min_x_u = @floatFromInt(min_column),
+        .min_y_u = @floatFromInt(min_row),
+        .min_z_u = -2,
+        .max_x_u = @floatFromInt(max_column_exclusive),
+        .max_y_u = @floatFromInt(max_row_exclusive),
+        .max_z_u = 2,
+    };
+    kit.measurement.mount_bounds_u = .{
+        .min_u = @floatFromInt(min_column),
+        .min_v = @floatFromInt(min_row),
+        .max_u = @floatFromInt(max_column_exclusive),
+        .max_v = @floatFromInt(max_row_exclusive),
+    };
+    kit.measurement.footprint = .{
+        .min_column = min_column,
+        .min_row = min_row,
+        .max_column_exclusive = max_column_exclusive,
+        .max_row_exclusive = max_row_exclusive,
+    };
+    kit.wall_opening_compatibility.?.portal_class = portal_class;
+    return kit;
+}
+
+const GeometryOpeningFixture = struct {
+    id: []const u8,
+    kind: architecture.types.WallOpeningKind,
+    kit_id: []const u8,
+    column_u: architecture.Unit,
+    row_u: architecture.Unit,
+};
+
+fn installGeometryOpenings(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    edge_id: []const u8,
+    fixtures: []const GeometryOpeningFixture,
+) !void {
+    const edge = for (source.walls.edges) |*candidate| {
+        if (std.mem.eql(u8, candidate.id, edge_id)) break candidate;
+    } else return error.TestExpectedEqual;
+    for (edge.openings) |*opening| opening.deinit(allocator);
+    if (edge.openings.len != 0) allocator.free(edge.openings);
+    const openings = try allocator.alloc(architecture.types.WallOpening, fixtures.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (openings[0..initialized]) |*opening| opening.deinit(allocator);
+        if (openings.len != 0) allocator.free(openings);
+    }
+    for (fixtures) |fixture| {
+        const id = try allocator.dupe(u8, fixture.id);
+        errdefer allocator.free(id);
+        const kit_id = try allocator.dupe(u8, fixture.kit_id);
+        errdefer allocator.free(kit_id);
+        openings[initialized] = .{
+            .id = id,
+            .kind = fixture.kind,
+            .kit_id = kit_id,
+            .column_u = fixture.column_u,
+            .row_u = fixture.row_u,
+            .facing_side = .a,
+            .hinge = .start,
+        };
+        initialized += 1;
+    }
+    edge.openings = openings;
+}
+
+fn countOpeningSurfaceRole(
+    bundle: *const geometry.GeometryBundle,
+    opening_id: []const u8,
+    role: geometry.SurfaceRole,
+) usize {
+    var count: usize = 0;
+    for (bundle.surfaces) |surface| {
+        if (surface.role != role) continue;
+        if (surface.opening_id) |id| if (std.mem.eql(u8, id, opening_id)) {
+            count += 1;
+        };
+    }
+    return count;
+}
+
+test "geometry subtracts one measured door and emits its frame and portal" {
+    const door = geometryOpeningKit("kit:door", .door, -10, 10, 0, 34, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("door-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "door-wall:e:0", &.{.{
+        .id = "door",
+        .kind = .door,
+        .kit_id = "kit:door",
+        .column_u = 20,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), countOpeningSurfaceRole(&bundle, "door", .jamb));
+    try testing.expectEqual(@as(usize, 1), countOpeningSurfaceRole(&bundle, "door", .header));
+    try testing.expectEqual(@as(usize, 1), bundle.traversal.len);
+    try testing.expectEqual(@as(usize, 1), bundle.door_frames.len);
+}
+
+test "geometry partitions two measured windows on one edge" {
+    const window = geometryOpeningKit("kit:window", .window, -4, 4, 0, 12, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), window };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("window-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "window-wall:e:0", &.{
+        .{ .id = "window-a", .kind = .window, .kit_id = "kit:window", .column_u = 12, .row_u = 16 },
+        .{ .id = "window-b", .kind = .window, .kit_id = "kit:window", .column_u = 36, .row_u = 16 },
+    });
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), countOpeningSurfaceRole(&bundle, "window-a", .pane));
+    try testing.expectEqual(@as(usize, 1), countOpeningSurfaceRole(&bundle, "window-b", .pane));
+    try testing.expect(bundle.surfaces.len > 8);
+}
+
+test "geometry derives a window sill and header from kit rows" {
+    const window = geometryOpeningKit("kit:row-window", .window, -4, 4, 0, 12, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), window };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("row-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "row-wall:e:0", &.{.{
+        .id = "row-window",
+        .kind = .window,
+        .kit_id = "kit:row-window",
+        .column_u = 20,
+        .row_u = 8,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var found_sill = false;
+    var found_header = false;
+    for (bundle.surfaces) |surface| {
+        const id = surface.opening_id orelse continue;
+        if (!std.mem.eql(u8, id, "row-window")) continue;
+        if (surface.role == .sill and surface.row_bottom_u == 8) found_sill = true;
+        if (surface.role == .header and surface.row_bottom_u == 20) found_header = true;
+    }
+    try testing.expect(found_sill);
+    try testing.expect(found_header);
+}
+
+test "geometry leaves an arch traversable with no pane or leaf frame" {
+    const arch = geometryOpeningKit("kit:arch", .arch, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), arch };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("arch-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "arch-wall:e:0", &.{.{
+        .id = "arch",
+        .kind = .arch,
+        .kit_id = "kit:arch",
+        .column_u = 20,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), countOpeningSurfaceRole(&bundle, "arch", .pane));
+    try testing.expectEqual(@as(usize, 0), bundle.door_frames.len);
+    try testing.expectEqual(@as(usize, 1), bundle.traversal.len);
+}
+
+test "geometry emits no pane for a broken-window kit" {
+    const broken = geometryOpeningKit("kit:broken", .broken_window, -4, 4, 0, 12, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), broken };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("broken-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "broken-wall:e:0", &.{.{
+        .id = "broken",
+        .kind = .broken_window,
+        .kit_id = "kit:broken",
+        .column_u = 20,
+        .row_u = 16,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), countOpeningSurfaceRole(&bundle, "broken", .jamb));
+    try testing.expectEqual(@as(usize, 0), countOpeningSurfaceRole(&bundle, "broken", .pane));
+}
+
+test "geometry lowers a measured garage opening to a vehicle portal and leaf frame" {
+    const garage = geometryOpeningKit("kit:garage", .garage_door, -16, 16, 0, 40, .vehicle);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), garage };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("garage-wall", 0, 0, 0, 80, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "garage-wall:e:0", &.{.{
+        .id = "garage",
+        .kind = .garage_door,
+        .kit_id = "kit:garage",
+        .column_u = 32,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), bundle.traversal.len);
+    try testing.expectEqual(@as(usize, 1), bundle.door_frames.len);
+    try testing.expectEqual(architecture.types.PortalClass.vehicle, bundle.traversal[0].portal_class);
+    try testing.expectEqualStrings("garage", bundle.door_frames[0].opening_id);
+}
+
+test "geometry lowers a sliding double door to a walk portal and leaf frame" {
+    const sliding = geometryOpeningKit("kit:sliding", .sliding_door, -12, 12, 0, 34, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), sliding };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("sliding-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "sliding-wall:e:0", &.{.{
+        .id = "sliding",
+        .kind = .sliding_door,
+        .kit_id = "kit:sliding",
+        .column_u = 24,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), bundle.traversal.len);
+    try testing.expectEqual(@as(usize, 1), bundle.door_frames.len);
+    try testing.expectEqual(architecture.types.PortalClass.walk, bundle.traversal[0].portal_class);
+    try testing.expectEqualStrings("sliding", bundle.door_frames[0].opening_id);
+}
+
+test "geometry preserves the one-unit solid face strip between adjacent openings" {
+    const window = geometryOpeningKit("kit:adjacent-window", .window, -4, 4, 0, 12, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), window };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("adjacent-wall", 0, 0, 0, 48, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "adjacent-wall:e:0", &.{
+        .{ .id = "adjacent-a", .kind = .window, .kit_id = "kit:adjacent-window", .column_u = 12, .row_u = 16 },
+        .{ .id = "adjacent-b", .kind = .window, .kit_id = "kit:adjacent-window", .column_u = 21, .row_u = 16 },
+    });
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var found_gap = false;
+    for (bundle.surfaces) |surface| {
+        if (surface.role == .face and surface.side == .a and
+            surface.column_start_u == 16 and surface.column_end_u == 17 and
+            surface.row_bottom_u == 0 and surface.row_top_u == 48) found_gap = true;
+    }
+    try testing.expect(found_gap);
+}
+
+fn solidBandMatchesSurface(band: geometry.SolidBand, surface: geometry.SurfaceBand) bool {
+    return std.mem.eql(u8, band.edge_id, surface.edge_id) and
+        band.column_start_u == surface.column_start_u and
+        band.column_end_u == surface.column_end_u and
+        band.row_bottom_u == surface.row_bottom_u and
+        band.row_top_u == surface.row_top_u;
+}
+
+fn solidBandOverlapsTraversal(band: geometry.SolidBand, traversal: geometry.TraversalInterval) bool {
+    return std.mem.eql(u8, band.edge_id, traversal.edge_id) and
+        band.column_start_u < traversal.column_end_u and traversal.column_start_u < band.column_end_u and
+        band.row_bottom_u < traversal.row_top_u and traversal.row_bottom_u < band.row_top_u;
+}
+
+test "every visible solid face rectangle has identical collider and cover extents" {
+    const window = geometryOpeningKit("kit:parity-window", .window, -4, 4, 0, 12, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), window };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("parity-wall", 0, 0, 0, 48, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "parity-wall:e:0", &.{.{
+        .id = "parity-window",
+        .kind = .window,
+        .kit_id = "kit:parity-window",
+        .column_u = 20,
+        .row_u = 16,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    for (bundle.surfaces) |surface| {
+        if (surface.role != .face) continue;
+        var collider_count: usize = 0;
+        var cover_count: usize = 0;
+        for (bundle.colliders) |band| if (solidBandMatchesSurface(band, surface)) {
+            collider_count += 1;
+        };
+        for (bundle.cover) |band| if (solidBandMatchesSurface(band, surface)) {
+            cover_count += 1;
+        };
+        try testing.expectEqual(@as(usize, 1), collider_count);
+        try testing.expectEqual(@as(usize, 1), cover_count);
+    }
+}
+
+test "a traversable opening has neither collision nor navigation blockers in its rectangle" {
+    const door = geometryOpeningKit("kit:parity-door", .door, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("portal-wall", 0, 0, 0, 48, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "portal-wall:e:0", &.{.{
+        .id = "portal-door",
+        .kind = .door,
+        .kit_id = "kit:parity-door",
+        .column_u = 20,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try testing.expect(bundle.colliders.len != 0);
+    try testing.expect(bundle.navigation_blockers.len != 0);
+    const traversal = bundle.traversal[0];
+    for (bundle.colliders) |band| try testing.expect(!solidBandOverlapsTraversal(band, traversal));
+    for (bundle.navigation_blockers) |band| try testing.expect(!solidBandOverlapsTraversal(band, traversal));
+}
+
+fn expectMetricFaceUv(surface: *const geometry.SurfaceBand, expected_width_m: f32, expected_height_m: f32) !void {
+    try testing.expectApproxEqAbs(@as(f32, 0), surface.uv_m[0].u, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), surface.uv_m[0].v, 0.0001);
+    try testing.expectApproxEqAbs(expected_width_m, surface.uv_m[1].u, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), surface.uv_m[1].v, 0.0001);
+    try testing.expectApproxEqAbs(expected_width_m, surface.uv_m[2].u, 0.0001);
+    try testing.expectApproxEqAbs(expected_height_m, surface.uv_m[2].v, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), surface.uv_m[3].u, 0.0001);
+    try testing.expectApproxEqAbs(expected_height_m, surface.uv_m[3].v, 0.0001);
+}
+
+test "horizontal wall face UVs use physical meters" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("uv-horizontal", 0, 0, 0, 16, 0, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try expectMetricFaceUv(findGeometrySurface(&bundle, "uv-horizontal:e:0", .face, .a).?, 1, 3);
+}
+
+test "45 degree wall face UVs preserve metric texture density" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("uv-diagonal", 0, 0, 0, 16, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try expectMetricFaceUv(findGeometrySurface(&bundle, "uv-diagonal:e:0", .face, .a).?, @sqrt(@as(f32, 2)), 3);
+}
+
+test "arbitrary angle wall face UVs preserve metric texture density" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("uv-arbitrary", 0, 0, 0, 48, 16, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    try expectMetricFaceUv(findGeometrySurface(&bundle, "uv-arbitrary:e:0", .face, .a).?, @sqrt(@as(f32, 10)), 3);
+}
+
+test "side materials and local UV orientation survive source-order permutation" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var canonical = try emptyOwnedArchitectureSource(testing.allocator);
+    defer canonical.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &canonical, &entries, drawWallCommand("permute-a", 0, 0, 0, 16, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &canonical, &entries, drawWallCommand("permute-b", 1, 0, 16, 32, 32, null, null));
+    var permuted = try architecture.types.cloneSource(testing.allocator, &canonical);
+    defer permuted.deinit(testing.allocator);
+    std.mem.swap(architecture.types.WallEdge, &permuted.walls.edges[0], &permuted.walls.edges[1]);
+    std.mem.swap(architecture.types.WallVertex, &permuted.walls.vertices[0], &permuted.walls.vertices[permuted.walls.vertices.len - 1]);
+    var canonical_bundle = try buildExpectedGeometry(testing.allocator, &canonical, &entries);
+    defer canonical_bundle.deinit(testing.allocator);
+    var permuted_bundle = try buildExpectedGeometry(testing.allocator, &permuted, &entries);
+    defer permuted_bundle.deinit(testing.allocator);
+    inline for (.{ "permute-a:e:0", "permute-b:e:0" }) |edge_id| {
+        const canonical_a = findGeometrySurface(&canonical_bundle, edge_id, .face, .a).?;
+        const canonical_b = findGeometrySurface(&canonical_bundle, edge_id, .face, .b).?;
+        const permuted_a = findGeometrySurface(&permuted_bundle, edge_id, .face, .a).?;
+        const permuted_b = findGeometrySurface(&permuted_bundle, edge_id, .face, .b).?;
+        try testing.expectEqualStrings("material:a", permuted_a.material_id);
+        try testing.expectEqualStrings("material:b", permuted_b.material_id);
+        try testing.expectEqualDeep(canonical_a.uv_m, permuted_a.uv_m);
+        try testing.expectEqualDeep(canonical_b.uv_m, permuted_b.uv_m);
+        try testing.expect(permuted_a.uv_m[2].u > 0);
+    }
+}
+
+fn drawWallCommandOnFloor(
+    command_id: []const u8,
+    expected_revision: u32,
+    floor: i32,
+    base_y_u: architecture.Unit,
+    start_x_u: f64,
+    start_z_u: f64,
+    end_x_u: f64,
+    end_z_u: f64,
+) mutation.Command {
+    var command = drawWallCommand(
+        command_id,
+        expected_revision,
+        start_x_u,
+        start_z_u,
+        end_x_u,
+        end_z_u,
+        null,
+        null,
+    );
+    command.operation.draw_wall.floor = floor;
+    command.operation.draw_wall.support = .{ .absolute = .{ .base_y_u = base_y_u } };
+    return command;
+}
+
+fn installCompileRoom(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    prefix: []const u8,
+    floor: i32,
+    base_y_u: architecture.Unit,
+) !void {
+    const command_ids = [_][]const u8{ "compile-room-a", "compile-room-b", "compile-room-c", "compile-room-d" };
+    if (!std.mem.eql(u8, prefix, "compile-room")) return error.TestUnexpectedResult;
+    const coordinates = [_][4]f64{
+        .{ 0, 0, 64, 0 },
+        .{ 64, 0, 64, 64 },
+        .{ 64, 64, 0, 64 },
+        .{ 0, 64, 0, 0 },
+    };
+    for (coordinates, 0..) |coordinates_u, index| {
+        try applyExpectedDraw(
+            allocator,
+            source,
+            entries,
+            drawWallCommandOnFloor(
+                command_ids[index],
+                source.revision,
+                floor,
+                base_y_u,
+                coordinates_u[0],
+                coordinates_u[1],
+                coordinates_u[2],
+                coordinates_u[3],
+            ),
+        );
+    }
+}
+
+fn compileExpected(
+    allocator: std.mem.Allocator,
+    source: *const architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    options: wall_compile.CompileOptions,
+) !wall_compile.ArchitectureCompileBundle {
+    return architecture.compile(allocator, source, entries, .{
+        .affected_bounds = options.affected_bounds,
+        .targets = options.targets,
+    });
+}
+
+fn replaceEdgeSideMaterial(
+    allocator: std.mem.Allocator,
+    source: *architecture.ArchitectureSource,
+    edge_id: []const u8,
+    side: architecture.types.WallSide,
+    material_id: []const u8,
+) !void {
+    const edge = for (source.walls.edges) |*candidate| {
+        if (std.mem.eql(u8, candidate.id, edge_id)) break candidate;
+    } else return error.TestExpectedEqual;
+    const finish = if (side == .a) &edge.side_a else &edge.side_b;
+    testing.allocator.free(finish.material_id);
+    finish.material_id = try allocator.dupe(u8, material_id);
+    source.revision += 1;
+}
+
+fn findTargetHash(
+    bundle: *const wall_compile.ArchitectureCompileBundle,
+    target: architecture.types.DirtyTarget,
+    floor: i32,
+) ?*const wall_compile.TargetHash {
+    for (bundle.wall.target_hashes) |*target_hash| {
+        if (target_hash.target == target and target_hash.floor == floor) return target_hash;
+    }
+    return null;
+}
+
+fn targetChanged(
+    before: *const wall_compile.ArchitectureCompileBundle,
+    after: *const wall_compile.ArchitectureCompileBundle,
+    target: architecture.types.DirtyTarget,
+    floor: i32,
+) bool {
+    const before_hash = findTargetHash(before, target, floor) orelse return true;
+    const after_hash = findTargetHash(after, target, floor) orelse return true;
+    return !std.mem.eql(u8, &before_hash.content_hash, &after_hash.content_hash);
+}
+
+fn expectChangedTargets(
+    before: *const wall_compile.ArchitectureCompileBundle,
+    after: *const wall_compile.ArchitectureCompileBundle,
+    floor: i32,
+    expected: []const architecture.types.DirtyTarget,
+) !void {
+    inline for (std.enums.values(architecture.types.DirtyTarget)) |target| {
+        const should_change = for (expected) |value| {
+            if (value == target) break true;
+        } else false;
+        const changed = targetChanged(before, after, target, floor);
+        if (should_change != changed) std.debug.print(
+            "target {s} expected changed={} actual changed={}\n",
+            .{ @tagName(target), should_change, changed },
+        );
+        try testing.expectEqual(should_change, changed);
+    }
+}
+
+test "compile bundle bytes ignore source array order" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try installCompileRoom(testing.allocator, &source, &entries, "compile-room", 0, 0);
+    var permuted = try architecture.types.cloneSource(testing.allocator, &source);
+    defer permuted.deinit(testing.allocator);
+    std.mem.swap(architecture.types.WallEdge, &permuted.walls.edges[0], &permuted.walls.edges[permuted.walls.edges.len - 1]);
+    std.mem.swap(architecture.types.WallVertex, &permuted.walls.vertices[0], &permuted.walls.vertices[permuted.walls.vertices.len - 1]);
+    var canonical_bundle = try compileExpected(testing.allocator, &source, &entries, .{});
+    defer canonical_bundle.deinit(testing.allocator);
+    var permuted_bundle = try compileExpected(testing.allocator, &permuted, &entries, .{});
+    defer permuted_bundle.deinit(testing.allocator);
+    try testing.expectEqualSlices(u8, canonical_bundle.canonical_bytes, permuted_bundle.canonical_bytes);
+    try testing.expectEqualDeep(canonical_bundle.bundle_hash, permuted_bundle.bundle_hash);
+    const bundle_hex = std.fmt.bytesToHex(canonical_bundle.bundle_hash, .lower);
+    const section_hex = std.fmt.bytesToHex(canonical_bundle.sections[0].section_hash, .lower);
+    try testing.expectEqualStrings(COMPILE_ROOM_BUNDLE_HASH, &bundle_hex);
+    try testing.expectEqualStrings(COMPILE_ROOM_SECTION_HASH, &section_hex);
+}
+
+test "compile bundle preserves canonical room face boundary signatures" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try installCompileRoom(testing.allocator, &source, &entries, "compile-room", 0, 0);
+    var derived = try topology.build(testing.allocator, &source.walls);
+    defer derived.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), derived.faces.len);
+    var bundle = try compileExpected(testing.allocator, &source, &entries, .{});
+    defer bundle.deinit(testing.allocator);
+    const room = for (bundle.wall.room_faces) |*candidate| {
+        if (candidate.kind == .interior) break candidate;
+    } else return error.TestExpectedEqual;
+    try testing.expectEqualStrings(derived.faces[0].signature, room.signature);
+    try testing.expectEqual(derived.faces[0].signed_area_twice, room.signed_area_twice_u);
+    try testing.expectEqual(@as(usize, 4), room.boundary_half_edge_ids.len);
+}
+
+test "compile target hashes isolate finish opening and topology edits" {
+    const door = geometryOpeningKit("kit:compile-door", .door, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var base = try emptyOwnedArchitectureSource(testing.allocator);
+    defer base.deinit(testing.allocator);
+    try installCompileRoom(testing.allocator, &base, &entries, "compile-room", 0, 0);
+    var base_bundle = try compileExpected(testing.allocator, &base, &entries, .{});
+    defer base_bundle.deinit(testing.allocator);
+
+    var finish = try architecture.types.cloneSource(testing.allocator, &base);
+    defer finish.deinit(testing.allocator);
+    try replaceEdgeSideMaterial(testing.allocator, &finish, "compile-room-a:e:0", .a, "material:changed");
+    var finish_bundle = try compileExpected(testing.allocator, &finish, &entries, .{});
+    defer finish_bundle.deinit(testing.allocator);
+    try expectChangedTargets(&base_bundle, &finish_bundle, 0, &.{ .render, .materials });
+
+    var opening = try architecture.types.cloneSource(testing.allocator, &base);
+    defer opening.deinit(testing.allocator);
+    try installGeometryOpenings(testing.allocator, &opening, "compile-room-a:e:0", &.{.{
+        .id = "compile-opening",
+        .kind = .door,
+        .kit_id = "kit:compile-door",
+        .column_u = 12,
+        .row_u = 0,
+    }});
+    opening.revision += 1;
+    var opening_bundle = try compileExpected(testing.allocator, &opening, &entries, .{});
+    defer opening_bundle.deinit(testing.allocator);
+    try expectChangedTargets(&base_bundle, &opening_bundle, 0, &.{
+        .render,
+        .collision,
+        .cover,
+        .doors_portals,
+        .navigation,
+        .visibility,
+        .audio,
+        .pick_proxies,
+    });
+
+    var structural = try architecture.types.cloneSource(testing.allocator, &opening);
+    defer structural.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &structural, &entries, drawWallCommand("compile-structural", structural.revision, 32, 0, 32, 64, null, null));
+    var structural_bundle = try compileExpected(testing.allocator, &structural, &entries, .{});
+    defer structural_bundle.deinit(testing.allocator);
+    const all_dirty_targets = std.enums.values(architecture.types.DirtyTarget);
+    try expectChangedTargets(&opening_bundle, &structural_bundle, 0, all_dirty_targets);
+}
+
+test "compile hashes stay stable outside affected floors" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommandOnFloor("floor-zero", 0, 0, 0, 0, 0, 32, 0));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommandOnFloor("floor-one", 1, 1, 64, 0, 0, 32, 0));
+    var before = try compileExpected(testing.allocator, &source, &entries, .{});
+    defer before.deinit(testing.allocator);
+    var changed = try architecture.types.cloneSource(testing.allocator, &source);
+    defer changed.deinit(testing.allocator);
+    try replaceEdgeSideMaterial(testing.allocator, &changed, "floor-zero:e:0", .a, "material:floor-zero-changed");
+    var after = try compileExpected(testing.allocator, &changed, &entries, .{});
+    defer after.deinit(testing.allocator);
+    inline for (std.enums.values(architecture.types.DirtyTarget)) |target| {
+        try testing.expect(!targetChanged(&before, &after, target, 1));
+    }
+
+    const floor_zero_bounds = [_]architecture.types.AffectedBounds{.{
+        .floor = 0,
+        .min_x_u = -8,
+        .min_y_u = 0,
+        .min_z_u = -8,
+        .max_x_u_exclusive = 40,
+        .max_y_u_exclusive = 64,
+        .max_z_u_exclusive = 8,
+    }};
+    var filtered = try compileExpected(testing.allocator, &changed, &entries, .{ .affected_bounds = &floor_zero_bounds });
+    defer filtered.deinit(testing.allocator);
+    for (filtered.wall.render_bands) |band| try testing.expect(std.mem.eql(u8, band.edge_id, "floor-zero:e:0"));
+    for (filtered.wall.target_hashes) |target_hash| try testing.expectEqual(@as(i32, 0), target_hash.floor);
+}
+
+fn architectureRaycast(
+    source: *const architecture.ArchitectureSource,
+    entries: []const architecture.CatalogEntry,
+    origin: [3]f64,
+    direction: [3]f64,
+) !architecture.RaycastResult {
+    return architecture.raycast(testing.allocator, source, entries, .{
+        .origin_meters = origin,
+        .direction = direction,
+        .maximum_distance_meters = 16,
+    });
+}
+
+test "raycast hits both directed sides of one wall" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ray-sides", 0, 0, 0, 64, 0, null, null));
+    var side_a = try architectureRaycast(&source, &entries, .{ 2, 1, 2 }, .{ 0, 0, -1 });
+    defer side_a.deinit(testing.allocator);
+    var side_b = try architectureRaycast(&source, &entries, .{ 2, 1, -2 }, .{ 0, 0, 1 });
+    defer side_b.deinit(testing.allocator);
+    try testing.expectEqual(architecture.types.WallSide.a, side_a.hit.?.side);
+    try testing.expectEqual(architecture.types.WallSide.b, side_b.hit.?.side);
+}
+
+test "raycast misses the true void inside a door opening" {
+    const door = geometryOpeningKit("kit:ray-door", .door, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ray-void", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "ray-void:e:0", &.{.{
+        .id = "ray-door",
+        .kind = .door,
+        .kit_id = "kit:ray-door",
+        .column_u = 32,
+        .row_u = 0,
+    }});
+    var result = try architectureRaycast(&source, &entries, .{ 2, 1, 2 }, .{ 0, 0, -1 });
+    defer result.deinit(testing.allocator);
+    try testing.expect(result.hit == null);
+}
+
+test "raycast hits a measured opening jamb from inside the void" {
+    const door = geometryOpeningKit("kit:ray-jamb", .door, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ray-jamb-wall", 0, 0, 0, 64, 0, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "ray-jamb-wall:e:0", &.{.{
+        .id = "ray-jamb-opening",
+        .kind = .door,
+        .kit_id = "kit:ray-jamb",
+        .column_u = 32,
+        .row_u = 0,
+    }});
+    var result = try architectureRaycast(&source, &entries, .{ 2, 1, 0 }, .{ -1, 0, 0 });
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(architecture.RaycastHitKind.opening_frame, result.hit.?.kind);
+    try testing.expectEqualStrings("ray-jamb-opening", result.hit.?.opening_id.?);
+}
+
+test "raycast chooses the nearest intersected wall" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ray-far", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ray-near", 1, 0, 32, 64, 32, null, null));
+    var result = try architectureRaycast(&source, &entries, .{ 2, 1, 4 }, .{ 0, 0, -1 });
+    defer result.deinit(testing.allocator);
+    try testing.expectEqualStrings("ray-near:e:0", result.hit.?.edge_id);
+    try testing.expect(result.hit.?.distance_meters < 3);
+}
+
+test "raycast returns stable IDs and exact local wall units" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ray-local", 0, 0, 0, 64, 0, null, null));
+    var result = try architectureRaycast(&source, &entries, .{ 2, 1, 2 }, .{ 0, 0, -1 });
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(architecture.RaycastHitKind.wall_face, result.hit.?.kind);
+    try testing.expectEqualStrings("ray-local:e:0", result.hit.?.edge_id);
+    try testing.expect(result.hit.?.opening_id == null);
+    try testing.expectEqual(@as(architecture.Unit, 32), result.hit.?.column_u);
+    try testing.expectEqual(@as(architecture.Unit, 16), result.hit.?.row_u);
 }

@@ -32,6 +32,8 @@ pub const WallTuning = struct {
     minimum_thickness_u: Unit,
     maximum_thickness_u: Unit,
     miter_limit_ratio: f64,
+    ray_parallel_epsilon: f64,
+    ray_bounds_epsilon: f64,
     maximum_floor_magnitude: i32,
 };
 
@@ -44,6 +46,8 @@ pub const wall_tuning = WallTuning{
     .minimum_thickness_u = 1,
     .maximum_thickness_u = 1_024,
     .miter_limit_ratio = 4.0,
+    .ray_parallel_epsilon = 0.0000001,
+    .ray_bounds_epsilon = 0.00001,
     .maximum_floor_magnitude = 4_096,
 };
 
