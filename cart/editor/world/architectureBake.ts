@@ -243,7 +243,17 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
     const meshes: ResidentMesh[] = [];
     const refs: MeshRef[] = [];
     for (const [role, group] of byRole) {
-      const key = `arch:wall:${role}`;
+      // The revision is part of the key (req_4477): scene3d interns geometry
+      // IMMUTABLY per geom key (generation bumps exist only for the studio's
+      // single edit mesh), so pushing grown wall bands under a stable key drew
+      // the FIRST bake forever — walls only appeared after a loader remount
+      // reset the intern cache. Each committed revision is new immutable
+      // content and takes a fresh key, exactly the contract facades satisfy
+      // with one key per facade. Cost: a stale intern entry per superseded
+      // revision until the next loader remount (2048-entry cache; dev reloads
+      // remount constantly). The engine-side cure — mutable resident-mesh
+      // generations keyed per hash — is a named follow-up capability.
+      const key = `arch:wall:${role}:r${source.revision}`;
       meshes.push({
         key,
         vertices: bandVertices(group),
