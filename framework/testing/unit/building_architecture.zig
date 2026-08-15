@@ -78,8 +78,8 @@ const HASH_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const HASH_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const HASH_C = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const HASH_D = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-const COMPILE_ROOM_BUNDLE_HASH = "a225e819f3c1b1735becbd5e2c7407150686c980ff6f29858fb9f13db0b1b15d";
-const COMPILE_ROOM_SECTION_HASH = "79c29b454e6ee8b00c2ef929a38eb0b463eb94e5d7a5f9e9a627c12c9c06508d";
+const COMPILE_ROOM_BUNDLE_HASH = "548fcb31e7e7697cde1f73752395f836157cab002c8a3fd466260a3d612305f8";
+const COMPILE_ROOM_SECTION_HASH = "02d34f40d42ec1b57ff5624194201c9b10fa480fa81a2f349f41a07d877aac0b";
 const WIRE_GOLDEN_EMPTY_SOURCE = [_]u8{
     0x52, 0x4a, 0x41, 0x57, 0x01, 0x00, 0x07, 0x00,
     0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -2680,6 +2680,23 @@ test "geometry seals a half wall with one horizontal top cap" {
     var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
     defer bundle.deinit(testing.allocator);
     try testing.expect(findGeometrySurface(&bundle, "half:e:0", .cap, null) != null);
+}
+
+test "geometry seals a full wall's top with a cap too (req_4478)" {
+    // No floor family exists yet, so a capless full wall renders as an
+    // open-topped hollow shell. Every profile seals its own top; slab
+    // suppression is the future floor compile's concern.
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("full", 0, 0, 0, 16, 0, null, null));
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    const cap = findGeometrySurface(&bundle, "full:e:0", .cap, null) orelse return error.TestExpectedCap;
+    // The cap spans the whole edge at the wall's top height.
+    try testing.expectEqual(@as(architecture.Unit, 0), cap.column_start_u);
+    try testing.expectEqual(@as(architecture.Unit, 16), cap.column_end_u);
+    try testing.expectEqual(cap.row_bottom_u, cap.row_top_u);
 }
 
 fn geometryOpeningKit(

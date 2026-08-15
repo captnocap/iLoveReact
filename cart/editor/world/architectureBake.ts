@@ -159,13 +159,24 @@ const ROLE_COLORS: Record<WallRenderBand['role'], [number, number, number]> = {
 };
 
 function bandVertices(bands: readonly WallRenderBand[]): Float32Array {
-  // Two triangles per quad, both windings, so the slab reads correctly from
-  // every camera regardless of cull direction (same choice as facade quads).
-  const TRIANGLES = [[0, 1, 2], [0, 2, 3], [0, 2, 1], [0, 3, 2]] as const;
-  const out = new Float32Array(bands.length * TRIANGLES.length * 3 * 8);
+  // ONE winding per quad, oriented to the engine's band normal (req_4478).
+  // The facade double-winding trick is wrong here: a wall's two sides are
+  // already distinct bands, so the mirrored copies only rendered the shell's
+  // interior — faces that are unreachable in a sealed wall — and doubled the
+  // triangle count for nothing.
+  const FRONT = [[0, 1, 2], [0, 2, 3]] as const;
+  const BACK = [[0, 2, 1], [0, 3, 2]] as const;
+  const out = new Float32Array(bands.length * 2 * 3 * 8);
   let cursor = 0;
   for (const band of bands) {
-    for (const triangle of TRIANGLES) {
+    const [q0, q1, , q3] = [band.quad[0]!, band.quad[1]!, band.quad[2]!, band.quad[3]!];
+    const ex = q1[0] - q0[0], ey = q1[1] - q0[1], ez = q1[2] - q0[2];
+    const fx = q3[0] - q0[0], fy = q3[1] - q0[1], fz = q3[2] - q0[2];
+    const wound = ((ey * fz - ez * fy) * band.normal[0])
+      + ((ez * fx - ex * fz) * band.normal[1])
+      + ((ex * fy - ey * fx) * band.normal[2]);
+    const triangles = wound >= 0 ? FRONT : BACK;
+    for (const triangle of triangles) {
       for (const corner of triangle) {
         const [x, y, z] = band.quad[corner]!;
         const [u, v] = band.uv[corner]!;

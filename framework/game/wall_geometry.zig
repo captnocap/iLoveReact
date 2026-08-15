@@ -273,27 +273,30 @@ pub fn build(
                 direction,
             ));
         }
-        if (edge.profile == .half) {
-            try builder.appendSurface(try ownedSurfaceBand(
-                allocator,
-                edge.id,
-                null,
-                .cap,
-                null,
-                edge.side_a.material_id,
-                0,
-                length_u,
-                edge.height_u,
-                edge.height_u,
-                .{
-                    point3(side_a_points.start, top_y_m),
-                    point3(side_a_points.end, top_y_m),
-                    point3(side_b_points.end, top_y_m),
-                    point3(side_b_points.start, top_y_m),
-                },
-                .{ .x = 0, .y = 1, .z = 0 },
-            ));
-        }
+        // Every wall seals its top (req_4478). The cap was half-profile-only on
+        // the assumption a full wall meets a ceiling — but no floor family
+        // exists yet, so full walls rendered as open-topped hollow shells with
+        // their interior faces showing. When slabs land, suppressing the cap
+        // under a covering slab belongs to that compile pass, not here.
+        try builder.appendSurface(try ownedSurfaceBand(
+            allocator,
+            edge.id,
+            null,
+            .cap,
+            null,
+            edge.side_a.material_id,
+            0,
+            length_u,
+            edge.height_u,
+            edge.height_u,
+            .{
+                point3(side_a_points.start, top_y_m),
+                point3(side_a_points.end, top_y_m),
+                point3(side_b_points.end, top_y_m),
+                point3(side_b_points.start, top_y_m),
+            },
+            .{ .x = 0, .y = 1, .z = 0 },
+        ));
     }
 
     for (derived_topology.vertices) |*vertex| {
