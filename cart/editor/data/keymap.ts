@@ -40,6 +40,8 @@ const GLOBAL_CHORDS: Record<string, string> = {
 // object on the world and never fights ModelView's mesh-element delete on a model.
 const WORLD_KEYS: Record<string, string> = {
   b: 'place-piece',
+  // G draws a semantic wall span (req_4473) — the engine-built wall system.
+  g: 'draw-wall',
   v: 'move-selection',
   n: 'paint-faces',
   k: 'place-sticker',

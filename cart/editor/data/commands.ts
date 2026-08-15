@@ -183,6 +183,10 @@ export const COMMANDS: Command[] = [
   // the click away from placement — that's the modality the world was missing.
   { id: 'select-tool', menu: 'Build', name: 'Select', icon: 'MousePointer2', key: 'Esc', context: false, native: true, undoable: false, tool: true, scope: 'world' },
   { id: 'place-piece', menu: 'Build', name: 'Place Piece', icon: 'Pencil', key: 'B', context: true, native: true, undoable: false, tool: true, scope: 'world' },
+  // Draw Wall (req_4473): click-click draws a semantic wall span on the integer
+  // lattice; the engine builds the geometry. This is the NEW wall system — the
+  // fixed wall pieces under Place Piece are the legacy products awaiting severance.
+  { id: 'draw-wall', menu: 'Build', name: 'Draw Wall', icon: 'BrickWall', key: 'G', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // Move is an armable mode: click a piece to grab it. Not selection-gated — the click selects.
   { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // R is mode-sensitive (req_0598): it spins the selected placed piece when one
@@ -510,7 +514,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('mesh-measurements'), cmd('mesh-player-scale'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('draw-wall'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
 };

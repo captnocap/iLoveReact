@@ -12,6 +12,8 @@ import type { PieceSelectionIntent } from '../world/selection';
 import type { WorldPrefab } from '../world/prefabs';
 import type { AuthoredFloraSpecies } from '../world/floraSpecies';
 import type { FloraPaintSample, WorldFloraBrush, WorldFloraPatch } from '../world/surfaceFlora';
+import type { ArchitectureSource } from '../world/architecture';
+import type { WallDrawCommit } from '../world/wallTools';
 
 // BLANKBOOT req_2490: the editor's world file is ITS OWN, fresh path — the old
 // main.gamefile is the condemned hmsc sandbox bake ("farts and dicks", ruled
@@ -70,6 +72,9 @@ export default function WorldEditorSurface(props: {
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onPaintFlora: (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => void;
+  /** Semantic wall source + one committed draw span (req_4473). */
+  architecture: ArchitectureSource;
+  onDrawWall: (commit: WallDrawCommit) => void;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -117,6 +122,8 @@ export default function WorldEditorSurface(props: {
         onPaintFlora={props.onPaintFlora}
         onPlace={props.onPlace}
         onMove={props.onMove}
+        architecture={props.architecture}
+        onDrawWall={props.onDrawWall}
         floor={props.floor}
         viewRecall={props.viewRecall}
         views={props.views}

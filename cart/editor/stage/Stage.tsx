@@ -71,6 +71,8 @@ export default function Stage(props: {
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onPaintFlora: (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => void;
+  /** Draw Wall (req_4473): one committed semantic wall span from the viewport. */
+  onDrawWall: (commit: import('../world/wallTools').WallDrawCommit) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
@@ -179,6 +181,8 @@ export default function Stage(props: {
           onPaintFaces={props.onPaintFaces}
           onStampSticker={props.onStampSticker}
           onPaintFlora={props.onPaintFlora}
+          architecture={props.state.architecture}
+          onDrawWall={props.onDrawWall}
         />
         {worldActive ? null : activeDocument.kind === 'home' ? (
           props.homeSurface

@@ -182,6 +182,19 @@ export function installArchitectureCatalogFromPackages(
   return entries;
 }
 
+/** The measured wall styles among projected entries — the draw tool's palette.
+ * A malformed projection reports loudly and yields no styles; the tool then
+ * refuses rather than guessing measurements. */
+export function projectedWallStyles(packages: readonly ArchitectureManifestPackage[]): ArchitectureCatalogEntry[] {
+  try {
+    return projectArchitectureCatalog(packages)
+      .filter(entry => entry.family === 'wall' && entry.role === 'style');
+  } catch (error) {
+    console.error(`[architecture] wall-style projection failed: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
+
 export function structuredArchitectureCatalogQuery(query: ArchitectureCatalogQuery): ArchitectureCatalogQuery {
   validateArchitectureCatalogQuery(query);
   return {

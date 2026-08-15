@@ -38,6 +38,9 @@ import { mapHeightAt, mapRenderedHeightMax, subscribeMapTerrainChanges } from '.
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
+import { beginWallDraw, commitWallDraw, snapWallPoint, type WallDrawCommit, type WallDrawGesture } from './wallTools';
+import { setLiveArchitecture } from './architectureBake';
+import type { ArchitectureSource } from './architecture';
 import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
@@ -210,6 +213,12 @@ export default function WorldViewport(props: {
   /** everything ONE gesture placed: a click is a one-piece batch, a drag-run
    *  (req_2747) is the whole wall run / floor rect — one journal entry either way. */
   onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
+  /** The persisted semantic wall source — draw-tool magnets read it, and the
+   *  live push re-runs when it changes so engine walls stay current (req_4473). */
+  architecture: ArchitectureSource;
+  /** Draw Wall (req_4473): one committed click-click span. The owner turns it
+   *  into exactly one semantic command; this component never mutates. */
+  onDrawWall: (commit: WallDrawCommit) => void;
   /** Commit a snapped preview after one Move-tool drag. */
   onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
@@ -286,6 +295,8 @@ export default function WorldViewport(props: {
   // sink without being torn down and rebuilt every render.
   const toolRef = useRef(props.tool);
   toolRef.current = props.tool;
+  const floorRef = useRef(props.floor);
+  floorRef.current = props.floor;
   const piecesRef = useRef(props.pieces);
   piecesRef.current = props.pieces;
   const authoredPiecesRef = useRef(props.authoredPieces);
@@ -296,6 +307,16 @@ export default function WorldViewport(props: {
   prefabsRef.current = props.prefabs;
   const onSelectRef = useRef(props.onSelect);
   onSelectRef.current = props.onSelect;
+  // Draw Wall (req_4473): the in-progress anchor lives here; leaving the tool
+  // (Escape → select-tool, or any switch) cancels it without a stray commit.
+  const architectureRef = useRef(props.architecture);
+  architectureRef.current = props.architecture;
+  const onDrawWallRef = useRef(props.onDrawWall);
+  onDrawWallRef.current = props.onDrawWall;
+  const wallAnchorRef = useRef<WallDrawGesture | null>(null);
+  useEffect(() => {
+    if (props.tool !== 'drawWall') wallAnchorRef.current = null;
+  }, [props.tool]);
   const onPieceContextRef = useRef(props.onPieceContext);
   onPieceContextRef.current = props.onPieceContext;
   const onPaintFacesRef = useRef(props.onPaintFaces);
@@ -651,6 +672,7 @@ export default function WorldViewport(props: {
     authoredPieces: readonly AuthoredBuildPiece[];
     worldFlora: readonly WorldFloraPatch[];
     floraSpecies: readonly AuthoredFloraSpecies[];
+    architecture: ArchitectureSource;
   } | null>(null);
   useEffect(() => {
     if (!props.active) return;
@@ -661,7 +683,11 @@ export default function WorldViewport(props: {
         && prior.pieces === props.pieces
         && prior.authoredPieces === props.authoredPieces
         && prior.worldFlora === props.worldFlora
-        && prior.floraSpecies === props.floraSpecies) return true;
+        && prior.floraSpecies === props.floraSpecies
+        && prior.architecture === props.architecture) return true;
+      // Refresh the engine wall bake (identity-cached) so the push below reads
+      // current wall meshes/colliders — child effects run before AppFrame's.
+      setLiveArchitecture(props.architecture);
       if (!pushLiveWorld(nodeId, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies)) return false;
       liveWorldPublishedRef.current = {
         nodeId,
@@ -669,6 +695,7 @@ export default function WorldViewport(props: {
         authoredPieces: props.authoredPieces,
         worldFlora: props.worldFlora,
         floraSpecies: props.floraSpecies,
+        architecture: props.architecture,
       };
       return true;
     };
@@ -676,7 +703,7 @@ export default function WorldViewport(props: {
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
     return () => clearInterval(t);
-  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies]);
+  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.architecture]);
 
   const residentDemandCacheRef = useRef<{
     authoredSource: readonly AuthoredBuildPiece[];
@@ -714,20 +741,21 @@ export default function WorldViewport(props: {
   // Keep only referenced authored meshes RESIDENT (req_2577). Palette size is
   // irrelevant: the active world, its surface flora, and the armed preview are
   // the complete demand set. Retry until the retained loader node exists.
-  const residentPublishedRef = useRef<{ nodeId: number; demand: typeof residentDemand } | null>(null);
+  const residentPublishedRef = useRef<{ nodeId: number; demand: typeof residentDemand; architecture: ArchitectureSource } | null>(null);
   useEffect(() => {
     if (!props.active) return;
     const push = () => {
       const nodeId = Number(loaderRef.current?.id ?? 0);
       const prior = residentPublishedRef.current;
-      if (nodeId && prior?.nodeId === nodeId && prior.demand === residentDemand) return true;
+      if (nodeId && prior?.nodeId === nodeId && prior.demand === residentDemand && prior.architecture === props.architecture) return true;
+      setLiveArchitecture(props.architecture);
       if (!pushResidentMeshes(
         nodeId,
         residentDemand.authoredPieces,
         residentDemand.floraSpecies,
         residentDemand.builtinFloraSpeciesIds,
       )) return false;
-      residentPublishedRef.current = { nodeId, demand: residentDemand };
+      residentPublishedRef.current = { nodeId, demand: residentDemand, architecture: props.architecture };
       return true;
     };
     let tries = 0;
@@ -740,7 +768,7 @@ export default function WorldViewport(props: {
       clearTimeout(start);
       if (retry) clearInterval(retry);
     };
-  }, [props.active, residentDemand]);
+  }, [props.active, residentDemand, props.architecture]);
 
   // Mesh GHOST: an authored piece previews as its real translucent mesh while
   // it is armed OR being moved OR mid-gizmo-drag (req_3367 — the drag preview
@@ -1397,6 +1425,26 @@ export default function WorldViewport(props: {
     // frame lagged, so the outline landed a tile off, req_2554. Camera-frame is a deferred slice
     // done through a re-render-safe path.)
     const tool = toolRef.current;
+    // Draw Wall (req_4473): first click anchors on the lattice, second commits
+    // exactly one span upward. The engine owns everything after the commit.
+    if (tool === 'drawWall') {
+      const gp = groundUnder(d.x0, d.y0);
+      if (!gp) { console.warn('[wall] GROUND MISS — click landed off the map'); return; }
+      const point = snapWallPoint(gp.x, gp.z);
+      if (!point) { console.warn('[wall] click did not resolve to a lattice point'); return; }
+      const source = architectureRef.current;
+      const anchor = wallAnchorRef.current;
+      if (!anchor || anchor.kind !== 'anchored') {
+        wallAnchorRef.current = beginWallDraw(source, floorRef.current, point);
+        console.warn(`[wall] anchored at (${point.xU}u, ${point.zU}u) — click the far end to draw`);
+        return;
+      }
+      const outcome = commitWallDraw(source, anchor, point);
+      wallAnchorRef.current = null;
+      if (outcome.status === 'committed') onDrawWallRef.current(outcome.commit);
+      else console.warn(`[wall] draw rejected — ${outcome.reason}`);
+      return;
+    }
     if (tool !== 'place') {
       onSelectRef.current(pickPieceAt(d.x0, d.y0), d.selectionIntent);
       return;

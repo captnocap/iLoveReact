@@ -61,6 +61,8 @@ export default function Workspace(props: {
   onPieceContext: (id: string, x: number, y: number, role: string | null) => void;
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
+  /** Draw Wall (req_4473): one committed semantic wall span from the viewport. */
+  onDrawWall: (commit: import('../world/wallTools').WallDrawCommit) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadePaint: (patch: Partial<EditorState['facadePaint']>) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;

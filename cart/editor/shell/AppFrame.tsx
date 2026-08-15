@@ -124,6 +124,11 @@ import {
   setActiveMapDocumentStem,
 } from '../data/mapDocuments';
 import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumentState';
+// Draw Wall (req_4473): one committed span → one engine command; measurements
+// come from the installed measured style, undo rides WORLD_UNDO_KEYS.
+import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
+import { applyArchitectureCommand, architectureCommandId } from '../world/architectureCommand';
+import { installedWallStyles } from '../data/initialState';
 // The durable working session (req_4435): what a cold start restores, and the
 // record the Home surface's Continue card reads.
 import {
@@ -4775,7 +4780,7 @@ export default function AppFrame() {
   // EditorState): map paint strokes and in-viewer mesh edits — mesh docs route to
   // the host mesh journal instead (meshUndoRedo below).
   const WORLD_UNDO_CAP = 32;
-  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId'] as const;
+  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId', 'architecture', 'architectureSelection'] as const;
   const recordWorldEdit = (
     prev: EditorState,
     next: EditorState,
@@ -4879,6 +4884,36 @@ export default function AppFrame() {
       gesture,
       stamp: stateRef.current.armedStamp,
     }, 'viewport');
+  };
+
+  /** Draw Wall (req_4473): one committed viewport gesture becomes exactly one
+   *  semantic command through the native engine. The engine's returned source is
+   *  adopted wholesale; the retained prior source is the undo snapshot (rides
+   *  WORLD_UNDO_KEYS like every other world slice). Measurements come from the
+   *  first installed measured wall style — never typed-in numbers. */
+  const drawWall = (commit: WallDrawCommit) => {
+    const current = stateRef.current;
+    const style = installedWallStyles()[0];
+    if (!style) {
+      setState((prev) => ({ ...prev, status: 'draw wall: no measured wall style is installed — export or seed one first' }));
+      return;
+    }
+    const commandId = architectureCommandId('draw', current.seq);
+    const command = wallDrawCommand(commandId, current.architecture.revision, commit, style);
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      setState((prev) => ({ ...prev, status: `draw wall rejected: ${result.reason}` }));
+      return;
+    }
+    setState((prev) => {
+      const next: EditorState = {
+        ...prev,
+        architecture: result.source,
+        seq: prev.seq + 1,
+        status: `Wall drawn (${style.label})`,
+      };
+      return recordWorldEdit(prev, next, 'Draw wall');
+    });
   };
 
   /** Commit one viewport drag after its local snapped preview has settled. This
@@ -11241,6 +11276,7 @@ export default function AppFrame() {
             onPieceContext={openPieceQuickMenu}
             onPaintFaces={paintPieceFaces}
             onPaintFlora={paintWorldFlora}
+            onDrawWall={drawWall}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}

@@ -50,6 +50,10 @@ export type ResidentMesh = {
   collisionBoxes?: ResidentCollisionBox[];
   /** Exact local-frame player narrowphase: xyz triples, three vertices/triangle. */
   collisionTriangles?: Float32Array;
+  /** false = draw-only: the mesh contributes NO physics islands (its owner
+   *  supplies collision another way, e.g. collide-only instance rows). The
+   *  lump byte already exists; default stays solid. */
+  solid?: boolean;
 };
 
 export type ResidentCollisionBox = {
@@ -140,7 +144,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     dv.setFloat32(o + 16, b.w, true);
     dv.setFloat32(o + 20, b.d, true);
     dv.setFloat32(o + 24, b.h, true);
-    dv.setUint32(o + 28, 1, true);            // solid
+    dv.setUint32(o + 28, m.solid === false ? 0 : 1, true); // solid (false = draw-only)
     dv.setUint32(o + 32, vertexCount, true);  // vertexCount
     o += 36;
     for (let i = 0; i < m.vertices.length; i += 1) { dv.setFloat32(o, m.vertices[i]!, true); o += 4; }

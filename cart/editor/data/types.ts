@@ -550,7 +550,11 @@ export type HistoryEvent = {
 // conflated with the undo mechanism. Host-side map paint strokes are NOT covered
 // (they never flow through EditorState); the empty-stack status says so.
 export type WorldUndoSlices = Partial<Pick<EditorState,
-  'worldPieces' | 'worldFlora' | 'worldPrefabs' | 'objects' | 'authoredBuildPieces' | 'authoredFloraSpecies' | 'selectedPieceId' | 'selectedPieceIds' | 'selectedObjectId' | 'armedPieceId'>>;
+  'worldPieces' | 'worldFlora' | 'worldPrefabs' | 'objects' | 'authoredBuildPieces' | 'authoredFloraSpecies' | 'selectedPieceId' | 'selectedPieceIds' | 'selectedObjectId' | 'armedPieceId'
+  // Semantic architecture rides the same journal: the retained ArchitectureSource
+  // reference is the undo snapshot, and the engine re-validates every restored
+  // source on its next use (req_4473).
+  | 'architecture' | 'architectureSelection'>>;
 export type WorldUndoEntry = {
   label: string;
   before: WorldUndoSlices;

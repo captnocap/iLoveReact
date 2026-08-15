@@ -17,7 +17,8 @@ import {
   emptyArchitectureSource,
   parseArchitectureSource,
 } from '../world/architecture';
-import { installArchitectureCatalogFromPackages } from '../world/architectureCatalog';
+import { installArchitectureCatalogFromPackages, projectedWallStyles } from '../world/architectureCatalog';
+import type { ArchitectureCatalogEntry } from '../world/architecture';
 import { architectureHostLive } from '../../../runtime/game/build';
 
 // Authored placeables: the ON-DISK MANIFEST is the source of truth (USER RULING
@@ -101,6 +102,15 @@ type InitialWorldArchitecture = { architecture?: unknown };
 
 /** Install every validated disk-declared kit atomically. No declarations means
  * no architecture capability call, which keeps non-game isolated editor tests pure. */
+let PROJECTED_WALL_STYLES: ArchitectureCatalogEntry[] | null = null;
+
+/** The measured wall styles from the disk packages, projected once per JS
+ * context — the Draw Wall tool's style source (req_4473). */
+export function installedWallStyles(): ArchitectureCatalogEntry[] {
+  if (PROJECTED_WALL_STYLES === null) PROJECTED_WALL_STYLES = projectedWallStyles(MODEL_PACKAGES);
+  return PROJECTED_WALL_STYLES;
+}
+
 export function bootArchitectureCatalog(): void {
   if (!MODEL_PACKAGES.some(pkg => pkg.placeable?.as === 'architecture-kit')) return;
   // Headless contexts (test bundles, hostless carts) have kits on disk but no

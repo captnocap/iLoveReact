@@ -21,6 +21,7 @@ import { runtimeCompiledPaintAtlas } from '../data/paintAtlasCompiler';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
+import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from './architectureBake';
 import { compileOutlinerCollision } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
 import { compileTextureSlotMesh } from '../model/modelTextureSlots';
@@ -187,7 +188,17 @@ export function pushLiveWorld(
     if (pieces.length) console.warn(`[place] live push SKIPPED — node=${nodeId} door=${typeof g.__compiled_world_set_live_pieces}`);
     return false;
   }
-  g.__compiled_world_set_live_pieces(nodeId, pieceInstanceRows(pieces));
+  // Semantic wall collision (req_4473): engine-derived oriented collide-only
+  // rows (r < 0) ride the same instance stream as piece boxes.
+  const pieceRows = pieceInstanceRows(pieces);
+  const wallRows = liveArchitectureCollideRows();
+  let instanceRows = pieceRows;
+  if (wallRows.length) {
+    instanceRows = new Float32Array(pieceRows.length + wallRows.length);
+    instanceRows.set(pieceRows, 0);
+    instanceRows.set(wallRows, pieceRows.length);
+  }
+  g.__compiled_world_set_live_pieces(nodeId, instanceRows);
   if (typeof g.__compiled_world_set_live_lights === 'function') {
     const lights: WorldLight[] = [];
     for (const piece of pieces) {
@@ -242,6 +253,8 @@ export function pushLiveWorld(
     // Graffiti facades (req_3057): baked paint quads ride the same ref stream —
     // world-space meshes, so the ref is identity.
     refs.push(...liveFacadeRefs());
+    // Semantic walls (req_4473): engine-compiled render bands, identity refs.
+    refs.push(...liveArchitectureRefs());
     refs.push(...surfaceFloraMeshRefs(pieces, worldFlora, floraSpecies));
     // Newest wire door first, presence-gated: v3 carries spin + uniform scale
     // (req_3367), v2 spin only (SPINPROP req_3128), v1 the bare transform. An
@@ -404,6 +417,7 @@ export function pushResidentMeshes(
     builtinFloraSpeciesIds ? new Set(builtinFloraSpeciesIds) : undefined,
   ));
   meshes.push(...liveFacadeResidentMeshes()); // graffiti facade quads (req_3057)
+  meshes.push(...liveArchitectureResidentMeshes()); // semantic wall bands (req_4473)
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
   console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId}`);
   return true;
