@@ -1796,6 +1796,27 @@ fn applyDrawWall(
             "the architecture source revision cannot advance",
         );
 
+    // Collinear same-spec continuation from a free wall end EXTENDS that wall
+    // instead of chaining a second edge (USER RULING req_4501: the invisible
+    // crease from drawing a run in several strokes refused doors at spots
+    // that look fine). Junction ends, spec changes, turns, and any stroke
+    // that touches other structure all fall through to the ordinary plan.
+    if (findWallExtension(
+        source,
+        &start.endpoint,
+        &end.endpoint,
+        support,
+        height_u,
+        thickness_u,
+        draw.profile,
+        draw.style_id,
+        draw.side_a_material_id,
+        draw.side_b_material_id,
+        draw.floor,
+    )) |extension| {
+        return applyWallExtension(allocator, source, entries, command, extension, revision_after);
+    }
+
     const plan_result = try planDraw(
         allocator,
         source,
@@ -1888,6 +1909,365 @@ fn applyDrawWall(
     source.deinit(allocator);
     source.* = candidate;
     return .{ .receipt = receipt };
+}
+
+const WallExtension = struct {
+    edge_index: usize,
+    vertex_index: usize,
+    new_x_u: types.Unit,
+    new_z_u: types.Unit,
+    /// Nonzero when the moved vertex is the edge's START: every opening and
+    /// anchor column on the edge shifts by this much so world positions hold.
+    column_shift_u: types.Unit,
+};
+
+/// A draw qualifies as an extension when exactly one endpoint rests on a
+/// DEGREE-ONE vertex whose single edge matches the drawn spec exactly, the
+/// stroke continues that edge's line outward, and the new span touches
+/// nothing else. Everything else keeps the ordinary draw plan.
+fn findWallExtension(
+    source: *const types.ArchitectureSource,
+    start: *const ResolvedEndpoint,
+    end: *const ResolvedEndpoint,
+    support: PlannedSupport,
+    height_u: types.Unit,
+    thickness_u: types.Unit,
+    profile: types.WallProfile,
+    style_id: []const u8,
+    side_a_material_id: []const u8,
+    side_b_material_id: []const u8,
+    floor: i32,
+) ?WallExtension {
+    var anchored = start;
+    var far = end;
+    if (start.vertex_id != null and end.vertex_id == null) {
+        // chained continuation: the stroke leaves an existing free end
+    } else if (end.vertex_id != null and start.vertex_id == null) {
+        anchored = end;
+        far = start;
+    } else {
+        return null;
+    }
+
+    var vertex_index: ?usize = null;
+    for (source.walls.vertices, 0..) |vertex, index| {
+        if (std.mem.eql(u8, vertex.id, anchored.vertex_id.?)) {
+            vertex_index = index;
+            break;
+        }
+    }
+    const shared_vertex = source.walls.vertices[vertex_index orelse return null];
+
+    var edge_index: ?usize = null;
+    var shared_is_edge_start = false;
+    for (source.walls.edges, 0..) |edge, index| {
+        const at_start = std.mem.eql(u8, edge.start_vertex_id, shared_vertex.id);
+        const at_end = std.mem.eql(u8, edge.end_vertex_id, shared_vertex.id);
+        if (!at_start and !at_end) continue;
+        if (edge_index != null) return null; // junction: two or more incident edges
+        edge_index = index;
+        shared_is_edge_start = at_start;
+    }
+    const edge = source.walls.edges[edge_index orelse return null];
+
+    const base_y_u = switch (support) {
+        .absolute => |value| value.base_y_u,
+        .slab => return null,
+    };
+    switch (edge.support) {
+        .absolute => |value| if (value.base_y_u != base_y_u) return null,
+        .slab => return null,
+    }
+    if (edge.height_u != height_u or
+        edge.thickness_u != thickness_u or
+        edge.profile != profile or
+        !std.mem.eql(u8, edge.style_id, style_id) or
+        !std.mem.eql(u8, edge.side_a.material_id, side_a_material_id) or
+        !std.mem.eql(u8, edge.side_b.material_id, side_b_material_id))
+    {
+        return null;
+    }
+
+    const other_vertex_id = if (shared_is_edge_start) edge.end_vertex_id else edge.start_vertex_id;
+    const other_vertex = findVertexById(source, other_vertex_id) orelse return null;
+    const other_point = topology.Point{ .x_u = other_vertex.x_u, .z_u = other_vertex.z_u };
+    const shared_point = topology.Point{ .x_u = shared_vertex.x_u, .z_u = shared_vertex.z_u };
+    const far_point = topology.Point{ .x_u = far.x_u, .z_u = far.z_u };
+    if (topology.orientation(other_point, shared_point, far_point) != 0) return null;
+    const along_x = @as(i64, shared_point.x_u) - @as(i64, other_point.x_u);
+    const along_z = @as(i64, shared_point.z_u) - @as(i64, other_point.z_u);
+    const out_x = @as(i64, far_point.x_u) - @as(i64, shared_point.x_u);
+    const out_z = @as(i64, far_point.z_u) - @as(i64, shared_point.z_u);
+    if (along_x * out_x + along_z * out_z <= 0) return null;
+
+    // The new span must run through open space: any touch with other
+    // structure means junctions/splits, which the ordinary plan owns.
+    for (source.walls.edges, 0..) |candidate, candidate_index| {
+        if (candidate_index == edge_index.?) continue;
+        const candidate_start = findVertexById(source, candidate.start_vertex_id).?;
+        if (candidate_start.floor != floor) continue;
+        const candidate_end = findVertexById(source, candidate.end_vertex_id).?;
+        const kind = topology.classifySegmentIntersection(
+            shared_point,
+            far_point,
+            .{ .x_u = candidate_start.x_u, .z_u = candidate_start.z_u },
+            .{ .x_u = candidate_end.x_u, .z_u = candidate_end.z_u },
+        );
+        if (kind != .none) return null;
+    }
+
+    return .{
+        .edge_index = edge_index.?,
+        .vertex_index = vertex_index.?,
+        .new_x_u = far.x_u,
+        .new_z_u = far.z_u,
+        .column_shift_u = if (shared_is_edge_start)
+            completeDistanceUnits(shared_point, far_point)
+        else
+            0,
+    };
+}
+
+fn applyWallExtension(
+    allocator: std.mem.Allocator,
+    source: *types.ArchitectureSource,
+    entries: []const catalog.CatalogEntry,
+    command: Command,
+    extension: WallExtension,
+    revision_after: u32,
+) ApplyError!types.MutationResult {
+    var candidate = try types.cloneSource(allocator, source);
+    errdefer candidate.deinit(allocator);
+    candidate.revision = revision_after;
+    const moved = &candidate.walls.vertices[extension.vertex_index];
+    moved.x_u = extension.new_x_u;
+    moved.z_u = extension.new_z_u;
+    const edge = &candidate.walls.edges[extension.edge_index];
+    if (extension.column_shift_u != 0) {
+        for (edge.openings) |*opening| opening.column_u += extension.column_shift_u;
+        for (candidate.walls.anchors) |*anchor| {
+            if (std.mem.eql(u8, anchor.edge_id, edge.id)) anchor.column_u += extension.column_shift_u;
+        }
+    }
+    types.validateSourceStructure(allocator, &candidate) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return makeRejection(
+            allocator,
+            command,
+            .invalid_source,
+            &.{},
+            "the wall extension did not produce a valid source",
+        ),
+    };
+    catalog.validateSourceCatalogReferences(allocator, &candidate, entries) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return makeRejection(
+            allocator,
+            command,
+            .invalid_catalog,
+            &.{},
+            "the wall extension is incompatible with the catalog",
+        ),
+    };
+    const receipt = try buildExtensionReceipt(allocator, source, &candidate, command, extension);
+    source.deinit(allocator);
+    source.* = candidate;
+    return .{ .receipt = receipt };
+}
+
+fn buildExtensionReceipt(
+    allocator: std.mem.Allocator,
+    before: *const types.ArchitectureSource,
+    after: *const types.ArchitectureSource,
+    command: Command,
+    extension: WallExtension,
+) std.mem.Allocator.Error!types.MutationReceipt {
+    const before_edge = before.walls.edges[extension.edge_index];
+    const vertex_id = before.walls.vertices[extension.vertex_index].id;
+    const shifted = extension.column_shift_u != 0;
+
+    const command_id = try allocator.dupe(u8, command.command_id);
+    errdefer allocator.free(command_id);
+    const source_hash_before = try hashSource(allocator, before);
+    errdefer allocator.free(source_hash_before);
+    const source_hash_after = try hashSource(allocator, after);
+    errdefer allocator.free(source_hash_after);
+
+    var shifted_anchor_count: usize = 0;
+    if (shifted) {
+        for (before.walls.anchors) |anchor| {
+            if (std.mem.eql(u8, anchor.edge_id, before_edge.id)) shifted_anchor_count += 1;
+        }
+    }
+    const updated_count = 1 + @as(usize, if (shifted) 1 else 0) + shifted_anchor_count;
+    const updated = try allocator.alloc(types.RecordDelta, updated_count);
+    var initialized_updated: usize = 0;
+    errdefer {
+        for (updated[0..initialized_updated]) |*value| value.deinit(allocator);
+        if (updated.len != 0) allocator.free(updated);
+    }
+    updated[initialized_updated] = try recordDelta(allocator, before, after, .vertex, vertex_id);
+    initialized_updated += 1;
+    if (shifted) {
+        updated[initialized_updated] = try recordDelta(allocator, before, after, .edge, before_edge.id);
+        initialized_updated += 1;
+        for (before.walls.anchors) |anchor| {
+            if (!std.mem.eql(u8, anchor.edge_id, before_edge.id)) continue;
+            updated[initialized_updated] = try recordDelta(allocator, before, after, .anchor, anchor.id);
+            initialized_updated += 1;
+        }
+    }
+
+    var patches = PatchBuilders.init(allocator);
+    defer patches.deinit();
+    {
+        var operation = try deltaOperation(allocator, before, after, .vertex, vertex_id, false);
+        errdefer operation.deinit(allocator);
+        try patches.appendForward(operation);
+    }
+    if (shifted) {
+        var operation = try deltaOperation(allocator, before, after, .edge, before_edge.id, false);
+        errdefer operation.deinit(allocator);
+        try patches.appendForward(operation);
+        for (before.walls.anchors) |anchor| {
+            if (!std.mem.eql(u8, anchor.edge_id, before_edge.id)) continue;
+            var anchor_operation = try deltaOperation(allocator, before, after, .anchor, anchor.id, false);
+            errdefer anchor_operation.deinit(allocator);
+            try patches.appendForward(anchor_operation);
+        }
+        var anchor_index = before.walls.anchors.len;
+        while (anchor_index > 0) {
+            anchor_index -= 1;
+            const anchor = before.walls.anchors[anchor_index];
+            if (!std.mem.eql(u8, anchor.edge_id, before_edge.id)) continue;
+            var anchor_operation = try deltaOperation(allocator, before, after, .anchor, anchor.id, true);
+            errdefer anchor_operation.deinit(allocator);
+            try patches.appendInverse(anchor_operation);
+        }
+        var inverse_edge = try deltaOperation(allocator, before, after, .edge, before_edge.id, true);
+        errdefer inverse_edge.deinit(allocator);
+        try patches.appendInverse(inverse_edge);
+    }
+    {
+        var operation = try deltaOperation(allocator, before, after, .vertex, vertex_id, true);
+        errdefer operation.deinit(allocator);
+        try patches.appendInverse(operation);
+    }
+    const forward_operations = try patches.takeForward();
+    errdefer deinitPatchOperations(allocator, forward_operations);
+    const inverse_operations = try patches.takeInverse();
+    errdefer deinitPatchOperations(allocator, inverse_operations);
+
+    const opening_remap_count: usize = if (shifted) before_edge.openings.len else 0;
+    const opening_remaps = try allocator.alloc(types.SurfaceChildRemap, opening_remap_count);
+    var initialized_opening_remaps: usize = 0;
+    errdefer {
+        for (opening_remaps[0..initialized_opening_remaps]) |*value| value.deinit(allocator);
+        if (opening_remaps.len != 0) allocator.free(opening_remaps);
+    }
+    if (shifted) {
+        for (before_edge.openings) |opening| {
+            opening_remaps[initialized_opening_remaps] = .{
+                .child_family = .opening,
+                .child_id = try allocator.dupe(u8, opening.id),
+                .predecessor_edge_id = try allocator.dupe(u8, before_edge.id),
+                .successor_edge_id = try allocator.dupe(u8, before_edge.id),
+                .old_column_u = opening.column_u,
+                .new_column_u = opening.column_u + extension.column_shift_u,
+                .row_u = opening.row_u,
+            };
+            initialized_opening_remaps += 1;
+        }
+    }
+    const anchor_remaps = try allocator.alloc(types.SurfaceChildRemap, shifted_anchor_count);
+    var initialized_anchor_remaps: usize = 0;
+    errdefer {
+        for (anchor_remaps[0..initialized_anchor_remaps]) |*value| value.deinit(allocator);
+        if (anchor_remaps.len != 0) allocator.free(anchor_remaps);
+    }
+    if (shifted) {
+        for (before.walls.anchors) |anchor| {
+            if (!std.mem.eql(u8, anchor.edge_id, before_edge.id)) continue;
+            anchor_remaps[initialized_anchor_remaps] = .{
+                .child_family = .anchor,
+                .child_id = try allocator.dupe(u8, anchor.id),
+                .predecessor_edge_id = try allocator.dupe(u8, before_edge.id),
+                .successor_edge_id = try allocator.dupe(u8, before_edge.id),
+                .old_column_u = anchor.column_u,
+                .new_column_u = anchor.column_u + extension.column_shift_u,
+                .row_u = anchor.row_u,
+            };
+            initialized_anchor_remaps += 1;
+        }
+    }
+
+    const created = try allocator.alloc(types.RecordRef, 0);
+    const removed = try allocator.alloc(types.RecordSnapshot, 0);
+    const edge_child_remaps = try allocator.alloc(types.EdgeChildRemap, 0);
+    const face_lineage = try allocator.alloc(types.FaceLineage, 0);
+
+    const after_edge = after.walls.edges[extension.edge_index];
+    const after_start = findVertexById(after, after_edge.start_vertex_id).?;
+    const after_end = findVertexById(after, after_edge.end_vertex_id).?;
+    const thickness_radius: types.Unit = @divTrunc(after_edge.thickness_u + 1, 2);
+    const base_y_u = switch (after_edge.support) {
+        .absolute => |value| value.base_y_u,
+        .slab => types.Limits.minimum_unit,
+    };
+    const affected_bounds = try allocator.alloc(types.AffectedBounds, 1);
+    errdefer allocator.free(affected_bounds);
+    affected_bounds[0] = .{
+        .floor = after_start.floor,
+        .min_x_u = @min(after_start.x_u, after_end.x_u) - thickness_radius,
+        .min_y_u = base_y_u,
+        .min_z_u = @min(after_start.z_u, after_end.z_u) - thickness_radius,
+        .max_x_u_exclusive = @max(after_start.x_u, after_end.x_u) + thickness_radius,
+        .max_y_u_exclusive = base_y_u + after_edge.height_u,
+        .max_z_u_exclusive = @max(after_start.z_u, after_end.z_u) + thickness_radius,
+    };
+
+    const dirty_values = [_]types.DirtyTarget{
+        .topology,
+        .render,
+        .collision,
+        .cover,
+        .materials,
+        .doors_portals,
+        .navigation,
+        .rooms,
+        .visibility,
+        .audio,
+        .pick_proxies,
+    };
+    const dirty_targets = try allocator.dupe(types.DirtyTarget, &dirty_values);
+    errdefer allocator.free(dirty_targets);
+
+    return .{
+        .command_id = command_id,
+        .source_revision_before = before.revision,
+        .source_revision_after = after.revision,
+        .source_hash_before = source_hash_before,
+        .source_hash_after = source_hash_after,
+        .created = created,
+        .updated = updated,
+        .removed = removed,
+        .edge_child_remaps = edge_child_remaps,
+        .opening_remaps = opening_remaps,
+        .anchor_remaps = anchor_remaps,
+        .face_lineage = face_lineage,
+        .forward_patch = .{
+            .expected_revision = before.revision,
+            .result_revision = after.revision,
+            .operations = forward_operations,
+        },
+        .inverse_patch = .{
+            .expected_revision = after.revision,
+            .result_revision = before.revision,
+            .operations = inverse_operations,
+        },
+        .affected_bounds = affected_bounds,
+        .dirty_targets = dirty_targets,
+    };
 }
 
 const StrokeCut = struct {

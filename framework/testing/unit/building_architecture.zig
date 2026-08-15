@@ -2238,11 +2238,13 @@ test "deleting one edge removes only vertices orphaned by that edge" {
         &entries,
         drawWallCommand("first", 0, 0, 0, 16, 0, null, null),
     );
+    // The second stroke turns a corner: a collinear continuation would EXTEND
+    // the first wall (req_4501) and leave nothing separate to delete.
     try applyExpectedDraw(
         testing.allocator,
         &source,
         &entries,
-        drawWallCommand("second", 1, 16, 0, 32, 0, null, null),
+        drawWallCommand("second", 1, 16, 0, 16, 16, null, null),
     );
     try applyExpectedEdgeMutation(testing.allocator, &source, &entries, .{
         .command_id = "delete-first",
@@ -3542,6 +3544,81 @@ test "face band UVs stay spread over the piece across opening cuts" {
     // The door splits each side into left/right (+ header) bands; if this is
     // ever 2 the opening did not cut and the law goes unexercised.
     try testing.expect(cut_face_bands > 2);
+}
+
+test "collinear same-spec strokes extend one wall" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ext-a", 0, 0, 0, 48, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ext-b", 1, 48, 0, 96, 0, null, null));
+    // One wall (req_4501): the continuation moved the free end outward and
+    // minted no records.
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+    try testing.expectEqual(@as(usize, 2), source.walls.vertices.len);
+    const extended = findSourceEdge(source, "ext-a:e:0").?;
+    const extended_end = findSourceVertex(source, extended.end_vertex_id).?;
+    try testing.expectEqual(@as(architecture.Unit, 96), extended_end.x_u);
+    try testing.expectEqual(@as(u32, 2), source.revision);
+
+    // Turning a corner stays a separate wall.
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("ext-c", 2, 96, 0, 96, 48, null, null));
+    try testing.expectEqual(@as(usize, 2), source.walls.edges.len);
+
+    // A collinear continuation with a DIFFERENT thickness is a real seam.
+    var respec = drawWallCommand("ext-d", 3, 96, 48, 96, 96, null, null);
+    respec.operation.draw_wall.thickness_u = 8;
+    try applyExpectedDraw(testing.allocator, &source, &entries, respec);
+    try testing.expectEqual(@as(usize, 3), source.walls.edges.len);
+}
+
+test "extension preserves openings and accepts a door across the healed seam" {
+    const door = geometryOpeningKit("kit:ext-door", .door, -8, 8, 0, 32, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("seam-a", 0, 0, 0, 48, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("seam-b", 1, 48, 0, 96, 0, null, null));
+    // The door's 16u footprint at column 44 spans 36..52 — straight across
+    // where the stroke seam used to be. One wall now, so it places (this is
+    // the user's exact complaint made impossible).
+    try applyExpectedOpeningMutation(
+        testing.allocator,
+        &source,
+        &entries,
+        openingCommand("seam-door", 2, "seam-a:e:0", "seam-door:o:0", "kit:ext-door", 44, 0),
+    );
+
+    // Extending the far end leaves the door's column untouched.
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("seam-c", 3, 96, 0, 144, 0, null, null));
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+    const after_forward = findSourceEdge(source, "seam-a:e:0").?;
+    try testing.expectEqual(@as(usize, 1), after_forward.openings.len);
+    try testing.expectEqual(@as(architecture.Unit, 44), after_forward.openings[0].column_u);
+
+    // Extending BACKWARD from the wall's start shifts columns so the door
+    // keeps its world position.
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("seam-d", 4, -48, 0, 0, 0, null, null));
+    try testing.expectEqual(@as(usize, 1), source.walls.edges.len);
+    const after_backward = findSourceEdge(source, "seam-a:e:0").?;
+    const new_start = findSourceVertex(source, after_backward.start_vertex_id).?;
+    try testing.expectEqual(@as(architecture.Unit, -48), new_start.x_u);
+    try testing.expectEqual(@as(architecture.Unit, 92), after_backward.openings[0].column_u);
+}
+
+test "a continuation that touches other structure keeps the ordinary draw plan" {
+    var entries = [_]architecture.CatalogEntry{validWallStyle()};
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("bar", 0, 64, -16, 64, 16, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("base", 1, 0, 0, 48, 0, null, null));
+    // The continuation crosses "bar" at (64,0): the ordinary plan splits both
+    // there instead of silently absorbing the stroke into "base".
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("through", 2, 48, 0, 96, 0, null, null));
+    const base = findSourceEdge(source, "base:e:0").?;
+    const base_end = findSourceVertex(source, base.end_vertex_id).?;
+    try testing.expectEqual(@as(architecture.Unit, 48), base_end.x_u);
+    try testing.expectEqual(@as(usize, 5), source.walls.edges.len);
 }
 
 test "compile target hashes isolate finish opening and topology edits" {
