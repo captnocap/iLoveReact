@@ -38,9 +38,9 @@ import { mapHeightAt, mapRenderedHeightMax, subscribeMapTerrainChanges } from '.
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
-import { beginWallDraw, commitWallDraw, snapWallPoint, type WallDrawCommit, type WallDrawGesture } from './wallTools';
+import { snapWallPoint, wallPointerRelease, STOREY_HEIGHT_U, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
 import { setLiveArchitecture } from './architectureBake';
-import type { ArchitectureSource } from './architecture';
+import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSource } from './architecture';
 import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
@@ -314,8 +314,16 @@ export default function WorldViewport(props: {
   const onDrawWallRef = useRef(props.onDrawWall);
   onDrawWallRef.current = props.onDrawWall;
   const wallAnchorRef = useRef<WallDrawGesture | null>(null);
+  // The wall ghost (req_4474): the snapped lattice point under the cursor plus
+  // the live anchor, projected into a storey-tall guide rectangle each render.
+  // State (not the ref) so anchoring and cursor cell-crossings re-render; the
+  // lattice snap itself throttles updates to one per crossed metre.
+  const [wallGhost, setWallGhost] = useState<{ anchor: WallLatticePoint | null; cursor: WallLatticePoint | null }>({ anchor: null, cursor: null });
   useEffect(() => {
-    if (props.tool !== 'drawWall') wallAnchorRef.current = null;
+    if (props.tool !== 'drawWall') {
+      wallAnchorRef.current = null;
+      setWallGhost((prev) => (prev.anchor || prev.cursor ? { anchor: null, cursor: null } : prev));
+    }
   }, [props.tool]);
   const onPieceContextRef = useRef(props.onPieceContext);
   onPieceContextRef.current = props.onPieceContext;
@@ -835,6 +843,20 @@ export default function WorldViewport(props: {
     return gp ? { x: gp.x, z: gp.z, terrainY: 0 } : null;
   }, [stage, props.floor]);
 
+  // The wall ghost's cursor leg (req_4474): every hover/drag move in Draw Wall
+  // snaps the ground point onto the lattice; state only changes when the
+  // snapped point crosses into a new cell, so re-renders stay at metre rate.
+  const trackWallCursor = useCallback((px: number, py: number) => {
+    if (toolRef.current !== 'drawWall') return;
+    const ground = groundUnder(px, py);
+    const point = ground ? snapWallPoint(ground.x, ground.z) : null;
+    setWallGhost((prev) => {
+      if (prev.cursor === point) return prev;
+      if (prev.cursor && point && prev.cursor.xU === point.xU && prev.cursor.zU === point.zU) return prev;
+      return { ...prev, cursor: point };
+    });
+  }, [groundUnder]);
+
   // Prop stacking (req_3363): the placement ray may strike a placed piece's TOP
   // FACE before the terrain — a table top is a placement surface, exactly the
   // hmsc-int rule ("nearest of (placed-piece face, ground) wins; piece faces
@@ -1326,7 +1348,8 @@ export default function WorldViewport(props: {
       }
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt]);
+    trackWallCursor(p.x, p.y);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackWallCursor]);
 
   const onUp = useCallback((e: any) => {
     if (interactionLockedRef.current) {
@@ -1397,6 +1420,35 @@ export default function WorldViewport(props: {
       if (d.paint.targets.length > 0) onPaintFacesRef.current(d.paint.targets);
       return;
     }
+    // Draw Wall (req_4473/req_4474): route the release BEFORE the drag-eater —
+    // a real click carries a few px of jitter that `turned` would swallow, and
+    // press-drag-release is the natural way to draw a span. Shift-drag stays a
+    // camera pan. Both gestures resolve in wallPointerRelease (pure, tested):
+    // click-then-click anchors then commits; one drag draws the whole wall.
+    if (toolRef.current === 'drawWall' && !d.pan) {
+      const p = local(e);
+      const downGround = groundUnder(d.x0, d.y0);
+      const upGround = groundUnder(p.x, p.y);
+      const routed = wallPointerRelease(
+        architectureRef.current,
+        floorRef.current,
+        wallAnchorRef.current,
+        downGround ? snapWallPoint(downGround.x, downGround.z) : null,
+        upGround ? snapWallPoint(upGround.x, upGround.z) : null,
+        d.turned,
+      );
+      if (routed.kind === 'anchor') {
+        wallAnchorRef.current = routed.gesture;
+        setWallGhost((prev) => ({ ...prev, anchor: routed.gesture.start }));
+        console.warn(`[wall] anchored at (${routed.gesture.start.xU}u, ${routed.gesture.start.zU}u) — click or drag to the far end`);
+        return;
+      }
+      wallAnchorRef.current = null;
+      setWallGhost((prev) => (prev.anchor ? { ...prev, anchor: null } : prev));
+      if (routed.kind === 'commit') onDrawWallRef.current(routed.commit);
+      else console.warn(`[wall] draw dropped — ${routed.reason}`);
+      return;
+    }
     // req_2548 diagnostic — every way a click can silently place nothing.
     if (d.turned) {
       // Move commits precisely once on drop; its local preview never mutated the
@@ -1425,26 +1477,6 @@ export default function WorldViewport(props: {
     // frame lagged, so the outline landed a tile off, req_2554. Camera-frame is a deferred slice
     // done through a re-render-safe path.)
     const tool = toolRef.current;
-    // Draw Wall (req_4473): first click anchors on the lattice, second commits
-    // exactly one span upward. The engine owns everything after the commit.
-    if (tool === 'drawWall') {
-      const gp = groundUnder(d.x0, d.y0);
-      if (!gp) { console.warn('[wall] GROUND MISS — click landed off the map'); return; }
-      const point = snapWallPoint(gp.x, gp.z);
-      if (!point) { console.warn('[wall] click did not resolve to a lattice point'); return; }
-      const source = architectureRef.current;
-      const anchor = wallAnchorRef.current;
-      if (!anchor || anchor.kind !== 'anchored') {
-        wallAnchorRef.current = beginWallDraw(source, floorRef.current, point);
-        console.warn(`[wall] anchored at (${point.xU}u, ${point.zU}u) — click the far end to draw`);
-        return;
-      }
-      const outcome = commitWallDraw(source, anchor, point);
-      wallAnchorRef.current = null;
-      if (outcome.status === 'committed') onDrawWallRef.current(outcome.commit);
-      else console.warn(`[wall] draw rejected — ${outcome.reason}`);
-      return;
-    }
     if (tool !== 'place') {
       onSelectRef.current(pickPieceAt(d.x0, d.y0), d.selectionIntent);
       return;
@@ -1642,6 +1674,42 @@ export default function WorldViewport(props: {
       });
     }
   }
+  // Draw Wall ghost (req_4474): a lattice diamond under the cursor always; once
+  // anchored, a storey-tall guide rectangle from the anchor to the cursor —
+  // base line, top line, and both verticals — in the placement-ghost green.
+  const wallSegs: number[] = [];
+  if (props.tool === 'drawWall') {
+    const baseY = props.floor * METERS_PER_LEVEL;
+    const topY = baseY + STOREY_HEIGHT_U / ARCHITECTURE_UNITS_PER_METER;
+    const ground = (pt: WallLatticePoint) => stage.project(pt.xU / ARCHITECTURE_UNITS_PER_METER, baseY, pt.zU / ARCHITECTURE_UNITS_PER_METER, rect);
+    const top = (pt: WallLatticePoint) => stage.project(pt.xU / ARCHITECTURE_UNITS_PER_METER, topY, pt.zU / ARCHITECTURE_UNITS_PER_METER, rect);
+    const diamond = (mark: { x: number; y: number }, r: number) => {
+      wallSegs.push(
+        mark.x, mark.y - r, mark.x + r, mark.y,
+        mark.x + r, mark.y, mark.x, mark.y + r,
+        mark.x, mark.y + r, mark.x - r, mark.y,
+        mark.x - r, mark.y, mark.x, mark.y - r,
+      );
+    };
+    const anchorGround = wallGhost.anchor ? ground(wallGhost.anchor) : null;
+    const cursorGround = wallGhost.cursor ? ground(wallGhost.cursor) : null;
+    if (cursorGround) diamond(cursorGround, 5);
+    if (anchorGround) diamond(anchorGround, 6);
+    const spans = wallGhost.anchor && wallGhost.cursor
+      && (wallGhost.anchor.xU !== wallGhost.cursor.xU || wallGhost.anchor.zU !== wallGhost.cursor.zU);
+    if (spans && anchorGround && cursorGround) {
+      const anchorTop = top(wallGhost.anchor!);
+      const cursorTop = top(wallGhost.cursor!);
+      wallSegs.push(anchorGround.x, anchorGround.y, cursorGround.x, cursorGround.y);
+      if (anchorTop && cursorTop) {
+        wallSegs.push(
+          anchorTop.x, anchorTop.y, cursorTop.x, cursorTop.y,
+          anchorGround.x, anchorGround.y, anchorTop.x, anchorTop.y,
+          cursorGround.x, cursorGround.y, cursorTop.x, cursorTop.y,
+        );
+      }
+    }
+  }
 
   return (
     <Box
@@ -1661,6 +1729,15 @@ export default function WorldViewport(props: {
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
             <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} />
+          </Graph>
+        </Box>
+      ) : null}
+
+      {/* Draw Wall ghost (req_4474) — snapped cursor diamond + anchored span guide. */}
+      {wallSegs.length ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+            <Graph.Polyline segments points={wallSegs} stroke="#34d399" strokeWidth={2} />
           </Graph>
         </Box>
       ) : null}

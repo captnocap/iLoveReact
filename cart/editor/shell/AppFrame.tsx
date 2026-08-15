@@ -128,6 +128,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { applyArchitectureCommand, architectureCommandId } from '../world/architectureCommand';
+import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
 import { installedWallStyles } from '../data/initialState';
 // The durable working session (req_4435): what a cold start restores, and the
 // record the Home surface's Continue card reads.
@@ -9721,6 +9722,33 @@ export default function AppFrame() {
           console.error('[edname] no model doc active — rename skipped');
         }
       }, 600 + i * 800);
+    });
+  }, []);
+
+  // RJIT_ARCHDRAW="x1,z1,x2,z2[;…]" (lattice u): synthetic draw-wall commits —
+  // the world surface's CLICK harness (clicks cannot ride RJIT_EDKEYS). Opens
+  // the world destination, then drives the SAME drawWall entrance the viewport
+  // uses; each segment logs status + live bake counts a beat later, so a
+  // headless `rjit shot editor` proves the draw→engine→bake→render chain
+  // end to end. Unset = no-op.
+  useEffect(() => {
+    const script = (globalThis as any).__env_get?.('RJIT_ARCHDRAW') as string | null | undefined;
+    if (!script) return;
+    const segments = script.split(';').map((entry) => entry.trim()).filter(Boolean);
+    setTimeout(() => goToDestinationRef.current('world'), 600);
+    segments.forEach((segment, i) => {
+      setTimeout(() => {
+        const [x1, z1, x2, z2] = segment.split(',').map((value) => Number(value.trim()));
+        if (![x1, z1, x2, z2].every((value) => Number.isSafeInteger(value))) {
+          console.error(`[archdraw] '${segment}' is not four lattice integers — skipped`);
+          return;
+        }
+        drawWall({ floor: 0, start: { xU: x1!, zU: z1! }, end: { xU: x2!, zU: z2! } });
+        setTimeout(() => {
+          const s = stateRef.current;
+          console.error(`[archdraw] after (${segment}) → status="${s.status}" edges=${s.architecture.walls.edges.length} liveMeshes=${liveArchitectureResidentMeshes().length} liveRefs=${liveArchitectureRefs().length} collideRows=${liveArchitectureCollideRows().length / 12}`);
+        }, 500);
+      }, 1400 + i * 900);
     });
   }, []);
 

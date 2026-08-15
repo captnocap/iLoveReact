@@ -4,6 +4,7 @@ import {
   IDLE_WALL_GESTURE,
   snapWallPoint,
   wallDrawCommand,
+  wallPointerRelease,
   wallVertexMagnet,
   WALL_SNAP_U,
 } from './wallTools';
@@ -123,6 +124,47 @@ test('a non-style catalog entry is refused as a draw source', () => {
     threw = true;
   }
   assert(threw, 'an opening kit was accepted as a wall style');
+});
+
+test('a jittery click anchors — the drag flag alone never eats the release (req_4474)', () => {
+  const source = emptyArchitectureSource();
+  // 8px of mouse jitter resolves down and up to the SAME lattice point.
+  const routed = wallPointerRelease(source, 0, null, { xU: 32, zU: 0 }, { xU: 32, zU: 0 }, true);
+  assert(routed.kind === 'anchor', `jittery click did not anchor: ${routed.kind}`);
+  assert(routed.kind === 'anchor' && routed.gesture.start.xU === 32, 'anchor drifted off the click point');
+});
+
+test('press-drag-release draws the whole span in one gesture', () => {
+  const source = emptyArchitectureSource();
+  const routed = wallPointerRelease(source, 0, null, { xU: 0, zU: 0 }, { xU: 96, zU: 0 }, true);
+  assert(routed.kind === 'commit', `drag did not commit: ${routed.kind}`);
+  assert(routed.kind === 'commit' && routed.commit.start.xU === 0 && routed.commit.end.xU === 96, 'drag span endpoints drifted');
+});
+
+test('a stationary click waits, then the second release commits from the anchor', () => {
+  const source = emptyArchitectureSource();
+  const first = wallPointerRelease(source, 0, null, { xU: 0, zU: 0 }, { xU: 0, zU: 0 }, false);
+  assert(first.kind === 'anchor', 'first click did not anchor');
+  const anchor = first.kind === 'anchor' ? first.gesture : null;
+  const second = wallPointerRelease(source, 0, anchor, { xU: 48, zU: 48 }, { xU: 48, zU: 48 }, false);
+  assert(second.kind === 'commit', `second click did not commit: ${second.kind}`);
+  assert(second.kind === 'commit' && second.commit.start.xU === 0 && second.commit.end.zU === 48, 'committed span drifted');
+});
+
+test('off-map releases miss without disturbing an absent anchor', () => {
+  const source = emptyArchitectureSource();
+  const offMapClick = wallPointerRelease(source, 0, null, null, null, false);
+  assert(offMapClick.kind === 'miss', 'off-map click did not miss');
+  const anchor = beginWallDraw(source, 0, { xU: 0, zU: 0 });
+  const offMapCommit = wallPointerRelease(source, 0, anchor, { xU: 0, zU: 0 }, null, true);
+  assert(offMapCommit.kind === 'miss', 'off-map release did not miss');
+});
+
+test('a drag that ends off the map or on its own start falls back to anchoring', () => {
+  const source = emptyArchitectureSource();
+  const offMapDrag = wallPointerRelease(source, 0, null, { xU: 16, zU: 16 }, null, true);
+  assert(offMapDrag.kind === 'anchor', 'off-map drag did not fall back to anchoring');
+  assert(offMapDrag.kind === 'anchor' && offMapDrag.gesture.start.xU === 16, 'fallback anchor drifted');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

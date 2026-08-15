@@ -15,6 +15,9 @@ import type { ArchitectureCatalogEntry, ArchitectureCommand } from './architectu
 export const WALL_SNAP_U = ARCHITECTURE_UNITS_PER_METER;
 /** A click this close (in u) to an existing vertex reuses it exactly. */
 export const WALL_MAGNET_RADIUS_U = 8;
+/** Storeys are 3 m — 48 u. Wall bases sit on their storey; the ghost guide
+ * draws one storey tall. */
+export const STOREY_HEIGHT_U = 48;
 
 export type WallLatticePoint = { xU: number; zU: number };
 
@@ -111,6 +114,40 @@ export function commitWallDraw(
   };
 }
 
+export type WallPointerRelease =
+  | { kind: 'anchor'; gesture: Extract<WallDrawGesture, { kind: 'anchored' }> }
+  | { kind: 'commit'; commit: WallDrawCommit }
+  | { kind: 'miss'; reason: string };
+
+/** Route one pointer release (req_4474). Both natural gestures resolve here:
+ * click-then-click (anchor, then commit at the second release) AND
+ * press-drag-release (the whole span in one gesture — down anchors, up
+ * commits). A stationary or off-map drag falls back to anchoring, so a jittery
+ * click never draws a zero wall and never gets eaten as a camera drag. */
+export function wallPointerRelease(
+  source: ArchitectureSource,
+  floor: number,
+  anchor: WallDrawGesture | null,
+  downPoint: WallLatticePoint | null,
+  upPoint: WallLatticePoint | null,
+  dragged: boolean,
+): WallPointerRelease {
+  if (anchor && anchor.kind === 'anchored') {
+    if (!upPoint) return { kind: 'miss', reason: 'release landed off the map' };
+    const outcome = commitWallDraw(source, anchor, upPoint);
+    if (outcome.status === 'committed') return { kind: 'commit', commit: outcome.commit };
+    return { kind: 'miss', reason: outcome.reason };
+  }
+  if (!downPoint) return { kind: 'miss', reason: 'click landed off the map' };
+  const began = beginWallDraw(source, floor, downPoint);
+  if (dragged && upPoint && (upPoint.xU !== began.start.xU || upPoint.zU !== began.start.zU)) {
+    const outcome = commitWallDraw(source, began, upPoint);
+    if (outcome.status === 'committed') return { kind: 'commit', commit: outcome.commit };
+    return { kind: 'miss', reason: outcome.reason };
+  }
+  return { kind: 'anchor', gesture: began };
+}
+
 /** One committed gesture becomes exactly one semantic command. Every structural
  * measurement comes from the SELECTED MEASURED STYLE — the tool contributes only
  * the drawn span. */
@@ -132,9 +169,9 @@ export function wallDrawCommand(
     end: commit.end,
     ...(commit.startMagnetVertexId ? { startMagnetVertexId: commit.startMagnetVertexId } : {}),
     ...(commit.endMagnetVertexId ? { endMagnetVertexId: commit.endMagnetVertexId } : {}),
-    // Storeys are 3 m (METERS_PER_LEVEL) = 48 u; slab support arrives with the
-    // floor family — until then the base is the storey's absolute height.
-    support: { kind: 'absolute', baseYU: commit.floor * 48 },
+    // Slab support arrives with the floor family — until then the base is the
+    // storey's absolute height.
+    support: { kind: 'absolute', baseYU: commit.floor * STOREY_HEIGHT_U },
     heightU: style.wallStyleDefaults.heightU,
     thicknessU: style.wallStyleDefaults.thicknessU,
     profile: style.wallStyleDefaults.profile,
