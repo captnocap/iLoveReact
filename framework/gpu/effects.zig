@@ -379,7 +379,13 @@ const Instance = struct {
             return false;
         };
 
-        const bg = images.createBindGroup(view, sampler) orelse {
+        // Through gpu_core (gpu_api), NOT images directly (req_4632): in the
+        // scene3d dev module this file links a dead copy of images.zig whose
+        // pipeline/layout globals are null — createBindGroup returned null and
+        // every material bake died at target creation while the device was fine.
+        // gpu_api routes to the core's LIVE images state across the ABI; in
+        // core/ship builds it forwards to the same images.createBindGroup.
+        const bg = gpu_core.createImageBindGroup(view, sampler) orelse {
             sampler.release();
             view.release();
             tex.destroy();
@@ -1485,7 +1491,12 @@ pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map
     inst.shader_desc = null; // `full` is freed on return; the pipeline is already built
     if (!(size_ok and pipe_ok and render_ok)) {
         g_material_bake_refusal = if (!size_ok)
-            "render target creation failed — no GPU device reachable from this build shape"
+            // Name the two halves separately (req_4632: the merged wording blamed
+            // the device while the real failure was the image bind group).
+            (if (gpu_core.getDevice() == null)
+                "no GPU device is reachable from this build shape"
+            else
+                "render target creation failed (texture/view/sampler/image bind group)")
         else if (!pipe_ok)
             "the WGSL failed to compile into a pipeline (wgpu prints the compile error in the host log)"
         else
