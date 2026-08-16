@@ -1973,7 +1973,54 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
             : { measured: false, reason: 'mesh is over the audit budget — intersecting/unreachable are UNKNOWN, not zero' },
       } };
     }
-    return { ok: false, reason: `unknown stats operation "${operation}" — edges, boundary, symmetry, or anomalies` };
+    if (operation === 'coincident') {
+      // "Which positions hold MORE than one vertex" — the whole-mesh stacked-vertex
+      // census, interior included. `boundary` sees only open rims, but the residue of
+      // an identity-less weld is often interior and invisible to it (req_4658).
+      // Optional `at: [x,y,z]` probes ONE position instead: how many vertices live
+      // there — count 1 is a fused vertex, count 2+ is a stacked twin group.
+      const topology = elements();
+      if (!topology) return { ok: false, reason: 'topology descriptors unavailable' };
+      const leash = Math.max(tolerance, Number.EPSILON);
+      const probe = Array.isArray(args.at) && (args.at as unknown[]).length === 3 ? (args.at as unknown[]).map(Number) : null;
+      if (probe) {
+        if (!probe.every(Number.isFinite)) return { ok: false, reason: 'at must be [x,y,z] numbers' };
+        const near = topology.vertices.filter((vertex) => vertex.at.every((value, axis) => Math.abs(value - probe[axis]!) <= leash));
+        return { ok: true, result: { at: probe, tolerance: leash, count: near.length, vertices: near.slice(0, 16) } };
+      }
+      const quantize = (value: number) => Math.round(value / leash);
+      const byPosition = new Map<string, { id: number; at: [number, number, number] }[]>();
+      for (const vertex of topology.vertices) {
+        const key = `${quantize(vertex.at[0])}|${quantize(vertex.at[1])}|${quantize(vertex.at[2])}`;
+        byPosition.set(key, [...(byPosition.get(key) ?? []), vertex]);
+      }
+      const openVertices = new Set<number>();
+      for (const edge of topology.edges) if (edge.open || edge.faces < 2) for (const vertex of edge.vertices) openVertices.add(vertex);
+      // An edge between two stacked ids means the span between them collapsed but
+      // stayed surface-connected; NO edge between them is the loose-shell signature.
+      const linked = new Set<string>();
+      for (const edge of topology.edges) {
+        const [a, b] = edge.vertices;
+        linked.add(a < b ? `${a}|${b}` : `${b}|${a}`);
+      }
+      const groups = [...byPosition.values()].filter((stack) => stack.length > 1).map((stack) => ({
+        vertices: stack.map((vertex) => vertex.id),
+        at: stack[0]!.at,
+        open: stack.some((vertex) => openVertices.has(vertex.id)),
+        connected: stack.some((a, i) => stack.some((b, j) => j > i && linked.has(a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`))),
+      }));
+      const interior = groups.filter((group) => !group.open);
+      return { ok: true, result: {
+        totalVertices: topology.vertices.length,
+        stackedGroups: groups.length,
+        interiorStackedGroups: interior.length,
+        openStackedGroups: groups.length - interior.length,
+        connectedStackedGroups: groups.filter((group) => group.connected).length,
+        interiorSamples: interior.slice(0, 24),
+        tolerance: leash,
+      } };
+    }
+    return { ok: false, reason: `unknown stats operation "${operation}" — edges, boundary, symmetry, anomalies, or coincident` };
   };
   /** Seat one target's facing plane onto another's. `dryRun` returns the delta the
    *  agent used to compute by hand; the plain form applies it as one undo step, so
