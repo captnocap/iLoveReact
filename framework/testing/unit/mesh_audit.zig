@@ -255,3 +255,34 @@ test "an over-budget audit leaves no stale marks" {
     try testing.expect(!facts.computed);
     for (unreachable_faces) |flag| try testing.expect(!flag);
 }
+
+test "a 12k-face field is measured, and its one burial and one penetration are found" {
+    // The req_4557 shape: dense-import scale (over the retired 6k quadratic-era cap)
+    // must still be MEASURED, and the BVH must reach the same verdicts the linear
+    // scans reached on the small fixtures above — one sealed box (12 unreachable,
+    // zero penetration) and one corner-overlap pair (penetrating), buried in a field
+    // of clean separated boxes that contribute nothing to either count.
+    const allocator = testing.allocator;
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
+    defer verts.deinit(allocator);
+    var placed: usize = 0;
+    while (placed < 1000) : (placed += 1) {
+        const gx: f32 = @floatFromInt(placed % 32);
+        const gz: f32 = @floatFromInt(placed / 32);
+        try box(&verts, allocator, .{ gx * 3, 0, gz * 3 }, .{ gx * 3 + 1, 1, gz * 3 + 1 });
+    }
+    try box(&verts, allocator, .{ -20, 0, -20 }, .{ -16, 4, -16 }); // shell, off-grid
+    try box(&verts, allocator, .{ -19, 1, -19 }, .{ -18, 2, -18 }); // sealed inside it
+    try box(&verts, allocator, .{ 200, 0, 0 }, .{ 202, 2, 2 });
+    try box(&verts, allocator, .{ 201, 1, 1 }, .{ 203, 3, 3 }); // corner-overlaps
+
+    const face_count = faces(verts);
+    try testing.expect(face_count > 6_000);
+    const facts = mesh_audit.audit(allocator, verts.items, face_count, .{}, null, .{});
+    try testing.expect(facts.computed);
+    try testing.expect(facts.intersecting > 0);
+    // The sealed box is buried; the overlapping corner also seals interior slivers,
+    // so the exact total varies with the crossing — but never below the 12 and never
+    // a clean zero.
+    try testing.expect(facts.unreachable_faces >= 12);
+}

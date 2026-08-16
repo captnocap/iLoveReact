@@ -47,10 +47,12 @@ pub const Marks = struct {
 };
 
 pub const Budget = struct {
-    /// Above this the pass is skipped. Both passes are quadratic in the worst case and
-    /// this runs once per topology generation on the interactive path, so the cap is
-    /// set for authored models (the mopeds are ~2k) rather than dense imports.
-    max_faces: u32 = 6_000,
+    /// Above this the pass is skipped. Both passes ride the flat BVH below (n·log n)
+    /// and run on the bounded face-table worker, never the frame path — the old 6_000
+    /// cap guarded the pre-BVH quadratic scans and left every dense import reading
+    /// "not measured" (req_4557: a 9.4k-tri quad remesh tripped it). The cap now only
+    /// exists so a pathological import cannot pin the worker for minutes.
+    max_faces: u32 = 200_000,
     /// Sphere sample count. 42 resolves oblique escape gaps that 6 axis directions
     /// miss, while staying cheap enough to run per edit.
     directions: u32 = 42,
@@ -92,6 +94,156 @@ fn boxesOverlap(a: Box, b: Box) bool {
     return !(a.lo[0] > b.hi[0] or a.hi[0] < b.lo[0] or
         a.lo[1] > b.hi[1] or a.hi[1] < b.lo[1] or
         a.lo[2] > b.hi[2] or a.hi[2] < b.lo[2]);
+}
+
+// ── Spatial index ─────────────────────────────────────────────────────────────
+// Flat median-split BVH over the face boxes. Both facts consult it: penetration
+// asks "which boxes overlap mine", reachability asks "does this ray meet any
+// triangle". Median split on the widest centroid axis keeps the tree balanced,
+// so the traversal stack below is bounded by tree depth (~log2(n/leaf)).
+
+const leaf_faces: u32 = 8;
+
+const BvhNode = struct {
+    box: Box,
+    /// Leaf when `count > 0`: faces are `order[start .. start + count]`.
+    start: u32 = 0,
+    count: u32 = 0,
+    left: u32 = 0,
+    right: u32 = 0,
+};
+
+const Bvh = struct {
+    nodes: []BvhNode,
+    order: []u32,
+
+    fn deinit(self: *Bvh, allocator: std.mem.Allocator) void {
+        allocator.free(self.nodes);
+        allocator.free(self.order);
+    }
+};
+
+fn centroidAxis(box: Box, axis: usize) f32 {
+    return (box.lo[axis] + box.hi[axis]) * 0.5;
+}
+
+const CentroidLess = struct {
+    boxes: []const Box,
+    axis: usize,
+    fn lessThan(self: @This(), a: u32, b: u32) bool {
+        return centroidAxis(self.boxes[a], self.axis) < centroidAxis(self.boxes[b], self.axis);
+    }
+};
+
+fn buildRange(nodes: []BvhNode, next: *u32, boxes: []const Box, order: []u32, start: u32, count: u32) u32 {
+    const index = next.*;
+    next.* += 1;
+    var box = boxes[order[start]];
+    for (order[start + 1 .. start + count]) |face| {
+        const b = boxes[face];
+        for (0..3) |axis| {
+            box.lo[axis] = @min(box.lo[axis], b.lo[axis]);
+            box.hi[axis] = @max(box.hi[axis], b.hi[axis]);
+        }
+    }
+    if (count <= leaf_faces) {
+        nodes[index] = .{ .box = box, .start = start, .count = count };
+        return index;
+    }
+    var axis: usize = 0;
+    var widest: f32 = -1;
+    for (0..3) |candidate| {
+        const width = box.hi[candidate] - box.lo[candidate];
+        if (width > widest) {
+            widest = width;
+            axis = candidate;
+        }
+    }
+    std.mem.sortUnstable(u32, order[start .. start + count], CentroidLess{ .boxes = boxes, .axis = axis }, CentroidLess.lessThan);
+    const half = count / 2;
+    const left = buildRange(nodes, next, boxes, order, start, half);
+    const right = buildRange(nodes, next, boxes, order, start + half, count - half);
+    nodes[index] = .{ .box = box, .left = left, .right = right };
+    return index;
+}
+
+/// Null only on allocation failure; the caller reports "not measured" as for any
+/// other unfulfilled audit. `boxes` must be non-empty.
+fn buildBvh(allocator: std.mem.Allocator, boxes: []const Box) ?Bvh {
+    const n: u32 = @intCast(boxes.len);
+    const order = allocator.alloc(u32, n) catch return null;
+    for (order, 0..) |*slot, i| slot.* = @intCast(i);
+    // A binary tree over n faces with any leaf size has at most 2n-1 nodes.
+    const nodes = allocator.alloc(BvhNode, @as(usize, n) * 2) catch {
+        allocator.free(order);
+        return null;
+    };
+    var next: u32 = 0;
+    _ = buildRange(nodes, &next, boxes, order, 0, n);
+    return .{ .nodes = nodes, .order = order };
+}
+
+// Balanced median split bounds depth at ~log2(n); 64 entries covers any u32 count.
+const traversal_depth = 64;
+
+/// Flag every face that face `x` penetrates (and `x` itself). Considers only
+/// faces `y > x`, so every unordered pair is tested exactly once across the
+/// caller's loop over all x.
+fn markPenetrationsFor(bvh: *const Bvh, boxes: []const Box, verts: []const f32, x: u32, hit_flags: []bool) void {
+    const target = boxes[x];
+    var stack: [traversal_depth]u32 = undefined;
+    var sp: usize = 1;
+    stack[0] = 0;
+    while (sp > 0) {
+        sp -= 1;
+        const node = bvh.nodes[stack[sp]];
+        if (!boxesOverlap(target, node.box)) continue;
+        if (node.count > 0) {
+            for (bvh.order[node.start .. node.start + node.count]) |y| {
+                if (y <= x) continue;
+                if (hit_flags[x] and hit_flags[y]) continue;
+                if (!boxesOverlap(target, boxes[y])) continue;
+                if (!penetrates(verts, x, y)) continue;
+                hit_flags[x] = true;
+                hit_flags[y] = true;
+            }
+            continue;
+        }
+        stack[sp] = node.left;
+        stack[sp + 1] = node.right;
+        sp += 2;
+    }
+}
+
+/// Any-hit query for the reachability pass: does the ray meet any non-glass
+/// triangle other than the origin face?
+fn rayBlockedByMesh(bvh: *const Bvh, boxes: []const Box, verts: []const f32, glass: ?[]const bool, self_index: u32, origin: Vec3, dir: Vec3, inv: Vec3, far: f32) bool {
+    var stack: [traversal_depth]u32 = undefined;
+    var sp: usize = 1;
+    stack[0] = 0;
+    while (sp > 0) {
+        sp -= 1;
+        const node = bvh.nodes[stack[sp]];
+        if (!rayHitsBox(origin, inv, node.box, far)) continue;
+        if (node.count > 0) {
+            for (bvh.order[node.start .. node.start + node.count]) |other| {
+                if (other == self_index) continue;
+                if (glass) |rows| {
+                    if (rows[other]) continue; // rays pass through glass
+                }
+                if (!rayHitsBox(origin, inv, boxes[other], far)) continue;
+                const oa = corner(verts, other, 0);
+                const ob = corner(verts, other, 1);
+                const oc = corner(verts, other, 2);
+                if (rayTriangle(origin, dir, oa, ob, oc, 1e-5, far) != null) return true;
+            }
+            continue;
+        }
+        stack[sp] = node.left;
+        stack[sp + 1] = node.right;
+        sp += 2;
+    }
+    return false;
 }
 
 /// Slab test: can a ray from `origin` along `dir` reach `box` at all? Cheap enough to
@@ -301,20 +453,16 @@ pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, 
         }
     }
 
+    var bvh = buildBvh(allocator, boxes) orelse return .{};
+    defer bvh.deinit(allocator);
+
     // ── Fact 1: penetration ────────────────────────────────────────────────────
-    // Every pair is considered, but an AABB reject settles almost all of them before
-    // the segment tests. Both faces of a penetrating pair are flagged, so the count is
-    // "triangles involved in a penetration", not "pairs".
+    // Every pair is considered exactly once (the query only visits y > x); the BVH
+    // settles almost all of them at node level before the segment tests. Both faces
+    // of a penetrating pair are flagged, so the count is "triangles involved in a
+    // penetration", not "pairs".
     for (0..face_count) |x| {
-        const xi: u32 = @intCast(x);
-        for (x + 1..face_count) |y| {
-            const yi: u32 = @intCast(y);
-            if (hit_flags[xi] and hit_flags[yi]) continue;
-            if (!boxesOverlap(boxes[xi], boxes[yi])) continue;
-            if (!penetrates(verts, xi, yi)) continue;
-            hit_flags[xi] = true;
-            hit_flags[yi] = true;
-        }
+        markPenetrationsFor(&bvh, boxes, verts, @intCast(x), hit_flags);
     }
     var intersecting: u32 = 0;
     for (hit_flags) |flag| {
@@ -352,23 +500,7 @@ pub fn audit(allocator: std.mem.Allocator, verts: []const f32, face_count: u32, 
             const dir = sampleDirection(d, budget.directions);
             if (dot(normal, dir) <= 1e-6) continue; // behind the face: not its side
             const inv = Vec3{ 1.0 / dir[0], 1.0 / dir[1], 1.0 / dir[2] };
-            var blocked = false;
-            for (0..face_count) |other| {
-                const oi: u32 = @intCast(other);
-                if (oi == self_index) continue;
-                if (glass) |rows| {
-                    if (rows[oi]) continue; // rays pass through glass
-                }
-                if (!rayHitsBox(origin, inv, boxes[oi], far)) continue;
-                const oa = corner(verts, oi, 0);
-                const ob = corner(verts, oi, 1);
-                const oc = corner(verts, oi, 2);
-                if (rayTriangle(origin, dir, oa, ob, oc, 1e-5, far) != null) {
-                    blocked = true;
-                    break;
-                }
-            }
-            if (!blocked) escaped = true;
+            if (!rayBlockedByMesh(&bvh, boxes, verts, glass, self_index, origin, dir, inv, far)) escaped = true;
         }
         if (!escaped) {
             unreachable_count += 1;
