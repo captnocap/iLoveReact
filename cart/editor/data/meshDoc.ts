@@ -88,6 +88,17 @@ export type ResidentSemanticSaveState = {
   table: MeshSemanticTable;
 };
 
+/** Authored-face count of the resident mesh (the host's group table), 0 when the
+ * host is unreachable or the mesh carries no authored groups. The single-part
+ * establishment path below requires a real group table before seeding a range,
+ * because the host's healing law expands a sole range over that table. */
+function residentAuthoredFaceCount(): number {
+  try {
+    const parsed = JSON.parse(String(host.__mesh_semantic_state?.() ?? 'null'));
+    return Number.isInteger(parsed?.authoredFaces) && parsed.authoredFaces > 0 ? parsed.authoredFaces : 0;
+  } catch { return 0; }
+}
+
 function readResidentSemanticSaveState(): ResidentSemanticSaveState | null {
   try {
     const raw = host.__mesh_semantic_state?.();
@@ -385,6 +396,24 @@ export function writeMeshDoc(
         pairs[index * 2 + 1] = range.hi;
       });
       host.__mesh_set_part_ranges?.(pairs);
+      hostRanges = hostPartRanges();
+    }
+    // First-save materialization of an UNPARTED import (req_4589): a package that
+    // arrives as manifest + raw source mesh (the agent import lane) opens with no
+    // host part ranges and one synthetic outliner row whose lo/hi were never
+    // stamped — recoveryRanges has nothing to restore, so the merged-parts guard
+    // below refused every save and the dirty document could never cross a
+    // navigation boundary (autosave-on-leave kept bouncing the tab switch).
+    // With exactly ONE declared part and no durable range table that could be
+    // merged away, establishing the trivial whole-mesh range destroys no
+    // boundary: seed a sole range and let the host's own healing law
+    // (healedSinglePartRange inside __mesh_set_part_ranges) expand it to the
+    // exact span of the resident authored-group table — the span is computed
+    // HOST-side, never guessed here.
+    if (hostRanges.length === 0 && parts.length === 1
+      && meshDocDurablePartCount(priorDoc?.storedRangeCount, priorPartCount) <= 1
+      && residentAuthoredFaceCount() > 0) {
+      host.__mesh_set_part_ranges?.(new Uint32Array([0, 1]));
       hostRanges = hostPartRanges();
     }
     if (hostRanges.length !== parts.length) {
