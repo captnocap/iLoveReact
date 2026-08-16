@@ -523,11 +523,12 @@ pub fn encodeCurrentSnapshotWithRangeObjectIdsAlloc(
 
     const semantics_absent = snapshot.semantic_regions == null or
         (snapshot.semantic_regions.?.len == 0 and snapshot.semantic_instances.?.len == 0);
-    if (semantics_absent and snapshot.render_corner_logical_ids != null) {
-        // A logical character snapshot has always required authored semantic rows.
-        // Neutral synthesis is only the non-logical pre-v4 migration path.
-        return refuseEncode("logical topology present but the snapshot carries no semantic rows");
-    }
+    // Absent semantics synthesize as explicitly-unassigned rows for logical and
+    // non-logical props alike. Fresh primitives are born WITH v5 logical topology
+    // now, and their naming debt is real but must stay a visible state, never a
+    // save refusal (req_4551 — a New Mesh cube could not make its first save).
+    // Character saves still require authored rows: they use the dedicated
+    // encodeSnapshotWithRangeObjectIdsAlloc path, which never synthesizes.
     if (semantics_absent) {
         unassigned_regions = try allocator.alloc(u32, face_count);
         unassigned_instances = try allocator.alloc(u32, face_count);
@@ -1311,6 +1312,52 @@ test "canonical current RJMD v5 stamps stable range ids onto anonymous topology"
     try std.testing.expectEqualStrings("stable-body", document.range_object_ids.?[0]);
     try std.testing.expectEqualStrings("stable-wheel", document.range_object_ids.?[1]);
     try std.testing.expectEqualSlices(u32, &ranges, document.ranges);
+}
+
+test "a fresh logical primitive with zero semantic rows saves as explicit naming debt (req_4551)" {
+    // The New Mesh cube: born with v5 logical topology and NO authored semantics.
+    // Its first save must synthesize explicitly-unassigned rows, never refuse —
+    // refusing here bricked the whole New Mesh -> Paint -> atlas flow.
+    var verts = [_]f32{0} ** (6 * 8);
+    const positions = [_][3]f32{
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 1, 0 },
+        .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 0, 0, 1 },
+    };
+    for (positions, 0..) |position, corner| {
+        const at = corner * 8;
+        verts[at] = position[0];
+        verts[at + 1] = position[1];
+        verts[at + 2] = position[2];
+    }
+    const snapshot = Snapshot{
+        .verts = verts[0..],
+        .groups = @constCast(&[_]u32{ 0, 1 }),
+        .materials = null,
+        .semantic_regions = null,
+        .semantic_instances = null,
+        .render_corner_logical_ids = @constCast(&[_]u32{ 0, 1, 2, 0, 1, 3 }),
+        .logical_vertex_count = 4,
+        .dense_to_stable_logical_ids = null,
+        .semantic_table_json = null,
+        .glass_first_vertex = 6,
+    };
+    const ranges = [_]u32{ 0, 2 };
+    const object_ids = [_][]const u8{"part:cube:1"};
+    const bytes = try encodeCurrentSnapshotWithRangeObjectIdsAlloc(
+        std.testing.allocator,
+        &snapshot,
+        &ranges,
+        &object_ids,
+    );
+    defer std.testing.allocator.free(bytes);
+    var document = try decodeDocument(std.testing.allocator, bytes);
+    defer document.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u32, VERSION_LOGICAL_TOPOLOGY), document.version);
+    try std.testing.expectEqual(@as(u32, 4), document.logical_vertex_count);
+    try std.testing.expectEqualSlices(u32, &.{ 0, 1, 2, 0, 1, 3 }, document.render_corner_logical_ids.?);
+    try std.testing.expectEqualSlices(u32, &.{ std.math.maxInt(u32), std.math.maxInt(u32) }, document.semantic_regions.?);
+    try std.testing.expectEqualSlices(u32, &.{ std.math.maxInt(u32), std.math.maxInt(u32) }, document.semantic_instances.?);
+    try std.testing.expectEqualStrings("part:cube:1", document.range_object_ids.?[0]);
 }
 
 test "RJMD v5 persists stable object ids against exact range values" {
