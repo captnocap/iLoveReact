@@ -26,25 +26,86 @@ export type OpeningKitArm = {
   permittedProfiles: readonly WallProfile[];
 };
 
-/** The first installed kit of the requested kind — the Draw Wall convention
- * (first measured style wins) until a kit picker exists. Null when nothing of
- * that kind is installed; the tool then refuses to arm with a pointer to the
- * export verb. */
+function kitArmFromEntry(entry: ArchitectureCatalogEntry): OpeningKitArm | null {
+  if (entry.family !== 'wall' || entry.role !== 'opening') return null;
+  if (!entry.measurement.footprint || !entry.wallOpeningCompatibility) return null;
+  return {
+    catalogId: entry.catalogId,
+    kind: entry.semanticKind as WallOpeningKind,
+    label: entry.label,
+    footprint: { ...entry.measurement.footprint },
+    minimumThicknessU: entry.wallOpeningCompatibility.minimumThicknessU,
+    permittedProfiles: [...entry.wallOpeningCompatibility.permittedProfiles],
+  };
+}
+
+/** The palette tile id for an installed opening kit — the Doors/Windows
+ * categories arm THROUGH the palette (req_4513: "the door is cutting into
+ * the wall"), never through tool keys. */
+export const OPENING_PALETTE_PREFIX = 'opening:';
+
+export function openingPaletteId(catalogId: string): string {
+  return `${OPENING_PALETTE_PREFIX}${catalogId}`;
+}
+
+export function openingCatalogIdOf(paletteId: string): string | null {
+  return paletteId.startsWith(OPENING_PALETTE_PREFIX) ? paletteId.slice(OPENING_PALETTE_PREFIX.length) : null;
+}
+
+const DOOR_FAMILY: readonly WallOpeningKind[] = ['door', 'garageDoor', 'slidingDoor', 'arch'];
+
+export type OpeningPaletteEntry = {
+  paletteId: string;
+  catalogId: string;
+  packageId: string;
+  label: string;
+  kind: WallOpeningKind;
+};
+export type OpeningPaletteGroup = { key: 'doorKits' | 'windowKits'; label: string; entries: OpeningPaletteEntry[] };
+
+/** Doors and Windows as build categories: every installed opening kit becomes
+ * one palette tile, doors-family first. Empty groups are omitted — the palette
+ * never shows a dead category. */
+export function openingPaletteGroups(entries: readonly ArchitectureCatalogEntry[]): OpeningPaletteGroup[] {
+  const doors: OpeningPaletteEntry[] = [];
+  const windows: OpeningPaletteEntry[] = [];
+  for (const entry of entries) {
+    const kit = kitArmFromEntry(entry);
+    if (!kit) continue;
+    const row: OpeningPaletteEntry = {
+      paletteId: openingPaletteId(entry.catalogId),
+      catalogId: entry.catalogId,
+      packageId: entry.packageId,
+      label: entry.label,
+      kind: kit.kind,
+    };
+    (DOOR_FAMILY.includes(kit.kind) ? doors : windows).push(row);
+  }
+  const groups: OpeningPaletteGroup[] = [];
+  if (doors.length) groups.push({ key: 'doorKits', label: 'Doors', entries: doors });
+  if (windows.length) groups.push({ key: 'windowKits', label: 'Windows', entries: windows });
+  return groups;
+}
+
+/** The armed kit by its exact catalog id — what a palette tile arms. */
+export function armedOpeningKitById(
+  entries: readonly ArchitectureCatalogEntry[],
+  catalogId: string,
+): OpeningKitArm | null {
+  const entry = entries.find((candidate) => candidate.catalogId === catalogId);
+  return entry ? kitArmFromEntry(entry) : null;
+}
+
+/** The first installed kit of the requested kind — the fallback when the tool
+ * activates without a palette choice (action-bar button, harness). Null when
+ * nothing of that kind is installed. */
 export function armedOpeningKitFromEntries(
   entries: readonly ArchitectureCatalogEntry[],
   kind: WallOpeningKind,
 ): OpeningKitArm | null {
   const entry = entries.find((candidate) => candidate.family === 'wall'
     && candidate.role === 'opening' && candidate.semanticKind === kind);
-  if (!entry || !entry.measurement.footprint || !entry.wallOpeningCompatibility) return null;
-  return {
-    catalogId: entry.catalogId,
-    kind,
-    label: entry.label,
-    footprint: { ...entry.measurement.footprint },
-    minimumThicknessU: entry.wallOpeningCompatibility.minimumThicknessU,
-    permittedProfiles: [...entry.wallOpeningCompatibility.permittedProfiles],
-  };
+  return entry ? kitArmFromEntry(entry) : null;
 }
 
 /** Nearest legal anchor to the hovered surface cell, by squared lattice

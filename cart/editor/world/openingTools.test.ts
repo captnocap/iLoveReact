@@ -1,7 +1,11 @@
 import {
+  armedOpeningKitById,
   armedOpeningKitFromEntries,
+  openingCatalogIdOf,
   openingEdgeRefusal,
   openingGhostCorners,
+  openingPaletteGroups,
+  openingPaletteId,
   snapOpeningSlot,
   type OpeningKitArm,
 } from './openingTools';
@@ -99,6 +103,26 @@ test('the ghost rectangle spans the footprint along the edge from its start', ()
   assert(Math.abs(diagonal[0]!.x - (2.5 - 0.5) * 0.6) < 1e-9, 'diagonal edges project through the unit direction');
   assert(Math.abs(diagonal[0]!.y - 1.5) < 1e-9, 'base height + row offset');
   assert(openingGhostCorners({ xM: 1, zM: 1 }, { xM: 1, zM: 1 }, 0, { columnU: 0, rowU: 0 }, KIT.footprint) === null, 'a degenerate edge draws nothing');
+});
+
+test('the palette is the kit picker: doors and windows group, ids round-trip, exact-id arming', () => {
+  const window = doorEntry({
+    catalogId: 'build:wall:opening:window:window-001', label: 'window_001',
+    semanticKind: 'window',
+    wallOpeningCompatibility: { permittedProfiles: ['full'], minimumThicknessU: 2, portalClass: 'none' },
+  });
+  const arch = doorEntry({ catalogId: 'build:wall:opening:arch:arch-001', label: 'arch_001', semanticKind: 'arch' });
+  const groups = openingPaletteGroups([doorEntry(), window, arch]);
+  assert(groups.length === 2 && groups[0]!.key === 'doorKits' && groups[1]!.key === 'windowKits', 'doors first, windows second');
+  assert(groups[0]!.entries.length === 2, 'arch joins the door family');
+  assert(groups[0]!.entries[0]!.paletteId === 'opening:build:wall:opening:door:door-001', 'palette id carries the catalog id');
+  assert(openingCatalogIdOf(groups[0]!.entries[0]!.paletteId) === 'build:wall:opening:door:door-001', 'palette id round-trips');
+  assert(openingCatalogIdOf('model:cube') === null, 'foreign palette ids resolve to null');
+  assert(openingPaletteGroups([]).length === 0, 'no kits, no dead categories');
+  const armed = armedOpeningKitById([doorEntry(), window], 'build:wall:opening:window:window-001');
+  assert(armed && armed.label === 'window_001' && armed.minimumThicknessU === 2, 'exact-id arming picks THAT kit');
+  assert(armedOpeningKitById([doorEntry()], 'build:wall:opening:door:gone') === null, 'a missing id arms nothing');
+  assert(openingPaletteId('x') === 'opening:x', 'prefix law');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

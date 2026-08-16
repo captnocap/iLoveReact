@@ -21,6 +21,8 @@ import { authoredMeshData } from '../world/authoredMesh';
 import { buildPartsThumbView, type PartsThumbView } from '../library/modelThumb';
 import { stampWorldPrefab, type WorldPrefab } from '../world/prefabs';
 import type { PlacedPiece } from '../world/pieces';
+import { openingPaletteGroups, openingPaletteId } from '../world/openingTools';
+import { authoredModelIdForPackage, installedOpeningKits } from '../data/initialState';
 
 // Same shot backdrop as the model gallery (library/ModelThumbnail.tsx).
 const THUMB_BG = '#0e1622';
@@ -31,11 +33,23 @@ const THUMB_BG = '#0e1622';
 // become resolvable once its package loads.
 const VIEW_CACHE = new Map<string, PartsThumbView>();
 
+// Doors/Windows tiles (req_4513) resolve their photograph through the kit's
+// own model package; this map carries paletteId → packageId for thumbViewFor.
+const OPENING_PKG_BY_PALETTE_ID = new Map<string, string>();
+
 function thumbViewFor(entry: PlaceableEntry): PartsThumbView | null {
   const hit = VIEW_CACHE.get(entry.id);
   if (hit) return hit;
   let view: PartsThumbView | null = null;
-  if (entry.authored) {
+  const openingPkg = OPENING_PKG_BY_PALETTE_ID.get(entry.id);
+  if (openingPkg) {
+    const vertices = authoredMeshData(authoredModelIdForPackage(openingPkg), openingPkg);
+    if (vertices) {
+      view = buildPartsThumbView([
+        { key: `opening:${openingPkg}`, vertices, count: Math.floor(vertices.length / 8), color: entry.hex },
+      ]);
+    }
+  } else if (entry.authored) {
     const piece = authoredPieceFor(entry.id);
     const vertices = piece ? authoredMeshData(piece.modelId, piece.pkgId) : null;
     if (piece && vertices) {
@@ -140,20 +154,34 @@ function PrefabThumb({ prefab }: { prefab: WorldPrefab }) {
   );
 }
 
-type PaletteKind = PlaceableKind | 'prefabs';
+type PaletteKind = PlaceableKind | 'prefabs' | 'doorKits' | 'windowKits';
 
-export default function BuildBar(props: { armedPieceId: string | null; prefabs: readonly WorldPrefab[]; onArm: (pieceId: string) => void }) {
+export default function BuildBar(props: { armedPieceId: string | null; armedOpeningKitId: string | null; prefabs: readonly WorldPrefab[]; onArm: (pieceId: string) => void }) {
+  // Doors/Windows categories (req_4513): every installed opening kit is one
+  // tile; clicking it arms the Place Door/Window tool with THAT kit — the
+  // palette IS the kit picker.
+  const openingGroups = openingPaletteGroups(installedOpeningKits()).map((group) => {
+    const entries: PlaceableEntry[] = group.entries.map((row) => {
+      OPENING_PKG_BY_PALETTE_ID.set(row.paletteId, row.packageId);
+      return { id: row.paletteId, label: row.label, hex: '#8a93c0', authored: false };
+    });
+    return { kind: group.key as PaletteKind, label: group.label, entries };
+  });
   // Catalog pieces + authored (exported-mesh) pieces, grouped by kind.
   const groups = [
     ...placeablesByKind().map((group) => ({ ...group, kind: group.kind as PaletteKind })),
+    ...openingGroups,
     ...(props.prefabs.length > 0 ? [{ kind: 'prefabs' as const, label: 'Prefabs', entries: [] }] : []),
   ];
   // The visible category defaults to the armed piece's kind (so re-entering Build
   // lands on what you last armed), else the first group. Local state — switching
   // categories is pure browsing; only clicking a PIECE arms (writes EditorState).
-  const armedKind: PaletteKind | undefined = props.armedPieceId?.startsWith('prefab.')
-    ? 'prefabs'
-    : props.armedPieceId ? placeableKind(props.armedPieceId) : undefined;
+  const armedOpeningPaletteId = props.armedOpeningKitId ? openingPaletteId(props.armedOpeningKitId) : null;
+  const armedKind: PaletteKind | undefined = armedOpeningPaletteId
+    ? openingGroups.find((group) => group.entries.some((entry) => entry.id === armedOpeningPaletteId))?.kind
+    : props.armedPieceId?.startsWith('prefab.')
+      ? 'prefabs'
+      : props.armedPieceId ? placeableKind(props.armedPieceId) : undefined;
   const [activeKind, setActiveKind] = useState<PaletteKind>(armedKind ?? groups[0]?.kind ?? 'wall');
   useEffect(() => { if (armedKind) setActiveKind(armedKind); }, [armedKind]);
   const active = groups.find((g) => g.kind === activeKind) ?? groups[0];
@@ -187,7 +215,7 @@ export default function BuildBar(props: { armedPieceId: string | null; prefabs: 
             </Tile>
           );
         }) : active?.entries.map((entry) => {
-          const on = entry.id === props.armedPieceId;
+          const on = entry.id === props.armedPieceId || (armedOpeningPaletteId !== null && entry.id === armedOpeningPaletteId);
           const Tile = on ? C.HW_BuildPieceTileOn : C.HW_BuildPieceTile;
           const Label = on ? C.HW_BuildPieceTileLabelOn : C.HW_BuildPieceTileLabel;
           // Authored (mesh) pieces get a ◆ marker so they read as real models.

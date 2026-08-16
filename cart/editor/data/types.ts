@@ -725,6 +725,9 @@ export type EditorState = {
    *  member for the existing Inspector and edit commands. */
   selectedPieceIds: string[];
   armedPieceId: string | null;
+  /** The opening kit (catalogId) armed by a Doors/Windows palette tile —
+   * the Place Door/Window tool's ghost measures with it (req_4513). */
+  armedOpeningKitId: string | null;
   /** User turn applied to the next placement ghost (R). Edge snaps add this
    *  to their natural edge-facing instead of losing their snap orientation. */
   armedYawDegrees: number;

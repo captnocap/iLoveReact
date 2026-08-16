@@ -7,6 +7,7 @@ import {
   CommandAuthority,
   CommandRegistry,
   type CommandInvocation,
+  type CommandAvailability,
   type CommandOutcome,
   type CommandProjection,
   type CommandSource,
@@ -94,6 +95,10 @@ import {
   type ModelOutlinerPlan,
   type ModelOutlinerSnapshot,
 } from '../model/outlinerCommand';
+import {
+  registerAnimationCommands,
+  type EditorAnimationCommandAdapter,
+} from '../animation/commandRegistration';
 
 export const WORLD_FLOOR_STEP_COMMAND_ID = 'world.floor.step';
 export const WORLD_MAX_FLOOR = 128;
@@ -104,8 +109,7 @@ export const WORLD_FOCUS_TOOL_COMMAND_ID = 'focus-selection';
 export const WORLD_PAINT_FACES_TOOL_COMMAND_ID = 'paint-faces';
 export const WORLD_STICKER_TOOL_COMMAND_ID = 'place-sticker';
 export const WORLD_DRAW_WALL_TOOL_COMMAND_ID = 'draw-wall';
-export const WORLD_CUT_DOOR_TOOL_COMMAND_ID = 'cut-door';
-export const WORLD_CUT_WINDOW_TOOL_COMMAND_ID = 'cut-window';
+export const WORLD_CUT_OPENING_TOOL_COMMAND_ID = 'cut-opening';
 export const WORLD_TOOL_COMMAND_IDS = [
   WORLD_SELECT_TOOL_COMMAND_ID,
   WORLD_PLACE_TOOL_COMMAND_ID,
@@ -114,8 +118,7 @@ export const WORLD_TOOL_COMMAND_IDS = [
   WORLD_PAINT_FACES_TOOL_COMMAND_ID,
   WORLD_STICKER_TOOL_COMMAND_ID,
   WORLD_DRAW_WALL_TOOL_COMMAND_ID,
-  WORLD_CUT_DOOR_TOOL_COMMAND_ID,
-  WORLD_CUT_WINDOW_TOOL_COMMAND_ID,
+  WORLD_CUT_OPENING_TOOL_COMMAND_ID,
 ] as const;
 export type WorldToolCommandId = typeof WORLD_TOOL_COMMAND_IDS[number];
 export const WORLD_UNDO_COMMAND_ID = 'world.history.undo';
@@ -329,6 +332,7 @@ export interface EditorCommandAdapter {
   history: EditorHistoryAdapter;
   colorStudio: EditorColorStudioAdapter;
   modelOutliner: EditorModelOutlinerAdapter;
+  animation?: EditorAnimationCommandAdapter;
 }
 
 export type EditorCommandRequest = Omit<CommandInvocation, 'invocationId'> & {
@@ -339,6 +343,7 @@ export interface EditorApplicationCommands {
   invoke<Result = unknown>(request: EditorCommandRequest): CommandOutcome<Result>;
   command(id: string): CommandProjection | undefined;
   commandsByMenu(menu: string): readonly CommandProjection[];
+  availability(commandId: string, args?: unknown, origin?: string): CommandAvailability;
   resolveChord(chord: string, mode?: CommandMode): CommandProjection | undefined;
 }
 
@@ -426,9 +431,8 @@ const WORLD_TOOL_DEFS: readonly {
   { id: WORLD_PAINT_FACES_TOOL_COMMAND_ID, label: 'Paint Faces', icon: 'Paintbrush', menu: 'Build', chord: 'N' },
   { id: WORLD_STICKER_TOOL_COMMAND_ID, label: 'Place Sticker', icon: 'Sticker', menu: 'Build', chord: 'K' },
   { id: WORLD_DRAW_WALL_TOOL_COMMAND_ID, label: 'Draw Wall', icon: 'BrickWall', menu: 'Build', chord: 'G' },
-  // Cut Opening (req_4503): one tool, parameterized by the armed kit kind.
-  { id: WORLD_CUT_DOOR_TOOL_COMMAND_ID, label: 'Cut Door', icon: 'DoorOpen', menu: 'Build', chord: 'O' },
-  { id: WORLD_CUT_WINDOW_TOOL_COMMAND_ID, label: 'Cut Window', icon: 'Blinds', menu: 'Build', chord: 'U' },
+  // Place Opening (req_4513): armed from the Doors/Windows palette, no chord.
+  { id: WORLD_CUT_OPENING_TOOL_COMMAND_ID, label: 'Place Door / Window', icon: 'DoorOpen', menu: 'Build', chord: '' },
 ];
 
 export function isWorldToolCommandId(id: string): id is WorldToolCommandId {
@@ -610,7 +614,7 @@ export function createEditorApplicationCommands(
       effect: 'report-only',
       undoScope: 'none',
       projections: { menu: [tool.menu], toolbar: ['D.world'], palette: true },
-      keybindings: [{ chord: tool.chord, when: { surface: 'world' } }],
+      keybindings: tool.chord ? [{ chord: tool.chord, when: { surface: 'world' } }] : [],
       validateArgs: noArgs,
       isEnabled: () => {
         const blocked = adapter.blockedReason();
@@ -916,6 +920,8 @@ export function createEditorApplicationCommands(
     });
   }));
 
+  registerAnimationCommands(registry, adapter.animation);
+
   const authoringSurfaceEnabled = () => {
     const blocked = adapter.blockedReason();
     if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
@@ -1165,6 +1171,8 @@ export function createEditorApplicationCommands(
     },
     command: (id: string) => registry.command(id),
     commandsByMenu: (menu: string) => registry.byMenu(menu),
+    availability: (commandId: string, args?: unknown, origin?: string) =>
+      authority.availability({ commandId, args, origin }),
     resolveChord: (chord: string, mode: CommandMode = {}) => registry.resolveChord(chord, mode),
   });
 }

@@ -12,10 +12,9 @@ export function worldToolFor(activeCommandId: string): WorldTool {
     // Draw Wall (req_4473): click-click commits one semantic wall span; the
     // native engine builds the geometry. Never places a catalog piece.
     case 'draw-wall': return 'drawWall';
-    // Cut Opening (req_4503): door and window are ONE tool parameterized by the
-    // armed kit; the ghost snaps to engine-enumerated slots, a click cuts.
-    case 'cut-door': return 'cutOpening';
-    case 'cut-window': return 'cutOpening';
+    // Place Opening (req_4513): armed by clicking a Doors/Windows palette
+    // tile; the ghost follows the cursor and snaps to engine slots on walls.
+    case 'cut-opening': return 'cutOpening';
     case 'move-selection': return 'move';
     case 'focus-selection': return 'focus';
     // Paint Faces (req_2879): touching a face applies the active material to that

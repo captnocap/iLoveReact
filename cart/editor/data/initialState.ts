@@ -243,6 +243,7 @@ export function initialState(worldSave: InitialWorldArchitecture | null = null):
     // describe a "Concrete Floor" the user never chose, and hid PieceBody's
     // real empty state behind a constant (req_4435). The Build bar arms.
     armedPieceId: null,
+    armedOpeningKitId: null,
     armedYawDegrees: 0,
     armedStamp: null,
     recentMaterialIds: [],

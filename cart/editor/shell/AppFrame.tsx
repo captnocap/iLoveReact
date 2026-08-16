@@ -129,7 +129,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
 import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand } from '../world/architectureCommand';
-import { armedOpeningKitFromEntries, snapOpeningSlot } from '../world/openingTools';
+import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, snapOpeningSlot } from '../world/openingTools';
 import { architectureHost } from '../world/architectureHost';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
@@ -5092,15 +5092,16 @@ export default function AppFrame() {
     }, 'Delete wall'));
   };
 
-  /** The kit the Cut Opening tool measures with — resolved from the installed
-   *  catalog per generation, exactly the Draw Wall first-style convention. */
-  const armedOpeningKind = state.activeCommandId === 'cut-door' ? ('door' as const)
-    : state.activeCommandId === 'cut-window' ? ('window' as const) : null;
+  /** The kit the Place Door/Window tool measures with (req_4513): the palette
+   *  tile the user clicked, by exact catalog id; the bare action-bar button
+   *  falls back to the first installed door kit. */
+  const openingToolActive = state.activeCommandId === 'cut-opening';
   const catalogGeneration = architectureCatalogGeneration();
-  const armedOpeningKit = useMemo(
-    () => (armedOpeningKind ? armedOpeningKitFromEntries(installedOpeningKits(), armedOpeningKind) : null),
-    [armedOpeningKind, catalogGeneration],
-  );
+  const armedOpeningKit = useMemo(() => {
+    if (!openingToolActive) return null;
+    if (state.armedOpeningKitId) return armedOpeningKitById(installedOpeningKits(), state.armedOpeningKitId);
+    return armedOpeningKitFromEntries(installedOpeningKits(), 'door');
+  }, [openingToolActive, state.armedOpeningKitId, catalogGeneration]);
   const openingFootprints = useMemo(() => {
     const map: Record<string, ArchitectureFootprint> = {};
     for (const entry of installedOpeningKits()) {
@@ -5108,25 +5109,24 @@ export default function AppFrame() {
     }
     return map;
   }, [catalogGeneration]);
-  // Arming a cut tool with nothing installed says WHY the ghost never appears
-  // and names the export verb that fixes it.
+  // Activating the tool with nothing installed says WHY the ghost never
+  // appears and names the verbs that fix it.
   useEffect(() => {
-    if (armedOpeningKind && !armedOpeningKit) {
-      const label = armedOpeningKind === 'door' ? 'Door' : 'Window';
-      setState((prev) => ({ ...prev, status: `no ${armedOpeningKind} kit installed — open your model, then File → Export → Wall Opening → ${label}` }));
+    if (openingToolActive && !armedOpeningKit) {
+      setState((prev) => ({ ...prev, status: 'no door/window kits installed — export one (File → Export → Wall Opening), then pick it in the Build palette' }));
     }
-  }, [armedOpeningKind, armedOpeningKit]);
+  }, [openingToolActive, armedOpeningKit]);
 
   /** Cut Opening (req_4503): one green-ghost click becomes exactly one
    *  insertOpening command; the engine subtracts the measured footprint and
    *  the returned source rides the same world undo journal as drawWall. */
   const cutOpening = (hit: { edgeId: string; side: 'a' | 'b'; slot: WallCell }): boolean => {
     const current = stateRef.current;
-    const kind = current.activeCommandId === 'cut-door' ? ('door' as const)
-      : current.activeCommandId === 'cut-window' ? ('window' as const) : null;
-    const kit = kind ? armedOpeningKitFromEntries(installedOpeningKits(), kind) : null;
+    const kit = current.armedOpeningKitId
+      ? armedOpeningKitById(installedOpeningKits(), current.armedOpeningKitId)
+      : armedOpeningKitFromEntries(installedOpeningKits(), 'door');
     if (!kit) {
-      setState((prev) => ({ ...prev, status: 'cut opening: no kit armed — File → Export → Wall Opening installs one' }));
+      setState((prev) => ({ ...prev, status: 'no kit armed — pick a door or window from the Build palette' }));
       return false;
     }
     const commandId = architectureCommandId('opening', current.seq);
@@ -5354,9 +5354,30 @@ export default function AppFrame() {
   const storeWorldViewNow = () => runCommand('world-view-store', 'panel');
 
   const armPiece = (pieceId: string) => {
+    // A Doors/Windows tile (req_4513) arms the Place Door/Window tool with
+    // THAT kit in the same click — the ghost follows the cursor immediately;
+    // no tool key, no second step. "The door is cutting into the wall."
+    const openingCatalogId = openingCatalogIdOf(pieceId);
+    if (openingCatalogId) {
+      const kit = armedOpeningKitById(installedOpeningKits(), openingCatalogId);
+      setState((prev) => ({
+        ...prev,
+        armedOpeningKitId: openingCatalogId,
+        activeCommandId: 'cut-opening',
+        armedPieceId: null,
+        armedStamp: null,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        status: kit
+          ? `${kit.label} armed — bring it to a wall; green cuts, red tells you why`
+          : `that kit is no longer installed — re-export it (File → Export → Wall Opening)`,
+      }));
+      return;
+    }
     setState((prev) => ({
       ...prev,
       armedPieceId: pieceId,
+      armedOpeningKitId: null,
       armedYawDegrees: 0,
       // A palette arm drops any copy stamp (req_2733) — you're placing the
       // DEFINITION again, not the copied instance's materials.

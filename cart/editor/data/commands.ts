@@ -198,11 +198,11 @@ export const COMMANDS: Command[] = [
   // lattice; the engine builds the geometry. This is the NEW wall system — the
   // fixed wall pieces under Place Piece are the legacy products awaiting severance.
   { id: 'draw-wall', menu: 'Build', name: 'Draw Wall', icon: 'BrickWall', key: 'G', context: true, native: true, undoable: false, tool: true, scope: 'world' },
-  // Cut Opening (req_4503): aim at a drawn wall, the ghost snaps to the nearest
-  // legal slot the ENGINE enumerated, click cuts the measured kit through the
-  // wall. Door and Window are the same tool parameterized by the armed kit.
-  { id: 'cut-door', menu: 'Build', name: 'Cut Door', icon: 'DoorOpen', key: 'O', context: true, native: true, undoable: false, tool: true, scope: 'world' },
-  { id: 'cut-window', menu: 'Build', name: 'Cut Window', icon: 'Blinds', key: 'U', context: true, native: true, undoable: false, tool: true, scope: 'world' },
+  // Place Opening (req_4513 RULING: the palette is the entrance, not tool
+  // keys — "the door is cutting into the wall"). Clicking a Doors/Windows
+  // palette tile arms this tool with that kit; the ghost follows the cursor
+  // and snaps green/red on walls. No keyboard chord — one click does it all.
+  { id: 'cut-opening', menu: 'Build', name: 'Place Door / Window', icon: 'DoorOpen', key: '', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // Move is an armable mode: click a piece to grab it. Not selection-gated — the click selects.
   { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // R is mode-sensitive (req_0598): it spins the selected placed piece when one
@@ -535,7 +535,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), cmd('clear-walls'), MESH_SUBMENU],
   View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('mesh-measurements'), cmd('mesh-player-scale'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('draw-wall'), cmd('cut-door'), cmd('cut-window'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('draw-wall'), cmd('cut-opening'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   // Registry-projected C-tier commands are appended by the existing root
   // DropdownMenu. They deliberately do not enter this compatibility table.
   Animation: [],
