@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# retopo-corpus bundler (req_4592) — capture each hand-retopo session as a training
+# triple: source draft + edit trail (the seat's follow firehose) + final package.
+# The corpus lives in userdata/ (SIBLING of zig-out — no build cleanup reaches it).
+#
+#   tools/forge/corpus begin  <name> <source-mesh-file>   # start recording, file the source
+#   tools/forge/corpus finish <name> <package-dir>        # trail -> disk, bundle the final
+#   tools/forge/corpus list                               # inventory
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+ROOT=userdata/retopo-corpus
+
+cmd=${1:?usage: corpus begin|finish|list}
+case "$cmd" in
+  begin)
+    name=${2:?corpus begin <name> <source-mesh-file>}
+    src=${3:?corpus begin <name> <source-mesh-file>}
+    dir="$ROOT/$name"
+    mkdir -p "$dir/source"
+    cp "$src" "$dir/source/"
+    tools/seat follow clear >/dev/null 2>&1 || true
+    tools/seat follow start "corpus-$name" >/dev/null
+    date -u +%FT%TZ > "$dir/begun.txt"
+    echo "recording '$name' (source: $(basename "$src")) — retopo away."
+    echo "when done: tools/forge/corpus finish $name <package-dir>"
+    ;;
+  finish)
+    name=${2:?corpus finish <name> <package-dir>}
+    pkg=${3:?corpus finish <name> <package-dir>}
+    dir="$ROOT/$name"
+    [ -d "$dir" ] || { echo "no corpus entry '$name' — run begin first"; exit 1; }
+    if ! tools/seat follow read > "$dir/trail.json" 2>/dev/null; then
+      echo "WARN: edit trail read failed — bundle continues with source+final only"
+      rm -f "$dir/trail.json"
+    fi
+    tools/seat follow stop >/dev/null 2>&1 || true
+    rm -rf "$dir/final"
+    cp -r "$pkg" "$dir/final"
+    date -u +%FT%TZ > "$dir/finished.txt"
+    echo "bundled $dir:"
+    ls "$dir"
+    ;;
+  list)
+    [ -d "$ROOT" ] || { echo "corpus empty ($ROOT)"; exit 0; }
+    total=0
+    for entry in "$ROOT"/*/; do
+      [ -d "$entry" ] || continue
+      total=$((total + 1))
+      state="RECORDING"
+      [ -f "$entry/finished.txt" ] && state="done $(cat "$entry/finished.txt")"
+      trail="no-trail"
+      [ -f "$entry/trail.json" ] && trail="trail:$(du -h "$entry/trail.json" | cut -f1)"
+      echo "$(basename "$entry")  $state  $trail"
+    done
+    echo "-- $total entries"
+    ;;
+  *)
+    echo "usage: corpus begin <name> <source-mesh-file> | finish <name> <package-dir> | list"
+    exit 1
+    ;;
+esac
