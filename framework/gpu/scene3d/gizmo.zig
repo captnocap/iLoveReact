@@ -84,7 +84,7 @@ pub const OV_EDGE = [3]f32{ 0.62, 0.70, 0.85 }; // unselected boundary edge (rea
 pub const OV_WIRE = [3]f32{ 0.35, 0.91, 0.65 }; // naked Pen Edges wire (the tool's #58e8a6 accent)
 // Above this boundary-edge count, skip the overlay edge lines (a huge triangle soup with no
 // grouping would flood the pass) — the GPU wireframe toggle still shows topology.
-pub const OV_MAX_EDGE_LINES: u32 = 40000;
+pub const OV_MAX_EDGE_LINES: u32 = 400000; // raised with OV_MAX_FACE_TINT (req_4580)
 // ── Face-mode dressing (req_2618 gap B) ────────────────────────────────────────────
 // Face mode must be unmistakable: every front-facing face gets a translucent tint quad
 // and a centroid dot (the old studio's signature look). Drawn as OVERLAY polys/capsules
@@ -102,7 +102,12 @@ pub const OV_FACE_DOT_PX: f32 = 3.0;
 pub const OV_FACE_DOT_GLASS_PX: f32 = 5.0;
 pub const OV_FACE_DOT_GLASS_SEL_PX: f32 = 6.5;
 pub const OV_FACE_DOT_SEL_PX: f32 = 5.0;
-pub const OV_MAX_FACE_TINT: u32 = 20000; // tint/dot pass fps guard (tris)
+// Overlay guard, sized for imported drafts, not just authored models (req_4580: the
+// 20k-era guard made face mode silently draw NOTHING on a 30k image→3D draft while
+// vertex mode rendered fine — an invisible wall the user hit mid-retopo). The machine
+// is the wall: 200k covers every draft the forge emits; genuine isosurface soup
+// (~678k) stays gated because no one should face-edit soup.
+pub const OV_MAX_FACE_TINT: u32 = 200000; // tint/dot pass guard (tris)
 pub const OV_FACE_CORNER_ID_PX: f32 = 11.0;
 pub const OV_MAX_FACE_CORNER_ID_TRIS: u32 = 256;
 pub const OV_FACE_CORNER_HUE_STEP_DEGREES: u32 = 137;
