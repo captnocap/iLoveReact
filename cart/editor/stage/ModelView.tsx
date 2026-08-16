@@ -4006,9 +4006,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const bytes = new Uint8Array(new Float32Array(data).buffer);
       const ok = host.__model_paint_material?.(key, spec.shader, bytes, 256, tiles) === 1;
       if (!ok) {
-        // Never fail into silent white: report it where the user paints.
-        console.error(`[paint] shader ink bake FAILED for '${ink.surface}' (door returned 0) — painting flat color instead`);
-        setInkWarn(`Shader ink '${spec.label}' failed to bake — the brush will paint flat color. Host log has details.`);
+        // Never fail into silent white: report it where the user paints — and
+        // NAME the host's refusal in the toast itself (req_4622); an undefined
+        // door means this build never registered the bake door at all.
+        const refusal = host.__model_paint_material === undefined
+          ? 'the __model_paint_material door is not registered in this build'
+          : String(host.__model_paint_material_refusal?.() ?? '');
+        console.error(`[paint] shader ink bake FAILED for '${ink.surface}' — ${refusal || 'no reason recorded'} — painting flat color instead`);
+        setInkWarn(`Shader ink '${spec.label}' failed to bake — the brush will paint flat color. ${refusal ? `Host: ${refusal}` : 'Host log has details.'}`);
       } else {
         setInkWarn(null);
         // A material ink can't READ at fill-only density: a face's island is a
@@ -4628,7 +4633,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const bytes = new Uint8Array(new Float32Array(data).buffer);
         const ok = host.__model_paint_material?.(key, spec.shader, bytes, 256, 1) === 1;
         if (ok) bakeOk += 1; else bakeFail += 1;
-        if (!ok || probeSpecs.length <= 4) console.error(`[inkbake] ${ok ? 'OK  ' : 'FAIL'} ${spec.id} (${spec.label}) wgsl=${spec.shader.length}B data=${data.length}f`);
+        if (!ok || probeSpecs.length <= 4) console.error(`[inkbake] ${ok ? 'OK  ' : 'FAIL'} ${spec.id} (${spec.label}) wgsl=${spec.shader.length}B data=${data.length}f${ok ? '' : ` — ${String(host.__model_paint_material_refusal?.() ?? 'no reason recorded')}`}`);
       }
       console.error(`[inkbake] done: ${bakeOk} baked, ${bakeFail} failed of ${probeSpecs.length}`);
       host.__model_paint_material_clear?.();

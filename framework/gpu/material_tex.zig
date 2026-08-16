@@ -88,3 +88,9 @@ pub fn bakePixels(io: std.Io, environ: *const std.process.Environ.Map, key: []co
     const hash = std.hash.Wyhash.hash(0, key);
     return effects.renderShaderToPixels(io, environ, hash, wgsl, data, size);
 }
+
+/// The last bake refusal, named (req_4622) — the door surfaces this in the UI
+/// instead of pointing at the host log. Null after a successful bake.
+pub fn bakeRefusal() ?[]const u8 {
+    return effects.materialBakeRefusal();
+}

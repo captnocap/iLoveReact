@@ -1443,11 +1443,22 @@ fn ensureMaterialInstance(key_hash: u64) ?*Instance {
 /// retains ownership, cached by `key_hash` for the host's lifetime). The shared
 /// shader→texture primitive (gpu/material_tex.zig) wraps this with the surface
 /// install so 3D faces sample it via scene3d_tex_key.
+// Refusals are DATA (req_4114 pattern, req_4622): beside the log line, the last
+// material-bake refusal is retained as a static string the __model_paint_material
+// door reads back, so the editor's toast names the reason instead of pointing at
+// a log the user has to hunt.
+var g_material_bake_refusal: ?[]const u8 = null;
+pub fn materialBakeRefusal() ?[]const u8 {
+    return g_material_bake_refusal;
+}
+
 pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map, key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?*wgpu.TextureView {
     // Every refusal below NAMES ITSELF (req_4612): this door used to return null
     // through five different branches with zero output, so "Host log has details"
     // was a lie for the one path users hit most (the brush's shader-ink dip).
+    g_material_bake_refusal = null;
     const inst = ensureMaterialInstance(key_hash) orelse {
+        g_material_bake_refusal = "effect instance table is full (4096 lifetime material slots) — restart the host";
         log.print("[effect-material] bake refused: instance table FULL ({d}/{d}) — material instances live until cart teardown, and every distinct (shader, params) mints one\n", .{ instance_count, MAX_INSTANCES });
         return null;
     };
@@ -1457,6 +1468,7 @@ pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map
     // compiles it (createShaderModule copies the source; renderGpu draws from the
     // cached pipeline, not shader_desc).
     const full = effect_assemble.assemble(page_alloc, wgsl) orelse {
+        g_material_bake_refusal = "shader assembly allocation failed";
         log.print("[effect-material] bake refused: shader assembly allocation failed (recipe {d}B)\n", .{wgsl.len});
         return null;
     };
@@ -1472,6 +1484,12 @@ pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map
     const render_ok = pipe_ok and renderGpu(inst);
     inst.shader_desc = null; // `full` is freed on return; the pipeline is already built
     if (!(size_ok and pipe_ok and render_ok)) {
+        g_material_bake_refusal = if (!size_ok)
+            "render target creation failed — no GPU device reachable from this build shape"
+        else if (!pipe_ok)
+            "the WGSL failed to compile into a pipeline (wgpu prints the compile error in the host log)"
+        else
+            "the GPU render pass failed";
         log.print("[effect-material] bake FAILED key={x}: size_ok={} pipe_ok={} render_ok={} (assembled {d}B at {d}x{d}, data {d} floats) — pipe_ok=false usually means the WGSL failed to compile; wgpu prints the error above\n", .{
             key_hash, size_ok, pipe_ok, render_ok, full.len, size, size, if (data) |d| d.len else 0,
         });
@@ -1490,11 +1508,13 @@ pub fn renderShaderToPixels(io: std.Io, environ: *const std.process.Environ.Map,
     if (renderShaderToTexture(io, environ, key_hash, wgsl, data, size) == null) return null;
     const inst = ensureMaterialInstance(key_hash) orelse return null;
     const tex = inst.texture orelse {
+        g_material_bake_refusal = "instance rendered but holds no texture";
         log.print("[effect-material] readback refused: instance rendered but holds no texture\n", .{});
         return null;
     };
     // Effect targets are created rgba8_unorm (ensureTarget) — no BGRA swizzle.
     return gpu_core.readbackTexture(tex, inst.width, inst.height, false) orelse {
+        g_material_bake_refusal = "pixel readback from the GPU failed";
         log.print("[effect-material] pixel readback FAILED ({d}x{d}) — GPU map/copy path refused\n", .{ inst.width, inst.height });
         return null;
     };

@@ -3724,15 +3724,23 @@ fn hostModelPaintPolygon(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
 /// Float32Array params) to a size×size image the host samples per dab — "dip the brush into a
 /// bucket of shader". `key` must vary per param set (materialize caches per key). While set,
 /// every dab/fill deposits the material's look instead of a flat colour, until _material_clear.
+// Refusals are DATA (req_4114 pattern, req_4622): every branch of the shader-ink
+// bake door records WHY before returning 0, and __model_paint_material_refusal
+// reads it back so the editor's toast names the reason directly.
+var g_paint_material_refusal: []const u8 = "";
+
 fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const host = v8_runtime.hostContext(info.getIsolate());
+    g_paint_material_refusal = "";
     const key = argToStringAlloc(info, 0) orelse {
+        g_paint_material_refusal = "the bake key argument did not arrive as a string";
         setReturnNumber(info, 0);
         return;
     };
     defer std.heap.c_allocator.free(key);
     const wgsl = argToStringAlloc(info, 1) orelse {
+        g_paint_material_refusal = "the WGSL argument did not arrive as a string";
         setReturnNumber(info, 0);
         return;
     };
@@ -3746,23 +3754,27 @@ fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const size: u32 = @intCast(std.math.clamp(argToI32(info, 3) orelse 256, 8, 1024));
     const scale: f32 = @floatCast(argToF64(info, 4) orelse 1.0);
     if (key.len == 0 or wgsl.len == 0) {
+        g_paint_material_refusal = "an empty bake key or WGSL recipe was passed";
         setReturnNumber(info, 0);
         return;
     }
     // bakePixels returns readbackStaticSurface's layout: 8-byte header (u32 w, u32 h LE) + RGBA,
     // page-allocated — we own it and free after copying the pixels into the paint module.
     const raw = material_tex.bakePixels(host.io, host.environ, key, wgsl, data, size) orelse {
+        g_paint_material_refusal = material_tex.bakeRefusal() orelse "the shader bake failed before naming a reason";
         setReturnNumber(info, 0);
         return;
     };
     defer std.heap.page_allocator.free(raw);
     if (raw.len < 8) {
+        g_paint_material_refusal = "the bake returned a malformed pixel payload";
         setReturnNumber(info, 0);
         return;
     }
     const w = std.mem.readInt(u32, raw[0..4], .little);
     const h = std.mem.readInt(u32, raw[4..8], .little);
     const ok = scene3d.setPaintMaterial(raw[8..], w, h, scale);
+    if (!ok) g_paint_material_refusal = "the paint session refused the baked pixels (a historical preview holds the resident session, or the pixel shape was invalid)";
     if (ok) {
         // Register this shader ink in the stroke program (WGSL + params embedded) so a saved
         // painting re-bakes it at load with no catalog — the program stays self-contained.
@@ -3778,6 +3790,14 @@ fn hostModelPaintMaterialClear(info_c: ?*const v8.c.FunctionCallbackInfo) callco
     scene3d.clearPaintMaterial();
     paint_program.deactivateMaterial();
     setReturnNumber(info, 1);
+}
+
+/// __model_paint_material_refusal() → string. WHY the last __model_paint_material
+/// call returned 0, empty after a success — refusals are data (req_4114, req_4622),
+/// so the ink toast names the reason instead of pointing at the host log.
+fn hostModelPaintMaterialRefusal(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnString(info, g_paint_material_refusal);
 }
 
 /// __model_region_formula(wgsl) → 1|0. Install the composed live-material-region
@@ -5447,6 +5467,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__model_paint_polygon", hostModelPaintPolygon);
         v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
         v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
+        v8_runtime.registerHostFn("__model_paint_material_refusal", hostModelPaintMaterialRefusal);
         v8_runtime.registerHostFn("__model_region_formula", hostModelRegionFormula);
         v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
         v8_runtime.registerHostFn("__model_region_bind_slot", hostModelRegionBindSlot);
@@ -5716,6 +5737,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__model_paint_polygon", hostModelPaintPolygon);
     v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
     v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
+    v8_runtime.registerHostFn("__model_paint_material_refusal", hostModelPaintMaterialRefusal);
     v8_runtime.registerHostFn("__model_region_formula", hostModelRegionFormula);
     v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
     v8_runtime.registerHostFn("__model_region_bind_slot", hostModelRegionBindSlot);
