@@ -863,6 +863,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?z3d.LcInfo {
 /// successful partial ring, exactly as in js-bench-editor.
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     const s: *z3d.LcSession = if (z3d.g_lc) |*sp| sp else return false;
+    const was_preview_ok = s.last_preview_ok;
     s.last_preview_ok = false;
     s.last_reason = if (s.basic)
         "Cut preview could not be built"
@@ -887,6 +888,17 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     // the weld tolerance; the walk-output check below backstops shorter edges.
     const weld_guard = @min(0.45, (indexed_edit_mesh.IMPORT_WELD_EPS * 2.0) / span);
     const fraction = std.math.clamp(offset_frac, weld_guard, 1.0 - weld_guard);
+    // Detent no-op gate (req_4574): the handle drag arrives per motion event with the
+    // offset SNAPPED to whole size-units, so most events land on the fraction already
+    // installed. Re-running the preview then rebuilds and reinstalls the whole mesh
+    // for zero visual change — on large models that alone froze the drag. Same law as
+    // the move gizmo's `@abs(d) < 1e-7` gate.
+    if (reuse_topology and was_preview_ok and @abs(fraction - s.last_offset_frac) < 1e-7) {
+        s.drag_raw_frac = fraction;
+        s.last_preview_ok = true;
+        s.last_reason = null;
+        return true;
+    }
     const n_planes = z3d.lcPlanes(s.lo[d], s.hi[d], cut_count, fraction * span, &planes);
     s.last_dir = @intCast(d);
     s.last_planes = planes;
@@ -895,11 +907,17 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     s.last_offset_frac = fraction;
     s.drag_raw_frac = fraction;
 
-    var preview = if (reuse_topology)
-        s.last_mesh.?.clone() catch return false
+    // Offset-only re-previews reposition the LAST mesh IN PLACE — no per-detent clone
+    // of the whole indexed mesh (req_4574). Safe because repositionCutVertices is
+    // absolute (recomputed from cuts+fraction, never a delta), so a refused check
+    // below leaves last_mesh un-installed but still parametrically consistent, and
+    // Apply is already gated on last_preview_ok.
+    var fresh: ?indexed_edit_mesh.Mesh = if (reuse_topology)
+        null
     else
         s.base_mesh.clone() catch return false;
-    defer preview.deinit();
+    defer if (fresh) |*m| m.deinit();
+    const preview: *indexed_edit_mesh.Mesh = if (fresh) |*m| m else &s.last_mesh.?;
     const changed = if (reuse_topology) blk: {
         preview.repositionCutVertices(cut_count, fraction, if (s.basic) s.dirs[d] else null);
         break :blk true;
@@ -939,9 +957,11 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     // commit those ids still need to belong to the source Outliner part; otherwise
     // face/edge overlays obey the old range and show only the retained first strip.
     if (s.last_face_part) |face_part| z3d.renormalizePartRanges(face_part, s.part_count);
-    if (s.last_mesh) |*mesh| mesh.deinit();
-    s.last_mesh = preview;
-    preview = .{ .allocator = std.heap.c_allocator };
+    if (fresh != null) {
+        if (s.last_mesh) |*mesh| mesh.deinit();
+        s.last_mesh = fresh.?;
+        fresh = null; // adopted — the defer above must not free it
+    }
     s.last_preview_ok = true;
     s.last_reason = null;
     return true;

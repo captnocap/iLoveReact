@@ -2091,6 +2091,15 @@ var input_drag_pending: bool = false;
 var input_drag_pending_x: f32 = 0;
 var input_drag_pending_y: f32 = 0;
 
+// Coalesced loop-cut handle drag (req_4574) — motion deltas accumulate during the
+// pump and issue ONE host re-preview per frame. Each re-preview rebuilds and
+// reinstalls the whole mesh, so running it per motion event made the freeze grow
+// with model size: while one rebuild blocked, more motion events queued, and the
+// next pump replayed a rebuild for every one of them.
+var lc_drag_pending: bool = false;
+var lc_drag_pending_dx: f32 = 0;
+var lc_drag_pending_dy: f32 = 0;
+
 // Input-to-present latency probe. Stamped on the SDL event that produces
 // a text/cursor change; logged once the next frame has finished painting.
 // Answers "how long from keypress/drag to pixels on screen?".
@@ -5146,10 +5155,12 @@ pub fn run(config_in: AppConfig) !void {
                         if (me_lc_dragging) {
                             // Loop-cut handle drag: the host re-previews internally; the
                             // popup polls __mesh_lc_state to track it (no JS per move).
-                            // Default SNAPS the offset to whole size-units; a held Shift
-                            // frees it to continuous (req_2644 QQ).
-                            const lc_snap = (c.SDL_GetModState() & c.SDL_KMOD_SHIFT) == 0;
-                            _ = r3d.meshLcHandleDrag(event.motion.xrel, event.motion.yrel, lc_snap);
+                            // Deltas only ACCUMULATE here — the re-preview rebuilds the
+                            // whole mesh, so it runs once per frame after the pump
+                            // (req_4574), never once per motion event.
+                            lc_drag_pending = true;
+                            lc_drag_pending_dx += event.motion.xrel;
+                            lc_drag_pending_dy += event.motion.yrel;
                             state_mod.markDirty();
                             continue;
                         }
@@ -6039,6 +6050,18 @@ pub fn run(config_in: AppConfig) !void {
                 const cursor_pos = hitTestInputByte(drag_node, input_drag_id, local_x, local_y);
                 input.updateDragToPos(input_drag_id, cursor_pos);
             }
+        }
+
+        // Coalesced loop-cut handle drag — one full-mesh re-preview per frame no
+        // matter how many motion events the pump delivered (req_4574). Default
+        // SNAPS the offset to whole size-units; a held Shift frees it to
+        // continuous (req_2644 QQ).
+        if (lc_drag_pending) {
+            lc_drag_pending = false;
+            const lc_snap = (c.SDL_GetModState() & c.SDL_KMOD_SHIFT) == 0;
+            _ = r3d.meshLcHandleDrag(lc_drag_pending_dx, lc_drag_pending_dy, lc_snap);
+            lc_drag_pending_dx = 0;
+            lc_drag_pending_dy = 0;
         }
 
         // Layout (main window) — skip full flex pass when nothing invalidated geometry
