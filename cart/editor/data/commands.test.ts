@@ -10,7 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  COMMANDS, MENUS, blockingOverlay, commandById, commandEnabled, deviceToolReplayable, menuNodes, meshPartCommands, meshToolActive, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  COMMANDS, MENUS, blockingOverlay, commandById, commandEnabled, deviceToolReplayable, menuNodes, meshActionBarCommands, meshPartCommands, meshToolActive, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
   menuDropdownLeft, publishCharacterRigUndoDepths, undoDepths, worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
@@ -205,6 +205,7 @@ test('structural merge requires the explicit selected set, not list adjacency', 
   const one = ids(meshPartCommands(true, 1));
   const many = ids(meshPartCommands(true, 2));
   assert(!one.includes('mesh-merge-down'), 'one selected row cannot infer a neighbor from list order');
+  assert(one.includes('mesh-linear-array') && one.includes('mesh-path-array'), 'focused part cannot reach both straight and curved array workflows');
   assert(many.includes('mesh-merge-down'), 'two selected rows expose structural merge');
 });
 
@@ -216,7 +217,7 @@ test('model context menu folds stable tool families without hiding a command', (
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
   assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-measurements|mesh-player-scale|mesh-xray|mesh-cam-lock|mesh-cam-store|mesh-cam-recall', 'view tools escaped their group');
   assert(ids(layout.directToolCommands).join('|') === 'mesh-paint|mesh-path-plane|mesh-path-edges|mesh-curve-pull', 'Paint Faces, both Pen tools, and Curve Pull must remain one click away');
-  assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-path-array|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
+  assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-linear-array|mesh-path-array|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
 
   const expected = ids([...meshToolCommands(), commandById('mesh-scale-by'), ...meshPartCommands(true, 2)]).sort().join('|');
   const presented = ids([
@@ -225,6 +226,15 @@ test('model context menu folds stable tool families without hiding a command', (
     ...layout.directPartCommands,
   ]).sort().join('|');
   assert(presented === expected, `context layout lost or duplicated commands: ${presented}`);
+});
+
+test('model action bar contains only foundational and persistent-state tools', () => {
+  assert(ids(meshActionBarCommands()).join('|') === [
+    'mesh-view', 'mesh-vertex', 'mesh-edge', 'mesh-face',
+    'mesh-move', 'mesh-scale', 'mesh-rotate',
+    'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z',
+    'mesh-paint',
+  ].join('|'), 'occasional model commands returned to the permanent action bar');
 });
 
 test('input preferences are not replayed as remembered pointer-device tools', () => {
@@ -332,6 +342,42 @@ test('dead placeholder commands and their empty menus are absent', () => {
   ];
   for (const id of removed) assert(!commandIds.has(id), `${id} is still registered`);
   assert(!MENUS.some((menu) => menu === ('Story' as any) || menu === ('Help' as any)), 'an empty placeholder menu remains in chrome');
+  assert(MENUS.includes('Animation'), 'registry-backed Animation menu is absent from chrome');
+  assert(menuNodes('Animation').length === 0, 'Animation commands leaked into the legacy command table');
+});
+
+// req_4663: the menu reorganization exists so no command is stranded off-menu again —
+// actions were reachable only from the action bar with no hotkey and no menu row.
+test('every registered command is reachable through the menu tree', () => {
+  const reachable = new Set<string>();
+  const walk = (nodes: MenuNode[]) => {
+    for (const node of nodes) {
+      if (node.kind === 'cmd') reachable.add(node.id);
+      else if (node.kind === 'sub') walk(node.children);
+    }
+  };
+  for (const menu of MENUS) walk(menuNodes(menu));
+  // The one deliberate absence: the world-piece delete id is the contextual dispatch
+  // target behind the Edit → Delete Selection row — a second Del row would be noise.
+  const covered = new Set([...reachable, WORLD_PIECE_DELETE_COMMAND_ID]);
+  const missing = COMMANDS.filter((command) => !covered.has(command.id)).map((command) => command.id);
+  assert(missing.length === 0, `commands unreachable from any menu: ${missing.join(', ')}`);
+});
+
+test('the View menu owns camera and display control for both surfaces', () => {
+  const view = menuNodes('View').filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
+  for (const id of ['toggle-minimap', 'focus-selection', 'world-view-store', 'world-view-recall',
+    'mesh-focus', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall',
+    'mesh-wire', 'mesh-xray', 'mesh-measurements', 'mesh-player-scale', 'model-ref-images']) {
+    assert(view.includes(id), `View menu lost ${id}`);
+  }
+});
+
+test('the Mesh menu is collapsible families, never one flat overflow list', () => {
+  const top = menuNodes('Mesh');
+  assert(top.length > 0 && top.every((node) => node.kind === 'sub'), 'Mesh menu regressed to a flat command list');
+  const families = top.map((node) => (node as Extract<MenuNode, { kind: 'sub' }>).id);
+  assert(families.join('|') === ['Select', 'Transform', 'Topology', 'Draw', 'Parts', 'Paint'].join('|'), `Mesh families drifted: ${families.join(', ')}`);
 });
 
 test('Section D follows the armed tool and contains only real Build tools', () => {

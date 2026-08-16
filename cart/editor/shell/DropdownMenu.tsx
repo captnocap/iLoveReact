@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
+import { ScrollView } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import {
   commandById, commandEnabled, menuNodes, submenuEnabled,
@@ -7,6 +8,12 @@ import {
 } from '../data/commands';
 import { activeSurface } from '../data/surfaces';
 import type { EditorState, LightId } from '../data/types';
+import {
+  APPLICATION_COMMAND_MENU_TUNING,
+  dispatchApplicationCommandMenuRow,
+  type ApplicationCommandMenuInvoke,
+  type ApplicationCommandMenuRow,
+} from './applicationCommandMenu';
 
 // The viewer light-rig switches, hosted under View → Lighting when a model is open. The model
 // shader supports one directional + ambient: Flat = even paint-true light; Key = the directional;
@@ -20,7 +27,7 @@ const LIGHT_MENU: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'l
 // Dropdown for the active top-bar menu. Mounted at the app root (see AppFrame) so it paints over
 // the body and hit-tests correctly; positioned under its menu-bar button via menuDropdownLeft.
 // The rows come from the declarative menu tree (commands.menuNodes): command rows, non-interactive
-// section headers, and inline-expandable submenus that can nest (File → New Mesh, Edit → Mesh →
+// section headers, and inline-expandable submenus that can nest (File → New Mesh, Mesh → Paint →
 // Paint Resolution). Every command/submenu grays-with-reason off its surface — never hidden.
 
 const rowIndent = (depth: number) => (depth > 0 ? { style: { paddingLeft: 12 + depth * 18 } } : {});
@@ -48,9 +55,40 @@ function CommandRow({ id, depth, state, onCommand }: { id: string; depth: number
   );
 }
 
-export default function DropdownMenu({ state, onCommand, onToggleLight }: { state: EditorState; onCommand: (id: string, source: string) => void; onToggleLight: (which: LightId) => void }) {
+function RegistryCommandRow(props: {
+  row: ApplicationCommandMenuRow;
+  onCommand: ApplicationCommandMenuInvoke;
+}) {
+  const command = props.row.command;
+  if (!props.row.enabled) {
+    return (
+      <C.HW_MenuDropRowOff>
+        <Icon name={command.icon} size={13} color={accentFor('textDim')} />
+        <C.HW_MenuDropTextOff>{command.label}</C.HW_MenuDropTextOff>
+        <C.HW_Spacer />
+        <C.HW_MenuDropReason>{props.row.reason ?? 'unavailable'}</C.HW_MenuDropReason>
+      </C.HW_MenuDropRowOff>
+    );
+  }
+  return (
+    <C.HW_MenuDropRow onPress={() => dispatchApplicationCommandMenuRow(props.row, props.onCommand)}>
+      <Icon name={command.icon} size={13} color={accentFor(command.native ? 'primary' : 'textDim')} />
+      <C.HW_MenuDropText>{command.label}</C.HW_MenuDropText>
+      <C.HW_Spacer />
+      <C.HW_MenuDropSub>{command.defaultKey ?? ''}</C.HW_MenuDropSub>
+    </C.HW_MenuDropRow>
+  );
+}
+
+export default function DropdownMenu({ state, onCommand, onToggleLight, applicationRows = [], onApplicationCommand }: {
+  state: EditorState;
+  onCommand: (id: string, source: string) => void;
+  onToggleLight: (which: LightId) => void;
+  applicationRows?: readonly ApplicationCommandMenuRow[];
+  onApplicationCommand?: ApplicationCommandMenuInvoke;
+}) {
   // Which submenu ids are expanded. A Set (not one id) so nested flyouts can be open together
-  // (Edit → Mesh open, and Paint Resolution open within it).
+  // (Mesh → Paint open, and Paint Resolution open within it).
   const [openSubs, setOpenSubs] = useState<Set<string>>(() => new Set());
   const toggleSub = (id: string) => setOpenSubs((prev) => {
     const next = new Set(prev);
@@ -99,6 +137,11 @@ export default function DropdownMenu({ state, onCommand, onToggleLight }: { stat
 
   const menu = state.openMenu;
   const rows = menu ? renderNodes(menuNodes(menu), 0) : [];
+  if (onApplicationCommand) {
+    rows.push(...applicationRows.map((row) => (
+      <RegistryCommandRow key={row.command.id} row={row} onCommand={onApplicationCommand} />
+    )));
+  }
 
   // Lighting: live toggles (the generic CommandRow can't show an on/off state), so it stays a
   // hand-rolled group. Only meaningful with a model in view — appended under View there.
@@ -133,7 +176,11 @@ export default function DropdownMenu({ state, onCommand, onToggleLight }: { stat
       <C.HW_MenuDropHead>
         <C.HW_HeadTitle>{state.openMenu}</C.HW_HeadTitle>
       </C.HW_MenuDropHead>
-      {rows}
+      {/* Every menu body scrolls past the cap (req_4663) — a fully-expanded family
+          must never run the panel off the monitor and strand commands unreachable. */}
+      <ScrollView showScrollbar style={{ maxHeight: APPLICATION_COMMAND_MENU_TUNING.maxBodyHeight }}>
+        {rows}
+      </ScrollView>
     </C.HW_MenuDropdown>
   );
 }

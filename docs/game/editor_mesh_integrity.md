@@ -79,7 +79,7 @@ order right behind the op that caused it.
 ## Whole-topology triangle recovery — req_3507 + req_3511–3513
 
 `Tris to Quads` is a model-wide planner, not a selected-face mutation. Enter
-Face mode and invoke **Edit → Mesh → Topology → Tris to Quads** (also exposed
+Face mode and invoke **Mesh → Topology → Tris to Quads** (also exposed
 by the contextual topology strip, including when no face is selected). The
 editor first paints a scanning card, then opens a reversible live dry run:
 proposed source diagonals disappear from the real topology overlay while the

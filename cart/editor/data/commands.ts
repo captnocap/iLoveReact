@@ -12,10 +12,13 @@ import { WALL_OPENING_EXPORT_TARGETS } from '../world/architectureKitExport';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
-export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Animation', 'Globals', 'Window'];
+// Surface-specific menus sit after the generic trio: Mesh is the model editor's
+// menu the way Map/Build are the world editor's — each grays-with-reason off its
+// surface instead of hiding (req_4663 reorganization).
+export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Mesh', 'Map', 'Build', 'Animation', 'Globals', 'Window'];
 export const MENU_DROPDOWN_WIDTH = 420;
 
-// The starter primitives under File → New Mesh (fresh document) and Edit → Mesh → Add Primitive
+// The starter primitives under File → New Mesh (fresh document) and Mesh → Parts → Add Primitive
 // (a part on the model in view). ONE list drives both submenus, the id→kind dispatch (AppFrame),
 // and the geometry (primitiveMeshData) — add a row + a generator case and the whole path lights up.
 export const PRIMITIVE_MESHES: { kind: PrimitiveKind; name: string; icon: string }[] = [
@@ -42,7 +45,7 @@ const NEW_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
 // Add Primitive = APPEND the primitive as a new part to the model in view (the 'add' verb the
 // outliner + also drives). Model scope: only when a model document is the active surface.
 const ADD_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
-  id: `add-mesh-${p.kind}`, menu: 'Edit', submenu: 'Add Primitive', name: p.name, icon: p.icon,
+  id: `add-mesh-${p.kind}`, menu: 'Mesh', submenu: 'Add Primitive', name: p.name, icon: p.icon,
   key: '', context: true, native: true, undoable: true, tool: false, scope: 'model',
 }));
 // Semantic building bases under File → New Mesh → Build Pieces. Unlike generic
@@ -62,12 +65,12 @@ const NEW_BUILD_STARTER_COMMANDS: Command[] = BUILD_PIECE_STARTERS.map((starter)
 
 // Paint resolution — texels per TRIANGLE patch for free-form model painting (a quad face is two
 // triangle patches; "face" would misread a cube's 6 as its 12 — req_2509). A MODEL-surface control
-// (it drives the mesh painter's atlas budget), nested under Edit → Mesh → Paint where the rest of
+// (it drives the mesh painter's atlas budget), nested under Mesh → Paint where the rest of
 // the brush lives — NOT File, where it was inert on the world and duplicated the toolbar's DETAIL
 // pill (req_2540). Pick any; dense meshes clamp to the atlas budget. Higher = finer strokes.
 export const PAINT_RESOLUTIONS = [16, 32, 64, 128, 256, 512] as const;
 const PAINT_RES_COMMANDS: Command[] = PAINT_RESOLUTIONS.map((px) => ({
-  id: `mesh-paint-res-${px}`, menu: 'Edit', submenu: 'Paint Resolution', name: `${px}×${px} texels / triangle`, icon: 'Grid3x3',
+  id: `mesh-paint-res-${px}`, menu: 'Mesh', submenu: 'Paint Resolution', name: `${px}×${px} texels / triangle`, icon: 'Grid3x3',
   key: '', context: false, native: true, undoable: false, scope: 'model',
 }));
 
@@ -245,116 +248,118 @@ export const COMMANDS: Command[] = [
   { id: 'toggle-memory', menu: 'Window', name: 'Memory', icon: 'MemoryStick', key: '', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'toggle-build-journal', menu: 'Window', name: 'Build Journal', icon: 'BookOpen', key: '', context: false, native: true, undoable: false, scope: 'global' },
 
-  // ── Model-surface mesh tools (Edit → Mesh; the host-native mesh editor) ──────────────────────
+  // ── Model-surface mesh tools (the MESH menu; the host-native mesh editor) ──────────────────────
   // scope 'model' → only enabled when a model document is the active surface. Keys resolve per
   // surface through the keymap; ModelView owns their live dispatch.
-  { id: 'mesh-view', menu: 'Edit', scope: 'model', name: 'View Only', icon: 'MousePointer2Off', key: '0', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-vertex', menu: 'Edit', scope: 'model', name: 'Vertex Select', icon: 'Grip', key: '1', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-edge', menu: 'Edit', scope: 'model', name: 'Edge Select', icon: 'Spline', key: '2', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-face', menu: 'Edit', scope: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-view', menu: 'Mesh', scope: 'model', name: 'View Only', icon: 'MousePointer2Off', key: '0', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-vertex', menu: 'Mesh', scope: 'model', name: 'Vertex Select', icon: 'Grip', key: '1', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-edge', menu: 'Mesh', scope: 'model', name: 'Edge Select', icon: 'Spline', key: '2', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-face', menu: 'Mesh', scope: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
   // Persistent additive selection is an input preference, not a replayable tool.
   // It supplements Shift for pointer picks/marquees; Escape clears the set only.
-  { id: 'mesh-persistent-additive', menu: 'Edit', scope: 'model', name: 'Additive Select', icon: 'ListPlus', key: '', context: true, native: true, undoable: false },
+  { id: 'mesh-persistent-additive', menu: 'Mesh', scope: 'model', name: 'Additive Select', icon: 'ListPlus', key: '', context: true, native: true, undoable: false },
   // Invert the selection within the active scope (req_4271). Ctrl+I resolves here
   // on the model surface (keymap MODEL_CHORDS outranks the global Import chord);
   // with nothing selected it selects everything — the complement of the empty set.
-  { id: 'mesh-invert', menu: 'Edit', scope: 'model', name: 'Invert Selection', icon: 'Layers3', key: 'Ctrl+I', context: true, native: true, undoable: false },
+  { id: 'mesh-invert', menu: 'Mesh', scope: 'model', name: 'Invert Selection', icon: 'Layers3', key: 'Ctrl+I', context: true, native: true, undoable: false },
   // UV direction collection (req_3388): one selected 3D face expands to every
   // atlas island projected from the same signed axis, without joining the mesh.
-  { id: 'mesh-select-uv-orientation', menu: 'Edit', scope: 'model', name: 'Collect Same UV Orientation', icon: 'Layers3', key: '', context: true, native: true, undoable: false, tool: true, needsSelection: true },
+  { id: 'mesh-select-uv-orientation', menu: 'Mesh', scope: 'model', name: 'Collect Same UV Orientation', icon: 'Layers3', key: '', context: true, native: true, undoable: false, tool: true, needsSelection: true },
   // One blocking semantic-naming lane: N names faces in Face mode and canonical
   // logical-edge paths in Edge mode.
-  { id: 'mesh-name-selection', menu: 'Edit', scope: 'model', name: 'Name Selection…', icon: 'Tag', key: 'N', context: true, native: true, undoable: true, needsSelection: true },
-  { id: 'mesh-move', menu: 'Edit', scope: 'model', name: 'Move Gizmo', icon: 'Move', key: 'G', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-scale', menu: 'Edit', scope: 'model', name: 'Scale Gizmo', icon: 'Scale3d', key: 'S', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-scale-by', menu: 'Edit', scope: 'model', name: 'Scale By…', icon: 'Scale3d', key: '', context: true, native: true, undoable: true },
+  { id: 'mesh-name-selection', menu: 'Mesh', scope: 'model', name: 'Name Selection…', icon: 'Tag', key: 'N', context: true, native: true, undoable: true, needsSelection: true },
+  { id: 'mesh-move', menu: 'Mesh', scope: 'model', name: 'Move Gizmo', icon: 'Move', key: 'G', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-scale', menu: 'Mesh', scope: 'model', name: 'Scale Gizmo', icon: 'Scale3d', key: 'S', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-scale-by', menu: 'Mesh', scope: 'model', name: 'Scale By…', icon: 'Scale3d', key: '', context: true, native: true, undoable: true },
   // Collapse one selected vertex row / edge loop onto its least-varying X/Y/Z
   // coordinate at the selection center. Native mirror twins follow in the same undo.
-  { id: 'mesh-align-loop', menu: 'Edit', scope: 'model', name: 'Align Loop', icon: 'AlignCenter', key: 'A', context: true, native: true, undoable: true, tool: true, needsSelection: true },
-  { id: 'mesh-circularize', menu: 'Edit', scope: 'model', name: 'Circularize Loop', icon: 'Circle', key: '', context: true, native: true, undoable: true, tool: true, needsSelection: true },
-  { id: 'mesh-rotate', menu: 'Edit', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-path-plane', menu: 'Edit', scope: 'model', name: 'Pen Plane', icon: 'PenTool', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-align-loop', menu: 'Mesh', scope: 'model', name: 'Align Loop', icon: 'AlignCenter', key: 'A', context: true, native: true, undoable: true, tool: true, needsSelection: true },
+  { id: 'mesh-circularize', menu: 'Mesh', scope: 'model', name: 'Circularize Loop', icon: 'Circle', key: '', context: true, native: true, undoable: true, tool: true, needsSelection: true },
+  { id: 'mesh-rotate', menu: 'Mesh', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint', menu: 'Mesh', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-path-plane', menu: 'Mesh', scope: 'model', name: 'Pen Plane', icon: 'PenTool', key: '', context: true, native: true, undoable: true, tool: true },
   // Pen Edges: the same pen path, committed as naked wire edges (open or closed) with NO
   // fill face — the outline's anchors become welded verts you pull with the move gizmo.
-  { id: 'mesh-path-edges', menu: 'Edit', scope: 'model', name: 'Pen Edges', icon: 'Spline', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-path-edges', menu: 'Mesh', scope: 'model', name: 'Pen Edges', icon: 'Spline', key: '', context: true, native: true, undoable: true, tool: true },
   // Curve Pull (req_4325/req_4328): armed, a Move drag bends one selected run through
   // an arc and live loop-cuts its full quad strips as curvature needs more resolution.
-  { id: 'mesh-curve-pull', menu: 'Edit', scope: 'model', name: 'Curve Pull', icon: 'Magnet', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-wire', menu: 'Edit', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
+  { id: 'mesh-curve-pull', menu: 'Mesh', scope: 'model', name: 'Curve Pull', icon: 'Magnet', key: '', context: true, native: true, undoable: true, tool: true },
+  // Camera/presentation commands live in the VIEW menu (req_4663): the menu that always
+  // holds camera control and display toggles, whichever surface owns them.
+  { id: 'mesh-focus', menu: 'View', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-wire', menu: 'View', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
   // Presentation toggle, not an input tool: device switching must never replay it.
-  { id: 'mesh-xray', menu: 'Edit', scope: 'model', name: 'X-Ray Elements', icon: 'Eye', key: '', context: false, native: true, undoable: false },
+  { id: 'mesh-xray', menu: 'View', scope: 'model', name: 'X-Ray Elements', icon: 'Eye', key: '', context: false, native: true, undoable: false },
   // Camera lock (req_2893): freeze the orbit view where the user set it — every camera
   // motion (drag/zoom/pan/double-click focus/compass snap) no-ops host-side while on.
-  { id: 'mesh-cam-lock', menu: 'Edit', scope: 'model', name: 'Lock Camera', icon: 'Lock', key: 'K', context: false, native: true, undoable: false, tool: true },
+  { id: 'mesh-cam-lock', menu: 'View', scope: 'model', name: 'Lock Camera', icon: 'Lock', key: 'K', context: false, native: true, undoable: false, tool: true },
   // Saved view (req_3067): pin the current orbit pose, then jump back to it after any
   // amount of orbiting — a double-click focus otherwise loses the working angle for good.
-  { id: 'mesh-cam-store', menu: 'Edit', scope: 'model', name: 'Store View', icon: 'BookmarkPlus', key: '', context: false, native: true, undoable: false, tool: true },
-  { id: 'mesh-cam-recall', menu: 'Edit', scope: 'model', name: 'Recall View', icon: 'Bookmark', key: 'H', context: false, native: true, undoable: false, tool: true },
+  { id: 'mesh-cam-store', menu: 'View', scope: 'model', name: 'Store View', icon: 'BookmarkPlus', key: '', context: false, native: true, undoable: false, tool: true },
+  { id: 'mesh-cam-recall', menu: 'View', scope: 'model', name: 'Recall View', icon: 'Bookmark', key: 'H', context: false, native: true, undoable: false, tool: true },
   // Live mirror editing (req_2758): toggle a symmetry plane — while on, gizmo edits land
   // reflected on each moved element's twin across that plane (plane at 0; Center first).
-  { id: 'mesh-sym-x', menu: 'Edit', scope: 'model', name: 'Mirror Edit X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-sym-y', menu: 'Edit', scope: 'model', name: 'Mirror Edit Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-sym-z', menu: 'Edit', scope: 'model', name: 'Mirror Edit Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-sym-x', menu: 'Mesh', scope: 'model', name: 'Mirror Edit X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-sym-y', menu: 'Mesh', scope: 'model', name: 'Mirror Edit Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-sym-z', menu: 'Mesh', scope: 'model', name: 'Mirror Edit Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
   // Contextual topology ops — edge mode has edge extrude/create-face; face mode has face extrude.
-  { id: 'mesh-extrude', menu: 'Edit', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-extrude-face', menu: 'Edit', scope: 'model', name: 'Extrude Face', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-extrude', menu: 'Mesh', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-extrude-face', menu: 'Mesh', scope: 'model', name: 'Extrude Face', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   // Replace one filled authored face with a welded regular N-gon center and a
   // deterministic triangle/quad transition ring. The center stays selected so
   // the ordinary Extrude verb grows a cylinder directly from a square panel.
-  { id: 'mesh-face-polygon', menu: 'Edit', scope: 'model', name: 'Face to N-gon', icon: 'Circle', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-create-face', menu: 'Edit', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-face-polygon', menu: 'Mesh', scope: 'model', name: 'Face to N-gon', icon: 'Circle', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-create-face', menu: 'Mesh', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
   // Weld (req_3382): merge the selected vertices at their center — Blender's
   // Merge-at-Center. Edge mode collapses the selected edges' endpoints.
-  { id: 'mesh-weld', menu: 'Edit', scope: 'model', name: 'Weld', icon: 'Magnet', key: 'M', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-weld', menu: 'Mesh', scope: 'model', name: 'Weld', icon: 'Magnet', key: 'M', context: true, native: true, undoable: true, tool: true },
   // Studio bevel: one selected sharp manifold edge, one 3+-edge corner, or one
   // complete 3+ edge open-boundary loop opens the shared live width popup.
-  { id: 'mesh-bevel', menu: 'Edit', scope: 'model', name: 'Bevel', icon: 'Slice', key: 'B', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-bevel', menu: 'Mesh', scope: 'model', name: 'Bevel', icon: 'Slice', key: 'B', context: true, native: true, undoable: true, tool: true },
   // Duplicate logical vertex identities across the selected edge seam while all
   // faces remain in their current authored Outliner part.
-  { id: 'mesh-edge-split', menu: 'Edit', scope: 'model', name: 'Edge Split', icon: 'Scissors', key: 'D', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-edge-split', menu: 'Mesh', scope: 'model', name: 'Edge Split', icon: 'Scissors', key: 'D', context: true, native: true, undoable: true, tool: true },
   // Destructive selected-edge wireframe: complete selected boundaries become
   // connected square struts without creating another Outliner part.
-  { id: 'mesh-edge-tubes', menu: 'Edit', scope: 'model', name: 'Edge to Tubes', icon: 'Boxes', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-edge-tubes', menu: 'Mesh', scope: 'model', name: 'Edge to Tubes', icon: 'Boxes', key: '', context: true, native: true, undoable: true, tool: true },
   // Studio's req_1182 face correction, restored on the active host-native surface:
   // reverse winding + UV corner order so an inside-out created face points outward.
-  { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-loopcut', menu: 'Edit', scope: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-flip-face', menu: 'Mesh', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-loopcut', menu: 'Mesh', scope: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
   // Basic cut subdivides ONLY selected faces; loop cut propagates around the ring.
-  { id: 'mesh-cut', menu: 'Edit', scope: 'model', name: 'Cut', icon: 'Slice', key: 'T', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-cut', menu: 'Mesh', scope: 'model', name: 'Cut', icon: 'Slice', key: 'T', context: true, native: true, undoable: true, tool: true },
   // Face-selection ops: detach peels the selection into a NEW part; glass toggles translucency;
   // solidify thickens in place; merge fuses 2+ authored faces into one.
-  { id: 'mesh-detach', menu: 'Edit', scope: 'model', name: 'Detach Faces', icon: 'Ungroup', key: 'D', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-glass', menu: 'Edit', scope: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-solidify', menu: 'Edit', scope: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-detach', menu: 'Mesh', scope: 'model', name: 'Detach Faces', icon: 'Ungroup', key: 'D', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-glass', menu: 'Mesh', scope: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-solidify', menu: 'Mesh', scope: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
   // Assign the selected faces to a UV MASK zone: they unfold as ONE chart for texturing
   // while the authored face distribution is left completely alone. This is the thing to
   // reach for INSTEAD of merging faces to fix a UV -- merging also creases the shading
   // and makes the mesh miserable to edit (req_4152).
-  { id: 'mesh-uv-zone', menu: 'Edit', scope: 'model', name: 'Assign UV Mask Zone', icon: 'Layers', key: 'Shift+M', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-merge-faces', menu: 'Edit', scope: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-uv-zone', menu: 'Mesh', scope: 'model', name: 'Assign UV Mask Zone', icon: 'Layers', key: 'Shift+M', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-merge-faces', menu: 'Mesh', scope: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
   // Whole-topology tris-to-quads recovery (req_3511/3512): dry-run the exact
   // maximum pairing, preview alternatives, then commit once on confirmation.
-  { id: 'mesh-tris-to-quads', menu: 'Edit', scope: 'model', name: 'Tris to Quads', icon: 'Grid2x2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-tris-to-quads', menu: 'Mesh', scope: 'model', name: 'Tris to Quads', icon: 'Grid2x2', key: '', context: true, native: true, undoable: true, tool: true },
   // Part ops (the focused outliner part): duplicate / mirrored duplicate / merge the
   // exact shift-selected set. The id keeps its old spelling for persisted keymaps, but
   // the operation is NEVER based on outliner order (req_2811 / req_2870).
-  { id: 'mesh-duplicate-part', menu: 'Edit', scope: 'model', name: 'Duplicate Part', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-linear-array', menu: 'Edit', scope: 'model', name: 'Linear Array...', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-path-array', menu: 'Edit', scope: 'model', name: 'Path Array...', icon: 'Route', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-mirror-x', menu: 'Edit', scope: 'model', name: 'Mirror Part X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-mirror-y', menu: 'Edit', scope: 'model', name: 'Mirror Part Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-mirror-z', menu: 'Edit', scope: 'model', name: 'Mirror Part Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-merge-down', menu: 'Edit', scope: 'model', name: 'Merge Selected Parts', icon: 'Merge', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-duplicate-part', menu: 'Mesh', scope: 'model', name: 'Duplicate Part', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-linear-array', menu: 'Mesh', scope: 'model', name: 'Linear Array...', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-path-array', menu: 'Mesh', scope: 'model', name: 'Path Array...', icon: 'Route', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-mirror-x', menu: 'Mesh', scope: 'model', name: 'Mirror Part X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-mirror-y', menu: 'Mesh', scope: 'model', name: 'Mirror Part Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-mirror-z', menu: 'Mesh', scope: 'model', name: 'Mirror Part Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-merge-down', menu: 'Mesh', scope: 'model', name: 'Merge Selected Parts', icon: 'Merge', key: '', context: true, native: true, undoable: true, tool: true },
   // Cross-model reuse: append a saved library model into the OPEN model as new part(s).
-  { id: 'mesh-import-part', menu: 'Edit', scope: 'model', name: 'Add From Library...', icon: 'PackagePlus', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-import-part', menu: 'Mesh', scope: 'model', name: 'Add From Library...', icon: 'PackagePlus', key: '', context: true, native: true, undoable: true, tool: true },
   // Paint sub-tools — bucket, free brush, and the shared closed pen path.
-  { id: 'mesh-paint-fill', menu: 'Edit', scope: 'model', name: 'Fill Face', icon: 'PaintBucket', key: 'B', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-paint-brush', menu: 'Edit', scope: 'model', name: 'Free Brush', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-paint-pen', menu: 'Edit', scope: 'model', name: 'Pen Fill', icon: 'PenTool', key: 'V', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-paint-safety', menu: 'Edit', scope: 'model', name: 'Face Safety', icon: 'Lock', key: 'X', context: true, native: true, undoable: false, tool: true },
-  { id: 'mesh-paint-detail', menu: 'Edit', scope: 'model', name: 'Brush Detail', icon: 'Grid2x2', key: 'Y', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-paint-fill', menu: 'Mesh', scope: 'model', name: 'Fill Face', icon: 'PaintBucket', key: 'B', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint-brush', menu: 'Mesh', scope: 'model', name: 'Free Brush', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint-pen', menu: 'Mesh', scope: 'model', name: 'Pen Fill', icon: 'PenTool', key: 'V', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint-safety', menu: 'Mesh', scope: 'model', name: 'Face Safety', icon: 'Lock', key: 'X', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-paint-detail', menu: 'Mesh', scope: 'model', name: 'Brush Detail', icon: 'Grid2x2', key: 'Y', context: true, native: true, undoable: false, tool: true },
 ];
 
 // ── Blocking overlays (modal discipline, req_2626 gap HH) ─────────────────────────────────────
@@ -484,7 +489,7 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
 // ── Menu tree (the nested structure the dropdown renders) ─────────────────────────────────────
 // A node is a command row, a non-interactive section header, or an inline-expandable submenu whose
 // children can themselves nest. A submenu carries its own `scope` so the whole flyout grays off its
-// surface (Edit → Mesh is dead weight on the world; New Mesh works anywhere).
+// surface (the Mesh families are dead weight on the world; New Mesh works anywhere).
 export type MenuNode =
   | { kind: 'cmd'; id: string }
   | { kind: 'section'; label: string }
@@ -493,20 +498,43 @@ export type MenuNode =
 const cmd = (id: string): MenuNode => ({ kind: 'cmd', id });
 const section = (label: string): MenuNode => ({ kind: 'section', label });
 
-// The Edit → Mesh flyout: the full host-native mesh editor, sectioned. Disabled off a model surface.
-const MESH_SUBMENU: MenuNode = {
-  kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
-  children: [
-    section('Select'), cmd('mesh-view'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
-    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-align-loop'), cmd('mesh-circularize'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-edge-tubes'), cmd('mesh-edge-split'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
-    section('Parts'),
+// The top-level MESH menu (req_4663): the full host-native mesh editor as collapsible
+// tool families instead of one always-expanded list — the old Edit → Mesh flyout ran
+// off the monitor and buried commands. Every family carries model scope so the whole
+// group grays-with-reason on the world. Camera/display toggles live in View, not here.
+const meshFamily = (id: string, icon: string, children: MenuNode[]): MenuNode =>
+  ({ kind: 'sub', id, label: id, icon, scope: 'model', children });
+
+const MESH_MENU_NODES: MenuNode[] = [
+  meshFamily('Select', 'MousePointer2', [
+    cmd('mesh-view'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
+    cmd('mesh-persistent-additive'), cmd('mesh-invert'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
+  ]),
+  meshFamily('Transform', 'Move', [
+    cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'),
+    cmd('mesh-align-loop'), cmd('mesh-circularize'),
+    cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'),
+  ]),
+  meshFamily('Topology', 'Scissors', [
+    cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-face-polygon'), cmd('mesh-create-face'),
+    cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-edge-split'), cmd('mesh-edge-tubes'), cmd('mesh-flip-face'),
+    cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'),
+    cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'), cmd('mesh-uv-zone'),
+  ]),
+  meshFamily('Draw', 'PenTool', [
+    cmd('mesh-path-plane'), cmd('mesh-path-edges'), cmd('mesh-curve-pull'),
+  ]),
+  meshFamily('Parts', 'Boxes', [
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
-    cmd('mesh-duplicate-part'), cmd('mesh-linear-array'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
-    section('Paint'), cmd('mesh-paint'), cmd('mesh-paint-fill'), cmd('mesh-paint-brush'), cmd('mesh-paint-pen'), cmd('mesh-paint-safety'), cmd('mesh-paint-detail'),
+    cmd('mesh-duplicate-part'), cmd('mesh-linear-array'), cmd('mesh-path-array'),
+    cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
+  ]),
+  meshFamily('Paint', 'Brush', [
+    cmd('mesh-paint'), cmd('mesh-paint-fill'), cmd('mesh-paint-brush'), cmd('mesh-paint-pen'),
+    cmd('mesh-paint-safety'), cmd('mesh-paint-detail'),
     { kind: 'sub', id: 'Paint Resolution', label: 'Paint Resolution', icon: 'Grid3x3', scope: 'model', children: PAINT_RES_COMMANDS.map((c) => cmd(c.id)) },
-  ],
-};
+  ]),
+];
 
 const MENU_TREE: Record<Menu, MenuNode[]> = {
   File: [
@@ -533,10 +561,28 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
       ],
     },
   ],
-  Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), cmd('clear-walls'), MESH_SUBMENU],
-  View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'), cmd('mesh-measurements'), cmd('mesh-player-scale'), cmd('model-ref-images')],
+  // Edit is the generic edit-verb menu only (req_4663): history, selection edits,
+  // preferences. Mesh modeling moved to its own top-level menu.
+  Edit: [
+    cmd('undo-local'), cmd('redo-local'),
+    section('Selection'),
+    cmd('duplicate-selection'), cmd('create-prefab'), cmd('delete-selection'), cmd('clear-walls'),
+    section('Application'),
+    cmd('open-preferences'),
+  ],
+  // View always holds view-related control — camera, bookmarks, display toggles —
+  // for whichever surface is open; off-surface groups gray with the reason.
+  View: [
+    section('World'),
+    cmd('toggle-minimap'), cmd('focus-selection'), cmd('world-view-store'), cmd('world-view-recall'),
+    section('Model Camera'),
+    cmd('mesh-focus'), cmd('mesh-cam-lock'), cmd('mesh-cam-store'), cmd('mesh-cam-recall'),
+    section('Model Display'),
+    cmd('mesh-wire'), cmd('mesh-xray'), cmd('mesh-measurements'), cmd('mesh-player-scale'), cmd('model-ref-images'),
+  ],
+  Mesh: MESH_MENU_NODES,
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('draw-wall'), cmd('cut-opening'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('draw-wall'), cmd('cut-opening'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd(WORLD_PIECE_SPIN_COMMAND_ID), cmd('create-prefab'), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   // Registry-projected C-tier commands are appended by the existing root
   // DropdownMenu. They deliberately do not enter this compatibility table.
   Animation: [],
@@ -639,7 +685,7 @@ export function meshPartCommands(hasActivePart: boolean, selectedPartCount: numb
   return out;
 }
 
-// The model right-click menu is deliberately shallower than the full Edit → Mesh
+// The model right-click menu is deliberately shallower than the full Mesh-menu
 // catalog: frequent/contextual verbs stay one click away while stable tool families
 // collapse behind four small rows. Keep this layout in data so a presentation cleanup
 // can never silently lose a command from the canonical mesh tool/part lists.

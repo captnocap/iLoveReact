@@ -27,7 +27,7 @@ import type { WorldFloraPatch } from '../world/surfaceFlora';
 import type { WorldPrefab } from '../world/prefabs';
 import type { WorldView } from '../world/worldViews';
 
-export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Animation' | 'Globals' | 'Window';
+export type Menu = 'File' | 'Edit' | 'View' | 'Mesh' | 'Map' | 'Build' | 'Animation' | 'Globals' | 'Window';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
 export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere'
@@ -144,7 +144,7 @@ export type Command = {
   // its surface (Duplicate/Delete/Move/Paint/Sample/Focus…). Placement tools do NOT set this.
   needsSelection?: boolean;
   // Groups this command under an expandable parent flyout in its menu dropdown
-  // (e.g. File → New Mesh → Cube, Edit → Mesh → Topology). Rows without a submenu render
+  // (e.g. File → New Mesh → Cube, Mesh → Topology). Rows without a submenu render
   // at the top level. `section` is a non-interactive header inside a submenu flyout.
   submenu?: string;
 };
@@ -575,7 +575,7 @@ export type EditorState = {
   openMenu: Menu | null;
   // When set, the size/resolution dialog is open for this primitive. `mode` splits the two
   // verbs that used to share one command: 'new' always spawns a FRESH model document; 'add'
-  // appends a part to the model already in view (the outliner + and Edit → Mesh → Add Primitive).
+  // appends a part to the model already in view (the outliner + and Mesh → Parts → Add Primitive).
   newMeshPrompt?: { kind: PrimitiveKind; mode: 'new' | 'add' } | null;
   // When true, the character-export dialog is open for the ACTIVE model doc —
   // the player-vs-NPC role choice that File → Export → Player / NPC Model

@@ -24,7 +24,7 @@ research run `research_runs/2026-08-12__everyday-curves-modeling-algorithms/`.
 
 ## The UI path (req_4322)
 
-`PRIMITIVE_MESHES` (data/commands.ts) drives File → New Mesh and Edit → Mesh →
+`PRIMITIVE_MESHES` (data/commands.ts) drives File → New Mesh and Mesh → Parts →
 Add Primitive from ONE list; the five curve kinds appended there flow through
 the same registry-driven pipeline as cube/cylinder: `PRIMITIVE_FIELDS`
 (assetCatalog.ts) describes each kind's dialog knobs (NewMeshDialog needs no

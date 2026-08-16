@@ -4167,7 +4167,7 @@ export default function AppFrame() {
       });
       return;
     }
-    // Paint resolution (Edit → Mesh → Paint → Paint Resolution): set exact texels/triangle on the
+    // Paint resolution (Mesh → Paint → Paint Resolution): set exact texels/triangle on the
     // viewer. The host clamps dense meshes to the atlas budget; the readout reflects what took.
     if (commandId.startsWith('mesh-paint-res-')) {
       const px = Number(commandId.slice('mesh-paint-res-'.length));
@@ -4180,7 +4180,7 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, openMenu: null, status }));
       return;
     }
-    // Add Primitive (Edit → Mesh → Add Primitive → <kind>): the 'add' verb — append a part to the
+    // Add Primitive (Mesh → Parts → Add Primitive → <kind>): the 'add' verb — append a part to the
     // model in view. Opens the size/resolution dialog in add mode; the outliner + shares this path.
     if (commandId.startsWith('add-mesh-')) {
       const kind = commandId.slice('add-mesh-'.length) as PrimitiveKind;
@@ -6651,7 +6651,7 @@ export default function AppFrame() {
   };
 
   // 'add' verb — APPEND the primitive as a new PART to the model in view (preserving every prior
-  // edit; no JS recompose). Reached from Edit → Mesh → Add Primitive and the outliner +.
+  // edit; no JS recompose). Reached from Mesh → Parts → Add Primitive and the outliner +.
   // Returns the new part's authored group range so a non-UI caller (the Agent Seat)
   // can select and name it in the same beat. UI callers ignore the value; every
   // refusal path returns null rather than throwing, because the seat reports the
