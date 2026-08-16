@@ -118,9 +118,20 @@ pub fn meshTopoWeldSelection() bool {
     const collapse_to = std.heap.c_allocator.alloc(?[3]f32, vert_count) catch return false;
     defer std.heap.c_allocator.free(collapse_to);
     @memset(collapse_to, null);
+    // Everything collapsing to one point must come out as ONE logical vertex, not a
+    // stack of coincident twins: on explicit-topology documents the rebuild carries
+    // stable ids verbatim, so the weld itself must hand it the identity groups to
+    // fuse. Group 0 is the selection centroid; each mirror plane subset is its own
+    // group at the reflected centroid.
+    const collapse_groups = std.heap.c_allocator.alloc(u32, vert_count) catch return false;
+    defer std.heap.c_allocator.free(collapse_groups);
+    @memset(collapse_groups, NO_COLLAPSE_GROUP);
     var v: u32 = 0;
     while (v < vert_count) : (v += 1) {
-        if (affected[v]) collapse_to[v] = center;
+        if (affected[v]) {
+            collapse_to[v] = center;
+            collapse_groups[v] = 0;
+        }
     }
     if (mesh_edit.mirrorMask() != 0) {
         v = 0;
@@ -136,6 +147,7 @@ pub fn meshTopoWeldSelection() bool {
                         reflected[axis] = mesh_edit.MIRROR_PLANE_CENTER[axis] * 2.0 - reflected[axis];
                 }
                 collapse_to[twin] = reflected;
+                collapse_groups[twin] = subset;
             }
         }
     }
@@ -173,8 +185,12 @@ pub fn meshTopoWeldSelection() bool {
     }
     if (!moved_any) return false;
     if (!z3d.maskMalformedWeldFaceGroups(verts, tri_count, corner_positions, touched, mask)) return false;
-    return z3d.rebuildMaskedFaces(verts, tri_count, mask, "weld", corner_positions);
+    return z3d.rebuildMaskedFaces(verts, tri_count, mask, "weld", corner_positions, collapse_groups);
 }
+
+/// Sentinel for `collapse_groups` rows: this dense vertex is not part of any weld
+/// collapse and its carried stable identity passes through unchanged.
+pub const NO_COLLAPSE_GROUP: u32 = std.math.maxInt(u32);
 
 pub const MeshRetopoWeldPairsRequest = struct {
     pairs: []const [2]u32,
@@ -206,9 +222,14 @@ pub fn meshRetopoWeldPairs(request: z3d.MeshRetopoWeldPairsRequest) bool {
     const targets = std.heap.c_allocator.alloc(f32, @as(usize, vert_count) * 3) catch return false;
     defer std.heap.c_allocator.free(targets);
     @memset(targets, 0);
+    // Each pair is its own identity group: the rebuild fuses the two carried stable
+    // ids into one survivor per pair, never across pairs — two pairs that happen to
+    // share a centroid still keep their own identities (seam order is authored).
+    const collapse_groups = std.heap.c_allocator.alloc(u32, vert_count) catch return false;
+    defer std.heap.c_allocator.free(collapse_groups);
+    @memset(collapse_groups, NO_COLLAPSE_GROUP);
 
-    var moved_any = false;
-    for (request.pairs) |pair| {
+    for (request.pairs, 0..) |pair, pair_index| {
         const a = pair[0];
         const b = pair[1];
         if (a == b or a >= vert_count or b >= vert_count or affected[a] or affected[b] or
@@ -226,14 +247,16 @@ pub fn meshRetopoWeldPairs(request: z3d.MeshRetopoWeldPairsRequest) bool {
         const center = [3]f32{ (pa[0] + pb[0]) * 0.5, (pa[1] + pb[1]) * 0.5, (pa[2] + pb[2]) * 0.5 };
         for (pair) |vertex| {
             affected[vertex] = true;
+            collapse_groups[vertex] = @intCast(pair_index);
             const base = @as(usize, vertex) * 3;
             targets[base] = center[0];
             targets[base + 1] = center[1];
             targets[base + 2] = center[2];
         }
-        if (distance > 1e-8) moved_any = true;
     }
-    if (!moved_any) return false;
+    // A zero-distance pair is NOT a no-op: two stable ids stacked on one position
+    // (the residue of an identity-less weld) fuse here without moving. Every
+    // validated pair is two distinct ids, so there is always identity work to do.
 
     const corner_positions = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
     defer std.heap.c_allocator.free(corner_positions);
@@ -267,7 +290,7 @@ pub fn meshRetopoWeldPairs(request: z3d.MeshRetopoWeldPairsRequest) bool {
         mask[face] = z3d.weldTriangleDegenerate(corner_positions[corner_base .. corner_base + 9]);
     }
     if (!z3d.maskMalformedWeldFaceGroups(verts, tri_count, corner_positions, touched, mask)) return false;
-    return z3d.rebuildMaskedFaces(verts, tri_count, mask, "weld vertex pairs", corner_positions);
+    return z3d.rebuildMaskedFaces(verts, tri_count, mask, "weld vertex pairs", corner_positions, collapse_groups);
 }
 
 /// Equalize the edge widths of explicit ordered rows while retaining their
@@ -413,7 +436,7 @@ pub fn paintStableJournalLabel(label: []const u8) bool {
 }
 
 pub fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8) bool {
-    return z3d.rebuildMaskedFaces(verts, tri_count, mask, label, null);
+    return z3d.rebuildMaskedFaces(verts, tri_count, mask, label, null, null);
 }
 
 /// The masked-rebuild core delete shares with WELD (req_3382): drop masked faces,
@@ -421,7 +444,7 @@ pub fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool,
 /// corner, tri_count×9) overrides surviving corners' positions while copying —
 /// weld moves its collapsed vertices in the SAME transaction that removes the
 /// faces the collapse degenerated, so undo is one step.
-pub fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8, corner_positions: ?[]const f32) bool {
+pub fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8, corner_positions: ?[]const f32, collapse_groups: ?[]const u32) bool {
     // Drop the selection FIRST (same rule as detach/glass): the orange tint is
     // real atlas pixels with per-face saved patches, and both are keyed by the
     // CURRENT face indices. Restoring after the survivors compact would paint
@@ -445,6 +468,13 @@ pub fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool
     defer semantic_instances.deinit(std.heap.c_allocator);
     var logical_ids: std.ArrayListUnmanaged(u32) = .empty;
     defer logical_ids.deinit(std.heap.c_allocator);
+    // Weld identity fusion (req_4652): every collapse group keeps ONE stable id —
+    // the first carried id seen in that group — and every other id in the group is
+    // rewritten onto it. Without this the carried rows resurrect each collapsed
+    // vertex as its own coincident twin: the dots stack, UI picking grabs both, and
+    // the model LOOKS welded while UV stitching and watertightness stay broken.
+    var collapse_survivors = std.AutoHashMapUnmanaged(u32, u32).empty;
+    defer collapse_survivors.deinit(std.heap.c_allocator);
     var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(std.heap.c_allocator);
     var f: u32 = 0;
@@ -477,7 +507,19 @@ pub fn rebuildMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool
         semantic_instances.append(std.heap.c_allocator, semantic.instance) catch return false;
         if (current_logical_ids) |rows| {
             const logical_base = @as(usize, f) * 3;
-            logical_ids.appendSlice(std.heap.c_allocator, rows[logical_base .. logical_base + 3]) catch return false;
+            var corner: u32 = 0;
+            while (corner < 3) : (corner += 1) {
+                var stable = rows[logical_base + corner];
+                if (collapse_groups) |vertex_groups| {
+                    const dense = mesh_edit.cornerVertPub(f, @intCast(corner));
+                    if (dense < vertex_groups.len and vertex_groups[dense] != NO_COLLAPSE_GROUP) {
+                        const survivor = collapse_survivors.getOrPut(std.heap.c_allocator, vertex_groups[dense]) catch return false;
+                        if (!survivor.found_existing) survivor.value_ptr.* = stable;
+                        stable = survivor.value_ptr.*;
+                    }
+                }
+                logical_ids.append(std.heap.c_allocator, stable) catch return false;
+            }
         }
         if (paint_stable) {
             const color = z3d.trueFaceColor(f);
