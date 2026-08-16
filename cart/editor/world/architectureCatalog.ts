@@ -148,7 +148,7 @@ export function projectArchitectureCatalogEntry(pkg: ArchitectureManifestPackage
     ...(wallOpening ? {
       wallOpeningCompatibility: {
         permittedProfiles: [...install.wallOpeningCompatibility!.permittedProfiles],
-        permittedThicknessU: [...install.wallOpeningCompatibility!.permittedThicknessU],
+        minimumThicknessU: install.wallOpeningCompatibility!.minimumThicknessU,
         portalClass: install.wallOpeningCompatibility!.portalClass,
       },
     } : {}),

@@ -427,7 +427,7 @@ export type ArchitectureCatalogEntry = {
   wallStyleDefaults?: { heightU: number; thicknessU: number; profile: WallProfile };
   wallOpeningCompatibility?: {
     permittedProfiles: readonly WallProfile[];
-    permittedThicknessU: readonly number[];
+    minimumThicknessU: number;
     portalClass: PortalClass;
   };
   assetRefs: {
@@ -559,7 +559,7 @@ function encodeCatalogEntries(kind: PacketKind, entries: readonly ArchitectureCa
     (entry.measurement.occupiedMask ?? []).forEach(cell => maskRows.push([index, CATALOG_MASK_KIND.occupied, cell.columnU, cell.rowU]));
     entry.measurement.clearanceMask.forEach(cell => maskRows.push([index, CATALOG_MASK_KIND.clearance, cell.columnU, cell.rowU]));
     entry.wallOpeningCompatibility?.permittedProfiles.forEach(profile => maskRows.push([index, CATALOG_MASK_KIND.profile, PROFILE_TAG[profile], 0]));
-    entry.wallOpeningCompatibility?.permittedThicknessU.forEach(value => maskRows.push([index, CATALOG_MASK_KIND.thickness, value, 0]));
+    if (entry.wallOpeningCompatibility) maskRows.push([index, CATALOG_MASK_KIND.thickness, entry.wallOpeningCompatibility.minimumThicknessU, 0]);
   });
   const tagBytes = new Uint8Array(tagRows.length * STRIDE.catalogTag);
   const tagView = new DataView(tagBytes.buffer);
@@ -638,7 +638,7 @@ function decodeCatalogEntries(packet: DecodedArchitecturePacket): ArchitectureCa
         profile: (['full', 'half'] as const)[view.getUint8(offset + 156)] ?? fail('invalid wall profile tag'),
       } : undefined,
       wallOpeningCompatibility: flags & CATALOG_FLAG.compatibility ? {
-        permittedProfiles: [], permittedThicknessU: [],
+        permittedProfiles: [], minimumThicknessU: 0,
         portalClass: (['none', 'walk', 'vehicle'] as const)[view.getUint8(offset + 157)] ?? fail('invalid portal tag'),
       } : undefined,
       assetRefs: {
@@ -681,7 +681,7 @@ function decodeCatalogEntries(packet: DecodedArchitecturePacket): ArchitectureCa
         }
         case CATALOG_MASK_KIND.thickness:
           if (!entry.wallOpeningCompatibility) return fail('thickness mask targets a non-opening entry');
-          (entry.wallOpeningCompatibility.permittedThicknessU as number[]).push(first);
+          (entry.wallOpeningCompatibility as { minimumThicknessU: number }).minimumThicknessU = first;
           break;
         default: return fail('catalog mask has an invalid kind');
       }

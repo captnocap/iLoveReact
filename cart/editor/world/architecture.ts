@@ -94,7 +94,8 @@ export type ArchitectureKitInstallDeclaration = {
   wallStyleProfile?: WallProfile;
   wallOpeningCompatibility?: {
     permittedProfiles: readonly WallProfile[];
-    permittedThicknessU: readonly number[];
+    /** The minimum wall housing depth this kit fits — open-ended above (RULED req_4491). */
+    minimumThicknessU: number;
     portalClass: PortalClass;
   };
 };
@@ -119,7 +120,8 @@ export type ArchitectureCatalogEntry = {
   wallStyleDefaults?: { heightU: number; thicknessU: number; profile: WallProfile };
   wallOpeningCompatibility?: {
     permittedProfiles: readonly WallProfile[];
-    permittedThicknessU: readonly number[];
+    /** The minimum wall housing depth this kit fits — open-ended above (RULED req_4491). */
+    minimumThicknessU: number;
     portalClass: PortalClass;
   };
   assetRefs: ArchitectureAssetRefs;
@@ -595,7 +597,7 @@ export function validateArchitectureCatalogEntry(value: unknown, path = 'archite
   if (opening) {
     if (entry.wallOpeningCompatibility === undefined) reject(`${path}.wallOpeningCompatibility`, 'is required for a wall opening kit');
     const compatibility = exactRecord(entry.wallOpeningCompatibility, `${path}.wallOpeningCompatibility`,
-      ['permittedProfiles', 'permittedThicknessU', 'portalClass']);
+      ['permittedProfiles', 'minimumThicknessU', 'portalClass']);
     const profiles = asArray(compatibility.permittedProfiles, `${path}.wallOpeningCompatibility.permittedProfiles`);
     if (profiles.length === 0) reject(`${path}.wallOpeningCompatibility.permittedProfiles`, 'must not be empty');
     const seenProfiles = new Set<string>();
@@ -604,15 +606,8 @@ export function validateArchitectureCatalogEntry(value: unknown, path = 'archite
       if (seenProfiles.has(parsed)) reject(`${path}.wallOpeningCompatibility.permittedProfiles[${index}]`, 'duplicates an earlier profile');
       seenProfiles.add(parsed);
     });
-    const thicknesses = asArray(compatibility.permittedThicknessU, `${path}.wallOpeningCompatibility.permittedThicknessU`);
-    if (thicknesses.length === 0) reject(`${path}.wallOpeningCompatibility.permittedThicknessU`, 'must not be empty');
-    const seenThicknesses = new Set<number>();
-    thicknesses.forEach((thickness, index) => {
-      const parsed = asInteger(thickness, `${path}.wallOpeningCompatibility.permittedThicknessU[${index}]`,
-        ARCHITECTURE_LIMITS.minimumWallThicknessU, ARCHITECTURE_LIMITS.maximumWallThicknessU);
-      if (seenThicknesses.has(parsed)) reject(`${path}.wallOpeningCompatibility.permittedThicknessU[${index}]`, 'duplicates an earlier thickness');
-      seenThicknesses.add(parsed);
-    });
+    asInteger(compatibility.minimumThicknessU, `${path}.wallOpeningCompatibility.minimumThicknessU`,
+      ARCHITECTURE_LIMITS.minimumWallThicknessU, ARCHITECTURE_LIMITS.maximumWallThicknessU);
     asEnum(compatibility.portalClass, PORTAL_CLASSES, `${path}.wallOpeningCompatibility.portalClass`);
   } else if (entry.wallOpeningCompatibility !== undefined) {
     reject(`${path}.wallOpeningCompatibility`, 'is only valid for a wall opening kit');

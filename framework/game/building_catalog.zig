@@ -69,12 +69,13 @@ pub const WallStyleDefaults = struct {
 
 pub const WallOpeningCompatibility = struct {
     permitted_profiles: []types.WallProfile,
-    permitted_thickness_u: []types.Unit,
+    /// The minimum wall housing depth this kit fits — any wall at least this
+    /// thick accepts the kit, open-ended above (RULED req_4491).
+    minimum_thickness_u: types.Unit,
     portal_class: types.PortalClass,
 
     pub fn deinit(self: *WallOpeningCompatibility, allocator: std.mem.Allocator) void {
         freeSlice(types.WallProfile, allocator, self.permitted_profiles);
-        freeSlice(types.Unit, allocator, self.permitted_thickness_u);
         self.* = undefined;
     }
 };
@@ -407,7 +408,7 @@ fn validateMasks(measurement: KitMeasurement, footprint: Footprint) ValidationEr
 }
 
 fn validateOpeningCompatibility(compatibility: WallOpeningCompatibility) ValidationError!void {
-    if (compatibility.permitted_profiles.len == 0 or compatibility.permitted_thickness_u.len == 0) {
+    if (compatibility.permitted_profiles.len == 0) {
         return error.invalid_wall_opening_compatibility;
     }
     for (compatibility.permitted_profiles, 0..) |profile, index| {
@@ -415,13 +416,10 @@ fn validateOpeningCompatibility(compatibility: WallOpeningCompatibility) Validat
             return error.invalid_wall_opening_compatibility;
         }
     }
-    for (compatibility.permitted_thickness_u, 0..) |thickness, index| {
-        if (thickness < types.wall_tuning.minimum_thickness_u or thickness > types.wall_tuning.maximum_thickness_u) {
-            return error.invalid_wall_opening_compatibility;
-        }
-        if (std.mem.indexOfScalar(types.Unit, compatibility.permitted_thickness_u[0..index], thickness) != null) {
-            return error.invalid_wall_opening_compatibility;
-        }
+    if (compatibility.minimum_thickness_u < types.wall_tuning.minimum_thickness_u or
+        compatibility.minimum_thickness_u > types.wall_tuning.maximum_thickness_u)
+    {
+        return error.invalid_wall_opening_compatibility;
     }
 }
 
@@ -529,7 +527,7 @@ fn matchesQuery(entry: CatalogEntry, query: CatalogQuery) bool {
     }
     if (query.wall_thickness_u) |thickness| {
         if (entry.wall_opening_compatibility) |compatibility| {
-            if (std.mem.indexOfScalar(types.Unit, compatibility.permitted_thickness_u, thickness) == null) return false;
+            if (thickness < compatibility.minimum_thickness_u) return false;
         } else if (entry.wall_style_defaults) |defaults| {
             if (defaults.thickness_u != thickness) return false;
         } else return false;

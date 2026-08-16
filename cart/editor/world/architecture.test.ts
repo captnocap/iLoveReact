@@ -131,7 +131,7 @@ function validOpeningKit(): ArchitectureCatalogEntry {
     },
     wallOpeningCompatibility: {
       permittedProfiles: ['full', 'half'],
-      permittedThicknessU: [4, 6],
+      minimumThicknessU: 4,
       portalClass: 'walk',
     },
     assetRefs: { meshContentHash: HASH_B, materialContentHashes: [HASH_C] },
@@ -260,7 +260,7 @@ test('opening size belongs only to the measured kit and footprint rounds outward
 
 test('catalog behavior comes from typed roles, measured fields, and exact compatibility', () => {
   throwsValidation(() => validateArchitectureCatalogEntry(changedKit(draft => { draft.role = 'style'; })), 'semanticKind');
-  throwsValidation(() => validateArchitectureCatalogEntry(changedKit(draft => { draft.wallOpeningCompatibility.permittedThicknessU = [4, 4]; })), 'permittedThicknessU');
+  throwsValidation(() => validateArchitectureCatalogEntry(changedKit(draft => { draft.wallOpeningCompatibility.minimumThicknessU = 0; })), 'minimumThicknessU');
   throwsValidation(() => validateArchitectureCatalog([validOpeningKit(), validOpeningKit()]), 'catalogId');
   throwsValidation(() => validateArchitectureCatalogEntry(changedKit(draft => { draft.contentHash = HASH_A.toUpperCase(); })), 'contentHash');
 });

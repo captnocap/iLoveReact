@@ -157,7 +157,6 @@ const EMPTY_CELLS = [_]architecture.types.WallCell{};
 const STYLE_PATH = [_][]u8{ @constCast("Wall"), @constCast("Styles") };
 const DOOR_PATH = [_][]u8{ @constCast("Wall"), @constCast("Openings"), @constCast("Doors") };
 const DOOR_PROFILES = [_]architecture.types.WallProfile{.full};
-const DOOR_THICKNESSES = [_]architecture.Unit{4};
 
 fn validWallStyle() architecture.CatalogEntry {
     return .{
@@ -226,7 +225,7 @@ fn validDoorKit() architecture.CatalogEntry {
         .wall_style_defaults = null,
         .wall_opening_compatibility = .{
             .permitted_profiles = @constCast(DOOR_PROFILES[0..]),
-            .permitted_thickness_u = @constCast(DOOR_THICKNESSES[0..]),
+            .minimum_thickness_u = 4,
             .portal_class = .walk,
         },
         .asset_refs = .{
@@ -1733,7 +1732,6 @@ test "wall split remaps anchors on both child cell ranges" {
 }
 
 const SMALL_DOOR_PROFILES = [_]architecture.types.WallProfile{ .full, .half };
-const SMALL_DOOR_THICKNESSES = [_]architecture.Unit{4};
 
 fn smallDoorKit() architecture.CatalogEntry {
     var kit = validDoorKit();
@@ -1757,7 +1755,7 @@ fn smallDoorKit() architecture.CatalogEntry {
     };
     kit.wall_opening_compatibility = .{
         .permitted_profiles = @constCast(SMALL_DOOR_PROFILES[0..]),
-        .permitted_thickness_u = @constCast(SMALL_DOOR_THICKNESSES[0..]),
+        .minimum_thickness_u = 4,
         .portal_class = .walk,
     };
     return kit;
@@ -2065,16 +2063,29 @@ test "opening insertion rejects clearance mask collision" {
 }
 
 test "opening insertion rejects incompatible thickness and profile" {
+    // The thickness contract is a MINIMUM housing depth (RULED req_4491): a
+    // wall thinner than the kit's minimum rejects; any wall at least that
+    // thick accepts, open-ended above.
     var entries = [_]architecture.CatalogEntry{ validWallStyle(), validDoorKit() };
+    var thin_source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer thin_source.deinit(testing.allocator);
+    try drawOpeningTestWall(testing.allocator, &thin_source, &entries, .full, 2, 48);
+    try expectOpeningRejection(
+        testing.allocator,
+        &thin_source,
+        &entries,
+        openingCommand("thin", 1, "base:e:0", "thin:o:0", "build:wall:opening:door:test", 16, 0),
+        .opening_incompatible_thickness,
+    );
+
     var thick_source = try emptyOwnedArchitectureSource(testing.allocator);
     defer thick_source.deinit(testing.allocator);
     try drawOpeningTestWall(testing.allocator, &thick_source, &entries, .full, 6, 48);
-    try expectOpeningRejection(
+    try applyExpectedOpeningMutation(
         testing.allocator,
         &thick_source,
         &entries,
         openingCommand("thick", 1, "base:e:0", "thick:o:0", "build:wall:opening:door:test", 16, 0),
-        .opening_incompatible_thickness,
     );
 
     var half_source = try emptyOwnedArchitectureSource(testing.allocator);

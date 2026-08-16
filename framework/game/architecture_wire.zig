@@ -813,7 +813,7 @@ const CatalogMaskKind = enum(u16) {
     occupied = 1,
     clearance = 2,
     permitted_profile = 3,
-    permitted_thickness = 4,
+    minimum_thickness = 4,
 };
 
 fn encodeSemanticKind(value: ?types.SemanticKind) [2]u8 {
@@ -864,7 +864,7 @@ fn appendCatalogSections(builder: *PacketBuilder, entries: []const catalog.Catal
             entry.gameplay_tags.len + entry.asset_refs.material_content_hashes.len) catch return error.count_limit;
         mask_count = std.math.add(usize, mask_count, entry.measurement.occupied_mask.len + entry.measurement.clearance_mask.len) catch return error.count_limit;
         if (entry.wall_opening_compatibility) |compatibility| {
-            mask_count = std.math.add(usize, mask_count, compatibility.permitted_profiles.len + compatibility.permitted_thickness_u.len) catch return error.count_limit;
+            mask_count = std.math.add(usize, mask_count, compatibility.permitted_profiles.len + 1) catch return error.count_limit;
         }
     }
     if (tag_count > Limits.maximum_output_rows or mask_count > Limits.maximum_output_rows) return error.count_limit;
@@ -928,7 +928,7 @@ fn appendCatalogSections(builder: *PacketBuilder, entries: []const catalog.Catal
         for (entry.measurement.clearance_mask) |cell| appendCatalogMaskRow(mask_bytes, &mask_index, entry_index, .clearance, cell.column_u, cell.row_u);
         if (entry.wall_opening_compatibility) |compatibility| {
             for (compatibility.permitted_profiles) |profile| appendCatalogMaskRow(mask_bytes, &mask_index, entry_index, .permitted_profile, @intFromEnum(profile), 0);
-            for (compatibility.permitted_thickness_u) |thickness| appendCatalogMaskRow(mask_bytes, &mask_index, entry_index, .permitted_thickness, thickness, 0);
+            appendCatalogMaskRow(mask_bytes, &mask_index, entry_index, .minimum_thickness, compatibility.minimum_thickness_u, 0);
         }
     }
     try builder.addSection(.catalog_entries, entries.len, catalog_entry_stride, entry_bytes);
@@ -1011,6 +1011,9 @@ pub fn decodeCatalog(allocator: std.mem.Allocator, packet: *const Packet) WireEr
         {
             return error.semantic_decode_failed;
         }
+        if (flags & CatalogEntryFlags.wall_compatibility != 0 and mask_counts[index][3] != 1) {
+            return error.semantic_decode_failed;
+        }
         const catalog_id = try ownedStringReference(allocator, packet, row, 0);
         errdefer freeSlice(u8, allocator, catalog_id);
         const content_hash = try ownedStringReference(allocator, packet, row, 8);
@@ -1037,8 +1040,6 @@ pub fn decodeCatalog(allocator: std.mem.Allocator, packet: *const Packet) WireEr
         errdefer freeSlice(types.WallCell, allocator, clearance);
         const profiles = try allocator.alloc(types.WallProfile, mask_counts[index][2]);
         errdefer freeSlice(types.WallProfile, allocator, profiles);
-        const thicknesses = try allocator.alloc(types.Unit, mask_counts[index][3]);
-        errdefer freeSlice(types.Unit, allocator, thicknesses);
         const mesh_hash = try ownedStringReference(allocator, packet, row, 160);
         errdefer freeSlice(u8, allocator, mesh_hash);
         const animation_hash = if (flags & CatalogEntryFlags.animation_hash != 0)
@@ -1093,7 +1094,7 @@ pub fn decodeCatalog(allocator: std.mem.Allocator, packet: *const Packet) WireEr
             } else null,
             .wall_opening_compatibility = if (flags & CatalogEntryFlags.wall_compatibility != 0) .{
                 .permitted_profiles = profiles,
-                .permitted_thickness_u = thicknesses,
+                .minimum_thickness_u = 0,
                 .portal_class = std.enums.fromInt(types.PortalClass, row[157]) orelse return error.semantic_decode_failed,
             } else null,
             .asset_refs = .{
@@ -1140,7 +1141,7 @@ pub fn decodeCatalog(allocator: std.mem.Allocator, packet: *const Packet) WireEr
             },
             .permitted_profile => entries[entry_index].wall_opening_compatibility.?.permitted_profiles[destination_index] =
                 std.enums.fromInt(types.WallProfile, @as(u8, @intCast(readInt(i32, row, 8)))) orelse return error.semantic_decode_failed,
-            .permitted_thickness => entries[entry_index].wall_opening_compatibility.?.permitted_thickness_u[destination_index] = readInt(types.Unit, row, 8),
+            .minimum_thickness => entries[entry_index].wall_opening_compatibility.?.minimum_thickness_u = readInt(types.Unit, row, 8),
         }
         mask_filled[entry_index][kind_index] += 1;
     };

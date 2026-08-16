@@ -501,13 +501,13 @@ fn openingPlacementRejection(
             "the measured opening kit does not permit this wall profile",
         );
     }
-    if (std.mem.indexOfScalar(types.Unit, compatibility.permitted_thickness_u, edge.thickness_u) == null) {
+    if (edge.thickness_u < compatibility.minimum_thickness_u) {
         return try ownedRejection(
             allocator,
             command,
             .opening_incompatible_thickness,
             &.{ edge.id, placement.kit_id },
-            "the measured opening kit does not permit this wall thickness",
+            "the wall is thinner than the opening kit's minimum housing depth",
         );
     }
     const footprint = kit.measurement.footprint.?;
@@ -562,7 +562,7 @@ fn openingKind(entry: *const catalog.CatalogEntry) ?types.WallOpeningKind {
 fn openingKitCompatibleWithEdge(edge: *const types.WallEdge, kit: *const catalog.CatalogEntry) bool {
     const compatibility = kit.wall_opening_compatibility.?;
     return std.mem.indexOfScalar(types.WallProfile, compatibility.permitted_profiles, edge.profile) != null and
-        std.mem.indexOfScalar(types.Unit, compatibility.permitted_thickness_u, edge.thickness_u) != null and
+        edge.thickness_u >= compatibility.minimum_thickness_u and
         kit.measurement.footprint.?.height() <= edge.height_u;
 }
 

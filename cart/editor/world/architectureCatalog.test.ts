@@ -80,7 +80,7 @@ function doorPackage(catalogId = 'build:wall:opening:door:measured'): Architectu
       contentHash: HASH_C,
       wallOpeningCompatibility: {
         permittedProfiles: ['full'],
-        permittedThicknessU: [4],
+        minimumThicknessU: 4,
         portalClass: 'walk',
       },
       assetRefs: { meshContentHash: HASH_D, materialContentHashes: [] },
