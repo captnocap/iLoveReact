@@ -17,7 +17,7 @@
 // Verify headless: `./tools/rjit shot modelview` renders the empty prompt; open a real
 // model under `./tools/rjit dev modelview`, or `RJIT_MODEL=path ./tools/rjit shot
 // modelview` to render one headlessly.
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Box, Col, Row, Text, Pressable, ScrollView, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { LightRig } from '../model/editMesh';
@@ -1332,6 +1332,35 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // another. This revision carries that identity change to Model Focus without putting
   // JS back into the native pointer loop.
   const [selectionRevision, setSelectionRevision] = useState(0);
+  // A face selection names its full addressable path — outliner groups › part › region —
+  // so the title strip answers "what am I on" without opening the focus panel (req_4509).
+  // Falls back to the plain count whenever the selection spans regions or parts.
+  const selectionPath = useMemo(() => {
+    if (selMode !== 3 || selInfo.sel < 1) return null;
+    const snapshot = readModelSelection();
+    if (!snapshot || snapshot.mode !== 3 || snapshot.truncated || snapshot.triangles.length === 0) return null;
+    const percept = readSeatPercept();
+    if (!percept) return null;
+    const regions = new Set<number | 'none'>();
+    const groups: number[] = [];
+    for (const triangle of snapshot.triangles) {
+      regions.add(typeof triangle.region === 'number' ? triangle.region : 'none');
+      if (typeof triangle.group === 'number') groups.push(triangle.group);
+    }
+    if (regions.size !== 1) return null;
+    const regionId = [...regions][0]!;
+    const regionName = regionId === 'none'
+      ? 'unnamed'
+      : percept.table.regions.find((region) => region.id === regionId)?.name ?? `region ${regionId}`;
+    // Part identity is shell-owned Outliner data: the host semantic state carries no
+    // parts, so the strip reads them through the same bridge the seat adapter uses.
+    const shellParts = ((globalThis as any).__seatShellBridge?.partPercept?.()?.parts ?? []) as
+      { name: string; lo: number | null; hi: number | null; groupPath: { name: string }[] }[];
+    const owner = groups.length === 0 ? undefined : shellParts.find((part) =>
+      part.lo != null && part.hi != null && groups.every((group) => group >= part.lo! && group < part.hi!));
+    const crumbs = owner ? [...owner.groupPath.map((group) => group.name), owner.name, regionName] : [regionName];
+    return crumbs.join(' › ');
+  }, [selMode, selInfo, selectionRevision, model?.key]);
   const [guard, setGuard] = useState<GuardInfo | null>(null);
   // Shader-ink bake failure — surfaced LOUD. The old shape discarded the door's
   // return code, so a failed bake silently painted flat white (req_2482).
@@ -5185,7 +5214,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         />
       ) : null}
 
-      {/* Title strip — only changes on load, so this render is the one-and-only. */}
+      {/* Title strip — the LIVE document name (initialTitle re-renders on rename; the
+          model snapshot's name is load-time and goes stale, req_4508) plus the selection's
+          addressable path when one is in focus. */}
       <Row
         style={{
           position: 'absolute', left: 0, top: 0, right: 0, height: 34,
@@ -5194,12 +5225,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         }}
       >
         <Text style={{ color: '#e8edf6', fontSize: 13, fontWeight: 600 }}>
-          {model ? model.name : initialTitle ?? 'Model Viewer'}
+          {initialTitle ?? model?.name ?? 'Model Viewer'}
         </Text>
         {model && (
-          <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
+          <Text numberOfLines={1} noWrap style={{ color: '#7d899c', fontSize: 12, marginLeft: 12, minWidth: 0 }}>
             {selMode !== 0
-              ? `${selInfo.sel} selected`
+              ? selectionPath
+                ? `› ${selectionPath} · ${selInfo.sel} selected`
+                : `${selInfo.sel} selected`
               : `${(model.count / 3).toLocaleString()} tris`}
           </Text>
         )}
