@@ -128,7 +128,8 @@ export default function Stage(props: {
   modelReloadRevision: number;
   onDiscardActiveModel: () => void;
   onSavePaintConflictLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
-  onRequireFirstModelSave: () => boolean;
+  /** First save propagated by atlas creation — true, or the exact refusal (req_4551). */
+  onRequireFirstModelSave: () => true | string;
   onModelDocumentMutated: () => void;
   onResidentModelReady: (modelId: string, modelSourceKey: string) => void;
   characterRigApi: CharacterRigApi | null;

@@ -520,7 +520,11 @@ export type ModelViewProps = {
   /** Save the resident geometry while explicitly preserving the stale paint
    * marker. Used when cold-open/variant conflicts did not originate at Save. */
   onKeepLive?: (options?: PaintLayoutKeepLiveOptions) => boolean;
-  onRequireFirstSave?: () => boolean;
+  /** Run the model's first save so atlas creation can proceed (req_4551: picking
+   * an atlas IS the commitment — the save propagates, the user never detours).
+   * Returns true on success, or the exact refusal string so the atlas prompt can
+   * show WHY instead of sitting inert while the status bar whispers. */
+  onRequireFirstSave?: () => true | string;
   onDocumentMutated?: () => void;
   /** Model-local emitted lights from the Rig draft. They illuminate the same
    * geometry here that each placed instance illuminates in World. */
@@ -1906,6 +1910,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     fit?: number;
   }) => AtlasReceipt | null>(() => null);
   const [atlasPrompt, setAtlasPrompt] = useState(false);
+  // Why the last size pick could not proceed (the propagated first save was
+  // refused). Shown IN the prompt: a dialog that silently stays open after a
+  // click reads as a broken guard, not a failed save (req_4551). A reopened
+  // prompt starts clean — the error describes THIS prompt's last pick only.
+  const [atlasPromptError, setAtlasPromptError] = useState<string | null>(null);
+  useEffect(() => { if (atlasPrompt) setAtlasPromptError(null); }, [atlasPrompt]);
   const [paintConflict, setPaintConflict] = useState<PaintLayoutConflictSession | null>(null);
   const coldPaintConflictShownRef = useRef<string | null>(null);
   // The atlas base TYPE (Blockbench's Create Texture "Type"), picked in the SAME gate as the
@@ -2948,7 +2958,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     detail?: number;
     fit?: number;
   }): AtlasReceipt | null => {
-    if (paintTarget && !paintTargetOnDisk && !(onRequireFirstSave?.() ?? false)) return null;
+    // A first-time model saves as part of picking the atlas (req_4551) — the
+    // pick IS the commitment, there is no separate save detour. A refused save
+    // surfaces in the prompt with the writer's exact reason.
+    if (paintTarget && !paintTargetOnDisk) {
+      const saved = onRequireFirstSave?.() ?? 'this model needs its first save, and no save authority is wired to this viewer';
+      if (saved !== true) {
+        setAtlasPromptError(saved);
+        return null;
+      }
+    }
+    setAtlasPromptError(null);
     const budget = request.fit;
     const density = budget === undefined
       ? changeDetail(request.detail ?? 1)
@@ -6432,6 +6452,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 );
               });
             })()}
+            {/* A first-time model saves as part of the pick (req_4551) — say so, and
+                when that propagated save is refused, the refusal lives HERE, loud,
+                not only in the status bar behind the dialog. */}
+            {paintTarget && !paintTargetOnDisk && !atlasPromptError && (
+              <Text style={{ color: '#8b97ab', fontSize: 10, marginTop: 8 }}>
+                picking a size also saves this model — first atlas and first save are one step
+              </Text>
+            )}
+            {atlasPromptError && (
+              <Col style={{ marginTop: 10, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, borderRadius: 6, backgroundColor: '#3a2330', borderWidth: 1, borderColor: '#8a4a5e' }}>
+                <Text style={{ color: '#ffb3c0', fontSize: 11, fontWeight: 700 }}>the automatic save was refused</Text>
+                <Text style={{ color: '#e8c9d2', fontSize: 10, marginTop: 4 }}>{atlasPromptError}</Text>
+              </Col>
+            )}
             <Row style={{ marginTop: 12, gap: 8, justifyContent: 'flex-end' }}>
               <Pressable
                 onPress={() => setAtlasPrompt(false)}

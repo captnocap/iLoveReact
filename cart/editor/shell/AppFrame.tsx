@@ -302,7 +302,7 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge, worldViewSlotForKey } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, importStlModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { convertStlToGlb, isStlFile } from '../data/stlImport';
-import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocUnreadableDiagnostic } from '../data/meshDoc';
+import { MESHDOC_VERTEX_STRIDE, compareMeshDocs, invalidateMeshDoc, meshDocBounds, meshDocRangeStats, meshDocTriangle, meshDocIsUnreadable, meshDocLastWriteFailure, meshDocPartRangesFromRows, partsMetaFromRows, meshDocUnreadableDiagnostic, resetMeshDocWriteFailure } from '../data/meshDoc';
 import { modelDocumentToken, nativeMeshActionDrain, reconcileNativeModelSession, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import { hydrateModelDocumentPartsAfterMount, modelDocumentMetadataByRange } from '../model/modelDocumentColdMount';
 import { parseModelHistory } from '../model/uvHistory';
@@ -11718,7 +11718,15 @@ export default function AppFrame() {
               if (activeModelId) discardModelWorkingCopy(activeModelId, 'Kept DISK — live edits and Ctrl+Z history were discarded');
             }}
             onSavePaintConflictLive={(options) => saveActiveModelNow('Saved after choosing Keep LIVE', 'explicit', true, options)}
-            onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas', 'explicit')}
+            onRequireFirstModelSave={() => {
+              // Picking an atlas size IS the first save (req_4551). On refusal the
+              // atlas prompt shows the document writer's exact reason; the reset
+              // keeps an older attempt's refusal from masquerading as this one's.
+              resetMeshDocWriteFailure();
+              if (saveActiveModelNow('Saved before creating paint atlas', 'explicit')) return true;
+              return meshDocLastWriteFailure()
+                ?? 'the save was refused before reaching the document writer — the status bar names the step';
+            }}
             onModelDocumentMutated={markActiveModelDirty}
             onResidentModelReady={(modelId, modelSourceKey) => {
               const current = stateRef.current;

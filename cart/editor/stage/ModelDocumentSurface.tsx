@@ -106,7 +106,8 @@ export default function ModelDocumentSurface({ model, documentId, lights, textur
   reloadRevision: number;
   onDiscardLive: () => void;
   onKeepLive: (options?: PaintLayoutKeepLiveOptions) => boolean;
-  onRequireFirstSave: () => boolean;
+  /** First save propagated by atlas creation — true, or the exact refusal (req_4551). */
+  onRequireFirstSave: () => true | string;
   onDocumentMutated: () => void;
   /** Successful native adoption/resume for the visible model. The shell may
    * retain this opaque key for transactional capability attachment. */

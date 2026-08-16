@@ -185,6 +185,14 @@ export function meshDocLastWriteFailure(): string | null {
   return lastMeshDocWriteFailure;
 }
 
+/** Drop the retained refusal before a fresh save attempt whose failure will be read
+ * back through meshDocLastWriteFailure(). A save that dies BEFORE reaching the
+ * document writer (staging, manifest) must not resurface an older document refusal
+ * as if it were this attempt's reason (req_4551). */
+export function resetMeshDocWriteFailure(): void {
+  lastMeshDocWriteFailure = null;
+}
+
 function refuseMeshDocSave(dir: string, reason: string): false {
   lastMeshDocWriteFailure = reason;
   console.error(`[meshdoc] REFUSING SAVE for ${dir}: ${reason}`);
