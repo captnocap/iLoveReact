@@ -44,10 +44,12 @@ function throwsValidation(run: () => void, expectedPath: string): void {
   throw new Error(`expected a validation error at '${expectedPath}'`);
 }
 
+// Real measured sizes — fractional is the NORM (req_4562): the modeled size
+// IS the size; nothing here rounds to tiles.
 const CATALOG = new Map<string, LotPlaceableFacts>([
-  ['bed_king', { id: 'bed_king', name: 'King Bed', widthU: 2, depthU: 3, mount: 'floor' }],
-  ['couch_001', { id: 'couch_001', name: 'Couch', widthU: 3, depthU: 1, mount: 'floor' }],
-  ['tv_001', { id: 'tv_001', name: 'TV', widthU: 2, depthU: 1, mount: 'wall' }],
+  ['bed_king', { id: 'bed_king', name: 'King Bed', widthU: 1.93, depthU: 2.13, mount: 'floor' }],
+  ['couch_001', { id: 'couch_001', name: 'Couch', widthU: 2.6, depthU: 0.95, mount: 'floor' }],
+  ['tv_001', { id: 'tv_001', name: 'TV', widthU: 1.42, depthU: 0.12, mount: 'wall' }],
 ]);
 
 /** 6×4 lot: one 3×4 bedroom walled off on the left, a door in its east wall. */
@@ -88,39 +90,46 @@ test('strict parse refuses bad versions, duplicate ids, and out-of-lot edges', (
   throwsValidation(() => parseLotPlan(badCells), 'cells[0]');
 });
 
-test('a valid furnished plan audits clean', () => {
+test('a valid furnished plan audits clean at fractional coordinates', () => {
   const plan = bedroomPlan();
-  plan.placements.push({ id: 'bed', placeableId: 'bed_king', columnU: 0, rowU: 0, rotation: 0 });
+  // x 0.05..1.98 stays clear of the door clearance zone that starts at x=2.
+  plan.placements.push({ id: 'bed', placeableId: 'bed_king', xU: 0.05, yU: 0.4, rotation: 0 });
   const findings = auditLotPlan(plan, CATALOG);
   equal(findings.length, 0, `findings: ${findings.map((f) => f.code).join(',')}`);
 });
 
-test('rotation swaps a footprint and out-of-bounds refuses', () => {
+test('rotation swaps the measured footprint and out-of-bounds refuses', () => {
   const plan = bedroomPlan();
-  const rect = lotPlacementRect({ id: 'bed', placeableId: 'bed_king', columnU: 0, rowU: 0, rotation: 1 }, CATALOG.get('bed_king')!);
-  equal(rect.widthU, 3, 'rotated width');
-  equal(rect.depthU, 2, 'rotated depth');
-  plan.placements.push({ id: 'bed', placeableId: 'bed_king', columnU: 5, rowU: 3, rotation: 0 });
+  const rect = lotPlacementRect({ id: 'bed', placeableId: 'bed_king', xU: 0, yU: 0, rotation: 1 }, CATALOG.get('bed_king')!);
+  equal(rect.widthU, 2.13, 'rotated width keeps the measured meters');
+  equal(rect.depthU, 1.93, 'rotated depth keeps the measured meters');
+  plan.placements.push({ id: 'bed', placeableId: 'bed_king', xU: 4.5, yU: 2.5, rotation: 0 });
   const findings = auditLotPlan(plan, CATALOG);
   equal(findings[0]?.code, 'placement-out-of-bounds', 'oob refusal');
 });
 
-test('overlap, unknown placeable, and door blocking refuse by name', () => {
+test('overlap, flush-touch, unknown placeable, and door blocking behave', () => {
   const plan = bedroomPlan();
-  plan.placements.push({ id: 'bed', placeableId: 'bed_king', columnU: 0, rowU: 0, rotation: 0 });
-  plan.placements.push({ id: 'couch', placeableId: 'couch_001', columnU: 0, rowU: 1, rotation: 0 });
-  plan.placements.push({ id: 'ghost', placeableId: 'not_a_thing', columnU: 5, rowU: 0, rotation: 0 });
-  plan.placements.push({ id: 'blocker', placeableId: 'couch_001', columnU: 2, rowU: 2, rotation: 0 });
+  plan.placements.push({ id: 'bed', placeableId: 'bed_king', xU: 0, yU: 0, rotation: 0 });
+  // Interiors intersect (bed is 1.93 wide, couch starts at 1.5) → overlap.
+  plan.placements.push({ id: 'couch', placeableId: 'couch_001', xU: 1.5, yU: 0.5, rotation: 0 });
+  // Flush against the bed's face at exactly 1.93 → NOT an overlap.
+  plan.placements.push({ id: 'flush', placeableId: 'couch_001', xU: 1.93, yU: 2.6, rotation: 0 });
+  plan.placements.push({ id: 'ghost', placeableId: 'not_a_thing', xU: 5, yU: 0, rotation: 0 });
+  // Door edge v:3,2 — clearance spans x 2..4, y 2..3; this couch reaches x 2.35.
+  plan.placements.push({ id: 'blocker', placeableId: 'couch_001', xU: 2.1, yU: 2.05, rotation: 1 });
   const codes = auditLotPlan(plan, CATALOG).map((f) => f.code);
   assert(codes.includes('placement-overlap'), `overlap missing in ${codes.join(',')}`);
+  equal(codes.filter((c) => c === 'placement-overlap').length, 1, 'flush touch did not count as overlap');
   assert(codes.includes('placement-unknown-placeable'), 'unknown placeable missing');
   assert(codes.includes('placement-blocks-door'), 'door block missing');
 });
 
-test('wall-mounted placeables demand a wall behind them', () => {
+test('wall-mounted placeables demand a wall within reach of a face', () => {
   const plan = bedroomPlan();
-  plan.placements.push({ id: 'tv-good', placeableId: 'tv_001', columnU: 0, rowU: 0, rotation: 0 });
-  plan.placements.push({ id: 'tv-floating', placeableId: 'tv_001', columnU: 4, rowU: 1, rotation: 0 });
+  // Back face at yU=0.03 — within the 0.05 u touch tolerance of the wall at y=0.
+  plan.placements.push({ id: 'tv-good', placeableId: 'tv_001', xU: 0.7, yU: 0.03, rotation: 0 });
+  plan.placements.push({ id: 'tv-floating', placeableId: 'tv_001', xU: 4, yU: 1.5, rotation: 0 });
   const findings = auditLotPlan(plan, CATALOG);
   equal(findings.length, 1, `findings: ${findings.map((f) => f.code).join(',')}`);
   equal(findings[0]!.code, 'wall-mount-without-wall', 'refusal code');
@@ -136,17 +145,17 @@ test('an opening needs a wall; a doorless room reports sealed', () => {
   assert(codes.includes('room-sealed'), 'sealed room missing');
 });
 
-test('the percept summarizes measured facts and renders the plan', () => {
+test('the percept keeps fractional truth in the legend', () => {
   const plan = bedroomPlan();
-  plan.placements.push({ id: 'bed', placeableId: 'bed_king', columnU: 0, rowU: 0, rotation: 0 });
+  plan.placements.push({ id: 'bed', placeableId: 'bed_king', xU: 0.05, yU: 0.4, rotation: 0 });
   const summary = summarizeLotPlan(plan, CATALOG);
   equal(summary.rooms[0]!.areaU2, 12, 'bedroom area');
-  equal(summary.placements[0]!.footprintU!.widthU, 2, 'measured footprint');
+  equal(summary.placements[0]!.footprintU!.widthU, 1.93, 'footprint is the MEASURED meters, not tiles');
   equal(summary.findings.length, 0, 'clean audit');
   const ascii = renderLotPlanAscii(plan, CATALOG);
   assert(ascii.includes('D'), 'door drawn');
   assert(ascii.includes('a '), 'placement glyph drawn');
-  assert(ascii.includes('King Bed · 2×3 u'), 'legend carries the measured size');
+  assert(ascii.includes('King Bed · 1.93×2.13 u at 0.05,0.4'), 'legend carries fractional truth');
   assert(ascii.includes('│'), 'walls drawn');
 });
 

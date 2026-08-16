@@ -3,8 +3,15 @@
 Steering numbers for anyone (human or LLM) authoring lot plans (req_4514/4518/4519).
 Everything is in **tiles**: 1 tile = 1 m (scale ruling R4, `tools/oracle "scale contract"`).
 The lot-plan data layer lives at `cart/editor/world/lotPlan.ts`; this guide is what to
-*put in it* so buildings read as real. Sources at the bottom; numbers are rounded to
-whole tiles outward, the same way placeable footprints round.
+*put in it* so buildings read as real. Sources at the bottom.
+
+**THE SCALE LAW (req_4562): never put an arbitrary scale on something — the world
+already has scale.** The tile grid structures walls, rooms, and openings; it never
+sizes an object. A placeable's MEASURED modeled size IS its size — positions and
+footprints are fractional meters ("a bed is not 2×3 tiles; a king bed is 1.93×2.13 m
+because that is what was modeled"). Quantizing collapses different real sizes into one
+number (8 = 2 but 2 also = N). Every number in this guide is steering guidance in
+meters, never a snap rule — expect a lot of fractional sizes.
 
 Standing rulings this guide obeys:
 
@@ -19,6 +26,8 @@ Standing rulings this guide obeys:
   units is a single run, not two back-to-back walls.
 - **req_4482** — floors derive from enclosure; a plan authors walls and never floors.
 - **req_4491** — an opening kit fits any wall at least as thick as its measured housing.
+- **req_4562** — the scale law above: measured size IS the size; data is fractional
+  meters; only walls/rooms/openings ride the tile grid.
 
 ---
 
@@ -26,16 +35,17 @@ Standing rulings this guide obeys:
 
 | Room | Minimum (tiles) | Comfortable | Notes |
 |---|---|---|---|
-| Bedroom | 3×3 | 3×4 – 4×4 | Real code min ~2.4×3.4 m; 3×4 fits a 2×3 king bed + walkway |
-| Living room | 4×3 | 4×5 – 5×6 | Couch (3×1) + TV wall + walkway |
+| Bedroom | 3×3 | 3×4 – 4×4 | Real code min ~2.4×3.4 m; fits a ~1.93×2.13 m king bed + walkway |
+| Living room | 4×3 | 4×5 – 5×6 | Couch (~2.6×0.95 m) + TV wall + walkway |
 | Kitchen | 2×3 | 3×4 | Counter run 1 deep, passage ≥1 clear (code: ≥0.9 m) |
 | Bathroom | 2×2 | 2×3 | Real min ~1.6×2.4 m; 2×3 fits tub + sink + toilet |
 | In-unit hall | 1 wide | 1 | 1 tile ≈ 0.9–1.2 m code hallway |
 | Shared corridor | 2 wide | 2 | Double-loaded standard is ~2.4 m — always 2 tiles |
 | Closet | 1×1 | 1×2 | |
 
-Doors occupy one edge cell (≈0.9 m leaf). Keep both flanking tiles clear — the audit
-refuses `placement-blocks-door`.
+A door's ADDRESS is a wall edge; its real cut width and height are the opening kit's
+MEASURED mount bounds (req_4491), not the tile. Keep 1 m clear on both sides of a door
+— the audit refuses `placement-blocks-door`.
 
 ## 2. Unit archetypes — the templates a building stamps
 
@@ -139,8 +149,9 @@ Ground-floor plate at 24×16 (street below, alley above):
 3. Walls on edges; party walls once; exterior shell closed.
 4. Doors (circulation first: entry → hall → rooms; audit catches sealed rooms),
    then windows on exterior walls.
-5. Placements, wall-mounted against real walls — every footprint is measured, never
-   guessed (`LotPlaceableFacts`).
+5. Placements at fractional meter positions, wall-mounted faces within 5 cm of a real
+   wall — every footprint is the model's measured size, never guessed and never rounded
+   (`LotPlaceableFacts`).
 6. `auditLotPlan` → fix every refusal → re-audit until clean.
 
 ## Sources

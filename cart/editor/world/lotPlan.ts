@@ -9,6 +9,13 @@
 // and the bake leg later executes a valid plan into real wall/opening/prop
 // commands (bake-by-execution, MAPFORMAT-0607 V29).
 //
+// SCALE LAW (req_4562, and V24's snap-substrate clause): the world is already
+// to scale and models are modeled to scale, so a placeable's MEASURED size IS
+// its size — positions and footprints are fractional meters, never rounded to
+// tiles. Quantizing collapses different real sizes into one number ("8 = 2 but
+// 2 also = N"). The tile grid structures WALLS, ROOMS, and OPENINGS; it never
+// resizes an object. Expect a lot of fractional sizes.
+//
 // Edge addressing: cell (c,r) has c in [0,widthU), r in [0,heightU).
 //   horizontal edge (c,r) — the border between cell (c,r-1) and cell (c,r); r in [0,heightU]
 //   vertical   edge (c,r) — the border between cell (c-1,r) and cell (c,r); c in [0,widthU]
@@ -30,8 +37,10 @@ export type LotRotation = 0 | 1 | 2 | 3;
 export type LotPlacement = {
   id: string;
   placeableId: string;
-  columnU: number;
-  rowU: number;
+  /** Continuous meters — the min corner of the footprint. Snapping is a UI
+   * convenience; the DATA is never quantized (req_4562). */
+  xU: number;
+  yU: number;
   rotation: LotRotation;
 };
 
@@ -54,7 +63,8 @@ export type LotPlan = {
 export type LotPlaceableFacts = {
   id: string;
   name: string;
-  /** Footprint in whole tiles at rotation 0, outward-rounded from measured bounds. */
+  /** MEASURED meters at rotation 0 — fractional, straight off the model's
+   * bounds, never rounded (req_4562: the modeled size IS the size). */
   widthU: number;
   depthU: number;
   mount: 'floor' | 'wall';
@@ -100,6 +110,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const asWhole = (value: unknown, path: string, max: number): number => {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > max) {
     fail(path, `must be an integer in [0, ${max}]`);
+  }
+  return value as number;
+};
+
+/** Continuous meters — fractional values are the NORM here (req_4562). */
+const asCoordinate = (value: unknown, path: string): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > LOT_LIMITS.maxSideU) {
+    fail(path, `must be a finite number of meters in [0, ${LOT_LIMITS.maxSideU}]`);
   }
   return value as number;
 };
@@ -226,8 +244,8 @@ export function parseLotPlan(value: unknown): LotPlan {
     return {
       id,
       placeableId: asName(placement.placeableId, `${path}.placeableId`),
-      columnU: asWhole(placement.columnU, `${path}.columnU`, LOT_LIMITS.maxSideU),
-      rowU: asWhole(placement.rowU, `${path}.rowU`, LOT_LIMITS.maxSideU),
+      xU: asCoordinate(placement.xU, `${path}.xU`),
+      yU: asCoordinate(placement.yU, `${path}.yU`),
       rotation: rotation as LotRotation,
     };
   });
@@ -237,48 +255,58 @@ export function parseLotPlan(value: unknown): LotPlan {
 
 export const cloneLotPlan = (plan: LotPlan): LotPlan => parseLotPlan(JSON.parse(JSON.stringify(plan)));
 
-/** A placement's occupied tile rectangle after rotation. */
-export function lotPlacementRect(
-  placement: LotPlacement,
-  facts: LotPlaceableFacts,
-): { columnU: number; rowU: number; widthU: number; depthU: number } {
+export type LotRect = { xU: number; yU: number; widthU: number; depthU: number };
+
+/** A placement's occupied rectangle after rotation — continuous meters. */
+export function lotPlacementRect(placement: LotPlacement, facts: LotPlaceableFacts): LotRect {
   const swapped = placement.rotation === 1 || placement.rotation === 3;
   return {
-    columnU: placement.columnU,
-    rowU: placement.rowU,
+    xU: placement.xU,
+    yU: placement.yU,
     widthU: swapped ? facts.depthU : facts.widthU,
     depthU: swapped ? facts.widthU : facts.depthU,
   };
 }
 
-/** The edges on a placement rectangle's boundary — where a wall-mounted
- * placeable must find a wall, and what a door needs kept clear beyond. */
-function rectBoundaryEdges(rect: { columnU: number; rowU: number; widthU: number; depthU: number }): LotEdge[] {
-  const edges: LotEdge[] = [];
-  for (let c = rect.columnU; c < rect.columnU + rect.widthU; c += 1) {
-    edges.push({ orientation: 'h', columnU: c, rowU: rect.rowU });
-    edges.push({ orientation: 'h', columnU: c, rowU: rect.rowU + rect.depthU });
+/** Meters for messages and legends: two decimals, trailing zeros trimmed. */
+export const fmtMeters = (value: number): string => String(Math.round(value * 100) / 100);
+
+/** Interiors must intersect — objects sitting flush (touching faces) are fine. */
+const OVERLAP_EPS = 1e-6;
+const rectsOverlap = (a: LotRect, b: LotRect): boolean =>
+  a.xU < b.xU + b.widthU - OVERLAP_EPS && b.xU < a.xU + a.widthU - OVERLAP_EPS &&
+  a.yU < b.yU + b.depthU - OVERLAP_EPS && b.yU < a.yU + a.depthU - OVERLAP_EPS;
+
+/** How close a face must sit to a wall plane to count as mounted on it. */
+const WALL_TOUCH_EPS = 0.05;
+
+/** Does any of the plan's wall segments lie against one of the rect's sides?
+ * A wall edge is a 1 m segment on the integer grid; the rect is continuous. */
+function rectTouchesWall(rect: LotRect, walls: LotWall[]): boolean {
+  for (const wall of walls) {
+    const { orientation, columnU, rowU } = wall.edge;
+    if (orientation === 'h') {
+      const spans = columnU + 1 > rect.xU + OVERLAP_EPS && columnU < rect.xU + rect.widthU - OVERLAP_EPS;
+      if (spans && (Math.abs(rect.yU - rowU) <= WALL_TOUCH_EPS || Math.abs(rect.yU + rect.depthU - rowU) <= WALL_TOUCH_EPS)) return true;
+    } else {
+      const spans = rowU + 1 > rect.yU + OVERLAP_EPS && rowU < rect.yU + rect.depthU - OVERLAP_EPS;
+      if (spans && (Math.abs(rect.xU - columnU) <= WALL_TOUCH_EPS || Math.abs(rect.xU + rect.widthU - columnU) <= WALL_TOUCH_EPS)) return true;
+    }
   }
-  for (let r = rect.rowU; r < rect.rowU + rect.depthU; r += 1) {
-    edges.push({ orientation: 'v', columnU: rect.columnU, rowU: r });
-    edges.push({ orientation: 'v', columnU: rect.columnU + rect.widthU, rowU: r });
-  }
-  return edges;
+  return false;
 }
 
-/** The two cells an edge separates; out-of-lot neighbors are omitted. */
-function edgeCells(plan: LotPlan, edge: LotEdge): { columnU: number; rowU: number }[] {
-  const cells = edge.orientation === 'h'
+/** The walk-through clearance a door needs: 1 m deep on each side of its edge. */
+function doorClearanceRects(edge: LotEdge): LotRect[] {
+  return edge.orientation === 'h'
     ? [
-      { columnU: edge.columnU, rowU: edge.rowU - 1 },
-      { columnU: edge.columnU, rowU: edge.rowU },
+      { xU: edge.columnU, yU: edge.rowU - 1, widthU: 1, depthU: 1 },
+      { xU: edge.columnU, yU: edge.rowU, widthU: 1, depthU: 1 },
     ]
     : [
-      { columnU: edge.columnU - 1, rowU: edge.rowU },
-      { columnU: edge.columnU, rowU: edge.rowU },
+      { xU: edge.columnU - 1, yU: edge.rowU, widthU: 1, depthU: 1 },
+      { xU: edge.columnU, yU: edge.rowU, widthU: 1, depthU: 1 },
     ];
-  return cells.filter((cell) =>
-    cell.columnU >= 0 && cell.columnU < plan.widthU && cell.rowU >= 0 && cell.rowU < plan.heightU);
 }
 
 /** Every refusal and warning in one pass — the feedback loop reads the whole
@@ -300,8 +328,9 @@ export function auditLotPlan(plan: LotPlan, catalog: Map<string, LotPlaceableFac
     }
   }
 
-  // Placement occupancy, measured against catalog facts.
-  const occupancy = new Map<number, string>();
+  // Placement geometry, measured against catalog facts — continuous rects,
+  // fractional meters throughout (req_4562).
+  const placed: { id: string; rect: LotRect }[] = [];
   for (const placement of plan.placements) {
     const facts = catalog.get(placement.placeableId);
     if (!facts) {
@@ -314,56 +343,49 @@ export function auditLotPlan(plan: LotPlan, catalog: Map<string, LotPlaceableFac
       continue;
     }
     const rect = lotPlacementRect(placement, facts);
-    if (rect.columnU + rect.widthU > plan.widthU || rect.rowU + rect.depthU > plan.heightU) {
+    if (rect.xU + rect.widthU > plan.widthU + OVERLAP_EPS || rect.yU + rect.depthU > plan.heightU + OVERLAP_EPS) {
       findings.push({
         severity: 'refusal',
         code: 'placement-out-of-bounds',
-        message: `placement '${placement.id}' (${facts.name}, ${rect.widthU}×${rect.depthU} u) leaves the ${plan.widthU}×${plan.heightU} lot`,
+        message: `placement '${placement.id}' (${facts.name}, ${fmtMeters(rect.widthU)}×${fmtMeters(rect.depthU)} u) leaves the ${plan.widthU}×${plan.heightU} lot`,
         subject: placement.id,
       });
       continue;
     }
-    for (let r = rect.rowU; r < rect.rowU + rect.depthU; r += 1) {
-      for (let c = rect.columnU; c < rect.columnU + rect.widthU; c += 1) {
-        const index = r * plan.widthU + c;
-        const holder = occupancy.get(index);
-        if (holder !== undefined && holder !== placement.id) {
-          findings.push({
-            severity: 'refusal',
-            code: 'placement-overlap',
-            message: `placement '${placement.id}' overlaps '${holder}' at tile ${c},${r}`,
-            subject: placement.id,
-          });
-        } else {
-          occupancy.set(index, placement.id);
-        }
-      }
-    }
-    if (facts.mount === 'wall') {
-      const backed = rectBoundaryEdges(rect).some((edge) => wallKeys.has(lotEdgeKey(edge)));
-      if (!backed) {
+    for (const other of placed) {
+      if (rectsOverlap(rect, other.rect)) {
         findings.push({
           severity: 'refusal',
-          code: 'wall-mount-without-wall',
-          message: `placement '${placement.id}' (${facts.name}) is wall-mounted but no wall touches its footprint`,
+          code: 'placement-overlap',
+          message: `placement '${placement.id}' overlaps '${other.id}'`,
           subject: placement.id,
         });
       }
     }
+    placed.push({ id: placement.id, rect });
+    if (facts.mount === 'wall' && !rectTouchesWall(rect, plan.walls)) {
+      findings.push({
+        severity: 'refusal',
+        code: 'wall-mount-without-wall',
+        message: `placement '${placement.id}' (${facts.name}) is wall-mounted but no wall lies within ${WALL_TOUCH_EPS} u of its footprint`,
+        subject: placement.id,
+      });
+    }
   }
 
-  // A door's two flanking cells stay walkable.
+  // A door's walk-through stays clear: 1 m on each side of the edge.
   for (const opening of plan.openings) {
     if (opening.kind !== 'door') continue;
-    for (const cell of edgeCells(plan, opening.edge)) {
-      const holder = occupancy.get(cell.rowU * plan.widthU + cell.columnU);
-      if (holder !== undefined) {
-        findings.push({
-          severity: 'refusal',
-          code: 'placement-blocks-door',
-          message: `placement '${holder}' blocks the door at ${lotEdgeKey(opening.edge)}`,
-          subject: holder,
-        });
+    for (const clearance of doorClearanceRects(opening.edge)) {
+      for (const other of placed) {
+        if (rectsOverlap(clearance, other.rect)) {
+          findings.push({
+            severity: 'refusal',
+            code: 'placement-blocks-door',
+            message: `placement '${other.id}' blocks the door at ${lotEdgeKey(opening.edge)}`,
+            subject: other.id,
+          });
+        }
       }
     }
   }

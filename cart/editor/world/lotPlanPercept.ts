@@ -7,6 +7,7 @@
 
 import {
   auditLotPlan,
+  fmtMeters,
   lotEdgeKey,
   lotPlacementRect,
   type LotFinding,
@@ -26,8 +27,10 @@ export type LotPlanSummary = {
     glyph: string;
     placeableId: string;
     name: string | null;
-    at: { columnU: number; rowU: number };
+    /** Continuous meters — fractional is the norm (req_4562). */
+    at: { xU: number; yU: number };
     rotation: number;
+    /** MEASURED meters after rotation, never rounded. */
     footprintU: { widthU: number; depthU: number } | null;
   }[];
   findings: LotFinding[];
@@ -67,7 +70,7 @@ export function summarizeLotPlan(plan: LotPlan, catalog: Map<string, LotPlaceabl
         glyph: placementGlyph(index),
         placeableId: placement.placeableId,
         name: facts?.name ?? null,
-        at: { columnU: placement.columnU, rowU: placement.rowU },
+        at: { xU: placement.xU, yU: placement.yU },
         rotation: placement.rotation,
         footprintU: facts ? { widthU: lotPlacementRect(placement, facts).widthU, depthU: lotPlacementRect(placement, facts).depthU } : null,
       };
@@ -86,14 +89,20 @@ export function renderLotPlanAscii(plan: LotPlan, catalog: Map<string, LotPlacea
   const openingAt = new Map(plan.openings.map((opening) => [lotEdgeKey(opening.edge), opening.kind]));
   const CELL = 2;
 
+  // Display quantization ONLY: a cell wears a placement's glyph when the
+  // placement covers the cell's center. The data underneath stays fractional.
   const cellGlyphs: string[] = plan.cells.map((room) => (room >= 0 ? roomGlyph(room) : '·'));
   plan.placements.forEach((placement, index) => {
     const facts = catalog.get(placement.placeableId);
     if (!facts) return;
     const rect = lotPlacementRect(placement, facts);
-    for (let r = rect.rowU; r < Math.min(rect.rowU + rect.depthU, plan.heightU); r += 1) {
-      for (let c = rect.columnU; c < Math.min(rect.columnU + rect.widthU, plan.widthU); c += 1) {
-        cellGlyphs[r * plan.widthU + c] = placementGlyph(index);
+    for (let r = 0; r < plan.heightU; r += 1) {
+      for (let c = 0; c < plan.widthU; c += 1) {
+        const cx = c + 0.5;
+        const cy = r + 0.5;
+        if (cx > rect.xU && cx < rect.xU + rect.widthU && cy > rect.yU && cy < rect.yU + rect.depthU) {
+          cellGlyphs[r * plan.widthU + c] = placementGlyph(index);
+        }
       }
     }
   });
@@ -136,8 +145,8 @@ export function renderLotPlanAscii(plan: LotPlan, catalog: Map<string, LotPlacea
   lines.push(`${plan.name} — ${plan.widthU}×${plan.heightU} u (1 u = 1 m)`);
   for (const room of summary.rooms) lines.push(`  ${room.glyph} ${room.name} · ${room.areaU2} u²`);
   for (const placement of summary.placements) {
-    const size = placement.footprintU ? `${placement.footprintU.widthU}×${placement.footprintU.depthU} u` : 'UNMEASURED';
-    lines.push(`  ${placement.glyph} ${placement.name ?? placement.placeableId} · ${size} at ${placement.at.columnU},${placement.at.rowU} r${placement.rotation}`);
+    const size = placement.footprintU ? `${fmtMeters(placement.footprintU.widthU)}×${fmtMeters(placement.footprintU.depthU)} u` : 'UNMEASURED';
+    lines.push(`  ${placement.glyph} ${placement.name ?? placement.placeableId} · ${size} at ${fmtMeters(placement.at.xU)},${fmtMeters(placement.at.yU)} r${placement.rotation}`);
   }
   for (const finding of summary.findings) {
     lines.push(`  ${finding.severity === 'refusal' ? '✗' : '⚠'} ${finding.message}`);
