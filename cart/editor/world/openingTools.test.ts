@@ -1,5 +1,6 @@
 import {
   armedOpeningKitById,
+  openingWorldPose,
   armedOpeningKitFromEntries,
   openingCatalogIdOf,
   openingEdgeRefusal,
@@ -67,23 +68,40 @@ test('the armed kit projects from the first installed entry of its kind', () => 
   assert(armedOpeningKitFromEntries([doorEntry(), second], 'door')!.label === 'door_001', 'first installed kit wins');
 });
 
-test('hover slides along the wall at the AUTHORED height; empty enumeration snaps nowhere', () => {
+test('hover slides the column; the WHEEL owns the row, defaulting to the authored height', () => {
   const slots: WallCell[] = [
     { columnU: 8, rowU: 0 }, { columnU: 9, rowU: 0 }, { columnU: 40, rowU: 0 },
   ];
-  assert(snapOpeningSlot(slots, 10, 2)!.columnU === 9, 'nearest column');
+  assert(snapOpeningSlot(slots, 10, 0)!.columnU === 9, 'nearest column');
   assert(snapOpeningSlot(slots, 39, 0)!.columnU === 40, 'far hover finds the far slot');
-  assert(snapOpeningSlot(slots, 8, 0)!.columnU === 8, 'exact hover keeps its slot');
   assert(snapOpeningSlot([], 10, 0) === null, 'no slots → no snap');
-  // req_4524: a 35u door in a 48u wall enumerates anchor rows 0..13 — hovering
-  // HIGH on the wall must not pin the doorway to the ceiling. The lowest legal
-  // row (the authored elevation) always wins; the hover only picks the column.
+  // req_4524/4526: anchor rows 0..13 on a tall wall — lift 0 keeps the door on
+  // the floor no matter where the cursor is; the wheel's lift walks the rows
+  // and clamps at the top like a prop's height dial.
   const tallWall: WallCell[] = [
     { columnU: 12, rowU: 0 }, { columnU: 35, rowU: 0 },
+    { columnU: 12, rowU: 8 }, { columnU: 35, rowU: 8 },
     { columnU: 12, rowU: 13 }, { columnU: 35, rowU: 13 },
   ];
-  const high = snapOpeningSlot(tallWall, 35, 33)!;
-  assert(high.rowU === 0 && high.columnU === 35, 'high hover stays a floor-standing door');
+  assert(snapOpeningSlot(tallWall, 35, 0)!.rowU === 0, 'no lift → floor-standing door');
+  assert(snapOpeningSlot(tallWall, 35, 8)!.rowU === 8, 'lift walks to the matching row');
+  assert(snapOpeningSlot(tallWall, 35, 999)!.rowU === 13, 'over-lift clamps at the highest legal row');
+  const lifted = snapOpeningSlot(tallWall, 14, 8)!;
+  assert(lifted.columnU === 12, 'column still follows the cursor within the lifted row');
+});
+
+test('the mounted pose runs along the edge with the loader yaw law', () => {
+  // +x wall: model +X must map to world +X → yaw 0.
+  const east = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'a')!;
+  assert(Math.abs(east.x - 2) < 1e-9 && east.z === 0 && east.y === 0, 'anchor in meters along the edge');
+  assert(east.yawDegrees === 0, '+x edge → yaw 0');
+  // +z wall: +X must map to +Z → world (cos, -sin) = (0, 1) → yaw 270.
+  const south = openingWorldPose({ xM: 0, zM: 0 }, { xM: 0, zM: 4 }, 1.5, { columnU: 16, rowU: 4 }, 'a')!;
+  assert(Math.abs(south.z - 1) < 1e-9 && Math.abs(south.y - 1.75) < 1e-9, 'position on a +z edge, base + row lift');
+  assert(Math.abs(south.yawDegrees - 270) < 1e-9, '+z edge → yaw 270 under the loader law');
+  const flipped = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'b')!;
+  assert(flipped.yawDegrees === 180, 'facing side b turns the door around');
+  assert(openingWorldPose({ xM: 1, zM: 1 }, { xM: 1, zM: 1 }, 0, { columnU: 0, rowU: 0 }, 'a') === null, 'degenerate edge mounts nothing');
 });
 
 test('static edge refusals name the reason the wall can never take the kit', () => {

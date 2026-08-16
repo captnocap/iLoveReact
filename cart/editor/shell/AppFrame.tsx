@@ -5177,6 +5177,39 @@ export default function AppFrame() {
     }
     return map;
   }, [catalogGeneration]);
+  // Opening-kit resident adapters (req_4526): the armed kit + every kit a
+  // placed opening references become resident MODELS — the mounted door in
+  // every cut and the armed translucent mesh ghost both resolve through them.
+  // Door-family kits carry the door edit so the resident swings its leaf.
+  const openingKitPieces = useMemo(() => {
+    const referenced = new Set<string>();
+    if (state.armedOpeningKitId) referenced.add(state.armedOpeningKitId);
+    for (const edge of state.architecture.walls.edges) {
+      for (const opening of edge.openings) referenced.add(opening.kitId);
+    }
+    if (referenced.size === 0) return [] as AuthoredBuildPiece[];
+    const pieces: AuthoredBuildPiece[] = [];
+    for (const entry of installedOpeningKits()) {
+      if (!referenced.has(entry.catalogId)) continue;
+      const pkg = modelPackageById(entry.packageId);
+      if (!pkg) {
+        console.warn(`[wall] opening kit '${entry.catalogId}' references missing package '${entry.packageId}' — not mounted`);
+        continue;
+      }
+      const kind = entry.semanticKind;
+      pieces.push({
+        id: `opening:${entry.catalogId}`,
+        modelId: authoredModelIdForPackage(pkg.id),
+        pkgId: pkg.id,
+        label: entry.label,
+        kind: 'wall',
+        hex: pkg.color ?? '#8a93c0',
+        ...(kind === 'door' || kind === 'slidingDoor' ? { edit: 'door' as const }
+          : kind === 'garageDoor' ? { edit: 'garageDoor' as const } : {}),
+      });
+    }
+    return pieces;
+  }, [state.armedOpeningKitId, state.architecture, catalogGeneration]);
   // Activating the tool with nothing installed says WHY the ghost never
   // appears and names the verbs that fix it. The warn is the ring-visible
   // truth of what the tool actually armed (req_4521 diagnosis).
@@ -11724,6 +11757,7 @@ export default function AppFrame() {
             onCutOpening={cutOpening}
             onSelectOpening={selectOpening}
             openingFootprints={openingFootprints}
+            openingKitPieces={openingKitPieces}
             wallDefaults={installedWallStyles()[0]?.wallStyleDefaults ?? null}
             onSelectWall={selectWallEdge}
             onWallDimensions={setSelectedWallDimensions}

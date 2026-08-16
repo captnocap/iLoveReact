@@ -86,6 +86,8 @@ export default function WorldEditorSurface(props: {
   onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: import('../world/architecture').WallCell }) => boolean;
   onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
   openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
+  /** Opening-kit resident adapters (req_4526) — mounted doors + the armed mesh ghost. */
+  openingKitPieces: readonly import('../world/authoredRegistry').AuthoredBuildPiece[];
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -142,6 +144,7 @@ export default function WorldEditorSurface(props: {
         onCutOpening={props.onCutOpening}
         onSelectOpening={props.onSelectOpening}
         openingFootprints={props.openingFootprints}
+        openingKitPieces={props.openingKitPieces}
         floor={props.floor}
         viewRecall={props.viewRecall}
         views={props.views}

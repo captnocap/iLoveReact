@@ -27,7 +27,7 @@ import { IsoStage, METERS_PER_LEVEL, type IsoPose, type Rect } from './isoStage'
 import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pieceScaleOf, pickAuthoredPlacement, PIECE_MODULE_METERS, PIECE_SCALE_LIMITS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
 import { findVertexSnap, type VertexSnapHit } from './vertexSnap';
-import { isAuthoredPiece, authoredResidentKeyOf, type AuthoredBuildPiece } from './authoredRegistry';
+import { isAuthoredPiece, authoredPieceFor, authoredResidentKeyOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { architectureHostLive, pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { faceRoleForHit } from './pieceSlots';
@@ -42,7 +42,7 @@ import { snapWallPoint, wallPointerRelease, type WallDrawCommit, type WallDrawGe
 import { setLiveArchitecture } from './architectureBake';
 import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
 import { architectureHost } from './architectureHost';
-import { openingEdgeRefusal, openingGhostCorners, snapOpeningSlot, type OpeningKitArm } from './openingTools';
+import { openingEdgeRefusal, openingGhostCorners, openingWorldPose, snapOpeningSlot, type OpeningKitArm } from './openingTools';
 import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
@@ -76,6 +76,8 @@ const WHEEL_PITCH_STEP_DEG = 3;
 // armed the plain wheel raises/lowers the placement instead of zooming, so a
 // picture goes UP THE WALL at place time — never authored floating in the studio.
 const PROP_LIFT_STEP_M = 0.25;
+// The opening dial steps the same 0.25m in lattice units (req_4526 parity).
+const OPENING_LIFT_STEP_U = PROP_LIFT_STEP_M * ARCHITECTURE_UNITS_PER_METER;
 const HOVER_READOUT_POLL_MS = 50;
 // Move previews are interactive but never belong on the frame path. A snapped
 // target is recomputed at most 30Hz while dragging; mouse-up always resolves the
@@ -243,6 +245,8 @@ export default function WorldViewport(props: {
   /** Measured footprint per installed opening kit id — the selected-opening
    *  outline resolves its rectangle through this regardless of the armed tool. */
   openingFootprints: Readonly<Record<string, import('./architecture').ArchitectureFootprint>>;
+  /** Opening-kit resident adapters (req_4526): armed + placed kits' models. */
+  openingKitPieces: readonly AuthoredBuildPiece[];
   /** Commit a snapped preview after one Move-tool drag. */
   onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
@@ -350,6 +354,10 @@ export default function WorldViewport(props: {
   /** Set once trackOpeningCursor exists below — the arm effect seeds through it. */
   const trackOpeningCursorRef = useRef<((px: number, py: number) => void) | null>(null);
   const openingRenderTraceRef = useRef('');
+  // The wheel's vertical dial for the armed opening (req_4526) — the SAME
+  // gesture as a prop's height dial, in lattice u, clamped by the legal rows.
+  const openingLiftRef = useRef(0);
+  useEffect(() => { openingLiftRef.current = 0; }, [props.openingKit?.catalogId]);
   const wallAnchorRef = useRef<WallDrawGesture | null>(null);
   // req_4520: the wall overlay — lattice cursor, anchor gizmo, hologram span,
   // magnet marker, and measurement drags — is HOST-RENDERED per frame
@@ -894,6 +902,7 @@ export default function WorldViewport(props: {
       props.worldFlora,
       props.floraSpecies,
       props.armed?.pieceId ?? null,
+      props.openingKitPieces,
     );
     const signature = JSON.stringify([
       next.authoredPieces.map((piece) => piece.id),
@@ -912,7 +921,7 @@ export default function WorldViewport(props: {
       demand: next,
     };
     return next;
-  }, [props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.armed?.pieceId]);
+  }, [props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.armed?.pieceId, props.openingKitPieces]);
 
   // Keep only referenced authored meshes RESIDENT (req_2577). Palette size is
   // irrelevant: the active world, its surface flora, and the armed preview are
@@ -964,16 +973,51 @@ export default function WorldViewport(props: {
     const ghost = placementGhost
       ?? (props.tool === 'move' && movePreview && isAuthoredPiece(movePreview.pieceId) ? movePreview : null)
       ?? (gizmoPreview && isAuthoredPiece(gizmoPreview.pieceId) ? gizmoPreview : null);
+    // The armed OPENING previews as its kit's real translucent model (req_4526
+    // — same vocabulary as an armed prop): mounted at the snapped slot on a
+    // wall, standing at the ground cursor otherwise.
+    let openingMeshGhost: { key: string; x: number; y: number; z: number; yaw: number } | null = null;
+    if (!ghost && props.tool === 'cutOpening' && props.openingKit && openingGhost) {
+      const key = `opening:${props.openingKit.catalogId}`;
+      if (openingGhost.mode === 'ground') {
+        // Face the camera while free-floating; walls decide the real yaw.
+        openingMeshGhost = {
+          key, x: openingGhost.xM, y: openingGhost.yM, z: openingGhost.zM,
+          yaw: ((-(stage.pose.yaw ?? 0)) % 360 + 360) % 360,
+        };
+      } else {
+        const source = architectureRef.current;
+        const edge = source.walls.edges.find((candidate) => candidate.id === openingGhost.edgeId);
+        const startVertex = edge ? source.walls.vertices.find((vertex) => vertex.id === edge.startVertexId) : null;
+        const endVertex = edge ? source.walls.vertices.find((vertex) => vertex.id === edge.endVertexId) : null;
+        if (edge && startVertex && endVertex && edge.support.kind === 'absolute') {
+          const pose = openingWorldPose(
+            { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+            { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+            edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
+            openingGhost.slot ?? openingGhost.anchor,
+            openingGhost.side,
+          );
+          if (pose) openingMeshGhost = { key, x: pose.x, y: pose.y, z: pose.z, yaw: pose.yawDegrees };
+        }
+      }
+    }
     if (ghost && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
       g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({
         key: authoredResidentKeyOf(ghost.pieceId),
         x: ghost.x, y: ghost.y, z: ghost.z, yaw: ghost.yawDegrees,
         scale: pieceScaleOf(ghost),
       }));
+    } else if (openingMeshGhost && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
+      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({
+        key: openingMeshGhost.key,
+        x: openingMeshGhost.x, y: openingMeshGhost.y, z: openingMeshGhost.z, yaw: openingMeshGhost.yaw,
+        scale: 1,
+      }));
     } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
       g.__compiled_world_clear_live_mesh_ghost(nodeId);
     }
-  }, [snap, movePreview, gizmoPreview, props.active, props.armed, props.tool]);
+  }, [snap, movePreview, gizmoPreview, props.active, props.armed, props.tool, openingGhost, props.openingKit]);
 
   // Unmount: drop the loader runtime + its pending camera.
   useEffect(() => () => {
@@ -1094,7 +1138,7 @@ export default function WorldViewport(props: {
       }
       openingSlotsCacheRef.current = { key: cacheKey, slots };
     }
-    const slot = snapOpeningSlot(slots, hit.columnU, hit.rowU);
+    const slot = snapOpeningSlot(slots, hit.columnU, openingLiftRef.current);
     setOpeningGhost({
       mode: 'wall',
       edgeId: hit.edgeId,
@@ -1246,6 +1290,13 @@ export default function WorldViewport(props: {
         const next = inside ? publishHoverAt(mx - r.x, my - r.y) : null;
         if (!inside) publishWorldHoverReadout(null);
         if ((armedHover || !inside) && !dragging) setSnap((cur) => (sameSnap(cur, next) ? cur : next));
+        // Place Door/Window rides the SAME poll that keeps prop ghosts live
+        // (req_4526): the framework delivers onMouseMove only under pointer
+        // capture, so hover tracking must poll the global mouse.
+        if (toolRef.current === 'cutOpening' && !dragging) {
+          if (inside) trackOpeningCursorRef.current?.(mx - r.x, my - r.y);
+          else setOpeningGhost(null);
+        }
       } else {
         const paint = mapPaintRef.current;
         setNativePaintRoute(!interactionLockedRef.current && paint.active && !(paint.channel === 'flora' && !!paint.floraSpeciesId));
@@ -1262,7 +1313,7 @@ export default function WorldViewport(props: {
     };
     // armedHover collapses props.armed (a fresh object every parent render) to a boolean, so the
     // loop tears down only on real disarm/tool change — not on every unrelated re-render.
-  }, [armedHover, publishHoverAt, pickFloraSurfaceAt, setNativePaintRoute]);
+  }, [armedHover, publishHoverAt, pickFloraSurfaceAt, setNativePaintRoute, setOpeningGhost]);
 
   // ── input: middle-drag orbits — x-travel spins the yaw, y-travel tilts the
   // pitch (req_2710) — shift-drag grabs the map, wheel zooms to the cursor
@@ -1868,6 +1919,15 @@ export default function WorldViewport(props: {
       setSnap(resolveSnap(mx - r.x, my - r.y));
       return;
     }
+    // Armed opening → the wheel is the SAME height dial a prop gets (RULED
+    // req_4526: "keep the behavior the same all the way around"). The lift
+    // walks the engine's legal anchor rows; over-lift clamps at the top,
+    // scroll-down returns to the kit's authored elevation.
+    if (!currentModifiers().ctrl && toolRef.current === 'cutOpening' && openingKitRef.current) {
+      openingLiftRef.current = Math.max(0, openingLiftRef.current + (dy > 0 ? OPENING_LIFT_STEP_U : -OPENING_LIFT_STEP_U));
+      trackOpeningCursorRef.current?.(mx - r.x, my - r.y);
+      return;
+    }
     if (currentModifiers().ctrl) {
       // ctrl+wheel tilts (req_2711): wheel up climbs toward a plan view,
       // wheel down levels toward the horizon. Zoom stays untouched.
@@ -1900,6 +1960,18 @@ export default function WorldViewport(props: {
       const look = pieceLook(snap.pieceId);
       if (look) ghostSegs.push(...boxSegments(stage, rect, snap.x, snap.y, snap.z, look.w, look.h, look.d, snap.yaw));
     }
+  }
+  // The armed piece's flair tag (req_4526): label the ghost like the door
+  // tool labels its cut — the topmost projected point anchors the chip.
+  let ghostReadout: { x: number; y: number; text: string } | null = null;
+  if (ghostSegs.length && props.armed && props.tool === 'place') {
+    let topX = ghostSegs[0]!;
+    let topY = ghostSegs[1]!;
+    for (let at = 0; at + 1 < ghostSegs.length; at += 2) {
+      if (ghostSegs[at + 1]! < topY) { topX = ghostSegs[at]!; topY = ghostSegs[at + 1]!; }
+    }
+    const label = authoredPieceFor(props.armed.pieceId)?.label ?? props.armed.pieceId;
+    ghostReadout = { x: topX + 8, y: topY - 20, text: label };
   }
   // Mid-drag, every piece the run would stamp ghosts at once (req_2747) — snap
   // is nulled while a run is live, so the two never double-draw.
@@ -2112,17 +2184,15 @@ export default function WorldViewport(props: {
         ), !legal, openingGhost.reason ? `${kit.label} — ${openingGhost.reason}` : kit.label);
       }
     } else {
-      // Ground preview: the kit rectangle stands at the cursor facing the
-      // camera — orientation is presentational; walls decide the real one.
-      const yawRad = ((stage.pose.yaw ?? 0) * Math.PI) / 180;
-      const rightX = Math.cos(yawRad);
-      const rightZ = Math.sin(yawRad);
-      const u0 = kit.footprint.minColumn / ARCHITECTURE_UNITS_PER_METER;
-      const u1 = kit.footprint.maxColumnExclusive / ARCHITECTURE_UNITS_PER_METER;
-      const v0 = openingGhost.yM + kit.footprint.minRow / ARCHITECTURE_UNITS_PER_METER;
-      const v1 = openingGhost.yM + kit.footprint.maxRowExclusive / ARCHITECTURE_UNITS_PER_METER;
-      const at = (u: number, v: number) => ({ x: openingGhost.xM + rightX * u, y: v, z: openingGhost.zM + rightZ * u });
-      pushGhostRect([at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)], false, `${kit.label} — bring it to a wall`);
+      // Ground preview: the kit's REAL mesh ghost rides the cursor (the live
+      // mesh-ghost door) — no outline needed, just the flair tag above it.
+      const top = stage.project(
+        openingGhost.xM,
+        openingGhost.yM + kit.footprint.maxRowExclusive / ARCHITECTURE_UNITS_PER_METER,
+        openingGhost.zM,
+        rect,
+      );
+      if (top) openingReadout = { x: top.x + 8, y: top.y - 20, text: `${kit.label} — bring it to a wall` };
     }
   }
   // req_4524 render-side truth, one warn per ghost change: what actually got
@@ -2154,23 +2224,32 @@ export default function WorldViewport(props: {
         style: { width: '100%', height: '100%' },
       })}
 
-      {/* 2D projected ghost — identity view, never eats input */}
+      {/* 2D projected ghost — identity view, never eats input. The armed
+          piece's name rides the outline (req_4526 — the door tool's flair tag,
+          adopted for every armed placement). */}
       {ghostSegs.length ? (
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
             <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} />
           </Graph>
+          {ghostReadout ? (
+            <Box style={{ position: 'absolute', left: ghostReadout.x, top: ghostReadout.y, backgroundColor: '#0d141fcc', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4 }}>
+              <Text style={{ color: '#e5e9f0', fontSize: 12 }}>{ghostReadout.text}</Text>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
 
       {/* Draw Wall overlay — host-rendered engine nodes since req_4520 (wall_tool.zig). */}
 
       {/* Cut Opening ghost (req_4503) — slot-snapped cut rectangle, green legal / red with reason. */}
-      {openingSegs.length ? (
+      {openingSegs.length || openingReadout ? (
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
-          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-            <Graph.Polyline segments points={openingSegs} stroke={openingColor} strokeWidth={2} />
-          </Graph>
+          {openingSegs.length ? (
+            <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+              <Graph.Polyline segments points={openingSegs} stroke={openingColor} strokeWidth={2} />
+            </Graph>
+          ) : null}
           {openingReadout ? (
             <Box style={{ position: 'absolute', left: openingReadout.x, top: openingReadout.y, backgroundColor: '#0d141fcc', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4 }}>
               <Text style={{ color: openingColor === '#f87171' ? '#f8b4b4' : '#e5e9f0', fontSize: 12 }}>{openingReadout.text}</Text>

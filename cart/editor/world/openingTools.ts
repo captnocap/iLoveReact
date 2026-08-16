@@ -108,25 +108,32 @@ export function armedOpeningKitFromEntries(
   return entry ? kitArmFromEntry(entry) : null;
 }
 
-/** The hovered cursor slides the kit ALONG the wall; its height is the
- * AUTHORED one (req_4524 — "the door is upside down": pure nearest-distance
- * snapping let a high hover pin the doorway against the ceiling). The kit's
- * footprint already encodes its authored elevation (a door's base at row 0, a
- * window's sill in its minRow), so the LOWEST legal anchor row keeps every kit
- * at the height it was modeled at; within that row the nearest column to the
- * cursor wins. Null when the edge offers no slot at all. */
+/** The hovered cursor slides the kit ALONG the wall; vertical placement is
+ * the SCROLL WHEEL, exactly like a prop's height dial (RULED req_4526 — "keep
+ * the behavior the same all the way around"). `preferredRowU` is the wheel's
+ * lift above the kit's authored elevation: the legal anchor row nearest it
+ * wins (0 = the authored height — a door stands on the floor, a window keeps
+ * its modeled sill), then the nearest column to the cursor within that row.
+ * The hover's own vertical position never steers (req_4524's ceiling-pinned
+ * door). Null when the edge offers no slot at all. */
 export function snapOpeningSlot(
   slots: readonly WallCell[],
   columnU: number,
-  rowU: number,
+  preferredRowU: number,
 ): WallCell | null {
-  void rowU; // vertical placement is authored, never hovered
-  let floorRow = Infinity;
-  for (const slot of slots) if (slot.rowU < floorRow) floorRow = slot.rowU;
+  let bestRow = Infinity;
+  let bestRowDistance = Infinity;
+  for (const slot of slots) {
+    const distance = Math.abs(slot.rowU - preferredRowU);
+    if (distance < bestRowDistance || (distance === bestRowDistance && slot.rowU < bestRow)) {
+      bestRow = slot.rowU;
+      bestRowDistance = distance;
+    }
+  }
   let best: WallCell | null = null;
   let bestDistance = Infinity;
   for (const slot of slots) {
-    if (slot.rowU !== floorRow) continue;
+    if (slot.rowU !== bestRow) continue;
     const distance = Math.abs(slot.columnU - columnU);
     if (distance < bestDistance) {
       best = slot;
@@ -134,6 +141,36 @@ export function snapOpeningSlot(
     }
   }
   return best;
+}
+
+export type OpeningWorldPose = { x: number; y: number; z: number; yawDegrees: number };
+
+/** Where the kit's MODEL mounts for an anchor on an edge, in world meters —
+ * the model's authored origin is the anchor (pivot law), its +X runs along
+ * the edge from the start vertex, and facing side 'b' turns it around so the
+ * leaf swings toward the side the camera saw. The same pose serves the armed
+ * mesh ghost and every placed opening's mounted door (req_4526). */
+export function openingWorldPose(
+  start: { xM: number; zM: number },
+  end: { xM: number; zM: number },
+  baseYM: number,
+  anchor: WallCell,
+  facingSide: 'a' | 'b',
+): OpeningWorldPose | null {
+  const dx = end.xM - start.xM;
+  const dz = end.zM - start.zM;
+  const length = Math.hypot(dx, dz);
+  if (!(length > 0)) return null;
+  const dirX = dx / length;
+  const dirZ = dz / length;
+  // Loader vertex law: model +X → world (cos yaw, 0, -sin yaw).
+  const yawDegrees = (Math.atan2(-dirZ, dirX) * 180) / Math.PI + (facingSide === 'b' ? 180 : 0);
+  return {
+    x: start.xM + dirX * (anchor.columnU / ARCHITECTURE_UNITS_PER_METER),
+    y: baseYM + anchor.rowU / ARCHITECTURE_UNITS_PER_METER,
+    z: start.zM + dirZ * (anchor.columnU / ARCHITECTURE_UNITS_PER_METER),
+    yawDegrees: ((yawDegrees % 360) + 360) % 360,
+  };
 }
 
 /** Why the hovered edge can NEVER take this kit — the same three static

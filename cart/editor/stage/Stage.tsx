@@ -158,6 +158,8 @@ export default function Stage(props: {
   onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: import('../world/architecture').WallCell }) => boolean;
   onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
   openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
+  /** Opening-kit resident adapters (req_4526) — mounted doors + the armed mesh ghost. */
+  openingKitPieces: readonly import('../world/authoredRegistry').AuthoredBuildPiece[];
   /** The measured style's default wall measurements — the gizmo's seed (req_4479). */
   wallDefaults: { heightU: number; thicknessU: number } | null;
   /** A Select-tool click resolved to a wall face (req_4480). */
@@ -280,6 +282,7 @@ export default function Stage(props: {
           onCutOpening={props.onCutOpening}
           onSelectOpening={props.onSelectOpening}
           openingFootprints={props.openingFootprints}
+          openingKitPieces={props.openingKitPieces}
         />
         {worldActive ? null : activeDocument.kind === 'home' ? (
           props.homeSurface

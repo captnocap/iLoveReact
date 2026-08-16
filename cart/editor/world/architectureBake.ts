@@ -9,6 +9,7 @@
 // draw-only (solid:false) so mesh-island welding never seals an opening.
 import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSource } from './architecture';
 import { architectureHost } from './architectureHost';
+import { openingWorldPose } from './openingTools';
 import { architectureHostLive } from '../../../runtime/game/build';
 import type { MeshRef, ResidentMesh } from './meshProps';
 
@@ -427,6 +428,31 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
       });
       refs.push({ key, x: 0, y: 0, z: 0, yaw: 0 });
     }
+    // Every placed opening MOUNTS its kit's model in the cut (req_4526 — "why
+    // did we just cut out a piece of the wall but there is no door"): one ref
+    // per opening against the `opening:<kitId>` resident the demand lane keeps
+    // hot. A door-edit resident swings its leaf on approach; the engine's
+    // collide rows already leave the void open around it.
+    let mounted = 0;
+    for (const edge of source.walls.edges) {
+      if (edge.openings.length === 0 || edge.support.kind !== 'absolute') continue;
+      const startVertex = source.walls.vertices.find(vertex => vertex.id === edge.startVertexId);
+      const endVertex = source.walls.vertices.find(vertex => vertex.id === edge.endVertexId);
+      if (!startVertex || !endVertex) continue;
+      for (const opening of edge.openings) {
+        const pose = openingWorldPose(
+          { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+          { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+          edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
+          { columnU: opening.columnU, rowU: opening.rowU },
+          opening.facingSide,
+        );
+        if (!pose) continue;
+        refs.push({ key: `opening:${opening.kitId}`, x: pose.x, y: pose.y, z: pose.z, yaw: pose.yawDegrees });
+        mounted += 1;
+      }
+    }
+    if (mounted) console.warn(`[architecture] ${mounted} opening kit model(s) mounted in their cuts`);
     LIVE = { source, meshes, refs, collideRows: collideRows(source, bands) };
     console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) + ${floors.length} floor tri(s) in ${floorFaces.size} room(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s)`);
   } catch (error) {
