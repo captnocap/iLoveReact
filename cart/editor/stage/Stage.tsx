@@ -306,6 +306,7 @@ export default function Stage(props: {
             globals={props.state.worldGlobals}
             pieces={props.state.worldPieces}
             authoredPieces={props.state.authoredBuildPieces}
+            openingKitPieces={props.openingKitPieces}
             worldFlora={props.state.worldFlora}
             floraSpecies={props.state.authoredFloraSpecies}
             prefabs={props.state.worldPrefabs}

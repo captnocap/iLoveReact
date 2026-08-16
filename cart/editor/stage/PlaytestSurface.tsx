@@ -47,6 +47,9 @@ type PlaytestSurfaceProps = {
   globals: WorldGlobals;
   pieces: readonly PlacedPiece[];
   authoredPieces: readonly AuthoredBuildPiece[];
+  /** Opening-kit resident adapters (req_4536): without these the play world
+   *  has the cutouts' REFS but no door models to draw at them. */
+  openingKitPieces: readonly AuthoredBuildPiece[];
   worldFlora: readonly WorldFloraPatch[];
   floraSpecies: readonly AuthoredFloraSpecies[];
   characterPackages: readonly ModelPackage[];
@@ -199,7 +202,7 @@ function MountedPlaytestSurface(props: ReadyPlaytestSurfaceProps) {
   }, [npcLineup]);
 
   // Register this mounted world as the motion workbench's /play target
-  // (req_4285): the MotionDock's PLAY button puts documents on this player.
+  // (req_4285): Animation Foundry transport puts documents on this player.
   useEffect(() => {
     let registered = 0;
     const claim = () => {
@@ -230,12 +233,12 @@ function MountedPlaytestSurface(props: ReadyPlaytestSurfaceProps) {
     return () => clearInterval(t);
   }, [props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies]);
   useEffect(() => {
-    const push = () => pushResidentMeshes(Number(loaderRef.current?.id ?? 0), props.authoredPieces, props.floraSpecies);
+    const push = () => pushResidentMeshes(Number(loaderRef.current?.id ?? 0), [...props.authoredPieces, ...props.openingKitPieces], props.floraSpecies);
     if (push()) return;
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
     return () => clearInterval(t);
-  }, [props.authoredPieces, props.floraSpecies]);
+  }, [props.authoredPieces, props.openingKitPieces, props.floraSpecies]);
 
   return (
     <C.HW_WorldEditorSurface>
