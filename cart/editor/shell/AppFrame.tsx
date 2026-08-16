@@ -5176,6 +5176,15 @@ export default function AppFrame() {
     }
     return map;
   }, [catalogGeneration]);
+  // Measured housing depth per kit — the req_4491 deep-set seat: mounted doors
+  // sit flush with their facing side; a thicker wall's surplus reads as reveal.
+  const openingDepthsU = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const entry of installedOpeningKits()) {
+      if (entry.wallOpeningCompatibility) map[entry.catalogId] = entry.wallOpeningCompatibility.minimumThicknessU;
+    }
+    return map;
+  }, [catalogGeneration]);
   // Opening-kit resident adapters (req_4526): the armed kit + every kit a
   // placed opening references become resident MODELS — the mounted door in
   // every cut and the armed translucent mesh ghost both resolve through them.
@@ -11753,6 +11762,7 @@ export default function AppFrame() {
             onCutOpening={cutOpening}
             onSelectOpening={selectOpening}
             openingFootprints={openingFootprints}
+            openingDepthsU={openingDepthsU}
             openingKitPieces={openingKitPieces}
             wallDefaults={installedWallStyles()[0]?.wallStyleDefaults ?? null}
             onSelectWall={selectWallEdge}

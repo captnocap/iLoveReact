@@ -145,17 +145,27 @@ export function snapOpeningSlot(
 
 export type OpeningWorldPose = { x: number; y: number; z: number; yawDegrees: number };
 
+/** The kit's seat within the wall's depth (RULED req_4491): the wall owns the
+ * tunnel at ITS thickness; the kit is a fixed measured asset that mounts flush
+ * with its authored facing side. A thicker wall deep-sets the door and the
+ * remaining depth reads as wall reveal — nothing stretches, nothing centers. */
+export type OpeningSeat = { wallThicknessU: number; kitDepthU: number };
+
 /** Where the kit's MODEL mounts for an anchor on an edge, in world meters —
  * the model's authored origin is the anchor (pivot law), its +X runs along
  * the edge from the start vertex, and facing side 'b' turns it around so the
- * leaf swings toward the side the camera saw. The same pose serves the armed
- * mesh ghost and every placed opening's mounted door (req_4526). */
+ * leaf swings toward the side the camera saw. The seat shifts the mount off
+ * the wall centerline so the kit sits flush with its facing side (req_4491
+ * deep-set law); an exact-fit wall gets offset 0 — the pre-seat pose. The
+ * same pose serves the armed mesh ghost and every placed opening's mounted
+ * door (req_4526). */
 export function openingWorldPose(
   start: { xM: number; zM: number },
   end: { xM: number; zM: number },
   baseYM: number,
   anchor: WallCell,
   facingSide: 'a' | 'b',
+  seat: OpeningSeat,
 ): OpeningWorldPose | null {
   const dx = end.xM - start.xM;
   const dz = end.zM - start.zM;
@@ -165,10 +175,18 @@ export function openingWorldPose(
   const dirZ = dz / length;
   // Loader vertex law: model +X → world (cos yaw, 0, -sin yaw).
   const yawDegrees = (Math.atan2(-dirZ, dirX) * 180) / Math.PI + (facingSide === 'b' ? 180 : 0);
+  // Engine side law (wall_geometry.zig): side-a normal = (-dirZ, dirX); side b
+  // is its negation. Flush = kit center moved from the centerline toward the
+  // facing face by half the surplus depth. Never negative — a too-thin wall
+  // was already refused before any pose exists.
+  const surplusM = Math.max(0, seat.wallThicknessU - seat.kitDepthU) / (2 * ARCHITECTURE_UNITS_PER_METER);
+  const normalSign = facingSide === 'a' ? 1 : -1;
+  const offsetX = -dirZ * surplusM * normalSign;
+  const offsetZ = dirX * surplusM * normalSign;
   return {
-    x: start.xM + dirX * (anchor.columnU / ARCHITECTURE_UNITS_PER_METER),
+    x: start.xM + dirX * (anchor.columnU / ARCHITECTURE_UNITS_PER_METER) + offsetX,
     y: baseYM + anchor.rowU / ARCHITECTURE_UNITS_PER_METER,
-    z: start.zM + dirZ * (anchor.columnU / ARCHITECTURE_UNITS_PER_METER),
+    z: start.zM + dirZ * (anchor.columnU / ARCHITECTURE_UNITS_PER_METER) + offsetZ,
     yawDegrees: ((yawDegrees % 360) + 360) % 360,
   };
 }

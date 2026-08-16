@@ -68,6 +68,7 @@ export default function Workspace(props: {
   onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: import('../world/architecture').WallCell }) => boolean;
   onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
   openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
+  openingDepthsU: Readonly<Record<string, number>>;
   /** Opening-kit resident adapters (req_4526) — mounted doors + the armed mesh ghost. */
   openingKitPieces: readonly import('../world/authoredRegistry').AuthoredBuildPiece[];
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;

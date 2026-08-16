@@ -90,18 +90,39 @@ test('hover slides the column; the WHEEL owns the row, defaulting to the authore
   assert(lifted.columnU === 12, 'column still follows the cursor within the lifted row');
 });
 
+// An exact-fit seat (wall thickness == kit depth): offset 0, the pre-req_4491 pose.
+const EXACT_SEAT = { wallThicknessU: 4, kitDepthU: 4 };
+
 test('the mounted pose runs along the edge with the loader yaw law', () => {
   // +x wall: model +X must map to world +X → yaw 0.
-  const east = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'a')!;
+  const east = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'a', EXACT_SEAT)!;
   assert(Math.abs(east.x - 2) < 1e-9 && east.z === 0 && east.y === 0, 'anchor in meters along the edge');
   assert(east.yawDegrees === 0, '+x edge → yaw 0');
   // +z wall: +X must map to +Z → world (cos, -sin) = (0, 1) → yaw 270.
-  const south = openingWorldPose({ xM: 0, zM: 0 }, { xM: 0, zM: 4 }, 1.5, { columnU: 16, rowU: 4 }, 'a')!;
+  const south = openingWorldPose({ xM: 0, zM: 0 }, { xM: 0, zM: 4 }, 1.5, { columnU: 16, rowU: 4 }, 'a', EXACT_SEAT)!;
   assert(Math.abs(south.z - 1) < 1e-9 && Math.abs(south.y - 1.75) < 1e-9, 'position on a +z edge, base + row lift');
   assert(Math.abs(south.yawDegrees - 270) < 1e-9, '+z edge → yaw 270 under the loader law');
-  const flipped = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'b')!;
+  const flipped = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'b', EXACT_SEAT)!;
   assert(flipped.yawDegrees === 180, 'facing side b turns the door around');
-  assert(openingWorldPose({ xM: 1, zM: 1 }, { xM: 1, zM: 1 }, 0, { columnU: 0, rowU: 0 }, 'a') === null, 'degenerate edge mounts nothing');
+  assert(openingWorldPose({ xM: 1, zM: 1 }, { xM: 1, zM: 1 }, 0, { columnU: 0, rowU: 0 }, 'a', EXACT_SEAT) === null, 'degenerate edge mounts nothing');
+});
+
+test('a thicker wall deep-sets the kit flush with its facing side (RULED req_4491)', () => {
+  // 16u (1m) wall, 4u (0.25m) kit → surplus 12u, offset 0.375m toward the
+  // facing side. +x edge: side-a normal = (-dirZ, dirX) = (0, +1) → +Z.
+  const seat = { wallThicknessU: 16, kitDepthU: 4 };
+  const sideA = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'a', seat)!;
+  assert(Math.abs(sideA.x - 2) < 1e-9, 'along-edge anchor is untouched by the seat');
+  assert(Math.abs(sideA.z - 0.375) < 1e-9, `side a shifts +Z toward its face (z=${sideA.z})`);
+  const sideB = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'b', seat)!;
+  assert(Math.abs(sideB.z + 0.375) < 1e-9, `side b shifts -Z toward the opposite face (z=${sideB.z})`);
+  // An exact fit stays on the centerline — the pose the user already verified.
+  const exact = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'a', EXACT_SEAT)!;
+  assert(exact.z === 0, 'exact-fit wall keeps the centerline mount');
+  // A kit deeper than the wall never mounts short — the refusal gate already
+  // rejected it; the seat clamps at flush rather than inventing a negative.
+  const clamped = openingWorldPose({ xM: 0, zM: 0 }, { xM: 4, zM: 0 }, 0, { columnU: 32, rowU: 0 }, 'a', { wallThicknessU: 4, kitDepthU: 16 })!;
+  assert(clamped.z === 0, 'over-deep kit clamps to the centerline, never negative');
 });
 
 test('static edge refusals name the reason the wall can never take the kit', () => {

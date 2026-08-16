@@ -245,6 +245,10 @@ export default function WorldViewport(props: {
   /** Measured footprint per installed opening kit id — the selected-opening
    *  outline resolves its rectangle through this regardless of the armed tool. */
   openingFootprints: Readonly<Record<string, import('./architecture').ArchitectureFootprint>>;
+  /** Measured housing depth (u) per installed opening kit id — the req_4491
+   *  deep-set seat: mounts sit flush with their facing side, thicker walls
+   *  read the surplus as reveal. */
+  openingDepthsU: Readonly<Record<string, number>>;
   /** Opening-kit resident adapters (req_4526): armed + placed kits' models. */
   openingKitPieces: readonly AuthoredBuildPiece[];
   /** Commit a snapped preview after one Move-tool drag. */
@@ -867,7 +871,7 @@ export default function WorldViewport(props: {
         && prior.architecture === props.architecture) return true;
       // Refresh the engine wall bake (identity-cached) so the push below reads
       // current wall meshes/colliders — child effects run before AppFrame's.
-      setLiveArchitecture(props.architecture);
+      setLiveArchitecture(props.architecture, props.openingDepthsU);
       if (!pushLiveWorld(nodeId, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies)) return false;
       liveWorldPublishedRef.current = {
         nodeId,
@@ -883,7 +887,7 @@ export default function WorldViewport(props: {
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
     return () => clearInterval(t);
-  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.architecture]);
+  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.architecture, props.openingDepthsU]);
 
   const residentDemandCacheRef = useRef<{
     authoredSource: readonly AuthoredBuildPiece[];
@@ -929,7 +933,7 @@ export default function WorldViewport(props: {
       const nodeId = Number(loaderRef.current?.id ?? 0);
       const prior = residentPublishedRef.current;
       if (nodeId && prior?.nodeId === nodeId && prior.demand === residentDemand && prior.architecture === props.architecture) return true;
-      setLiveArchitecture(props.architecture);
+      setLiveArchitecture(props.architecture, props.openingDepthsU);
       if (!pushResidentMeshes(
         nodeId,
         residentDemand.authoredPieces,
@@ -949,7 +953,7 @@ export default function WorldViewport(props: {
       clearTimeout(start);
       if (retry) clearInterval(retry);
     };
-  }, [props.active, residentDemand, props.architecture]);
+  }, [props.active, residentDemand, props.architecture, props.openingDepthsU]);
 
   // Mesh GHOST: an authored piece previews as its real translucent mesh while
   // it is armed OR being moved OR mid-gizmo-drag (req_3367 — the drag preview
@@ -993,6 +997,9 @@ export default function WorldViewport(props: {
             edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
             openingGhost.slot ?? openingGhost.anchor,
             openingGhost.side,
+            // The ghost previews the SAME deep-set seat the placed mount gets
+            // (req_4491): flush with the facing side at the kit's housing depth.
+            { wallThicknessU: edge.thicknessU, kitDepthU: props.openingKit.minimumThicknessU },
           );
           if (pose) openingMeshGhost = { key, x: pose.x, y: pose.y, z: pose.z, yaw: pose.yawDegrees };
         }

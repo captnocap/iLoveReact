@@ -347,26 +347,29 @@ function collideRows(source: ArchitectureSource, bands: readonly WallRenderBand[
 
 type LiveArchitecture = {
   source: ArchitectureSource | null;
+  /** kitId → measured housing depth (u) — the req_4491 deep-set seat data. */
+  openingDepthsU: Readonly<Record<string, number>>;
   meshes: ResidentMesh[];
   refs: MeshRef[];
   collideRows: number[];
 };
 
-let LIVE: LiveArchitecture = { source: null, meshes: [], refs: [], collideRows: [] };
+let LIVE: LiveArchitecture = { source: null, openingDepthsU: {}, meshes: [], refs: [], collideRows: [] };
 
 /** Compile the source through the engine and stage its live bake. Identity-cached
- * on the retained source object, so the viewport refreshes it cheaply right
- * before every push. Never throws: a compile/decode failure clears the stage and
+ * on the retained source object (and the kit-depth map — a live kit install may
+ * re-seat mounted doors), so the viewport refreshes it cheaply right before
+ * every push. Never throws: a compile/decode failure clears the stage and
  * reports loudly — a silent stale wall is worse than a missing one. */
-export function setLiveArchitecture(source: ArchitectureSource): void {
-  if (LIVE.source === source) return;
+export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: Readonly<Record<string, number>>): void {
+  if (LIVE.source === source && LIVE.openingDepthsU === openingDepthsU) return;
   if (!architectureHostLive() || source.walls.edges.length === 0) {
     // req_4476 diagnostic: a capability-absent host silently rendering zero
     // walls is indistinguishable from every other blank — say it.
     if (source.walls.edges.length > 0) {
       console.warn(`[architecture] live bake SKIPPED — host capability absent; ${source.walls.edges.length} edge(s) will not render live`);
     }
-    LIVE = { source, meshes: [], refs: [], collideRows: [] };
+    LIVE = { source, openingDepthsU, meshes: [], refs: [], collideRows: [] };
     return;
   }
   try {
@@ -440,12 +443,17 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
       const endVertex = source.walls.vertices.find(vertex => vertex.id === edge.endVertexId);
       if (!startVertex || !endVertex) continue;
       for (const opening of edge.openings) {
+        // Seat law (req_4491): flush with the facing side at the kit's measured
+        // housing depth. An unknown kit (catalog gap) seats at the wall's own
+        // thickness → offset 0 → the old centered mount, never a wrong shove.
+        const kitDepthU = openingDepthsU[opening.kitId] ?? edge.thicknessU;
         const pose = openingWorldPose(
           { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
           { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
           edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
           { columnU: opening.columnU, rowU: opening.rowU },
           opening.facingSide,
+          { wallThicknessU: edge.thicknessU, kitDepthU },
         );
         if (!pose) continue;
         refs.push({ key: `opening:${opening.kitId}`, x: pose.x, y: pose.y, z: pose.z, yaw: pose.yawDegrees });
@@ -453,16 +461,16 @@ export function setLiveArchitecture(source: ArchitectureSource): void {
       }
     }
     if (mounted) console.warn(`[architecture] ${mounted} opening kit model(s) mounted in their cuts`);
-    LIVE = { source, meshes, refs, collideRows: collideRows(source, bands) };
+    LIVE = { source, openingDepthsU, meshes, refs, collideRows: collideRows(source, bands) };
     console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) + ${floors.length} floor tri(s) in ${floorFaces.size} room(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s)`);
   } catch (error) {
     console.error(`[architecture] live wall bake FAILED — walls not rendered: ${error instanceof Error ? error.message : String(error)}`);
-    LIVE = { source, meshes: [], refs: [], collideRows: [] };
+    LIVE = { source, openingDepthsU, meshes: [], refs: [], collideRows: [] };
   }
 }
 
 export function clearLiveArchitecture(): void {
-  LIVE = { source: null, meshes: [], refs: [], collideRows: [] };
+  LIVE = { source: null, openingDepthsU: {}, meshes: [], refs: [], collideRows: [] };
 }
 
 export function liveArchitectureResidentMeshes(): ResidentMesh[] {
