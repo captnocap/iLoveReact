@@ -113,18 +113,8 @@ export function openDocumentForDestination(
   return preferred ?? matches[matches.length - 1]!;
 }
 
-/** The recent-history key family a destination's subject uses. */
-export function recentKeyPrefixFor(subject: SubjectKind): string | null {
-  if (subject === 'model') return 'model:';
-  if (subject === 'material') return 'asset:';
-  return null;
-}
-
-/** The newest recent-history entry a destination could open, or null when the
- *  user has never opened one of those. */
-export function newestRecentFor(subject: SubjectKind, recentKeys: readonly string[]): string | null {
-  const prefix = recentKeyPrefixFor(subject);
-  if (!prefix) return null;
-  const hit = recentKeys.find((key) => key.startsWith(prefix));
-  return hit ? hit.slice(prefix.length) : null;
-}
+// A destination with no open subject lands on Home filtered to its subject —
+// THE SUBJECT RULE (req_4464). It never reaches into the recent-history keys to
+// reopen yesterday's document on its own: auto-opening the newest recent read
+// as "the editor restored a document I closed" after a cold start (req_4540),
+// the same haunting the minted-id lease work killed for New Mesh (req_3773).

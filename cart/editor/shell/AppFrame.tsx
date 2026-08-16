@@ -417,7 +417,6 @@ import { WORLD_DOCUMENT_ID, WORLD_BIBLE_DOCUMENT, WORLD_BIBLE_DOCUMENT_ID, HOME_
 import {
   activeDestination,
   destinationForKey,
-  newestRecentFor,
   openDocumentForDestination,
   type DestinationId,
 } from './destinations';
@@ -10573,23 +10572,20 @@ export default function AppFrame() {
       }));
       return;
     }
+    // THE SUBJECT RULE (req_4464, amended req_4540): a destination with no open
+    // subject lands on Home filtered to that subject, where the recents and
+    // favorites are — it never silently reopens the newest recent document.
+    // Auto-opening yesterday's model read as "the editor restored a document I
+    // closed", which is exactly the haunting req_3773 was about.
     if (id === 'model') {
       const open = alreadyHere ? null : openDocumentForDestination('model', documents, preferred);
       if (open) { selectWorkspaceDocument(open.id); return; }
-      const recentId = alreadyHere ? null : newestRecentFor('model', current.recentLibraryKeys ?? []);
-      const model = recentId
-        ? effectiveModelPackage(recentId, current.modelOverrides, current.modelDupes)
-        : null;
-      if (model) { openModelDocument(model); return; }
       openHome('model', alreadyHere ? 'pick a model to open in the studio' : 'no model open yet — pick one, or File → New Mesh');
       return;
     }
     if (id === 'material') {
       const open = alreadyHere ? null : openDocumentForDestination('material', documents, preferred);
       if (open) { selectWorkspaceDocument(open.id); return; }
-      const recentId = alreadyHere ? null : newestRecentFor('material', current.recentLibraryKeys ?? []);
-      const asset = recentId ? assetByIdOrNull(recentId, current.assetOverrides) : null;
-      if (asset) { focusMaterialDocument(undefined, asset.id); return; }
       openHome('material', alreadyHere ? 'pick a material to open in the lab' : 'no material open yet — pick one to open the Material Lab');
       return;
     }

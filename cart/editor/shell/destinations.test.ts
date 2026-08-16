@@ -15,9 +15,7 @@ import {
   activeDestination,
   destinationById,
   destinationForKey,
-  newestRecentFor,
   openDocumentForDestination,
-  recentKeyPrefixFor,
 } from './destinations';
 import {
   ANIMATION_DOCUMENT,
@@ -94,20 +92,11 @@ test('a destination you already used returns you to it, preferring the focused o
   assert(openDocumentForDestination('material', docs, null) === null, 'a destination with no open document claimed one');
 });
 
-test('a destination that needs a subject knows which history to read', () => {
-  assert(recentKeyPrefixFor('model') === 'model:', 'the model history prefix drifted');
-  assert(recentKeyPrefixFor('material') === 'asset:', 'the material history prefix drifted');
-  assert(recentKeyPrefixFor(null) === null, 'a subjectless destination claimed a history');
-  assert(recentKeyPrefixFor('map') === null, 'maps are documents, not library history');
-});
-
-test('the newest matching recent is what a subjectless destination opens', () => {
-  const keys = ['asset:brick', 'model:car', 'model:tree'];
-  assert(newestRecentFor('model', keys) === 'car', 'the newest model was not chosen');
-  assert(newestRecentFor('material', keys) === 'brick', 'the newest material was not chosen');
-  assert(newestRecentFor('model', ['asset:brick']) === null, 'an empty model history invented one');
-  assert(newestRecentFor(null, keys) === null, 'a subjectless destination read a history');
-});
+// The Subject Rule (req_4464, amended req_4540): a destination with no open
+// subject lands on Home filtered to that subject, where the recents are VISIBLE.
+// The newestRecentFor/recentKeyPrefixFor helpers that silently reopened the
+// newest recent document after a cold start are gone; this file importing them
+// would fail the bundle, which is the regression guard.
 
 test('only Model and Material can ever need a subject — the rest always open', () => {
   const needy = DESTINATIONS.filter((destination) => destination.needs !== null).map((destination) => destination.id);
