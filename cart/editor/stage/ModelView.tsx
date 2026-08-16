@@ -47,7 +47,7 @@ import {
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { hydrateModelShapeCounts } from '../model/modelShapeHydration';
 import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
-import { RETOPO_INTENTS, activeCorpusEntry, recordRetopoIntent } from '../data/retopoIntents';
+import { RETOPO_INTENTS, activeCorpusEntry, recordRetopoIntent, retractLastIntent } from '../data/retopoIntents';
 import { selectMeshFaces } from '../model/selectMeshFaces';
 import ExtrudeDialog from './ExtrudeDialog';
 import type { ExtrudeKind, ExtrudeParams } from '../data/extrudeParams';
@@ -5280,6 +5280,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             <Text style={{ color: '#f0b57a', fontSize: 11 }}>{intent.label}</Text>
           </Pressable>
         ))}
+        {/* Retract renders with the recorder regardless of selection — the moment
+            you need it is right after an undo, when nothing may be selected. */}
+        {model && selMode !== 0 && activeCorpusEntry() !== null && (
+          <Pressable
+            tooltip="Retract the previous intent (that action got undone)"
+            onPress={() => {
+              const entry = retractLastIntent();
+              flashIntent(entry ? '↺ last intent retracted' : 'nothing to retract');
+            }}
+            style={{ marginLeft: 6, paddingLeft: 7, paddingRight: 7, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#5a3d3d', backgroundColor: 'rgba(200,90,90,0.10)' }}
+          >
+            <Text style={{ color: '#d99a9a', fontSize: 11 }}>oops</Text>
+          </Pressable>
+        )}
         {intentFlash && (
           <Text noWrap style={{ color: '#f0b57a', fontSize: 11, marginLeft: 8 }}>{intentFlash}</Text>
         )}

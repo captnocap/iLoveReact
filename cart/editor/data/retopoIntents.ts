@@ -40,6 +40,19 @@ export function activeCorpusEntry(): string | null {
   return name.length > 0 ? name : null;
 }
 
+/** Explicitly retract the PREVIOUS intent line (req_4609): stamped after an
+ *  intent's action got undone, so training never has to infer the take-back
+ *  from the intent→delete→undo sequence alone. */
+export function retractLastIntent(): string | null {
+  const entry = activeCorpusEntry();
+  if (!entry) return null;
+  const path = `${CORPUS_ROOT}/${entry}/intents.jsonl`;
+  const prev = host.__fs_read?.(path);
+  if (typeof prev !== 'string' || prev.trim().length === 0) return null; // nothing to retract
+  const line = JSON.stringify({ at: Date.now(), intent: 'retract-last' });
+  return host.__fs_write?.(path, prev + line + '\n') ? entry : null;
+}
+
 /** Append one intent line to the active entry. Returns the entry name, or null
  *  when nothing is recording (callers surface that as status, never silently). */
 export function recordRetopoIntent(intentId: string, selection: ModelSelectionSnapshot | null): string | null {
