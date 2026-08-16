@@ -38,7 +38,9 @@ fi
 apt-get install -y -qq libxxf86vm1 libxrandr2 libxinerama1 libxcursor1 libx11-6 \
   libxext6 libxrender1 libxfixes3 libxcb1 libxau6 libxdmcp6 >/dev/null 2>&1 || \
   echo "WARN: X11 runtime libs install failed - instant-meshes may not run"
-/workspace/bin/instant-meshes --help >/dev/null 2>&1 || \
-  echo "WARN: instant-meshes not runnable - quad remesh stage will fail"
+# (--help exits non-zero, so probe linkability, not exit status)
+if ldd /workspace/bin/instant-meshes 2>/dev/null | grep -q "not found"; then
+  echo "WARN: instant-meshes is missing shared libs - quad remesh stage will fail"
+fi
 
 echo "BOOTSTRAP_OK"
