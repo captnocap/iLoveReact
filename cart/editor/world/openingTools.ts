@@ -108,20 +108,26 @@ export function armedOpeningKitFromEntries(
   return entry ? kitArmFromEntry(entry) : null;
 }
 
-/** Nearest legal anchor to the hovered surface cell, by squared lattice
- * distance; ties break toward the earlier slot in engine order. Null when the
- * edge offers no slot at all. */
+/** The hovered cursor slides the kit ALONG the wall; its height is the
+ * AUTHORED one (req_4524 — "the door is upside down": pure nearest-distance
+ * snapping let a high hover pin the doorway against the ceiling). The kit's
+ * footprint already encodes its authored elevation (a door's base at row 0, a
+ * window's sill in its minRow), so the LOWEST legal anchor row keeps every kit
+ * at the height it was modeled at; within that row the nearest column to the
+ * cursor wins. Null when the edge offers no slot at all. */
 export function snapOpeningSlot(
   slots: readonly WallCell[],
   columnU: number,
   rowU: number,
 ): WallCell | null {
+  void rowU; // vertical placement is authored, never hovered
+  let floorRow = Infinity;
+  for (const slot of slots) if (slot.rowU < floorRow) floorRow = slot.rowU;
   let best: WallCell | null = null;
   let bestDistance = Infinity;
   for (const slot of slots) {
-    const dc = slot.columnU - columnU;
-    const dr = slot.rowU - rowU;
-    const distance = dc * dc + dr * dr;
+    if (slot.rowU !== floorRow) continue;
+    const distance = Math.abs(slot.columnU - columnU);
     if (distance < bestDistance) {
       best = slot;
       bestDistance = distance;

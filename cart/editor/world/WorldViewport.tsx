@@ -347,6 +347,9 @@ export default function WorldViewport(props: {
   onSelectOpeningRef.current = props.onSelectOpening;
   const openingKitRef = useRef(props.openingKit);
   openingKitRef.current = props.openingKit;
+  /** Set once trackOpeningCursor exists below — the arm effect seeds through it. */
+  const trackOpeningCursorRef = useRef<((px: number, py: number) => void) | null>(null);
+  const openingRenderTraceRef = useRef('');
   const wallAnchorRef = useRef<WallDrawGesture | null>(null);
   // req_4520: the wall overlay — lattice cursor, anchor gizmo, hologram span,
   // magnet marker, and measurement drags — is HOST-RENDERED per frame
@@ -475,6 +478,10 @@ export default function WorldViewport(props: {
       openingTrackTraceRef.current = 0;
     } else {
       console.warn(`[wall] viewport cutOpening armed — kit=${props.openingKit ? props.openingKit.label : 'NONE (prop chain dropped it)'}`);
+      // Seed the ghost at the viewport center immediately (req_4524): arming
+      // from the palette must show the kit without waiting for a pointer move.
+      const r = rectRef.current;
+      if (r.width > 0) trackOpeningCursorRef.current?.(r.width / 2, r.height / 2);
     }
   }, [props.tool, props.openingKit, syncHostAnchor]);
   // req_4476 diagnostic: every drawWall-adjacent tool transition, logged from
@@ -1097,6 +1104,7 @@ export default function WorldViewport(props: {
       reason: slot ? null : `no room for ${kit.label} on this wall`,
     });
   }, [pickWallAt, setOpeningGhost, groundUnder]);
+  trackOpeningCursorRef.current = trackOpeningCursor;
 
   // Prop stacking (req_3363): the placement ray may strike a placed piece's TOP
   // FACE before the terrain — a table top is a placement surface, exactly the
@@ -2065,9 +2073,13 @@ export default function WorldViewport(props: {
   const openingSegs: number[] = [];
   let openingColor = '#9aa3ad';
   let openingReadout: { x: number; y: number; text: string } | null = null;
+  let openingProjectionNote = '';
   const pushGhostRect = (corners: readonly { x: number; y: number; z: number }[] | null, cross: boolean, label: string): void => {
     const projected = corners?.map((corner) => stage.project(corner.x, corner.y, corner.z, rect)) ?? null;
-    if (!projected || !projected.every((point) => point !== null)) return;
+    if (!projected || !projected.every((point) => point !== null)) {
+      openingProjectionNote = !corners ? 'no corners (degenerate edge)' : `projection dropped ${projected ? projected.filter((point) => point === null).length : 4}/4 corners`;
+      return;
+    }
     const pts = projected as { x: number; y: number }[];
     for (let index = 0; index < 4; index += 1) {
       const a = pts[index]!;
@@ -2111,6 +2123,21 @@ export default function WorldViewport(props: {
       const v1 = openingGhost.yM + kit.footprint.maxRowExclusive / ARCHITECTURE_UNITS_PER_METER;
       const at = (u: number, v: number) => ({ x: openingGhost.xM + rightX * u, y: v, z: openingGhost.zM + rightZ * u });
       pushGhostRect([at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)], false, `${kit.label} — bring it to a wall`);
+    }
+  }
+  // req_4524 render-side truth, one warn per ghost change: what actually got
+  // projected to screen (or why nothing did).
+  {
+    const ghostKey = openingGhost
+      ? (openingGhost.mode === 'wall'
+        ? `w:${openingGhost.edgeId}:${openingGhost.slot ? `${openingGhost.slot.columnU},${openingGhost.slot.rowU}` : 'x'}`
+        : `g:${openingGhost.xM.toFixed(1)},${openingGhost.zM.toFixed(1)}`)
+      : '';
+    if (ghostKey !== openingRenderTraceRef.current) {
+      openingRenderTraceRef.current = ghostKey;
+      if (ghostKey) {
+        console.warn(`[wall] ghost RENDER ${ghostKey} → segs=${openingSegs.length}${openingSegs.length ? ` first=(${openingSegs[0]!.toFixed(0)},${openingSegs[1]!.toFixed(0)}) rect=${rect.width}x${rect.height}` : ` NOTHING${openingProjectionNote ? ` — ${openingProjectionNote}` : ''}`}`);
+      }
     }
   }
 

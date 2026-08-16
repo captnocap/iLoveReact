@@ -67,14 +67,23 @@ test('the armed kit projects from the first installed entry of its kind', () => 
   assert(armedOpeningKitFromEntries([doorEntry(), second], 'door')!.label === 'door_001', 'first installed kit wins');
 });
 
-test('hover snaps to the nearest engine slot; empty enumeration snaps nowhere', () => {
+test('hover slides along the wall at the AUTHORED height; empty enumeration snaps nowhere', () => {
   const slots: WallCell[] = [
     { columnU: 8, rowU: 0 }, { columnU: 9, rowU: 0 }, { columnU: 40, rowU: 0 },
   ];
-  assert(snapOpeningSlot(slots, 10, 2)!.columnU === 9, 'nearest by lattice distance');
+  assert(snapOpeningSlot(slots, 10, 2)!.columnU === 9, 'nearest column');
   assert(snapOpeningSlot(slots, 39, 0)!.columnU === 40, 'far hover finds the far slot');
   assert(snapOpeningSlot(slots, 8, 0)!.columnU === 8, 'exact hover keeps its slot');
   assert(snapOpeningSlot([], 10, 0) === null, 'no slots → no snap');
+  // req_4524: a 35u door in a 48u wall enumerates anchor rows 0..13 — hovering
+  // HIGH on the wall must not pin the doorway to the ceiling. The lowest legal
+  // row (the authored elevation) always wins; the hover only picks the column.
+  const tallWall: WallCell[] = [
+    { columnU: 12, rowU: 0 }, { columnU: 35, rowU: 0 },
+    { columnU: 12, rowU: 13 }, { columnU: 35, rowU: 13 },
+  ];
+  const high = snapOpeningSlot(tallWall, 35, 33)!;
+  assert(high.rowU === 0 && high.columnU === 35, 'high hover stays a floor-standing door');
 });
 
 test('static edge refusals name the reason the wall can never take the kit', () => {
