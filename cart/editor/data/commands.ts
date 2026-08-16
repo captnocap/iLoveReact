@@ -8,6 +8,7 @@ import { activeSurface, hasSelection } from './surfaces';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
+import { WALL_OPENING_EXPORT_TARGETS } from '../world/architectureKitExport';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
@@ -78,6 +79,15 @@ const EXPORT_BUILD_COMMANDS: Command[] = BUILD_PIECE_EXPORT_TARGETS.map((target)
   key: '', context: false, native: true, undoable: false, scope: 'model',
 }));
 
+// Export → Wall Opening → <kind> (req_4507): the OPEN model becomes a measured
+// architecture opening kit — the semantic wall system's cut vocabulary. The
+// manifest declaration is measured off the real mesh; the boot catalog scan
+// installs it (the kit owns the frame, req_4487).
+const EXPORT_WALL_OPENING_COMMANDS: Command[] = WALL_OPENING_EXPORT_TARGETS.map((target) => ({
+  id: `export-wall-opening-${target.id}`, menu: 'File', submenu: 'Export Wall Opening', name: target.label, icon: target.icon,
+  key: '', context: false, native: true, undoable: false, scope: 'model',
+}));
+
 // Export → Prop → <role>: the OPEN model remains a free-placing prop carrying
 // its rig, while the manifest role lets derived intersections/transit stops
 // request the correct model without name heuristics (req_2938).
@@ -135,6 +145,7 @@ export const COMMANDS: Command[] = [
   // which durable document is committed; autosave never replaces this command.
   { id: 'save-snapshot', menu: 'File', name: 'Save', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'global' },
   ...EXPORT_BUILD_COMMANDS,
+  ...EXPORT_WALL_OPENING_COMMANDS,
   ...EXPORT_PROP_COMMANDS,
   ...EXPORT_FLORA_COMMANDS,
   EXPORT_CHARACTER_COMMAND,
@@ -509,6 +520,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     {
       kind: 'sub', id: 'Export', label: 'Export', icon: 'Upload', scope: 'model', children: [
         { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
+        { kind: 'sub', id: 'Export Wall Opening', label: 'Wall Opening', icon: 'DoorOpen', scope: 'model', children: EXPORT_WALL_OPENING_COMMANDS.map((c) => cmd(c.id)) },
         { kind: 'sub', id: 'Export Prop', label: 'Prop', icon: 'Armchair', scope: 'model', children: EXPORT_PROP_COMMANDS.map((c) => cmd(c.id)) },
         { kind: 'sub', id: 'Export Flora', label: 'Flora', icon: 'Sprout', scope: 'model', children: EXPORT_FLORA_COMMANDS.map((c) => cmd(c.id)) },
         cmd('export-character'),

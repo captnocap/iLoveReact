@@ -127,10 +127,11 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // Draw Wall (req_4473): one committed span → one engine command; measurements
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
+import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
 import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand } from '../world/architectureCommand';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
-import { installedWallStyles } from '../data/initialState';
+import { bootArchitectureCatalog, installedWallStyles } from '../data/initialState';
 // The durable working session (req_4435): what a cold start restores, and the
 // record the Home surface's Continue card reads.
 import {
@@ -373,7 +374,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, loadMaterializedPackages, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
+import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, loadMaterializedPackages, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, packageMeshDocSha256, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -4421,6 +4422,106 @@ export default function AppFrame() {
         return;
       }
       saveActiveModelNow('Saved', 'explicit');
+      return;
+    }
+    if (command.id.startsWith('export-wall-opening-')) {
+      // Export → Wall Opening → <kind> (req_4507): the OPEN model becomes a
+      // measured opening kit for the semantic wall system. The manifest is the
+      // record (req_2718): the measured `placeable: architecture-kit`
+      // declaration lands in the package on disk and every boot re-installs
+      // the catalog from that scan. The kit owns the frame (req_4487) — this
+      // model IS the mounted asset; the wall keeps only its cut flesh.
+      const target = wallOpeningExportTargetForCommand(command.id);
+      if (!target) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `Unknown wall-opening export target: ${command.id}` }));
+        return;
+      }
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
+      if (!pkg) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export needs a MODEL open — open one from Models, then File → Export.' }));
+        return;
+      }
+      const modelId = authoredModelIdForPackage(pkg.id);
+      // Door-family kinds keep the named-part contract: the Outliner names
+      // WHICH geometry swings before any declaration is written, exactly like
+      // the legacy Door Wall compiler — a coincidental name never promotes.
+      if (target.needsDoorLeafPart) {
+        const leaf = resolveDoorLeafPart(state.modelParts[pkg.id] ?? []);
+        if (!leaf.ok) {
+          setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: leaf.error }));
+          return;
+        }
+      }
+      // Export implies save (req_2753): journal the resident HOST mesh into
+      // the package first so the measured bounds and the hashed document are
+      // the geometry YOU SEE.
+      const docWritten = saveLiveModelBeforeExport((request) => saveModelDocumentNow(
+        pkg.id,
+        request.reason,
+        request.intent,
+      ));
+      if (!docWritten) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export stopped: the explicit model save did not commit the live resident.' }));
+        return;
+      }
+      const captured = modelPackageMeshData(pkg);
+      if (captured && captured.length >= 8) cacheAuthoredMesh(modelId, captured);
+      const bounds = authoredMeshBounds(modelId, pkg.id);
+      if (!bounds) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `Exported nothing: "${pkg.name}" has no reachable geometry. Open it in the model editor, save, then re-export. (${modelId})` }));
+        return;
+      }
+      const meshContentHash = packageMeshDocSha256(pkg.kind, pkg.id);
+      if (!meshContentHash) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `Export stopped: the saved model document (mesh/doc.blob) is not on disk to content-address. Save the model, then retry.` }));
+        return;
+      }
+      let placeable: ModelPlaceable;
+      try {
+        placeable = wallOpeningKitPlaceable({ target, name: pkg.name, bounds, meshContentHash });
+      } catch (error) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `${target.label} kit export refused: ${error instanceof Error ? error.message : String(error)}` }));
+        return;
+      }
+      const pkgExported: ModelPackage = { ...pkg, placeable };
+      const firstMaterialize = !isMaterialized(pkg.kind, pkg.id);
+      let disk: string;
+      if (firstMaterialize) {
+        const res = materializeModelPackage(pkgExported);
+        disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
+      } else {
+        disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable })
+          ? 'manifest updated'
+          : 'MANIFEST WRITE FAILED — export is session-only';
+      }
+      upsertSavedPackage(pkgExported); // the live roster carries the declaration this session
+      // The running host learns the kit NOW — same atomic install the next
+      // boot repeats from the disk scan.
+      let installNote = '';
+      try {
+        bootArchitectureCatalog();
+      } catch (error) {
+        installNote = ` — LIVE CATALOG INSTALL REFUSED: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      const kit = placeable as Extract<ModelPlaceable, { as: 'architecture-kit' }>;
+      const footprint = kit.measurement.footprint!;
+      const widthU = footprint.maxColumnExclusive - footprint.minColumn;
+      const heightU = footprint.maxRowExclusive - footprint.minRow;
+      const minimumU = kit.install.wallOpeningCompatibility!.minimumThicknessU;
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        // An opening kit installs into the measured catalog, never the free
+        // palette — drop any stale palette registration this package held.
+        authoredBuildPieces: prev.authoredBuildPieces.filter((entry) => entry.pkgId !== pkg.id),
+        authoredFloraSpecies: prev.authoredFloraSpecies.filter((entry) => entry.pkgId !== pkg.id),
+        modelDupes: prev.modelDupes.some((m) => m.id === pkg.id)
+          ? prev.modelDupes.map((m) => (m.id === pkg.id ? pkgExported : m))
+          : firstMaterialize ? [...prev.modelDupes, pkgExported] : prev.modelDupes,
+        status: `Exported "${pkg.name}" as a ${target.label} opening kit — ${widthU}u × ${heightU}u cut, fits walls ≥${minimumU}u thick (${kit.install.catalogId}) — ${disk}${installNote}.`,
+      }));
       return;
     }
     if (command.id.startsWith('export-build-piece-') || command.id.startsWith('export-prop') || command.id.startsWith('export-flora-')) {

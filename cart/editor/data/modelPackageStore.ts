@@ -394,6 +394,14 @@ function fileSha256(path: string): string {
   return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value) ? value.toLowerCase() : '';
 }
 
+/** Content address of the saved model DOCUMENT (mesh/doc.blob) — what an
+ * architecture-kit export writes as its meshContentHash. Empty when the
+ * package or the document is not on disk yet. */
+export function packageMeshDocSha256(kind: ModelPackageKind, id: string): string {
+  const dir = resolvePackageDir(kind, id);
+  return dir ? fileSha256(`${dir}/mesh/doc.blob`) : '';
+}
+
 function preparedArtifactBytes(
   sourcePath: string,
   expectedHash: string,
