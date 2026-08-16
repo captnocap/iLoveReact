@@ -26,4 +26,19 @@ pip install -q numpy -r /tmp/req-notorch.txt
 pip install -q torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu128 --no-deps
 pip install -q -e . --no-deps
 
+# Instant Meshes: field-aligned quad remesh (CPU). The 2019 binary links X11
+# libs even in batch mode, so install its runtime deps on the disposable pod.
+if [ ! -x /workspace/bin/instant-meshes ]; then
+  mkdir -p /workspace/bin
+  curl -sL -o /tmp/im.zip https://instant-meshes.s3.eu-central-1.amazonaws.com/instant-meshes-linux.zip
+  python3 -c "import zipfile; zipfile.ZipFile('/tmp/im.zip').extractall('/tmp/im')"
+  mv "/tmp/im/Instant Meshes" /workspace/bin/instant-meshes
+  chmod +x /workspace/bin/instant-meshes
+fi
+apt-get install -y -qq libxxf86vm1 libxrandr2 libxinerama1 libxcursor1 libx11-6 \
+  libxext6 libxrender1 libxfixes3 libxcb1 libxau6 libxdmcp6 >/dev/null 2>&1 || \
+  echo "WARN: X11 runtime libs install failed - instant-meshes may not run"
+/workspace/bin/instant-meshes --help >/dev/null 2>&1 || \
+  echo "WARN: instant-meshes not runnable - quad remesh stage will fail"
+
 echo "BOOTSTRAP_OK"
