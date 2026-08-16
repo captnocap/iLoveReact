@@ -4278,6 +4278,16 @@ pub fn run(config_in: AppConfig) !void {
         const dt = @divTrunc(std.Io.Clock.now(.awake, io).toMicroseconds() - startup_t0, 1000);
         log.print("[startup] gpu: {d}ms\n", .{dt});
     }
+    // Dev modules that loaded BEFORE this point were handed the CoreApi snapshot
+    // with gpu_device/gpu_queue still null, and current() only re-ran on a module
+    // reload — so every gpu_api read in the module (the shader-ink bake, req_4627)
+    // saw "no device" forever while the core rendered fine. The module keeps a
+    // POINTER to the core's one g_api struct, so refreshing it here the moment the
+    // real device exists fixes every reader at once; a module loaded later gets
+    // fresh values through prepare() anyway.
+    if (@hasDecl(build_options_for_whisper, "dev_native_modules") and build_options_for_whisper.dev_native_modules) {
+        _ = @import("dev_modules/core_exports.zig").current();
+    }
 
     // KMS mode: SDL's dummy video driver delivers no input, so bridge kernel
     // input devices into the SDL queue through an explicit-Io owner.
