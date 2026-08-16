@@ -5662,7 +5662,11 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
     if (g_mode == .none) return -1;
     const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
     if (!ready) return -1;
-    if (g_mode == .vertex or g_mode == .edge) _ = refreshCameraVisibility(cam, vp_w, vp_h);
+    // Every mode consumes the camera masks here: vertex/edge gate on their
+    // per-element visibility, and the face branch tests centroids against the
+    // same occlusion buffer the drawn face dots obey (req_4610). The build is
+    // key-cached, so the parked-camera marquee pays for it once.
+    _ = refreshCameraVisibility(cam, vp_w, vp_h);
     const minx = @min(x0, x1);
     const maxx = @max(x0, x1);
     const miny = @min(y0, y1);
@@ -5691,6 +5695,13 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
                     (pos[b + 1] + pos[b + 4] + pos[b + 7]) / 3.0,
                     (pos[b + 2] + pos[b + 5] + pos[b + 8]) / 3.0,
                 };
+                // Surface mode: a face whose center is buried behind a nearer
+                // surface draws no dot, so it must not catch the marquee either
+                // (drawn == clickable, req_3856's buffer applied here, req_4610).
+                // Back-face culling alone let a box sweep the model's FAR SIDE and
+                // everything hidden behind the front wall. X-Ray leaves
+                // g_occ_ready false, so this gate is inert there by construction.
+                if (!g_xray and occPointHidden(c)) continue;
                 if (inRect(model_paint.project(cam, vp_w, vp_h, c), minx, maxx, miny, maxy)) set[f] = true;
             }
             // A face selection means the whole authored n-gon — the same rule the
@@ -7029,6 +7040,89 @@ pub fn sessionReset() void {
         @field(@This(), f.name) = @field(fresh, f.name);
     // Deliberately frees NOTHING: ownership of the previous state lives in the
     // record the coordinator just parked.
+}
+
+/// End command-lifetime previews before switching or destroying model sessions.
+///
+/// Curve Pull, edge-path cycling, and intent-amplifier walks deliberately do not
+/// park: each retains borrowed topology identity or a selection baseline whose
+/// numeric indices can look valid in a different document. Clearing only Curve
+/// Pull allowed a same-sized document to inherit an old path-cycle baseline, and
+/// a staged walk token could apply the prior document's ids. The process-monotonic
+/// walk counter survives; only the document-relative staged capability is revoked.
+pub fn sessionInvalidateTransients() void {
+    curvePullEnd();
+    pathCycleReset();
+    clearWalkPlan();
+}
+
+/// Destroy one INACTIVE document's parked mesh-edit state.
+///
+/// This is deliberately not implemented by loading the record and calling `reset()`.
+/// Loading would replace the active document, while `reset()` also unwinds legacy face
+/// tint through the active `model_paint` authority. A parked legacy patch belongs to the
+/// parked document: final teardown frees its bytes without replaying them into whichever
+/// atlas happens to be active now. Every other pointer below is likewise owned solely by
+/// the parked Session after the coordinator has completed park -> reset/load.
+pub fn sessionDeinitParked(s: *Session) void {
+    if (s.g_verts) |value| alloc.free(value);
+    if (s.g_vert_part) |value| alloc.free(value);
+    if (s.g_corner_vert) |value| alloc.free(value);
+    if (s.g_edges) |value| alloc.free(value);
+    if (s.g_edge_boundary) |value| alloc.free(value);
+    if (s.g_edge_incidence) |value| alloc.free(value);
+    if (s.g_edge_wire) |value| alloc.free(value);
+    if (s.g_scope_vert) |value| alloc.free(value);
+    if (s.g_scope_edge) |value| alloc.free(value);
+    if (s.g_affect_vert) |value| alloc.free(value);
+    if (s.g_mirror_twin) |value| alloc.free(value);
+    if (s.g_mirror_affect) |value| alloc.free(value);
+    if (s.g_sel_vert) |value| alloc.free(value);
+    if (s.g_sel_edge) |value| alloc.free(value);
+    if (s.g_sel_face) |value| alloc.free(value);
+    if (s.g_snap) |value| alloc.free(value);
+    if (s.g_camera_visible_vert) |value| alloc.free(value);
+    if (s.g_camera_visible_edge) |value| alloc.free(value);
+    if (s.g_occ_depth.len > 0) alloc.free(s.g_occ_depth);
+
+    var patches = s.g_face_base.iterator();
+    while (patches.next()) |entry| alloc.free(entry.value_ptr.*);
+    s.g_face_base.deinit(alloc);
+
+    // An empty value makes final teardown idempotent and prevents a stale parked record
+    // from retaining counts/cache keys that describe storage it no longer owns.
+    s.* = .{};
+}
+
+test "session transient invalidation revokes every non-parked allocation" {
+    sessionInvalidateTransients();
+    defer sessionInvalidateTransients();
+
+    g_curve_ids = alloc.dupe(u32, &.{ 1, 2, 3 }) catch return error.OutOfMemory;
+    g_curve_base = alloc.dupe([3]f32, &.{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 2, 0, 0 } }) catch return error.OutOfMemory;
+    g_curve_params = alloc.dupe(f32, &.{ 0, 0.5, 1 }) catch return error.OutOfMemory;
+    g_curve_mask = alloc.dupe(bool, &.{ true, true, true }) catch return error.OutOfMemory;
+    g_pathcycle_base = alloc.dupe(bool, &.{ true, false }) catch return error.OutOfMemory;
+    g_pathcycle_edge = 4;
+    g_pathcycle_index = 2;
+    g_pathcycle_built_for = 8;
+    g_walk_ids = alloc.dupe(u32, &.{ 9, 10 }) catch return error.OutOfMemory;
+    g_walk_token = 51;
+    const counter_before = g_walk_counter;
+
+    sessionInvalidateTransients();
+    sessionInvalidateTransients();
+
+    try testing.expect(g_curve_ids == null);
+    try testing.expect(g_curve_base == null);
+    try testing.expect(g_curve_params == null);
+    try testing.expect(g_curve_mask == null);
+    try testing.expect(g_pathcycle_base == null);
+    try testing.expectEqual(@as(i64, -1), g_pathcycle_edge);
+    try testing.expectEqual(@as(u32, 0), g_pathcycle_index);
+    try testing.expect(g_walk_ids == null);
+    try testing.expectEqual(@as(u64, 0), g_walk_token);
+    try testing.expectEqual(counter_before, g_walk_counter);
 }
 
 // ── Intent amplifiers: two decisions expand to N correct elements (req_4061) ─────
