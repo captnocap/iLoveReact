@@ -1230,6 +1230,7 @@ pub const meshGizmoDrag = @import("gizmo_drag.zig").meshGizmoDrag;
 pub const meshGizmoNudge = @import("gizmo_drag.zig").meshGizmoNudge;
 pub const meshGizmoScaleBy = @import("gizmo_drag.zig").meshGizmoScaleBy;
 pub const meshAlignLoop = @import("gizmo_drag.zig").meshAlignLoop;
+pub const meshCircularizeLoop = @import("gizmo_drag.zig").meshCircularizeLoop;
 pub const meshTransformTranslate = @import("gizmo_drag.zig").meshTransformTranslate;
 pub const meshTransformScaleAxis = @import("gizmo_drag.zig").meshTransformScaleAxis;
 pub const meshTransformRotateAxis = @import("gizmo_drag.zig").meshTransformRotateAxis;

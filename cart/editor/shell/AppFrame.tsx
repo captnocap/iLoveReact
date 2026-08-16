@@ -4255,6 +4255,18 @@ export default function AppFrame() {
       }));
       return;
     }
+    if (commandId === 'mesh-circularize') {
+      const radius = withNativeMeshActionSource(source, () => modelToolApiRef.current?.circularizeLoop() ?? 0);
+      setState((prev) => ({
+        ...prev,
+        contextOpen: false,
+        openMenu: null,
+        status: radius > 0
+          ? `circularized selected loop at r=${radius.toFixed(3)}m — one Undo`
+          : 'circularize: select one closed loop of 3+ connected verts or edges',
+      }));
+      return;
+    }
     if (commandId === 'mesh-name-selection') {
       if (state.modelTool.selMode !== 2 && state.modelTool.selMode !== 3) {
         setState((prev) => ({ ...prev, status: 'Name Selection works in Edge or Face mode' }));

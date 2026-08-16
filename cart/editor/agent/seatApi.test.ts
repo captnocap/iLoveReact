@@ -770,6 +770,15 @@ test('loop alignment reports the native auto-selected world axis', () => {
   assert(!executeSeatRequest(createAgentSeat(), { action: 'align-loop' }).ok, 'rejected loop alignment reported success');
 });
 
+test('circularize reports the measured radius and refuses the zero receipt', () => {
+  (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
+  (globalThis as any).__mesh_circularize_loop = () => 0.7071;
+  const reply = executeSeatRequest(createAgentSeat(), { action: 'circularize' });
+  assert(reply.ok && (reply.result as any).radius === 0.7071, 'circularize dropped or remapped the native radius receipt');
+  (globalThis as any).__mesh_circularize_loop = () => 0;
+  assert(!executeSeatRequest(createAgentSeat(), { action: 'circularize' }).ok, 'rejected circularize reported success');
+});
+
 test('axis scale preserves sub-centimetre factors exactly at the seat boundary', () => {
   (globalThis as any).__mesh_semantic_state = () => JSON.stringify(percept);
   let factor = 0;

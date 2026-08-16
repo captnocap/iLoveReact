@@ -38,6 +38,7 @@ declare global {
   function __model_orbit_zoom(...args: unknown[]): unknown;
   function __model_orbit_pan(...args: unknown[]): unknown;
   function __model_orbit_lock(...args: unknown[]): unknown;
+  function __model_orbit_navigation_toggle(...args: unknown[]): unknown;
   function __model_cam_pose(...args: unknown[]): unknown;
   function __model_cam_set_pose(...args: unknown[]): unknown;
   function __model_shot_offscreen(...args: unknown[]): unknown;
@@ -62,6 +63,7 @@ declare global {
   function __mesh_curve_pull_arm(...args: unknown[]): unknown;
   function __mesh_gizmo_scale_by(...args: unknown[]): unknown;
   function __mesh_align_loop(...args: unknown[]): unknown;
+  function __mesh_circularize_loop(...args: unknown[]): unknown;
   function __mesh_transform_translate(...args: unknown[]): unknown;
   function __mesh_transform_scale_axis(...args: unknown[]): unknown;
   function __mesh_transform_rotate_axis(...args: unknown[]): unknown;
@@ -74,6 +76,9 @@ declare global {
   function __mesh_edit_path_pick(...args: unknown[]): unknown;
   function __mesh_topo_flip_faces(...args: unknown[]): unknown;
   function __mesh_topo_weld(...args: unknown[]): unknown;
+  function __mesh_logical_status(...args: unknown[]): unknown;
+  function __mesh_topo_edge_split(...args: unknown[]): unknown;
+  function __mesh_topo_edge_tubes(...args: unknown[]): unknown;
   function __mesh_retopo_weld_pairs(...args: unknown[]): unknown;
   function __mesh_retopo_normalize_widths(...args: unknown[]): unknown;
   function __mesh_topo_loop_cut(...args: unknown[]): unknown;
@@ -180,6 +185,7 @@ declare global {
   function __model_paint_polygon(...args: unknown[]): unknown;
   function __model_paint_material(...args: unknown[]): unknown;
   function __model_paint_material_clear(...args: unknown[]): unknown;
+  function __model_paint_material_refusal(...args: unknown[]): unknown;
   function __model_region_formula(...args: unknown[]): unknown;
   function __model_region_set(...args: unknown[]): unknown;
   function __model_region_bind_slot(...args: unknown[]): unknown;
@@ -208,6 +214,7 @@ declare global {
   function __model_mesh_write(...args: unknown[]): unknown;
   function __model_painted_mesh_write(...args: unknown[]): unknown;
   function __model_meshdoc_write(...args: unknown[]): unknown;
+  function __model_meshdoc_refusal(...args: unknown[]): unknown;
   function __character_rig_session(...args: unknown[]): unknown;
   function __model_atlas_base(...args: unknown[]): unknown;
   function __model_atlas_apply(...args: unknown[]): unknown;
@@ -636,6 +643,7 @@ declare global {
   function __segment_open(...args: unknown[]): unknown;
   function __segment_close(...args: unknown[]): unknown;
   function __segment_refine(...args: unknown[]): unknown;
+  function __matting_alpha(...args: unknown[]): unknown;
   function __pose_estimate_image(...args: unknown[]): unknown;
   function __pose_camera_devices(...args: unknown[]): unknown;
   function __pose_smoothing(...args: unknown[]): unknown;
@@ -875,6 +883,16 @@ declare global {
   function __game_build_validate(...args: unknown[]): unknown;
   function __game_build_catalog_count(...args: unknown[]): unknown;
   function __game_build_catalog_rows(...args: unknown[]): unknown;
+  function __game_build_arch_catalog_validate(...args: unknown[]): unknown;
+  function __game_build_arch_catalog_install(...args: unknown[]): unknown;
+  function __game_build_arch_catalog_query(...args: unknown[]): unknown;
+  function __game_build_arch_source_validate(...args: unknown[]): unknown;
+  function __game_build_arch_mutate(...args: unknown[]): unknown;
+  function __game_build_arch_compile(...args: unknown[]): unknown;
+  function __game_build_arch_raycast(...args: unknown[]): unknown;
+  function __game_build_arch_opening_slots(...args: unknown[]): unknown;
+  function __game_build_arch_scale_metadata(...args: unknown[]): unknown;
+  function __game_build_arch_catalog_rows(...args: unknown[]): unknown;
 
   // game_map (framework/v8_bindings_game_map.zig)
   function __map_reset(...args: unknown[]): unknown;
@@ -982,6 +1000,9 @@ declare global {
   function __compiled_world_status(...args: unknown[]): unknown;
   function __compiled_world_set_camera(...args: unknown[]): unknown;
   function __compiled_world_clear_camera(...args: unknown[]): unknown;
+  function __compiled_world_set_animation_trajectory(...args: unknown[]): unknown;
+  function __compiled_world_clear_animation_trajectory(...args: unknown[]): unknown;
+  function __compiled_world_frame_animation_trajectory(...args: unknown[]): unknown;
   function __compiled_world_set_live_pieces(...args: unknown[]): unknown;
   function __compiled_world_clear_live_pieces(...args: unknown[]): unknown;
   function __compiled_world_set_live_lights(...args: unknown[]): unknown;
@@ -1000,6 +1021,12 @@ declare global {
   function __compiled_world_set_hide_walls(...args: unknown[]): unknown;
   function __compiled_world_ground_hit(...args: unknown[]): unknown;
   function __compiled_world_set_paint_mode(...args: unknown[]): unknown;
+  function __compiled_world_wall_tool_arm(...args: unknown[]): unknown;
+  function __compiled_world_wall_tool_anchor(...args: unknown[]): unknown;
+  function __compiled_world_wall_tool_selection(...args: unknown[]): unknown;
+  function __compiled_world_wall_tool_magnets(...args: unknown[]): unknown;
+  function __compiled_world_wall_tool_press(...args: unknown[]): unknown;
+  function __compiled_world_wall_tool_release(...args: unknown[]): unknown;
   function __compiled_world_set_resident_meshes(...args: unknown[]): unknown;
   function __compiled_world_set_player_character(...args: unknown[]): unknown;
   function __compiled_world_npc_character_session(...args: unknown[]): unknown;

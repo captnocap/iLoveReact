@@ -149,6 +149,10 @@
           "zig": "hostModelOrbitLock"
         },
         {
+          "js": "__model_orbit_navigation_toggle",
+          "zig": "hostModelOrbitNavigationToggle"
+        },
+        {
           "js": "__model_cam_pose",
           "zig": "hostModelCamPose"
         },
@@ -245,6 +249,10 @@
           "zig": "hostMeshAlignLoop"
         },
         {
+          "js": "__mesh_circularize_loop",
+          "zig": "hostMeshCircularizeLoop"
+        },
+        {
           "js": "__mesh_transform_translate",
           "zig": "hostMeshTransformTranslate"
         },
@@ -291,6 +299,18 @@
         {
           "js": "__mesh_topo_weld",
           "zig": "hostMeshTopoWeld"
+        },
+        {
+          "js": "__mesh_logical_status",
+          "zig": "hostMeshLogicalStatus"
+        },
+        {
+          "js": "__mesh_topo_edge_split",
+          "zig": "hostMeshTopoEdgeSplit"
+        },
+        {
+          "js": "__mesh_topo_edge_tubes",
+          "zig": "hostMeshTopoEdgeTubes"
         },
         {
           "js": "__mesh_retopo_weld_pairs",
@@ -717,6 +737,10 @@
           "zig": "hostModelPaintMaterialClear"
         },
         {
+          "js": "__model_paint_material_refusal",
+          "zig": "hostModelPaintMaterialRefusal"
+        },
+        {
           "js": "__model_region_formula",
           "zig": "hostModelRegionFormula"
         },
@@ -827,6 +851,10 @@
         {
           "js": "__model_meshdoc_write",
           "zig": "hostModelMeshdocWrite"
+        },
+        {
+          "js": "__model_meshdoc_refusal",
+          "zig": "hostModelMeshdocRefusal"
         },
         {
           "js": "__character_rig_session",
@@ -2566,6 +2594,10 @@
           "zig": "hostSegmentRefine"
         },
         {
+          "js": "__matting_alpha",
+          "zig": "hostMattingAlpha"
+        },
+        {
           "js": "__pose_estimate_image",
           "zig": "hostPoseEstimateImage"
         },
@@ -3532,6 +3564,46 @@
         {
           "js": "__game_build_catalog_rows",
           "zig": "hostCatalogRows"
+        },
+        {
+          "js": "__game_build_arch_catalog_validate",
+          "zig": "hostArchitectureCatalogValidate"
+        },
+        {
+          "js": "__game_build_arch_catalog_install",
+          "zig": "hostArchitectureCatalogInstall"
+        },
+        {
+          "js": "__game_build_arch_catalog_query",
+          "zig": "hostArchitectureCatalogQuery"
+        },
+        {
+          "js": "__game_build_arch_source_validate",
+          "zig": "hostArchitectureSourceValidate"
+        },
+        {
+          "js": "__game_build_arch_mutate",
+          "zig": "hostArchitectureMutate"
+        },
+        {
+          "js": "__game_build_arch_compile",
+          "zig": "hostArchitectureCompile"
+        },
+        {
+          "js": "__game_build_arch_raycast",
+          "zig": "hostArchitectureRaycast"
+        },
+        {
+          "js": "__game_build_arch_opening_slots",
+          "zig": "hostArchitectureOpeningSlots"
+        },
+        {
+          "js": "__game_build_arch_scale_metadata",
+          "zig": "hostArchitectureScaleMetadata"
+        },
+        {
+          "js": "__game_build_arch_catalog_rows",
+          "zig": "hostArchitectureCatalogRows"
         }
       ]
     },
@@ -3966,6 +4038,18 @@
           "zig": "hostClearCamera"
         },
         {
+          "js": "__compiled_world_set_animation_trajectory",
+          "zig": "hostSetAnimationTrajectory"
+        },
+        {
+          "js": "__compiled_world_clear_animation_trajectory",
+          "zig": "hostClearAnimationTrajectory"
+        },
+        {
+          "js": "__compiled_world_frame_animation_trajectory",
+          "zig": "hostFrameAnimationTrajectory"
+        },
+        {
           "js": "__compiled_world_set_live_pieces",
           "zig": "hostSetLivePieces"
         },
@@ -4036,6 +4120,30 @@
         {
           "js": "__compiled_world_set_paint_mode",
           "zig": "hostSetPaintMode"
+        },
+        {
+          "js": "__compiled_world_wall_tool_arm",
+          "zig": "hostWallToolArm"
+        },
+        {
+          "js": "__compiled_world_wall_tool_anchor",
+          "zig": "hostWallToolAnchor"
+        },
+        {
+          "js": "__compiled_world_wall_tool_selection",
+          "zig": "hostWallToolSelection"
+        },
+        {
+          "js": "__compiled_world_wall_tool_magnets",
+          "zig": "hostWallToolMagnets"
+        },
+        {
+          "js": "__compiled_world_wall_tool_press",
+          "zig": "hostWallToolPress"
+        },
+        {
+          "js": "__compiled_world_wall_tool_release",
+          "zig": "hostWallToolRelease"
         },
         {
           "js": "__compiled_world_set_resident_meshes",

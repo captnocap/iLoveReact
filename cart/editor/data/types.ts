@@ -171,6 +171,9 @@ export type ModelToolApi = {
   scaleBy: (factor: number) => boolean;
   /** Flatten the selected vertex row / edge loop on its nearest X/Y/Z plane. */
   alignLoop: () => number;
+  /** Rebuild one closed selected loop as an equal-spaced circle; returns the
+   *  measured radius in metres, 0 on refusal (req_4662). */
+  circularizeLoop: () => number;
   paint: () => void;
   pathPlane: () => void;
   pathEdges: () => void;

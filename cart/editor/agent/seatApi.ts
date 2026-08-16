@@ -1301,6 +1301,12 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
     adapter.documentMutated?.();
     return { axis: 'xyz'[code - 1] as 'x' | 'y' | 'z' };
   };
+  const circularize = (): { radius: number } | null => {
+    const radius = Number(automation(() => host.__mesh_circularize_loop?.()) ?? 0);
+    if (!(radius > 0)) return null;
+    adapter.documentMutated?.();
+    return { radius };
+  };
   const rotate = (axis: [number, number, number], pivot: [number, number, number], degrees: number) =>
     finiteVec3(axis) && finiteVec3(pivot) && Number.isFinite(degrees)
     && recordTransform(automation(() => host.__mesh_transform_rotate_axis?.(...axis, ...pivot, degrees * Math.PI / 180)) === 1);
@@ -2294,7 +2300,7 @@ export function createAgentSeat(adapter: SeatAdapter = {}) {
   return {
     look, elements, selection, retopoBands, boundaryContinuation, follow, followPatch,
     select, selectEdge, selectVertex, selectFace, selectAudit, selectSplitPoints, editRegion, selectElements, selectBoundaryEdgePairs, selectBoundaryEdgePoints, selectBoundaryContinuation, nameSelection, extrude, extrudeEdge,
-    connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, rotate, deleteSelection,
+    connectVertices, createFace, bevel, inset, move, scale, scaleUniform, alignLoop, circularize, rotate, deleteSelection,
     mergeFaces, edgeSplit, edgeTubes, weld, weldPairs, normalizeWidths, solidify, detach, flip, glass, paint, paintReadiness, atlas, material, uv, save,
     undo, redo, symmetrize, loopCut, trisToQuads, uvZone, mirrorMatchQuads, mirrorReplace, collectUvOrientation, shellAction, withTopoRefusal,
     addPrimitive, newPrimitive, shot, shotOffscreen, recipeList, runRecipe, reply,
@@ -2700,6 +2706,10 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'align-loop': {
         const result = seat.alignLoop();
         return seat.reply('align-loop', !!result, result ?? undefined, result ? undefined : 'align loop rejected — select a skewed vertex row or at least two connected loop edges');
+      }
+      case 'circularize': {
+        const result = seat.circularize();
+        return seat.reply('circularize', !!result, result ?? undefined, result ? undefined : 'circularize rejected — select one closed loop of 3+ connected vertices (or its edges); open paths, branches, and point-collapsed rings refuse');
       }
       case 'rotate': { const ok = seat.rotate(args.axis as [number, number, number], args.pivot as [number, number, number], Number(args.degrees ?? 0)); return seat.reply('rotate', ok, undefined, ok ? undefined : 'rotate rejected — needs axis:[x,y,z], pivot:[x,y,z], finite degrees, and an in-scope vertex/edge/face selection (view mode transforms nothing)'); }
       case 'undo': { const result = seat.undo(); return seat.reply('undo', !!result, result ?? undefined, result ? undefined : 'nothing to undo'); }

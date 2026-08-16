@@ -367,6 +367,9 @@ export type ModelToolApi = {
   transformScope: (scope: ModelTransformScope, op: ModelScopeTransformOp, phase?: 'preview' | 'commit') => boolean;
   cancelScopePreview: () => void;
   alignLoop: () => number;
+  // Rebuild one closed selected loop as an equal-spaced circle; returns the
+  // measured radius in metres, 0 on refusal (req_4662).
+  circularizeLoop: () => number;
   // The cart half of the integrity roll call (req_3484): re-read key, selection,
   // and part ranges from host truth after the host reports (or heals) a ledger
   // fault. Returns false when the host carries no ranges to mirror.
@@ -734,6 +737,8 @@ const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
 const meshScaleBy = (factor: number) => host.__mesh_gizmo_scale_by?.(factor) === 1;
 // Align Loop returns 1/2/3 for X/Y/Z; normalize that to 0/1/2 and -1 refusal.
 const meshAlignLoop = () => Math.trunc(Number(host.__mesh_align_loop?.() ?? 0)) - 1;
+// Circularize returns the rebuilt ring's measured radius in metres; 0 = refusal.
+const meshCircularizeLoop = () => Number(host.__mesh_circularize_loop?.() ?? 0);
 const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_select_edge?.(idx, additive ? 1 : 0) === 1;
 // Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus,
 // zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
@@ -3182,6 +3187,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     onDocumentMutated?.();
     return axis;
   };
+  const circularizeLoop = (): number => {
+    if (!host.__mesh_circularize_loop) {
+      setError('circularize: host door missing — rebuild the dev host');
+      return 0;
+    }
+    const radius = meshCircularizeLoop();
+    if (!(radius > 0)) {
+      setError('circularize: select one closed loop of 3+ connected verts (or its edges)');
+      return 0;
+    }
+    setError(null);
+    onDocumentMutated?.();
+    return radius;
+  };
   const runMirrorQuads = (axis: number) => {
     const { result, doorPresent } = meshMirrorQuads(axis);
     if (adoptMesh(result)) return;
@@ -3327,6 +3346,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     transformScope,
     cancelScopePreview,
     alignLoop,
+    circularizeLoop,
     resyncFromHost: () => {
       const session = readModelSession();
       if (session?.key) setModel((m) => (m && m.key !== session.key ? { ...m, key: session.key, count: session.count } : m));
@@ -5576,6 +5596,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   >
                     <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Align Loop</Text>
                   </Pressable>
+                  {selInfo.sel >= 3 && (
+                    <Pressable
+                      onPress={circularizeLoop}
+                      tooltip="Rebuild the selected closed loop as an equal-spaced circle — restores a collapsed ring"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Circularize</Text>
+                    </Pressable>
+                  )}
                 </>
               )}
               {selMode === 2 && selInfo.sel > 0 && (
@@ -5639,6 +5671,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       }}
                     >
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Align Loop</Text>
+                    </Pressable>
+                  )}
+                  {selInfo.sel >= 3 && (
+                    <Pressable
+                      onPress={circularizeLoop}
+                      tooltip="Rebuild the selected closed edge loop as an equal-spaced circle — restores a collapsed ring"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Circularize</Text>
                     </Pressable>
                   )}
                   {selInfo.sel >= 2 && (

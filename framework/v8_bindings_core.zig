@@ -1346,6 +1346,20 @@ fn hostMeshAlignLoop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnNumber(info, @as(u32, axis) + 1);
 }
 
+/// __mesh_circularize_loop() -> measured radius in metres, 0 on refusal. The
+/// native mesh editor redistributes one closed selected vertex/edge loop of 3+
+/// vertices onto its best-fit circle at equal spacing — the restore verb for a
+/// ring that has collapsed or drifted (req_4662).
+fn hostMeshCircularizeLoop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const radius = scene3d.meshCircularizeLoop() orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    state.markDirty();
+    setReturnNumber(info, radius);
+}
+
 fn hostMeshTransformTranslate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const delta = [3]f32{
@@ -5366,6 +5380,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_curve_pull_arm", hostMeshCurvePullArm);
         v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
         v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
+        v8_runtime.registerHostFn("__mesh_circularize_loop", hostMeshCircularizeLoop);
         v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);
         v8_runtime.registerHostFn("__mesh_transform_scale_axis", hostMeshTransformScaleAxis);
         v8_runtime.registerHostFn("__mesh_transform_rotate_axis", hostMeshTransformRotateAxis);
@@ -5639,6 +5654,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_curve_pull_arm", hostMeshCurvePullArm);
     v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
     v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
+    v8_runtime.registerHostFn("__mesh_circularize_loop", hostMeshCircularizeLoop);
     v8_runtime.registerHostFn("__mesh_transform_translate", hostMeshTransformTranslate);
     v8_runtime.registerHostFn("__mesh_transform_scale_axis", hostMeshTransformScaleAxis);
     v8_runtime.registerHostFn("__mesh_transform_rotate_axis", hostMeshTransformRotateAxis);

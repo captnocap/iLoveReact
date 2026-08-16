@@ -271,6 +271,7 @@ export const COMMANDS: Command[] = [
   // Collapse one selected vertex row / edge loop onto its least-varying X/Y/Z
   // coordinate at the selection center. Native mirror twins follow in the same undo.
   { id: 'mesh-align-loop', menu: 'Edit', scope: 'model', name: 'Align Loop', icon: 'AlignCenter', key: 'A', context: true, native: true, undoable: true, tool: true, needsSelection: true },
+  { id: 'mesh-circularize', menu: 'Edit', scope: 'model', name: 'Circularize Loop', icon: 'Circle', key: '', context: true, native: true, undoable: true, tool: true, needsSelection: true },
   { id: 'mesh-rotate', menu: 'Edit', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-path-plane', menu: 'Edit', scope: 'model', name: 'Pen Plane', icon: 'PenTool', key: '', context: true, native: true, undoable: true, tool: true },
@@ -497,7 +498,7 @@ const MESH_SUBMENU: MenuNode = {
   kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
   children: [
     section('Select'), cmd('mesh-view'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'), cmd('mesh-select-uv-orientation'), cmd('mesh-name-selection'),
-    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-align-loop'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
+    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-align-loop'), cmd('mesh-circularize'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'), cmd('mesh-xray'),
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-weld'), cmd('mesh-bevel'), cmd('mesh-edge-tubes'), cmd('mesh-edge-split'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'), cmd('mesh-tris-to-quads'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
@@ -603,7 +604,11 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
   if (tool.selMode === 1) {
     return tool.sel === 1
       ? [{ ...commandById('mesh-extrude'), name: 'Extrude Edge to Vertex' }, commandById('mesh-bevel')]
-      : [commandById('mesh-align-loop'), commandById('mesh-weld')];
+      : [
+          commandById('mesh-align-loop'),
+          ...(tool.sel >= 3 ? [commandById('mesh-circularize')] : []),
+          commandById('mesh-weld'),
+        ];
   }
   if (tool.selMode === 2) {
     // Weld collapses the selected edges' endpoints — one edge = an edge collapse.
@@ -615,6 +620,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
           commandById('mesh-edge-tubes'),
           commandById('mesh-edge-split'),
           commandById('mesh-align-loop'),
+          ...(tool.sel >= 3 ? [commandById('mesh-circularize')] : []),
           commandById('mesh-weld'),
         ];
   }

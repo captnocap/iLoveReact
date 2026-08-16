@@ -4431,6 +4431,18 @@ pub const AlignLoopResult = struct {
     coordinate: f32,
 };
 
+/// Circularize refuses below this measured mean radius: a loop whose vertices
+/// all sit on one point carries no plane or radius to restore, and inventing
+/// either would move geometry to a place the model never authored.
+pub const CircularizeTuning = struct {
+    pub const minimum_radius_m: f32 = 0.000001;
+};
+
+pub const CircularizeResult = struct {
+    mutation: Mutation,
+    radius: f32,
+};
+
 fn exactScaleByFactor(factor: f32) ?f32 {
     if (!std.math.isFinite(factor)) return null;
     const magnitude = @abs(factor);
@@ -5537,6 +5549,121 @@ pub fn alignSelectedLoop() ?AlignLoopResult {
     return .{ .mutation = mutation, .axis = axis, .coordinate = pivot[axis] };
 }
 
+/// Redistribute one closed selected loop of 3+ vertices onto its best-fit circle
+/// at equal angular spacing — the restore verb for a ring that has collapsed or
+/// drifted (req_4662). Order comes from the topology (walking the selected
+/// authored edges), never from positions, so a crumpled ring still untangles in
+/// its authored vertex order. The circle is measured from the loop itself:
+/// centroid pivot, Newell-normal plane, mean in-plane radial distance; the walk's
+/// first vertex anchors the phase so the ring keeps its current orientation.
+pub fn circularizeSelectedLoop() ?CircularizeResult {
+    if (g_mode != .vertex and g_mode != .edge) return null;
+    const mask = fillAffectedVerts() orelse return null;
+    const edges = g_edges orelse return null;
+
+    // Pair table over the selected authored edges: a closed loop is exactly two
+    // selected neighbours per selected vertex, with a single connected cycle.
+    const neighbors = alloc.alloc([2]u32, g_vert_count) catch return null;
+    defer alloc.free(neighbors);
+    const degrees = alloc.alloc(u8, g_vert_count) catch return null;
+    defer alloc.free(degrees);
+    @memset(degrees, 0);
+    var edge: u32 = 0;
+    while (edge < g_edge_count) : (edge += 1) {
+        if (!selectedAlignmentEdge(edge, mask)) continue;
+        const a = edges[edge * 2];
+        const b = edges[edge * 2 + 1];
+        if (degrees[a] == 2 or degrees[b] == 2) return null;
+        neighbors[a][degrees[a]] = b;
+        neighbors[b][degrees[b]] = a;
+        degrees[a] += 1;
+        degrees[b] += 1;
+    }
+    var count: u32 = 0;
+    var start: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < g_vert_count) : (vertex += 1) {
+        if (!mask[vertex]) continue;
+        if (degrees[vertex] != 2) return null;
+        if (start == null) start = vertex;
+        count += 1;
+    }
+    if (count < 3) return null;
+
+    const order = alloc.alloc(u32, count) catch return null;
+    defer alloc.free(order);
+    order[0] = start orelse return null;
+    var previous = order[0];
+    var current = neighbors[previous][0];
+    var filled: u32 = 1;
+    while (current != order[0]) {
+        if (filled >= count) return null; // second disconnected cycle in the selection
+        order[filled] = current;
+        filled += 1;
+        const next = if (neighbors[current][0] == previous) neighbors[current][1] else neighbors[current][0];
+        previous = current;
+        current = next;
+    }
+    if (filled != count) return null;
+
+    var centroid = [3]f32{ 0, 0, 0 };
+    for (order[0..count]) |v| centroid = vecAdd(centroid, vertPos(v));
+    centroid = vecMul(centroid, 1.0 / @as(f32, @floatFromInt(count)));
+
+    var normal = [3]f32{ 0, 0, 0 };
+    for (order[0..count], 0..) |v, index| {
+        const p = vecSub(vertPos(v), centroid);
+        const q = vecSub(vertPos(order[(index + 1) % count]), centroid);
+        normal = vecAdd(normal, vecCross(p, q));
+    }
+    const normal_length = @sqrt(vecDot(normal, normal));
+    if (!std.math.isFinite(normal_length) or normal_length <= 1e-12) return null;
+    const plane_normal = vecMul(normal, 1.0 / normal_length);
+
+    // In-plane basis anchored at the walk's first vertex (phase anchor); a first
+    // vertex sitting exactly on the axis falls back to any in-plane direction.
+    var u_axis = vecSub(vertPos(order[0]), centroid);
+    u_axis = vecSub(u_axis, vecMul(plane_normal, vecDot(u_axis, plane_normal)));
+    var u_length = @sqrt(vecDot(u_axis, u_axis));
+    if (u_length <= 1e-12) {
+        const seed: [3]f32 = if (@abs(plane_normal[0]) < 0.9) .{ 1, 0, 0 } else .{ 0, 1, 0 };
+        u_axis = vecSub(seed, vecMul(plane_normal, vecDot(seed, plane_normal)));
+        u_length = @sqrt(vecDot(u_axis, u_axis));
+        if (u_length <= 1e-12) return null;
+    }
+    u_axis = vecMul(u_axis, 1.0 / u_length);
+    const v_axis = vecCross(plane_normal, u_axis);
+
+    var radius: f32 = 0;
+    for (order[0..count]) |v| {
+        const rel = vecSub(vertPos(v), centroid);
+        const x = vecDot(rel, u_axis);
+        const y = vecDot(rel, v_axis);
+        radius += @sqrt(x * x + y * y);
+    }
+    radius /= @as(f32, @floatFromInt(count));
+    if (!std.math.isFinite(radius) or radius <= CircularizeTuning.minimum_radius_m) return null;
+
+    const verts = g_verts orelse return null;
+    const targets = alloc.dupe(f32, verts) catch return null;
+    defer alloc.free(targets);
+    const step = std.math.tau / @as(f32, @floatFromInt(count));
+    for (order[0..count], 0..) |v, index| {
+        const angle = step * @as(f32, @floatFromInt(index));
+        const target = vecAdd(centroid, vecAdd(
+            vecMul(u_axis, radius * @cos(angle)),
+            vecMul(v_axis, radius * @sin(angle)),
+        ));
+        const base = @as(usize, v) * 3;
+        targets[base] = target[0];
+        targets[base + 1] = target[1];
+        targets[base + 2] = target[2];
+    }
+    const mutation = applyExplicitVertexTargets(mask, targets);
+    if (!mutation.changed) return null;
+    return .{ .mutation = mutation, .radius = radius };
+}
+
 /// Bounding sphere for the resident interleaved position/normal/UV soup. This is
 /// the live Model Focus + camera-frame truth after numeric transforms; load-time
 /// `MeshRef.radius` is intentionally not consulted.
@@ -6163,6 +6290,99 @@ test "normalizeWidths equalizes an explicit topology path and pins open endpoint
     try testing.expectApproxEqAbs(@as(f32, 0), vertPos(left)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 2), vertPos(uneven)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 4), vertPos(right)[0], 0.0001);
+}
+
+// A crumpled 6-vertex ring on z=0, fan-triangulated around a hub at the origin.
+// Selecting only the rim keeps the hub out of the mask, so the rim's authored
+// edges form exactly one closed loop with no chords between selected verts.
+const circularize_rim = [_][3]f32{
+    .{ 1.0, 0, 0 },   .{ 0.23, 0.19, 0 },   .{ 0, 1.4, 0 },
+    .{ -0.79, 0.14, 0 }, .{ -1.13, -0.41, 0 }, .{ 0.25, -0.43, 0 },
+};
+
+fn setupCrumpledRing() void {
+    var soup: [6 * 3 * 8]f32 = @splat(0);
+    for (0..6) |wedge| {
+        const corners = [3][3]f32{
+            .{ 0, 0, 0 },
+            circularize_rim[wedge],
+            circularize_rim[(wedge + 1) % 6],
+        };
+        for (corners, 0..) |point, corner| {
+            const base = (wedge * 3 + corner) * 8;
+            soup[base] = point[0];
+            soup[base + 1] = point[1];
+            soup[base + 2] = point[2];
+            soup[base + 5] = 1;
+        }
+    }
+    model_paint.setTarget(779, soup[0..], 18);
+}
+
+test "circularize spaces a closed crumpled rim equally on its measured circle" {
+    setupCrumpledRing();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    try testing.expectEqual(@as(u32, 7), vertCount());
+    const hub = findVertAt(.{ 0, 0, 0 }).?;
+    var vertex: u32 = 0;
+    while (vertex < vertCount()) : (vertex += 1) {
+        if (vertex != hub) g_sel_vert.?[vertex] = true;
+    }
+
+    const result = circularizeSelectedLoop() orelse return error.TestExpectedResult;
+    try testing.expect(result.mutation.changed);
+    try testing.expect(result.radius > 0.1);
+
+    var centroid = [3]f32{ 0, 0, 0 };
+    vertex = 0;
+    while (vertex < vertCount()) : (vertex += 1) {
+        if (vertex != hub) centroid = vecAdd(centroid, vertPos(vertex));
+    }
+    centroid = vecMul(centroid, 1.0 / 6.0);
+
+    // Every rim vertex lands on the measured radius and stays in the source
+    // plane; successive rim spokes subtend the equal-spacing angle (60° for 6).
+    vertex = 0;
+    while (vertex < vertCount()) : (vertex += 1) {
+        if (vertex == hub) continue;
+        const rel = vecSub(vertPos(vertex), centroid);
+        try testing.expectApproxEqAbs(result.radius, @sqrt(vecDot(rel, rel)), 0.0001);
+        try testing.expectApproxEqAbs(@as(f32, 0), vertPos(vertex)[2], 0.0001);
+    }
+    const expected_dot = 0.5 * result.radius * result.radius; // cos 60°
+    var edge: u32 = 0;
+    var rim_edges: u32 = 0;
+    while (edge < edgeCount()) : (edge += 1) {
+        const ends = edgeEndpointsPub(edge);
+        if (ends[0] == hub or ends[1] == hub) continue;
+        const a = vecSub(vertPos(ends[0]), centroid);
+        const b = vecSub(vertPos(ends[1]), centroid);
+        try testing.expectApproxEqAbs(expected_dot, vecDot(a, b), 0.001);
+        rim_edges += 1;
+    }
+    try testing.expectEqual(@as(u32, 6), rim_edges);
+}
+
+test "circularize refuses an open vertex path — the loop must close" {
+    setupCrumpledRing();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const a = findVertAt(circularize_rim[0]).?;
+    const b = findVertAt(circularize_rim[1]).?;
+    const c = findVertAt(circularize_rim[2]).?;
+    g_sel_vert.?[a] = true;
+    g_sel_vert.?[b] = true;
+    g_sel_vert.?[c] = true;
+    try testing.expect(circularizeSelectedLoop() == null);
 }
 
 test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a lossy hash)" {

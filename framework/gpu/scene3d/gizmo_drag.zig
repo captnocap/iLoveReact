@@ -334,6 +334,25 @@ pub fn meshAlignLoop() ?u8 {
     return null;
 }
 
+/// Restore one closed selected vertex/edge loop onto its best-fit circle at
+/// equal spacing (req_4662). One mutation, one journal entry; returns the
+/// measured radius in metres so the caller can report what it rebuilt.
+pub fn meshCircularizeLoop() ?f32 {
+    if (z3d.meshEditModeRaw() == 0 or !model_paint.hasTarget()) return null;
+    var snap = z3d.journalSnapshotCurrent("circularize loop");
+    const circle = mesh_edit.circularizeSelectedLoop() orelse {
+        z3d.journalDiscard(&snap);
+        return null;
+    };
+    const ok = z3d.applyMeshMutation(circle.mutation);
+    if (ok) {
+        z3d.journalCommit(&snap);
+        return circle.radius;
+    }
+    z3d.journalDiscard(&snap);
+    return null;
+}
+
 pub fn meshTransformTranslate(delta: [3]f32) bool {
     if (z3d.meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
     var snap = z3d.journalSnapshotCurrent("translate exact");
