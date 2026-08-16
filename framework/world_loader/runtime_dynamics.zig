@@ -23,7 +23,7 @@ const doorHalfExtents = m_state.doorHalfExtents;
 const CookedDoor = m_state.CookedDoor;
 const COOKED_DOOR_SWING_ARC_DEGREES = m_state.COOKED_DOOR_SWING_ARC_DEGREES;
 const COOKED_DOOR_OPEN_SECONDS = m_state.COOKED_DOOR_OPEN_SECONDS;
-const cookedDoorRectFloats = m_state.cookedDoorRectFloats;
+const cookedDoorOrientedFloats = m_state.cookedDoorOrientedFloats;
 const rotateYLocal = m_state.rotateYLocal;
 const sampleRoute = m_state.sampleRoute;
 const sceneTerrainTopAt = m_physics.sceneTerrainTopAt;
@@ -288,10 +288,12 @@ pub fn applyCookedDoorPose(self: anytype, cd: *CookedDoor) void {
         node.scene3d_pos_y = cd.node_base_y;
         node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
     }
-    // req_1960: the panel rect follows the swing and remains physical.
-    const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
-    if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
-        @memcpy(self.physics_colliders.values[at .. at + game_physics.RECT_FLOATS], &cookedDoorRectFloats(cd.*));
+    // req_1960: the panel collider follows the swing and remains physical.
+    // req_4538: ORIENTED slot — orientedBase() moves with live rect folds, so
+    // it must be recomputed every call, never cached.
+    const at = self.physics_colliders.orientedBase() + cd.oriented_index * game_physics.ORIENTED_FLOATS;
+    if (at + game_physics.ORIENTED_FLOATS <= self.physics_colliders.values.len and cd.oriented_index < self.physics_colliders.oriented_count) {
+        @memcpy(self.physics_colliders.values[at .. at + game_physics.ORIENTED_FLOATS], &cookedDoorOrientedFloats(cd.*));
     }
 }
 

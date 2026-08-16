@@ -35,6 +35,7 @@ const PlayerState = state.PlayerState;
 const PhysicsColliders = state.PhysicsColliders;
 const PropBody = state.PropBody;
 const cookedDoorWorldBox = state.cookedDoorWorldBox;
+const cookedDoorOrientedFloats = state.cookedDoorOrientedFloats;
 const solidVertexCount = state.solidVertexCount;
 const clamp = state.clamp;
 const Bounds = instances.Bounds;
@@ -555,35 +556,27 @@ pub fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Sc
             }
         }
 
-        // LIVE cooked-door panel rects (req_1864): one toggleable rect per cooked
+        // LIVE cooked-door leaf colliders (req_1864): one ORIENTED box per cooked
         // door mesh-prop instance, in mp.instances order (so collectCookedDoors
-        // aligns rect_index = start + i). Same park/blocksPlayer machinery as the
-        // DOORS-lump doors, but the world box comes from the custom leaf slot.
-        var cooked_door_rect_start: usize = 0;
+        // aligns oriented_index = start + i). stepCookedDoors rewrites each at its
+        // swing pose in place per frame. Oriented, never a rect (req_4538): at a
+        // diagonal instance yaw the leaf's axis-aligned cover spans the whole
+        // doorway, so an OPEN door on an angled wall bricked the visually clear
+        // portal. The box boots at the authored state's swing pose — no park.
+        var cooked_door_oriented_start: usize = 0;
         var cooked_door_count: usize = 0;
         if (scene.mesh_props) |mp| {
-            cooked_door_rect_start = rect_count;
+            cooked_door_oriented_start = oriented_count;
             cooked: for (mp.instances) |inst| {
                 const mi: usize = @intCast(inst.mesh);
                 if (mi >= mp.meshes.len) continue;
                 const box = cookedDoorWorldBox(mp.meshes[mi], inst) orelse continue;
-                if (rect_count >= game_physics.MAX_RECTS) {
+                if (oriented_count >= game_physics.MAX_ORIENTED) {
                     clipped_rows += 1;
                     break :cooked;
                 }
-                const park: f32 = if (box.open) DOOR_OPEN_PARK_METERS else 0;
-                try rects.appendSlice(allocator, &[_]f32{
-                    box.cx - box.half_x + park, // minX
-                    box.cz - box.half_z + park, // minZ
-                    box.cx + box.half_x + park, // maxX
-                    box.cz + box.half_z + park, // maxZ
-                    box.base_y + box.panel_h, // top
-                    if (box.open) 0 else 1, // blocksPlayer
-                    DOOR_PANEL_FRICTION,
-                    DOOR_PANEL_RESTITUTION,
-                    box.base_y, // floor (banded with the door's storey)
-                });
-                rect_count += 1;
+                try oriented.appendSlice(allocator, &cookedDoorOrientedFloats(box));
+                oriented_count += 1;
                 cooked_door_count += 1;
             }
         }
@@ -622,7 +615,7 @@ pub fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Sc
             .car_count = car_count,
             .door_rect_start = door_rect_start,
             .door_count = door_count,
-            .cooked_door_rect_start = cooked_door_rect_start,
+            .cooked_door_oriented_start = cooked_door_oriented_start,
             .cooked_door_count = cooked_door_count,
         };
     }

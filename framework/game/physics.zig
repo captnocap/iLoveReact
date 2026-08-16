@@ -953,8 +953,9 @@ pub fn reachBlockedStepColliders(
     );
 }
 
-/// Door-aware reach query. `skip_rect_index` identifies the candidate door's
-/// own moving panel in the packed RECT section, so that panel cannot hide its
+/// Door-aware reach query. `skip_oriented_index` identifies the candidate
+/// door's own moving panel in the packed ORIENTED section (req_4538: the
+/// swinging leaf rides the oriented lane), so that panel cannot hide its
 /// close/open prompt after swinging away from the closed-position target.
 /// Every other thin wall remains an occluder.
 pub fn reachBlockedStepCollidersExceptRect(
@@ -968,7 +969,7 @@ pub fn reachBlockedStepCollidersExceptRect(
     target_y: f32,
     target_z: f32,
     max_blocker_thickness: f32,
-    skip_rect_index: ?usize,
+    skip_oriented_index: ?usize,
 ) bool {
     const dx = target_x - eye_x;
     const dy = target_y - eye_y;
@@ -981,7 +982,6 @@ pub fn reachBlockedStepCollidersExceptRect(
 
     var r: usize = 0;
     while (r < rect_count) : (r += 1) {
-        if (skip_rect_index != null and r == skip_rect_index.?) continue;
         const at = rect_base + r * RECT_FLOATS;
         if (step_input[at + 5] <= 0.5) continue; // solid only
         const min_x = step_input[at];
@@ -998,6 +998,7 @@ pub fn reachBlockedStepCollidersExceptRect(
 
     var o: usize = 0;
     while (o < oriented_count) : (o += 1) {
+        if (skip_oriented_index != null and o == skip_oriented_index.?) continue;
         const at = oriented_base + o * ORIENTED_FLOATS;
         if (step_input[at + 5] <= 0.5) continue;
         const min_u = step_input[at];

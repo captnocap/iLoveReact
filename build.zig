@@ -1373,6 +1373,24 @@ pub fn build(b: *std.Build) void {
     const spring_arm_test_step = b.step("test-world-loader-spring-arm", "Run the spring-arm camera vs placed-prop collision tests");
     spring_arm_test_step.dependOn(&run_spring_arm_test.step);
 
+    // ── Cooked-door swing collider tests ───────────────────────────
+    // req_4538: the swinging leaf rides the ORIENTED collider lane — its old
+    // world-AABB inflated over the doorway at a diagonal yaw and bricked a
+    // visually open door. Same root pattern as the spring-arm suite.
+    const cooked_door_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader_doors_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const cooked_door_test = b.addTest(.{
+        .name = "world-loader-doors-test",
+        .root_module = cooked_door_test_mod,
+    });
+    const run_cooked_door_test = b.addRunArtifact(cooked_door_test);
+    const cooked_door_test_step = b.step("test-world-loader-doors", "Run the cooked-door swing collider tests");
+    cooked_door_test_step.dependOn(&run_cooked_door_test.step);
+
     // ── Animation Foundry 3D trajectory tests ─────────────────────
     // The cart publishes semantic points/markers/chevrons once per document
     // revision; WorldLoader owns fail-closed decode and static tessellation.

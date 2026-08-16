@@ -1162,20 +1162,100 @@ test "reach gate: a thin box CONTAINING the target (the aimed door panel) is ski
 test "reach gate: an explicitly identified swung door leaf cannot make its prompt one-sided" {
     // Closed-position prompt target is x=0. Once the panel swings toward +X it
     // crosses only the +X player's sightline; containment can no longer identify
-    // it as the candidate. Explicit rect identity keeps both approaches valid.
-    const swung_leaf = [physics.RECT_FLOATS]f32{ 0.55, -0.1, 0.75, 0.1, 2.2, 1, 0.5, 0, 0 };
-    const buf = (Sim{ .rects = &.{swung_leaf} }).pack(&g_buf);
-    try testing.expect(!physics.reachBlockedStepColliders(buf, 1, 0, -2, 1.4, 0, 0, 1.1, 0, 0.5));
-    try testing.expect(physics.reachBlockedStepColliders(buf, 1, 0, 2, 1.4, 0, 0, 1.1, 0, 0.5));
-    try testing.expect(!physics.reachBlockedStepCollidersExceptRect(buf, 1, 0, -2, 1.4, 0, 0, 1.1, 0, 0.5, 0));
-    try testing.expect(!physics.reachBlockedStepCollidersExceptRect(buf, 1, 0, 2, 1.4, 0, 0, 1.1, 0, 0.5, 0));
+    // it as the candidate. Explicit identity keeps both approaches valid — the
+    // leaf rides the ORIENTED lane (req_4538), so the skip names an oriented slot.
+    const swung_leaf = [physics.ORIENTED_FLOATS]f32{ 0.55, -0.1, 0.75, 0.1, 2.2, 1, 0.5, 0, 0, 0.65, 0, 0 };
+    const buf = (Sim{ .oriented = &.{swung_leaf} }).pack(&g_buf);
+    try testing.expect(!physics.reachBlockedStepColliders(buf, 0, 1, -2, 1.4, 0, 0, 1.1, 0, 0.5));
+    try testing.expect(physics.reachBlockedStepColliders(buf, 0, 1, 2, 1.4, 0, 0, 1.1, 0, 0.5));
+    try testing.expect(!physics.reachBlockedStepCollidersExceptRect(buf, 0, 1, -2, 1.4, 0, 0, 1.1, 0, 0.5, 0));
+    try testing.expect(!physics.reachBlockedStepCollidersExceptRect(buf, 0, 1, 2, 1.4, 0, 0, 1.1, 0, 0.5, 0));
 }
 
 test "reach gate: skipping the candidate leaf still respects another wall" {
     const wall = [physics.RECT_FLOATS]f32{ 0.9, -1, 1.1, 1, 3, 1, 0.5, 0, 0 };
-    const leaf = [physics.RECT_FLOATS]f32{ 1.4, -0.1, 1.6, 0.1, 2.2, 1, 0.5, 0, 0 };
-    const buf = (Sim{ .rects = &.{ wall, leaf } }).pack(&g_buf);
-    try testing.expect(physics.reachBlockedStepCollidersExceptRect(buf, 2, 0, 0, 1.4, 0, 2, 1.1, 0, 0.5, 1));
+    const leaf = [physics.ORIENTED_FLOATS]f32{ 1.4, -0.1, 1.6, 0.1, 2.2, 1, 0.5, 0, 0, 1.5, 0, 0 };
+    const buf = (Sim{ .rects = &.{wall}, .oriented = &.{leaf} }).pack(&g_buf);
+    try testing.expect(physics.reachBlockedStepCollidersExceptRect(buf, 1, 1, 0, 1.4, 0, 2, 1.1, 0, 0.5, 0));
+}
+
+// ── the angled-wall doorway (req_4538) ───────────────────────────────
+// A door leaf on a 45° wall, swung fully open (perpendicular to the wall).
+// As an ORIENTED box the portal stays traversable; the old axis-aligned
+// rect of the same swung leaf inflated over the doorway and bricked it.
+// Geometry: portal center at origin, wall along (0.707,−0.707) (yaw 45°),
+// leaf 0.9×0.06×2.1, hinge at the min-X local edge → world (−0.318, 0.318);
+// fully open the leaf's center swings to (−0.636, 0) at total yaw 135°.
+const DIAGONAL_OPEN_LEAF_ORIENTED = [physics.ORIENTED_FLOATS]f32{ -1.086, -0.03, -0.186, 0.03, 2.1, 1, 0.5, 0, 0, -0.636, 0, 2.35619449 };
+// Closed leaf: centered on the portal, yawed with the wall.
+const DIAGONAL_CLOSED_LEAF_ORIENTED = [physics.ORIENTED_FLOATS]f32{ -0.45, -0.03, 0.45, 0.03, 2.1, 1, 0.5, 0, 0, 0, 0, 0.78539816 };
+// The flanking wall runs on both sides of the 1m portal (the engine's own
+// oriented collide-only rows), so the walks below cross a REAL doorway.
+const DIAGONAL_WALL_NEG = [physics.ORIENTED_FLOATS]f32{ -3.5, -0.1, -0.5, 0.1, 3, 1, 0.5, 0, 0, 0, 0, 0.78539816 };
+const DIAGONAL_WALL_POS = [physics.ORIENTED_FLOATS]f32{ 0.5, -0.1, 3.5, 0.1, 3, 1, 0.5, 0, 0, 0, 0, 0.78539816 };
+
+// Walk the player through the portal center along the wall's normal
+// (0.707, 0.707) and report how far past the wall plane they end up.
+fn walkDiagonalDoorway(leaf: [physics.ORIENTED_FLOATS]f32) f32 {
+    var sim = Sim{
+        .dt = 1.0 / 60.0,
+        .px = -1.06,
+        .pz = -1.06,
+        .py = 0,
+        .move_x = 0.7071,
+        .move_z = 0.7071,
+        .speed = 4,
+        .player_radius = 0.34,
+        .player_height = 1.65,
+        .step_height = 0.5,
+        .rects = &.{GROUND},
+        .oriented = &.{ DIAGONAL_WALL_NEG, DIAGONAL_WALL_POS, leaf },
+    };
+    var frame: usize = 0;
+    while (frame < 180) : (frame += 1) {
+        const out = physics.step(sim.pack(&g_buf)).?;
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        sim.pvz = out[6];
+    }
+    return (sim.px + sim.pz) * 0.7071; // signed distance along the walk normal
+}
+
+test "angled doorway: a fully open oriented leaf leaves the portal traversable (req_4538)" {
+    const crossed = walkDiagonalDoorway(DIAGONAL_OPEN_LEAF_ORIENTED);
+    try testing.expect(crossed > 1.0); // walked clean through the doorway
+}
+
+test "angled doorway: a closed oriented leaf still blocks" {
+    const crossed = walkDiagonalDoorway(DIAGONAL_CLOSED_LEAF_ORIENTED);
+    try testing.expect(crossed < 0.0); // stopped at the wall plane
+}
+
+test "angled doorway: the old axis-aligned cover contained the walk line — the pinned regression" {
+    // The pre-req_4538 collider was the swung leaf's world AABB:
+    // (|cos135|·0.45 + |sin135|·0.03 ≈ 0.339) half extents around (−0.636, 0).
+    // Inflated by the player radius it CONTAINS the portal center, so the
+    // straight walk through a visually open diagonal doorway hit a wall.
+    const radius = 0.34;
+    const aabb_min_x = -0.636 - 0.339 - radius;
+    const aabb_max_x = -0.636 + 0.339 + radius;
+    const aabb_min_z = 0.0 - 0.339 - radius;
+    const aabb_max_z = 0.0 + 0.339 + radius;
+    try testing.expect(aabb_min_x <= 0 and 0 <= aabb_max_x and aabb_min_z <= 0 and 0 <= aabb_max_z);
+    // The oriented box sees the same point 0.45m off the leaf face — clear.
+    // Rotate (0,0) into the leaf frame about its pivot (−0.636, 0) at 135°.
+    const cs = @cos(@as(f32, 2.35619449));
+    const sn = @sin(@as(f32, 2.35619449));
+    const dx = 0.0 - (-0.636);
+    const dz = 0.0 - 0.0;
+    const local_x = -0.636 + cs * dx - sn * dz;
+    const local_z = 0.0 + sn * dx + cs * dz;
+    const clear_of_leaf_face = local_z > 0.03 + radius or local_z < -0.03 - radius or
+        local_x > -0.186 + radius or local_x < -1.086 - radius;
+    try testing.expect(clear_of_leaf_face);
 }
 
 // ── stair traversal (req_1453) ───────────────────────────────────────

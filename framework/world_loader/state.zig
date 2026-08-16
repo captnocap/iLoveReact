@@ -170,11 +170,13 @@ pub const PhysicsColliders = struct {
     /// without doors (and on the camera set).
     door_rect_start: usize = 0,
     door_count: usize = 0,
-    /// LIVE cooked-door panel rects (req_1864): `cooked_door_count` rects starting
-    /// at rect index `cooked_door_rect_start`, one per cooked-door mesh-prop
-    /// instance in mp.instances order — the E toggle parks/unparks them in place,
-    /// the same machinery as the DOORS-lump doors but sourced from a custom mesh.
-    cooked_door_rect_start: usize = 0,
+    /// LIVE cooked-door leaf colliders (req_1864): `cooked_door_count` ORIENTED
+    /// boxes starting at oriented index `cooked_door_oriented_start`, one per
+    /// cooked-door mesh-prop instance in mp.instances order — stepCookedDoors
+    /// rewrites each in place at its swing pose per frame (req_4538: oriented,
+    /// never a rect, so a diagonal doorway's open leaf doesn't AABB over the
+    /// portal). Sourced from a custom mesh, unlike the DOORS-lump rects.
+    cooked_door_oriented_start: usize = 0,
     cooked_door_count: usize = 0,
 
     pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
@@ -184,6 +186,12 @@ pub const PhysicsColliders = struct {
     /// First float index of the rect section.
     pub fn rectBase(self: *const PhysicsColliders) usize {
         return game_physics.INPUT_HEADER_FLOATS + self.entity_capacity * game_physics.ENTITY_FLOATS;
+    }
+
+    /// First float index of the oriented section — moves whenever live folds
+    /// change rect_count, so per-frame writers must recompute it every call.
+    pub fn orientedBase(self: *const PhysicsColliders) usize {
+        return self.rectBase() + self.rect_count * game_physics.RECT_FLOATS;
     }
 };
 
@@ -217,7 +225,7 @@ pub const DoorState = struct {
 };
 
 /// One cooked door's live two-state machine (req_1864) — the toggleable leaf is
-/// a mesh-prop slot NODE (the user's custom art) plus a parked-when-open rect.
+/// a mesh-prop slot NODE (the user's custom art) plus an oriented swing collider.
 /// Sourced from MeshPropDoor (MESH_PROPS v6), not the DOORS lump; runs the same
 /// E-toggle as a built-in door but drops a mesh node instead of a box.
 pub const CookedDoor = struct {
@@ -234,8 +242,11 @@ pub const CookedDoor = struct {
     node_x: f32 = 0,
     node_z: f32 = 0,
     yaw_degrees: f32 = 0,
-    /// rect index in physics_colliders (parked out of the world when open)
-    rect_index: usize = 0,
+    /// index into the ORIENTED section of physics_colliders (req_4538: the
+    /// leaf collides as an oriented box — a world AABB of a diagonal leaf
+    /// covers the whole open portal, so an angled doorway bricked while
+    /// visually open)
+    oriented_index: usize = 0,
     /// SWING (req_1908): the leaf rotates about this WORLD hinge line (one vertical
     /// edge of the leaf) by `progress * arc`. progress 0=closed .. 1=open, animated
     /// over COOKED_DOOR_OPEN_SECONDS so the door visibly swings instead of teleporting.
@@ -250,8 +261,8 @@ pub const CookedDoor = struct {
     half_x: f32,
     half_z: f32,
     /// LOCAL leaf half extents (req_1960) — the leaf's own half-width (X) + half-depth
-    /// (Z) before any rotation, so stepCookedDoors recomputes the SWUNG world AABB each
-    /// frame and the moving rect shoves the player (a real physical door).
+    /// (Z) before any rotation, so stepCookedDoors recomputes the SWUNG oriented box
+    /// each frame and the moving collider shoves the player (a real physical door).
     half_w_local: f32 = 0,
     half_d_local: f32 = 0,
     reach: f32,
@@ -275,7 +286,7 @@ pub const LIVE_TEXTURED_ALPHA_ROUTE_ALPHA: f32 = 0.998;
 pub const LIVE_DOOR_FLAT_GLASS_ALPHA: f32 = 87.0 / 255.0;
 
 /// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's
-/// local bounds, yawed + offset by the placed instance. Shared by the rect
+/// local bounds, yawed + offset by the placed instance. Shared by the collider
 /// builder and the reach scan so collision and interaction agree. null when the
 /// mesh carries no door or the leaf slot is empty/out of range.
 pub fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshPropInstance) ?CookedDoor {
@@ -334,10 +345,14 @@ pub fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.Mesh
     };
 }
 
-/// Physics rect for a cooked door at its current swing progress. Shared by the
-/// editor-live generation builder and the per-frame baked/live door step so the
-/// panel cannot spawn closed for one physics frame after a state-preserving rebuild.
-pub fn cookedDoorRectFloats(cd: CookedDoor) [game_physics.RECT_FLOATS]f32 {
+/// Physics collider for a cooked door at its current swing progress. Shared by
+/// the editor-live generation builder and the per-frame baked/live door step so
+/// the panel cannot spawn closed for one physics frame after a state-preserving
+/// rebuild. ORIENTED, not a rect (req_4538): the swung leaf is a rigid box at
+/// yaw `inst_yaw + theta` — its axis-aligned cover at a diagonal yaw inflates
+/// over the whole doorway and blocks a visually open portal. Pivot is the
+/// swung panel center; the local frame carries the leaf's own half extents.
+pub fn cookedDoorOrientedFloats(cd: CookedDoor) [game_physics.ORIENTED_FLOATS]f32 {
     const theta = cd.progress * COOKED_DOOR_SWING_ARC_DEGREES * std.math.pi / 180.0;
     const ct = @cos(theta);
     const st = @sin(theta);
@@ -346,20 +361,19 @@ pub fn cookedDoorRectFloats(cd: CookedDoor) [game_physics.RECT_FLOATS]f32 {
     const scx = cd.hinge_x + (ddx * ct + ddz * st);
     const scz = cd.hinge_z + (-ddx * st + ddz * ct);
     const total = cd.yaw_degrees * std.math.pi / 180.0 + theta;
-    const tc = @abs(@cos(total));
-    const ts = @abs(@sin(total));
-    const hxw = tc * cd.half_w_local + ts * cd.half_d_local;
-    const hzw = ts * cd.half_w_local + tc * cd.half_d_local;
     return .{
-        scx - hxw,
-        scz - hzw,
-        scx + hxw,
-        scz + hzw,
+        scx - cd.half_w_local,
+        scz - cd.half_d_local,
+        scx + cd.half_w_local,
+        scz + cd.half_d_local,
         cd.base_y + cd.panel_h,
         1,
         DOOR_PANEL_FRICTION,
         DOOR_PANEL_RESTITUTION,
         cd.base_y,
+        scx,
+        scz,
+        total,
     };
 }
 

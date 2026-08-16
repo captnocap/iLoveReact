@@ -22,7 +22,7 @@ const MAX_EMBEDDED_LOADERS = config.MAX_EMBEDDED_LOADERS;
 const Vec3 = loader_state.Vec3;
 const CookedDoor = loader_state.CookedDoor;
 const cookedDoorWorldBox = loader_state.cookedDoorWorldBox;
-const cookedDoorRectFloats = loader_state.cookedDoorRectFloats;
+const cookedDoorOrientedFloats = loader_state.cookedDoorOrientedFloats;
 const solidVertexCount = loader_state.solidVertexCount;
 const instanceYawRadians = instances.instanceYawRadians;
 const rectFloats = instances.rectFloats;
@@ -875,9 +875,11 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
             // Resident Door Wall metadata uses the SAME cookedDoorWorldBox +
             // swing machine as baked MESH_PROPS instances. Its static islands
             // already exclude the leaf (solidVertexCount); add that leaf as one
-            // live rect and carry its transient state across generation rebuilds.
+            // live ORIENTED box (req_4538 — an axis-aligned rect of a diagonal
+            // leaf covers the open portal) and carry its transient state across
+            // generation rebuilds.
             if (cookedDoorWorldBox(mesh, inst)) |initial_box| {
-                if (runtime.base_rect_count + live_rect_count >= game_physics.MAX_RECTS) {
+                if (runtime.base_oriented_count + live_oriented_count >= game_physics.MAX_ORIENTED) {
                     clipped += 1;
                     continue;
                 }
@@ -886,23 +888,23 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
                 var box = initial_box;
                 box.open = carried.open;
                 box.progress = carried.progress;
-                box.rect_index = runtime.base_rect_count + live_rect_count;
-                live_rects.appendSlice(alloc, &cookedDoorRectFloats(box)) catch {
+                box.oriented_index = runtime.base_oriented_count + live_oriented_count;
+                live_oriented.appendSlice(alloc, &cookedDoorOrientedFloats(box)) catch {
                     clipped += 1;
                     continue;
                 };
                 next_live_doors.append(alloc, box) catch {
-                    live_rects.shrinkRetainingCapacity(live_rects.items.len - game_physics.RECT_FLOATS);
+                    live_oriented.shrinkRetainingCapacity(live_oriented.items.len - game_physics.ORIENTED_FLOATS);
                     clipped += 1;
                     continue;
                 };
                 next_live_door_states.append(alloc, carried) catch {
                     _ = next_live_doors.pop();
-                    live_rects.shrinkRetainingCapacity(live_rects.items.len - game_physics.RECT_FLOATS);
+                    live_oriented.shrinkRetainingCapacity(live_oriented.items.len - game_physics.ORIENTED_FLOATS);
                     clipped += 1;
                     continue;
                 };
-                live_rect_count += 1;
+                live_oriented_count += 1;
             }
         }
     }

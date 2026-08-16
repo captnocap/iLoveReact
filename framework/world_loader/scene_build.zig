@@ -197,9 +197,10 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
         if (doors.records.len > 0) log.print("[loader] door layer: {d} door(s) but no live rects (collider cap / no baked colliders)\n", .{doors.records.len});
     }
     // Cooked doors (req_1864): one live two-state machine per cooked-door
-    // mesh-prop instance that got a rect, in the SAME mp.instances order the
-    // rect builder used, so rect_index = cooked_door_rect_start + i. node_child
-    // is filled later, when the mesh-prop node pass emits the leaf slot node.
+    // mesh-prop instance that got a collider, in the SAME mp.instances order
+    // the builder used, so oriented_index = cooked_door_oriented_start + i.
+    // node_child is filled later, when the mesh-prop node pass emits the leaf
+    // slot node.
     if (self.physics_colliders.cooked_door_count > 0) {
         if (self.scene.mesh_props) |mp| {
             self.cooked_doors = try self.allocator.alloc(CookedDoor, self.physics_colliders.cooked_door_count);
@@ -210,7 +211,7 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
                 if (mi >= mp.meshes.len) continue;
                 const box = cookedDoorWorldBox(mp.meshes[mi], inst) orelse continue;
                 self.cooked_doors[ci] = box;
-                self.cooked_doors[ci].rect_index = self.physics_colliders.cooked_door_rect_start + ci;
+                self.cooked_doors[ci].oriented_index = self.physics_colliders.cooked_door_oriented_start + ci;
                 ci += 1;
             }
             log.print("[loader] cooked-door layer: {d} live custom door(s)\n", .{self.cooked_doors.len});
@@ -476,10 +477,27 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
         try self.kid_list.append(self.allocator, .{});
     }
 
-    // The bind specimen is ordinary stride-8 geometry and therefore lives
-    // after all eight palette-backed player/NPC slots without consuming a
-    // ninth skin palette. It remains before every streaming/live tail.
+    // Character tools own one stable static companion slot. Animation Foundry
+    // installs its neutral ground here at the explicit preview-stage mount;
+    // capture reuses the same immutable grid. It remains after all palette-
+    // backed player/NPC slots and before every streaming/live tail. The
+    // historical field name is retained while capture bounds still live in
+    // `player_bind_specimen`.
     self.player_bind_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+
+    // The Animation Foundry root path is retained native geometry: four
+    // static instance families plus one native-clock playhead marker. Reserve
+    // all slots before the streaming/live tail so their indices never move.
+    self.animation_trajectory_path_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+    self.animation_trajectory_cut_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+    self.animation_trajectory_blend_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+    self.animation_trajectory_chevron_child = self.kid_list.items.len;
+    try self.kid_list.append(self.allocator, .{});
+    self.animation_trajectory_playhead_child = self.kid_list.items.len;
     try self.kid_list.append(self.allocator, .{});
 
     if (self.scene.player_character) |*character| {
@@ -1398,7 +1416,14 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
     if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
     if (self.scene.player_character) |*resident_character| {
         const facing_yaw = resident_character.facing_yaw_offset_degrees;
-        if (self.player_bind_specimen) |*bind| {
+        if (self.player_target_active_owner.value() != null) {
+            m_animation.placeSinglePlayerCharacter(
+                self.kid_list.items,
+                self.player_first_child,
+                m_animation.characterDiagnosticAnchor(),
+                facing_yaw,
+            );
+        } else if (self.player_bind_specimen) |*bind| {
             m_animation.placePlayerCharacterSpecimens(
                 self.kid_list.items,
                 self.player_first_child,

@@ -3,14 +3,17 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
-const gpu = @import("../gpu/gpu.zig");
+const build_options = @import("build_options");
+const gpu = if (build_options.dev_native_modules and build_options.dev_game_module)
+    @import("../dev_modules/gpu_api.zig")
+else
+    @import("../gpu/gpu.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const game_physics = @import("../game/physics.zig");
 const log = std.debug;
 const m_config = @import("config.zig");
 const m_state = @import("state.zig");
-const m_animation = @import("animation.zig");
 const runtime_dynamics = @import("runtime_dynamics.zig");
 
 const SCAN_E = m_config.SCAN_E;
@@ -31,12 +34,11 @@ const elevatorStopIndex = m_state.elevatorStopIndex;
 const CookedDoor = m_state.CookedDoor;
 const clamp = m_state.clamp;
 const keyDown = m_state.keyDown;
-const updatePlayerModelNodes = m_animation.updatePlayerModelNodes;
 const toggleCookedDoor = runtime_dynamics.toggleCookedDoor;
 const toggleDoor = runtime_dynamics.toggleDoor;
 const toggleLiveCookedDoor = runtime_dynamics.toggleLiveCookedDoor;
 
-pub fn interactReachBlockedExceptRect(self: anytype, target_x: f32, target_y: f32, target_z: f32, skip_rect_index: ?usize) bool {
+pub fn interactReachBlockedExceptRect(self: anytype, target_x: f32, target_y: f32, target_z: f32, skip_oriented_index: ?usize) bool {
     if (!self.has_physics_colliders) return false;
     const colliders = &self.physics_colliders;
     if (colliders.rect_count == 0 and colliders.oriented_count == 0) return false;
@@ -51,7 +53,7 @@ pub fn interactReachBlockedExceptRect(self: anytype, target_x: f32, target_y: f3
         target_y,
         target_z,
         INTERACT_BLOCKER_MAX_THICKNESS_METERS,
-        skip_rect_index,
+        skip_oriented_index,
     );
 }
 
@@ -60,7 +62,7 @@ pub fn interactReachBlocked(self: anytype, target_x: f32, target_y: f32, target_
 }
 
 pub fn cookedDoorReachBlocked(self: anytype, cd: CookedDoor) bool {
-    return interactReachBlockedExceptRect(self, cd.cx, cd.base_y + cd.panel_h / 2, cd.cz, cd.rect_index);
+    return interactReachBlockedExceptRect(self, cd.cx, cd.base_y + cd.panel_h / 2, cd.cz, cd.oriented_index);
 }
 
 /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest
@@ -311,8 +313,8 @@ pub fn stepInteract(self: anytype, dt: f32) void {
     if (!arch.has_seat) return;
     // seat: pin the player to the prop (/test adoptPose parity: position =
     // the prop anchor, velocity zeroed, facing = the prop's yaw); stepNow's
-    // stand-up edge owns the exit. The render path adds 180° to player.yaw
-    // (updatePlayerModelNodes model_yaw_degrees), so bake the prop's yaw
+    // stand-up edge owns the exit. Saved-character scene placement adds 180° to
+    // player.yaw, so bake the prop's yaw
     // MINUS 180 into the state — the figure then faces the prop's own way
     // instead of sitting backwards (USER report 2026-06-11).
     self.player.x = inst.x;
