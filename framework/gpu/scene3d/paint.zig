@@ -58,8 +58,15 @@ const z3d = @import("root.zig");
 // The door renders a shader recipe to pixels (material_tex.bakePixels) and hands them
 // here; while set, every dab/fill SAMPLES the material instead of a flat colour.
 pub fn setPaintMaterial(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
-    if (!z3d.residentMutationAllowed(.paint_session)) return false;
-    return model_paint.setMaterialInk(rgba, w, h, scale);
+    if (!z3d.residentMutationAllowed(.paint_session)) {
+        log.print("[material-ink] install refused: a historical preview holds the resident session — close the version viewer to dip a shader ink\n", .{});
+        return false;
+    }
+    if (!model_paint.setMaterialInk(rgba, w, h, scale)) {
+        log.print("[material-ink] install refused: bad baked-pixel shape ({d}B for {d}x{d})\n", .{ rgba.len, w, h });
+        return false;
+    }
+    return true;
 }
 pub fn clearPaintMaterial() void {
     if (!z3d.residentMutationAllowed(.paint_session)) return;

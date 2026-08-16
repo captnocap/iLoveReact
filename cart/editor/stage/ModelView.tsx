@@ -72,7 +72,7 @@ import {
 } from '@reactjit/runtime/paint';
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
-import { shaderSpec, defaultShaderData } from '../textures/shaders';
+import { shaderSpec, defaultShaderData, shaderGroups } from '../textures/shaders';
 // Curve interpretations for the pen tools (req_4324): clicks become control points,
 // the mode (SMOOTH / ARC / HANG) says how they connect via data/curves.ts.
 import { PEN_CURVE_MODES } from './penCurveModes';
@@ -4610,6 +4610,28 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const axis = axisName === 'y' ? 1 : axisName === 'z' ? 2 : 0;
       host.__mesh_gizmo_nudge?.(axis, Number(amountText) || 0);
       setSelInfo(readSelInfo() ?? { mode: 3, verts: 0, edges: 0, sel: 1 });
+    }
+    // RJIT_INKBAKE=<spec-id|all> dips shader ink(s) through the exact brush-bake door
+    // call and reports each stage — the headless repro for 'Shader ink failed to bake'
+    // (req_4612). 'all' sweeps the full catalog and summarizes; failures always print.
+    const inkbake = callHost<string | null>('__env_get', null, 'RJIT_INKBAKE');
+    if (inkbake) {
+      const probeSpecs = inkbake === 'all'
+        ? shaderGroups().flatMap((g) => g.specs)
+        : [shaderSpec(inkbake)].filter((s): s is NonNullable<typeof s> => Boolean(s));
+      if (probeSpecs.length === 0) console.error(`[inkbake] no spec matches '${inkbake}'`);
+      let bakeOk = 0;
+      let bakeFail = 0;
+      for (const spec of probeSpecs) {
+        const data = defaultShaderData(spec);
+        const key = `paint:${spec.id}:${data.map((n) => Math.round(n * 1000)).join(',')}`;
+        const bytes = new Uint8Array(new Float32Array(data).buffer);
+        const ok = host.__model_paint_material?.(key, spec.shader, bytes, 256, 1) === 1;
+        if (ok) bakeOk += 1; else bakeFail += 1;
+        if (!ok || probeSpecs.length <= 4) console.error(`[inkbake] ${ok ? 'OK  ' : 'FAIL'} ${spec.id} (${spec.label}) wgsl=${spec.shader.length}B data=${data.length}f`);
+      }
+      console.error(`[inkbake] done: ${bakeOk} baked, ${bakeFail} failed of ${probeSpecs.length}`);
+      host.__model_paint_material_clear?.();
     }
     // RJIT_MESHMODE=1|2|3 enters vertex/edge/face mode at boot — the headless proof that
     // the vertex dots / edge highlights / overlay draw (vertex mode shows every vert).

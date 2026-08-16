@@ -19,7 +19,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
-const gpu_core = @import("gpu.zig");
+// Shape-aware GPU access (req_4612): effects is compiled into BOTH the core and —
+// via v8_bindings' material bake chain — the scene3d dev module. A direct
+// `gpu.zig` import in the module links a dead second copy whose device is null,
+// so every shader-ink bake failed under `rjit dev` while the shipped binary was
+// fine (the req_4040 dead-copy trap). gpu_api forwards to gpu.zig in core/ship
+// builds and crosses the CoreApi ABI in module builds — the same device either way.
+const gpu_core = @import("../dev_modules/gpu_api.zig");
 const images = @import("images.zig");
 const log = @import("../diag/log.zig");
 const layout = @import("../layout.zig");
@@ -757,7 +763,10 @@ fn getOrCreatePipeline(io: std.Io, environ: *const std.process.Environ.Map, devi
         .label = "effect_gpu_shader",
         .code = wgsl,
     });
-    const shader_module = device.createShaderModule(&module_desc) orelse return null;
+    const shader_module = device.createShaderModule(&module_desc) orelse {
+        log.print("[effect-pipeline] createShaderModule returned null — the WGSL failed to parse/validate ({d}B); wgpu prints the compile error to stderr\n", .{wgsl.len});
+        return null;
+    };
     defer shader_module.release();
 
     const pipeline_layout = device.createPipelineLayout(&.{
@@ -790,7 +799,10 @@ fn getOrCreatePipeline(io: std.Io, environ: *const std.process.Environ.Map, devi
         .primitive = .{ .topology = .triangle_list },
         .multisample = .{},
         .fragment = &fragment_state,
-    }) orelse return null;
+    }) orelse {
+        log.print("[effect-pipeline] createRenderPipeline returned null (module compiled; layout/entry-point mismatch, wgsl {d}B)\n", .{wgsl.len});
+        return null;
+    };
 
     progress.finishOk();
 
@@ -1432,13 +1444,22 @@ fn ensureMaterialInstance(key_hash: u64) ?*Instance {
 /// shader→texture primitive (gpu/material_tex.zig) wraps this with the surface
 /// install so 3D faces sample it via scene3d_tex_key.
 pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map, key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?*wgpu.TextureView {
-    const inst = ensureMaterialInstance(key_hash) orelse return null;
+    // Every refusal below NAMES ITSELF (req_4612): this door used to return null
+    // through five different branches with zero output, so "Host log has details"
+    // was a lie for the one path users hit most (the brush's shader-ink dip).
+    const inst = ensureMaterialInstance(key_hash) orelse {
+        log.print("[effect-material] bake refused: instance table FULL ({d}/{d}) — material instances live until cart teardown, and every distinct (shader, params) mints one\n", .{ instance_count, MAX_INSTANCES });
+        return null;
+    };
     // The shipped recipe is the fragment body; assemble it with the SAME fixed
     // header + math prelude the V8 host injects (U/VsOut/vs_main/fbm/…), so the
     // material shader compiles identically here. Freed after the pipeline
     // compiles it (createShaderModule copies the source; renderGpu draws from the
     // cached pipeline, not shader_desc).
-    const full = effect_assemble.assemble(page_alloc, wgsl) orelse return null;
+    const full = effect_assemble.assemble(page_alloc, wgsl) orelse {
+        log.print("[effect-material] bake refused: shader assembly allocation failed (recipe {d}B)\n", .{wgsl.len});
+        return null;
+    };
     defer page_alloc.free(full);
     inst.active = true;
     inst.backend = .gpu;
@@ -1446,9 +1467,16 @@ pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map
     inst.shader_desc = .{ .wgsl = full };
     inst.gpu_data_pending = data;
     inst.setDisplaySize(@floatFromInt(size), @floatFromInt(size));
-    const ok = ensureGpuSize(inst, size, size) and ensureGpuPipeline(io, environ, inst) and renderGpu(inst);
+    const size_ok = ensureGpuSize(inst, size, size);
+    const pipe_ok = size_ok and ensureGpuPipeline(io, environ, inst);
+    const render_ok = pipe_ok and renderGpu(inst);
     inst.shader_desc = null; // `full` is freed on return; the pipeline is already built
-    if (!ok) return null;
+    if (!(size_ok and pipe_ok and render_ok)) {
+        log.print("[effect-material] bake FAILED key={x}: size_ok={} pipe_ok={} render_ok={} (assembled {d}B at {d}x{d}, data {d} floats) — pipe_ok=false usually means the WGSL failed to compile; wgpu prints the error above\n", .{
+            key_hash, size_ok, pipe_ok, render_ok, full.len, size, size, if (data) |d| d.len else 0,
+        });
+        return null;
+    }
     return inst.texture_view;
 }
 
@@ -1461,9 +1489,15 @@ pub fn renderShaderToTexture(io: std.Io, environ: *const std.process.Environ.Map
 pub fn renderShaderToPixels(io: std.Io, environ: *const std.process.Environ.Map, key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
     if (renderShaderToTexture(io, environ, key_hash, wgsl, data, size) == null) return null;
     const inst = ensureMaterialInstance(key_hash) orelse return null;
-    const tex = inst.texture orelse return null;
+    const tex = inst.texture orelse {
+        log.print("[effect-material] readback refused: instance rendered but holds no texture\n", .{});
+        return null;
+    };
     // Effect targets are created rgba8_unorm (ensureTarget) — no BGRA swizzle.
-    return gpu_core.readbackTexture(tex, inst.width, inst.height, false);
+    return gpu_core.readbackTexture(tex, inst.width, inst.height, false) orelse {
+        log.print("[effect-material] pixel readback FAILED ({d}x{d}) — GPU map/copy path refused\n", .{ inst.width, inst.height });
+        return null;
+    };
 }
 
 fn findInstanceByName(effect_name: []const u8) ?*Instance {
