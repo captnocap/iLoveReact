@@ -34,7 +34,17 @@ import {
   type MeshSemanticTable,
 } from '../model/meshSemantics';
 
-export type { MeshEdgeRegion, MeshRangeObject, MeshSemanticRegion, MeshSemanticTable } from '../model/meshSemantics';
+export type {
+  ContactFrame,
+  ContactRigTable,
+  InteractionProfile,
+  InteractionProfileTable,
+  LocalContactFrame,
+  MeshEdgeRegion,
+  MeshRangeObject,
+  MeshSemanticRegion,
+  MeshSemanticTable,
+} from '../model/meshSemantics';
 
 const host = globalThis as any;
 
@@ -50,7 +60,9 @@ export type PackageMeshDoc = {
   /** Durable semantic region and repeated-instance id per triangle (RJMD v4). */
   semanticRegions?: Uint32Array | null;
   semanticInstances?: Uint32Array | null;
-  /** Versioned dictionary that turns numeric membership into names and provenance. */
+  /** Versioned dictionary that turns numeric membership into names and provenance.
+   *  Contact rigs and interaction profiles live additively in this same canonical
+   *  RJMD table; they never acquire a sidecar or host-only shadow copy. */
   semanticTable?: MeshSemanticTable | null;
   /** Stable object ID for each persisted range in range order (RJMD v5 only). */
   rangeObjectIds?: string[] | null;
@@ -374,8 +386,16 @@ export function writeMeshDoc(
     // The expected count crosses as a scalar only. The host re-validates it at the
     // write boundary and atomically renames a complete fsynced RJMD over doc.blob;
     // resident geometry never crosses the JS bridge.
-    if (host.__model_meshdoc_write?.(docPath, parts.length, JSON.stringify(objectIds)) !== 1) {
-      return refuseMeshDocSave(dir, 'native RJMD writer rejected the resident document');
+    if (typeof host.__model_meshdoc_write !== 'function') {
+      return refuseMeshDocSave(dir, 'the __model_meshdoc_write host door is not registered in this build');
+    }
+    if (host.__model_meshdoc_write(docPath, parts.length, JSON.stringify(objectIds)) !== 1) {
+      // Refusals are data (req_4114): the host records exactly which invariant it
+      // refused on, so the save error names it instead of a blanket rejection.
+      const hostReason = host.__model_meshdoc_refusal?.();
+      return refuseMeshDocSave(dir, typeof hostReason === 'string' && hostReason
+        ? `native RJMD writer rejected the resident document: ${hostReason}`
+        : 'native RJMD writer rejected the resident document');
     }
     invalidateMeshDoc(dir);
     const writtenDoc = parseDocBlob(dir);

@@ -3446,6 +3446,26 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, 1);
 }
 
+/// Why the last __model_meshdoc_write returned 0. Same law as __mesh_topo_refusal
+/// (req_4114): a refusal the caller cannot read is a guess with a confident face on
+/// it — the editor spent a whole session spamming "native RJMD writer rejected the
+/// resident document" with six unrelated invariants hiding behind it (req_4539).
+var g_meshdoc_write_refusal_buf: [512]u8 = undefined;
+var g_meshdoc_write_refusal: []const u8 = "";
+
+fn meshdocWriteRefuse(info: v8.FunctionCallbackInfo, comptime fmt: []const u8, args: anytype) void {
+    g_meshdoc_write_refusal = std.fmt.bufPrint(&g_meshdoc_write_refusal_buf, fmt, args) catch fmt;
+    std.log.err("[meshdoc] refused write: {s}", .{g_meshdoc_write_refusal});
+    setReturnNumber(info, 0);
+}
+
+/// __model_meshdoc_refusal() → the exact reason the last write door returned 0
+/// ("" when the last write succeeded or none ran yet).
+fn hostModelMeshdocRefusal(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnString(info, g_meshdoc_write_refusal);
+}
+
 /// __model_meshdoc_write(path, expectedRangeCount?, rangeObjectIdsJson?) → 1 on success.
 /// Persist the full resident model document through the canonical current-v5 RJMD
 /// encoder. The host owns only the atomic temp/fsync/rename transaction; section
@@ -3454,27 +3474,29 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const io = v8_runtime.hostContext(info.getIsolate()).io;
     const alloc = std.heap.c_allocator;
-    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    g_meshdoc_write_refusal = "";
+    meshdoc_format.g_encode_refusal = "";
+    const path = argToStringAlloc(info, 0) orelse return meshdocWriteRefuse(info, "target path argument missing", .{});
     defer alloc.free(path);
-    var document = scene3d.modelDocumentSnapshot(alloc) orelse return setReturnNumber(info, 0);
+    var document = scene3d.modelDocumentSnapshot(alloc) orelse
+        return meshdocWriteRefuse(info, "no composable resident document (snapshot composition failed)", .{});
     defer document.deinit(alloc);
     const ranges = model_source.partRanges();
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
-    if (!meshdoc_format.rangesValid(ranges, range_count)) return setReturnNumber(info, 0);
+    if (!meshdoc_format.rangesValid(ranges, range_count))
+        return meshdocWriteRefuse(info, "resident part range table is absent or malformed ({d} range(s))", .{range_count});
     if (!meshdoc_format.rangesOwnEveryFace(ranges, document.groups, range_count)) {
-        std.log.err("[meshdoc] refused write: at least one Outliner range has no resident visible/hidden faces, or a face has no range owner", .{});
-        return setReturnNumber(info, 0);
+        return meshdocWriteRefuse(info, "at least one Outliner range has no resident visible/hidden faces, or a face has no range owner", .{});
     }
     if (document.render_corner_logical_ids == null) {
         const maybe_promotion = mesh_edit.legacyEdgeTopologyPromotionAlloc(
             alloc,
             document.verts,
             document.groups,
-            ranges orelse return setReturnNumber(info, 0),
+            ranges orelse return meshdocWriteRefuse(info, "promotion requires part ranges but none are resident", .{}),
             document.semantic_table_json,
         ) catch |err| {
-            std.log.err("[meshdoc] refused v4 edge-path promotion: {}", .{err});
-            return setReturnNumber(info, 0);
+            return meshdocWriteRefuse(info, "v4 edge-path promotion failed: {s}", .{@errorName(err)});
         };
         if (maybe_promotion) |value| {
             var promotion = value;
@@ -3482,59 +3504,68 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         }
     }
     if (argToI32(info, 1)) |expected| {
-        if (expected < 0 or @as(u32, @intCast(expected)) != range_count) return setReturnNumber(info, 0);
+        if (expected < 0 or @as(u32, @intCast(expected)) != range_count)
+            return meshdocWriteRefuse(info, "caller expects {d} part range(s) but the resident model holds {d}", .{ expected, range_count });
     }
 
     const encoded = encode: {
         if (argToStringAlloc(info, 2)) |range_object_ids_json| {
             defer alloc.free(range_object_ids_json);
             var parsed_ids = std.json.parseFromSlice([]const []const u8, alloc, range_object_ids_json, .{}) catch
-                return setReturnNumber(info, 0);
+                return meshdocWriteRefuse(info, "range object ids argument is not a JSON string array", .{});
             defer parsed_ids.deinit();
             if (parsed_ids.value.len > 0) {
                 break :encode meshdoc_format.encodeCurrentSnapshotWithRangeObjectIdsAlloc(
                     alloc,
                     &document,
-                    ranges orelse return setReturnNumber(info, 0),
+                    ranges orelse return meshdocWriteRefuse(info, "encode requires part ranges but none are resident", .{}),
                     parsed_ids.value,
-                ) catch return setReturnNumber(info, 0);
+                ) catch |err| return meshdocWriteRefuse(info, "encoder rejected the snapshot ({s}): {s}", .{
+                    @errorName(err),
+                    if (meshdoc_format.g_encode_refusal.len > 0) meshdoc_format.g_encode_refusal else "no detail recorded",
+                });
             }
             // Logical character saves have always required exact stable object IDs;
             // retaining that refusal prevents a current bind from becoming anonymous.
-            if (document.render_corner_logical_ids != null) return setReturnNumber(info, 0);
+            if (document.render_corner_logical_ids != null)
+                return meshdocWriteRefuse(info, "logical character document cannot save without stable object ids", .{});
         } else if (document.render_corner_logical_ids != null) {
-            return setReturnNumber(info, 0);
+            return meshdocWriteRefuse(info, "logical character document cannot save without stable object ids", .{});
         }
         break :encode meshdoc_format.encodeCurrentSnapshotAlloc(
             alloc,
             &document,
-            ranges orelse return setReturnNumber(info, 0),
-        ) catch return setReturnNumber(info, 0);
+            ranges orelse return meshdocWriteRefuse(info, "encode requires part ranges but none are resident", .{}),
+        ) catch |err| return meshdocWriteRefuse(info, "encoder rejected the snapshot ({s}): {s}", .{
+            @errorName(err),
+            if (meshdoc_format.g_encode_refusal.len > 0) meshdoc_format.g_encode_refusal else "no detail recorded",
+        });
     };
     defer alloc.free(encoded);
 
     // Never truncate the durable document in place. A complete, fsynced temp file is
     // atomically renamed over it only after the canonical encoder accepts every channel.
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, io).toNanoseconds() }) catch return setReturnNumber(info, 0);
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path, std.Io.Clock.now(.real, io).toNanoseconds() }) catch
+        return meshdocWriteRefuse(info, "temp path exceeds the filesystem path limit", .{});
     const file = std.Io.Dir.cwd().createFile(io, tmp_path, .{
         .truncate = true,
         .permissions = fs_core.replacementPermissions(io, std.Io.Dir.cwd(), path, .default_file),
-    }) catch return setReturnNumber(info, 0);
-    file.writeStreamingAll(io, encoded) catch {
+    }) catch |err| return meshdocWriteRefuse(info, "could not create the temp file beside the document: {s}", .{@errorName(err)});
+    file.writeStreamingAll(io, encoded) catch |err| {
         file.close(io);
         std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
-        return setReturnNumber(info, 0);
+        return meshdocWriteRefuse(info, "could not stream the encoded document to disk: {s}", .{@errorName(err)});
     };
-    file.sync(io) catch {
+    file.sync(io) catch |err| {
         file.close(io);
         std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
-        return setReturnNumber(info, 0);
+        return meshdocWriteRefuse(info, "could not fsync the encoded document: {s}", .{@errorName(err)});
     };
     file.close(io);
-    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, io) catch {
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, io) catch |err| {
         std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
-        return setReturnNumber(info, 0);
+        return meshdocWriteRefuse(info, "could not atomically rename the temp file over the document: {s}", .{@errorName(err)});
     };
     setReturnNumber(info, 1);
 }
@@ -5444,6 +5475,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
         v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);
         v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);
+        v8_runtime.registerHostFn("__model_meshdoc_refusal", hostModelMeshdocRefusal);
         v8_runtime.registerHostFn("__character_rig_session", hostCharacterRigSession);
         v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
         v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
@@ -5712,6 +5744,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
     v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);
     v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);
+    v8_runtime.registerHostFn("__model_meshdoc_refusal", hostModelMeshdocRefusal);
     v8_runtime.registerHostFn("__character_rig_session", hostCharacterRigSession);
     v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);

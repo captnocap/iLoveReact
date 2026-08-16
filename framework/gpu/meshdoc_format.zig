@@ -23,6 +23,63 @@ pub fn rangesValid(pairs: ?[]const u32, expected_count: u32) bool {
 pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
 pub const NO_FACE_MATERIAL: u32 = std.math.maxInt(u32);
 
+/// Canonical count of authored polygon faces in one RJMD document. Durable
+/// range tables are sorted and non-overlapping, so a group id has exactly one
+/// object owner; counting distinct group ids is therefore the same as counting
+/// distinct (object, group) keys without materializing a second identity table.
+/// Anonymous/malformed group rows fall back to triangle identity because they
+/// cannot truthfully claim to be one authored polygon.
+pub fn authoredFaceCount(face_count: usize, optional_groups: ?[]const u32) u64 {
+    const groups = optional_groups orelse return face_count;
+    if (groups.len != face_count) return face_count;
+    var count: u64 = 0;
+    for (groups, 0..) |group, index| {
+        if (group == NO_FACE_GROUP) {
+            count += 1;
+            continue;
+        }
+        var seen = false;
+        for (groups[0..index]) |prior| {
+            if (prior == group) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) count += 1;
+    }
+    return count;
+}
+
+/// One canonical, unambiguous hash for the stable object namespace attached to
+/// an RJMD range table. Each UTF-8 id is length-framed: without the frame,
+/// ["ab", "c"] and ["a", "bc"] would hash to the same byte stream.
+pub fn objectNamespaceDigest(
+    model_id: []const u8,
+    object_ids: []const []const u8,
+    ranges: []const u32,
+) [32]u8 {
+    var hash = std.crypto.hash.sha2.Sha256.init(.{});
+    hash.update(model_id);
+    for (object_ids) |object_id| {
+        var length: [4]u8 = undefined;
+        std.mem.writeInt(u32, &length, @intCast(object_id.len), .little);
+        hash.update(&length);
+        hash.update(object_id);
+    }
+    hash.update(std.mem.sliceAsBytes(ranges));
+    var digest: [32]u8 = undefined;
+    hash.final(&digest);
+    return digest;
+}
+
+pub fn objectNamespaceHashHex(
+    model_id: []const u8,
+    object_ids: []const []const u8,
+    ranges: []const u32,
+) [64]u8 {
+    return std.fmt.bytesToHex(objectNamespaceDigest(model_id, object_ids, ranges), .lower);
+}
+
 /// One resident slice of a model document. The visible mesh is one block and every
 /// host-stashed hidden Outliner part is another. Geometry stays host-resident; this
 /// shape exists only long enough to build the atomic RJMD write snapshot.
@@ -121,6 +178,17 @@ pub const EncodeError = std.mem.Allocator.Error || error{
     InvalidSnapshot,
     SizeOverflow,
 };
+
+/// Why the last encode returned error.InvalidSnapshot, as one static string.
+/// A refused Save used to surface as a bare non-1 from the write door, which
+/// left the editor guessing between six unrelated invariants (req_4539) —
+/// refusals are data, same law as the topology session's `__mesh_topo_refusal`.
+pub var g_encode_refusal: []const u8 = "";
+
+fn refuseEncode(why: []const u8) EncodeError {
+    g_encode_refusal = why;
+    return error.InvalidSnapshot;
+}
 
 pub const RangeObjectMetadataError = std.mem.Allocator.Error || error{
     InvalidRangeObjectMetadata,
@@ -270,12 +338,12 @@ fn encodeSnapshotVersionAlloc(
     ranges: []const u32,
     version: u32,
 ) EncodeError![]u8 {
-    if (version != 4 and version != VERSION_LOGICAL_TOPOLOGY) return error.InvalidSnapshot;
-    if (snapshot.verts.len == 0 or snapshot.verts.len % 24 != 0) return error.InvalidSnapshot;
+    if (version != 4 and version != VERSION_LOGICAL_TOPOLOGY) return refuseEncode("unsupported RJMD version");
+    if (snapshot.verts.len == 0 or snapshot.verts.len % 24 != 0) return refuseEncode("vertex stream is empty or not whole faces (len % 24)");
     const vertex_count = snapshot.verts.len / 8;
     const face_count = vertex_count / 3;
     if (vertex_count > std.math.maxInt(u32) or face_count > std.math.maxInt(u32) or ranges.len % 2 != 0) {
-        return error.InvalidSnapshot;
+        return refuseEncode("vertex/face count overflow or odd range-pair table");
     }
     const groups = snapshot.groups;
     const materials = snapshot.materials;
@@ -283,26 +351,31 @@ fn encodeSnapshotVersionAlloc(
     const semantic_instances = snapshot.semantic_instances;
     const logical_ids = snapshot.render_corner_logical_ids;
     const semantic_json = snapshot.semantic_table_json orelse &.{};
-    if ((groups != null and groups.?.len != face_count) or
-        (materials != null and materials.?.len != face_count) or
-        (semantic_regions == null) != (semantic_instances == null) or
-        (semantic_regions != null and (semantic_regions.?.len != face_count or semantic_instances.?.len != face_count)) or
-        (logical_ids != null and (logical_ids.?.len != vertex_count or snapshot.logical_vertex_count == 0)) or
-        (logical_ids == null and snapshot.logical_vertex_count != 0) or
-        (semantic_regions == null and semantic_json.len != 0))
-    {
-        return error.InvalidSnapshot;
-    }
+    if (groups != null and groups.?.len != face_count)
+        return refuseEncode("face-group table length does not match the face count");
+    if (materials != null and materials.?.len != face_count)
+        return refuseEncode("face-material table length does not match the face count");
+    if ((semantic_regions == null) != (semantic_instances == null))
+        return refuseEncode("semantic regions and instances must be present together");
+    if (semantic_regions != null and (semantic_regions.?.len != face_count or semantic_instances.?.len != face_count))
+        return refuseEncode("semantic row count does not match the face count");
+    if (logical_ids != null and (logical_ids.?.len != vertex_count or snapshot.logical_vertex_count == 0))
+        return refuseEncode("logical corner table length/count does not match the render corners");
+    if (logical_ids == null and snapshot.logical_vertex_count != 0)
+        return refuseEncode("logical vertex count without a logical corner table");
+    if (semantic_regions == null and semantic_json.len != 0)
+        return refuseEncode("semantic table present without semantic membership rows");
     const range_count: u32 = @intCast(ranges.len / 2);
-    if (!rangesValid(ranges, range_count) or !rangesOwnEveryFace(ranges, groups, range_count)) {
-        return error.InvalidSnapshot;
-    }
+    if (!rangesValid(ranges, range_count))
+        return refuseEncode("part range table is unsorted, overlapping, or empty-ranged");
+    if (!rangesOwnEveryFace(ranges, groups, range_count))
+        return refuseEncode("part ranges do not own every face exactly once (or a range owns none)");
     if (logical_ids) |rows| {
         if (!logicalRowsValid(allocator, snapshot.verts, rows, snapshot.logical_vertex_count, true)) {
-            return error.InvalidSnapshot;
+            return refuseEncode("logical corner rows are not a dense, position-consistent weld table");
         }
     }
-    if (version == 4 and logical_ids != null) return error.InvalidSnapshot;
+    if (version == 4 and logical_ids != null) return refuseEncode("v4 envelope cannot carry logical topology");
     const header_bytes: usize = if (version == VERSION_LOGICAL_TOPOLOGY) 48 else 40;
     var total = header_bytes;
     total = std.math.add(usize, total, std.math.mul(usize, snapshot.verts.len, 4) catch return error.SizeOverflow) catch return error.SizeOverflow;
@@ -399,14 +472,18 @@ pub fn encodeCurrentSnapshotAlloc(
     }
 
     if (persisted.semantic_table_json) |semantic_json| {
-        if (semantic_json.len > MAX_SEMANTIC_TABLE_BYTES) return error.InvalidSnapshot;
+        if (semantic_json.len > MAX_SEMANTIC_TABLE_BYTES) return refuseEncode("semantic table exceeds MAX_SEMANTIC_TABLE_BYTES");
+        mesh_edge_semantics.validateContactRigExtensionsJson(allocator, semantic_json) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return refuseEncode("semantic table rejected by the contact-rig extension validator"),
+        };
         const range_object_ids = rangeObjectIdsAlloc(
             allocator,
             semantic_json,
             ranges,
         ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
-            error.InvalidRangeObjectMetadata => return error.InvalidSnapshot,
+            error.InvalidRangeObjectMetadata => return refuseEncode("semantic table's rangeObjects metadata does not match the range table"),
         };
         defer if (range_object_ids) |rows| freeRangeObjectIds(allocator, rows, rows.len);
     }
@@ -431,11 +508,11 @@ pub fn encodeCurrentSnapshotWithRangeObjectIdsAlloc(
     range_object_ids: []const []const u8,
 ) EncodeError![]u8 {
     if (snapshot.verts.len == 0 or snapshot.verts.len % 24 != 0 or range_object_ids.len == 0) {
-        return error.InvalidSnapshot;
+        return refuseEncode("vertex stream is empty/ragged or no range object ids were supplied");
     }
     const face_count = snapshot.verts.len / 24;
     if ((snapshot.semantic_regions == null) != (snapshot.semantic_instances == null)) {
-        return error.InvalidSnapshot;
+        return refuseEncode("semantic regions and instances must be present together");
     }
 
     var persisted = snapshot.*;
@@ -449,7 +526,7 @@ pub fn encodeCurrentSnapshotWithRangeObjectIdsAlloc(
     if (semantics_absent and snapshot.render_corner_logical_ids != null) {
         // A logical character snapshot has always required authored semantic rows.
         // Neutral synthesis is only the non-logical pre-v4 migration path.
-        return error.InvalidSnapshot;
+        return refuseEncode("logical topology present but the snapshot carries no semantic rows");
     }
     if (semantics_absent) {
         unassigned_regions = try allocator.alloc(u32, face_count);
@@ -471,7 +548,7 @@ pub fn encodeCurrentSnapshotWithRangeObjectIdsAlloc(
         range_object_ids,
     ) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.InvalidRangeObjectMetadata => return error.InvalidSnapshot,
+        error.InvalidRangeObjectMetadata => return refuseEncode("stable object ids could not be stamped onto the semantic table (id/range mismatch or invalid table)"),
     };
     defer allocator.free(semantic_json);
     persisted.semantic_table_json = semantic_json;
@@ -488,7 +565,7 @@ pub fn encodeSnapshotWithRangeObjectIdsAlloc(
     range_object_ids: []const []const u8,
 ) EncodeError![]u8 {
     if (snapshot.render_corner_logical_ids == null or snapshot.semantic_table_json == null) {
-        return error.InvalidSnapshot;
+        return refuseEncode("character save requires logical topology and a semantic table");
     }
     const semantic_json = semanticTableWithRangeObjectIdsAlloc(
         allocator,
@@ -497,7 +574,7 @@ pub fn encodeSnapshotWithRangeObjectIdsAlloc(
         range_object_ids,
     ) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.InvalidRangeObjectMetadata => return error.InvalidSnapshot,
+        error.InvalidRangeObjectMetadata => return refuseEncode("stable object ids could not be stamped onto the semantic table (id/range mismatch or invalid table)"),
     };
     defer allocator.free(semantic_json);
     var persisted = snapshot.*;
@@ -608,10 +685,13 @@ pub fn decodeDocument(allocator: std.mem.Allocator, bytes: []const u8) DecodeErr
     if (at > bytes.len or bytes.len - at != json_len) return error.InvalidDocument;
     const semantic_table_json: ?[]u8 = if (has_semantics == 1) blk: {
         if (json_len == 0) return error.InvalidDocument;
-        // Validate syntax here; semantic membership-to-role validation belongs to
-        // the character hash/loader boundary where the authored role vocabulary is known.
-        var parsed = std.json.parseFromSlice(std.json.Value, allocator, bytes[at..], .{}) catch return error.InvalidDocument;
-        parsed.deinit();
+        // General semantic membership-to-role validation remains at its owning
+        // character boundary. Contact-rig extensions are model-blob data, however,
+        // so their versioned identity/frames/references are validated here.
+        mesh_edge_semantics.validateContactRigExtensionsJson(allocator, bytes[at..]) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidDocument,
+        };
         break :blk try allocator.dupe(u8, bytes[at..]);
     } else null;
     errdefer if (semantic_table_json) |json| allocator.free(json);
@@ -837,51 +917,134 @@ pub fn composeSnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) 
     };
 }
 
+pub const RecoveryChannelDelta = struct {
+    affected_count: u64 = 0,
+    synthesized: bool = false,
+    repaired: bool = false,
+    defaulted: bool = false,
+    dropped: bool = false,
+};
+
+pub const RecoveryCompositionReport = struct {
+    /// Face-group, material, and semantic counts are face-row records. Logical
+    /// topology counts are render-corner records. Canonical reorder/remap is not
+    /// degradation; only discarded, synthesized, repaired, or defaulted input is.
+    face_groups: RecoveryChannelDelta = .{},
+    materials: RecoveryChannelDelta = .{},
+    semantic_membership: RecoveryChannelDelta = .{},
+    logical_topology: RecoveryChannelDelta = .{},
+};
+
+pub const RecoveryCompositionResult = struct {
+    snapshot: Snapshot,
+    report: RecoveryCompositionReport,
+};
+
+fn recoveryDeltaAdd(delta: *RecoveryChannelDelta, affected_count: usize, action: enum { synthesized, repaired, defaulted, dropped }) void {
+    delta.affected_count += @intCast(affected_count);
+    switch (action) {
+        .synthesized => delta.synthesized = true,
+        .repaired => delta.repaired = true,
+        .defaulted => delta.defaulted = true,
+        .dropped => delta.dropped = true,
+    }
+}
+
 /// Recovery-only block composition. Ordinary Save remains strict through
 /// `composeSnapshot`; this path preserves every independently coherent resident
 /// channel when one sibling channel is stale. Missing semantic rows are filled
 /// as unassigned, missing logical rows receive fresh stable ids, and a logical
 /// position conflict drops only logical topology before one final composition.
-pub fn composeRecoverySnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) !Snapshot {
+pub fn composeRecoverySnapshotWithReport(allocator: std.mem.Allocator, blocks: []const FaceBlock) !RecoveryCompositionResult {
     if (blocks.len == 0) return error.InvalidFaceBlock;
     const normalized = try allocator.alloc(FaceBlock, blocks.len);
     defer allocator.free(normalized);
 
+    var report = RecoveryCompositionReport{};
     var total_faces: usize = 0;
     var usable_blocks: usize = 0;
     var any_groups = false;
     var all_groups_valid = true;
     var any_semantics = false;
+    var any_semantic_input = false;
+    var semantic_default_faces: usize = 0;
+    var semantic_invalid_input_faces: usize = 0;
     var any_logical = false;
+    var any_logical_input = false;
+    var logical_default_corners: usize = 0;
+    var logical_invalid_input_corners: usize = 0;
     var missing_logical_corners: usize = 0;
     var max_logical_id: u32 = 0;
     for (blocks) |block| {
         const faces = block.verts.len / 24;
         if (faces == 0) continue;
+        for (block.verts[0 .. faces * 24]) |value| if (!std.math.isFinite(value)) return error.InvalidFaceBlock;
         total_faces = std.math.add(usize, total_faces, faces) catch return error.InvalidFaceBlock;
         usable_blocks += 1;
         const groups_valid = if (block.groups) |rows| rows.len >= faces else false;
         any_groups = any_groups or block.groups != null;
         all_groups_valid = all_groups_valid and groups_valid;
+        if (block.groups) |rows| if (rows.len > faces)
+            recoveryDeltaAdd(&report.face_groups, rows.len - faces, .dropped);
+        if (block.materials) |rows| {
+            if (rows.len < faces)
+                recoveryDeltaAdd(&report.materials, faces, .dropped)
+            else if (rows.len > faces)
+                recoveryDeltaAdd(&report.materials, rows.len - faces, .dropped);
+        }
         const semantics_valid = block.semantic_regions != null and block.semantic_instances != null and
             block.semantic_regions.?.len >= faces and block.semantic_instances.?.len >= faces;
+        const has_semantic_input = block.semantic_regions != null or block.semantic_instances != null;
         any_semantics = any_semantics or semantics_valid;
+        any_semantic_input = any_semantic_input or has_semantic_input;
+        if (semantics_valid) {
+            const extra_regions = block.semantic_regions.?.len - faces;
+            const extra_instances = block.semantic_instances.?.len - faces;
+            const extra = @max(extra_regions, extra_instances);
+            if (extra > 0) recoveryDeltaAdd(&report.semantic_membership, extra, .dropped);
+        } else {
+            semantic_default_faces += faces;
+            if (has_semantic_input) semantic_invalid_input_faces += faces;
+        }
         const corners = faces * 3;
         const logical_valid = if (block.render_corner_logical_ids) |rows| rows.len >= corners else false;
+        const has_logical_input = block.render_corner_logical_ids != null;
         any_logical = any_logical or logical_valid;
+        any_logical_input = any_logical_input or has_logical_input;
         if (logical_valid) {
             for (block.render_corner_logical_ids.?[0..corners]) |id| max_logical_id = @max(max_logical_id, id);
+            const extra = block.render_corner_logical_ids.?.len - corners;
+            if (extra > 0) recoveryDeltaAdd(&report.logical_topology, extra, .dropped);
         } else {
             missing_logical_corners = std.math.add(usize, missing_logical_corners, corners) catch
                 return error.InvalidFaceBlock;
+            logical_default_corners += corners;
+            if (has_logical_input) logical_invalid_input_corners += corners;
         }
     }
     if (usable_blocks == 0 or total_faces > std.math.maxInt(u32) / 3) return error.InvalidFaceBlock;
+
+    if (any_groups and !all_groups_valid) {
+        report.face_groups = .{ .affected_count = @intCast(total_faces), .defaulted = true };
+    }
+    if (any_semantics) {
+        if (semantic_default_faces > 0)
+            recoveryDeltaAdd(&report.semantic_membership, semantic_default_faces, .defaulted);
+    } else if (any_semantic_input) {
+        recoveryDeltaAdd(&report.semantic_membership, semantic_invalid_input_faces, .dropped);
+    }
 
     var use_logical = any_logical;
     if (use_logical and missing_logical_corners > 0) {
         const remaining = @as(u64, std.math.maxInt(u32)) - max_logical_id;
         if (missing_logical_corners > remaining) use_logical = false;
+    }
+    if (any_logical and use_logical) {
+        if (logical_default_corners > 0)
+            recoveryDeltaAdd(&report.logical_topology, logical_default_corners, .synthesized);
+    } else if (any_logical_input) {
+        const affected = if (any_logical) total_faces * 3 else logical_invalid_input_corners;
+        report.logical_topology = .{ .affected_count = @intCast(affected), .dropped = true };
     }
     const semantic_fill = if (any_semantics) try allocator.alloc(u32, total_faces * 2) else null;
     defer if (semantic_fill) |rows| allocator.free(rows);
@@ -892,9 +1055,9 @@ pub fn composeRecoverySnapshot(allocator: std.mem.Allocator, blocks: []const Fac
         null;
     defer if (logical_fill) |rows| allocator.free(rows);
     if (logical_fill) |rows| {
-        var next = max_logical_id + 1;
+        var next: u64 = @as(u64, max_logical_id) + 1;
         for (rows) |*id| {
-            id.* = next;
+            id.* = @intCast(next);
             next += 1;
         }
     }
@@ -929,13 +1092,23 @@ pub fn composeRecoverySnapshot(allocator: std.mem.Allocator, blocks: []const Fac
         semantic_fill_at += faces;
     }
 
-    return composeSnapshot(allocator, normalized[0..output_index]) catch |err| switch (err) {
+    const snapshot = composeSnapshot(allocator, normalized[0..output_index]) catch |err| switch (err) {
         error.InvalidLogicalTopology => {
             for (normalized[0..output_index]) |*block| block.render_corner_logical_ids = null;
-            return composeSnapshot(allocator, normalized[0..output_index]);
+            report.logical_topology = .{ .affected_count = @intCast(total_faces * 3), .dropped = true };
+            return .{
+                .snapshot = try composeSnapshot(allocator, normalized[0..output_index]),
+                .report = report,
+            };
         },
         else => return err,
     };
+    return .{ .snapshot = snapshot, .report = report };
+}
+
+pub fn composeRecoverySnapshot(allocator: std.mem.Allocator, blocks: []const FaceBlock) !Snapshot {
+    const result = try composeRecoverySnapshotWithReport(allocator, blocks);
+    return result.snapshot;
 }
 
 /// A multipart RJMD is valid only when every serialized face belongs to exactly one
@@ -964,6 +1137,23 @@ pub fn rangesOwnEveryFace(pairs: ?[]const u32, groups: ?[]const u32, expected_co
     return true;
 }
 
+test "authored face count keeps one triangulated n-gon as one face" {
+    try std.testing.expectEqual(@as(u64, 1), authoredFaceCount(2, &.{ 41, 41 }));
+    try std.testing.expectEqual(@as(u64, 2), authoredFaceCount(2, &.{ 41, 42 }));
+    try std.testing.expectEqual(@as(u64, 2), authoredFaceCount(2, &.{ NO_FACE_GROUP, NO_FACE_GROUP }));
+}
+
+test "object namespace hash frames ids and includes range order" {
+    const split_left = objectNamespaceDigest("model", &.{ "ab", "c" }, &.{ 0, 1, 1, 2 });
+    const split_right = objectNamespaceDigest("model", &.{ "a", "bc" }, &.{ 0, 1, 1, 2 });
+    const reordered = objectNamespaceDigest("model", &.{ "c", "ab" }, &.{ 0, 1, 1, 2 });
+    const different_ranges = objectNamespaceDigest("model", &.{ "ab", "c" }, &.{ 0, 2, 2, 3 });
+    try std.testing.expect(!std.mem.eql(u8, &split_left, &split_right));
+    try std.testing.expect(!std.mem.eql(u8, &split_left, &reordered));
+    try std.testing.expect(!std.mem.eql(u8, &split_left, &different_ranges));
+    try std.testing.expectEqual(split_left, objectNamespaceDigest("model", &.{ "ab", "c" }, &.{ 0, 1, 1, 2 }));
+}
+
 test "document composition reorders semantic rows with opaque and glass faces" {
     const solid_face = [_]f32{0} ** 24;
     const glass = [_]f32{1} ** 24;
@@ -979,7 +1169,7 @@ test "document composition reorders semantic rows with opaque and glass faces" {
     try std.testing.expectEqualSlices(u32, &.{ 1, 3 }, snapshot.semantic_instances.?);
 }
 
-test "recovery composition preserves valid channels when one semantic block is stale" {
+test "recovery composition reports the semantic rows it defaults" {
     var first = [_]f32{0} ** 24;
     var second = [_]f32{0} ** 24;
     first[8] = 1;
@@ -989,7 +1179,7 @@ test "recovery composition preserves valid channels when one semantic block is s
     second[17] = 1;
     var stale_regions = [_]u32{};
     var stale_instances = [_]u32{};
-    var snapshot = try composeRecoverySnapshot(std.testing.allocator, &.{
+    var recovery = try composeRecoverySnapshotWithReport(std.testing.allocator, &.{
         .{
             .verts = &first,
             .groups = &.{2},
@@ -1007,13 +1197,19 @@ test "recovery composition preserves valid channels when one semantic block is s
             .render_corner_logical_ids = &.{ 20, 21, 22 },
         },
     });
-    defer snapshot.deinit(std.testing.allocator);
+    defer recovery.snapshot.deinit(std.testing.allocator);
+    const snapshot = &recovery.snapshot;
     try std.testing.expectEqualSlices(u32, &.{ 2, 9 }, snapshot.groups.?);
     try std.testing.expectEqualSlices(u32, &.{ 3, 7 }, snapshot.materials.?);
     try std.testing.expectEqualSlices(u32, &.{ 4, std.math.maxInt(u32) }, snapshot.semantic_regions.?);
     try std.testing.expectEqualSlices(u32, &.{ 0, std.math.maxInt(u32) }, snapshot.semantic_instances.?);
     try std.testing.expectEqualSlices(u32, &.{ 0, 1, 2, 3, 4, 5 }, snapshot.render_corner_logical_ids.?);
     try std.testing.expectEqualSlices(u32, &.{ 10, 11, 12, 20, 21, 22 }, snapshot.dense_to_stable_logical_ids.?);
+    try std.testing.expectEqual(@as(u64, 1), recovery.report.semantic_membership.affected_count);
+    try std.testing.expect(recovery.report.semantic_membership.defaulted);
+    try std.testing.expectEqual(@as(u64, 0), recovery.report.face_groups.affected_count);
+    try std.testing.expectEqual(@as(u64, 0), recovery.report.materials.affected_count);
+    try std.testing.expectEqual(@as(u64, 0), recovery.report.logical_topology.affected_count);
 }
 
 test "canonical current RJMD v5 round-trips every supplied nonlogical channel" {
