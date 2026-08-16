@@ -415,7 +415,7 @@ pub fn appendOverlay(self: anytype) void {
         const hz = @as(f32, @floatFromInt(st.hover_z_u)) / UNITS_PER_METER;
         const hy = @as(f32, @floatFromInt(st.floor)) * METERS_PER_LEVEL;
         const s = DIAMOND_PX * worldPerPixel(self, hx, hy, hz);
-        appendBox(self, hx, hy + 0.01, hz, s, 0.03, s, std.math.pi / 4.0, EMERALD, 0.95);
+        appendBox(self, hx, hy + 0.01, hz, s, 0.03, s, 45.0, EMERALD, 0.95);
         // Pre-anchor: a faint one-storey pole telegraphs "this tool builds
         // walls" — deliberately NOT interactive and with no handles, so the
         // first click can never be eaten by chrome riding the cursor
@@ -431,7 +431,7 @@ pub fn appendOverlay(self: anytype) void {
         const mz_m = st.magnet_z_u / UNITS_PER_METER;
         const my_m = @as(f32, @floatFromInt(st.floor)) * METERS_PER_LEVEL;
         const s = (DIAMOND_PX + 4) * worldPerPixel(self, mx_m, my_m, mz_m);
-        appendBox(self, mx_m, my_m + 0.02, mz_m, s, 0.05, s, std.math.pi / 4.0, CYAN, 0.95);
+        appendBox(self, mx_m, my_m + 0.02, mz_m, s, 0.05, s, 45.0, CYAN, 0.95);
     }
     // The planted anchor (req_4531 flow step 3): the committed start point is
     // AMBER — unmistakably "the wall starts here, your next click ends it".
@@ -440,7 +440,7 @@ pub fn appendOverlay(self: anytype) void {
         const az_m = @as(f32, @floatFromInt(st.anchor_z_u)) / UNITS_PER_METER;
         const ay_m = @as(f32, @floatFromInt(st.floor)) * METERS_PER_LEVEL;
         const s = (DIAMOND_PX + 3) * worldPerPixel(self, ax_m, ay_m, az_m);
-        appendBox(self, ax_m, ay_m + 0.02, az_m, s, 0.05, s, std.math.pi / 4.0, AMBER, 0.95);
+        appendBox(self, ax_m, ay_m + 0.02, az_m, s, 0.05, s, 45.0, AMBER, 0.95);
     }
     // The hologram span (req_4520 #3): a translucent wall VOLUME from the
     // anchor to the cursor at the pending height × thickness — the unmissable
@@ -456,7 +456,9 @@ pub fn appendOverlay(self: anytype) void {
         const dz = hz - az;
         const len = @sqrt(dx * dx + dz * dz);
         if (len > 0.01) {
-            const yaw = -std.math.atan2(dz, dx);
+            // The instance wire carries DEGREES (quantAngleU16); the shader's
+            // Ry maps local +X onto world (cos ry, -sin ry) — hence the sign.
+            const yaw = -std.math.atan2(dz, dx) * (180.0 / std.math.pi);
             appendBox(
                 self,
                 (ax + hx) * 0.5,
@@ -486,10 +488,10 @@ pub fn appendOverlay(self: anytype) void {
         appendBox(self, base[0], base[1] + height_m * 0.5, base[2], arm_w, height_m, arm_w, 0, arm_color, 0.95);
         appendCone(self, base[0], base[1] + height_m + head_s * 0.5, base[2], head_s, head_s, 0, arm_color, 0.95);
         // Hub: a squat diamond at the base.
-        appendBox(self, base[0], base[1] + 0.02, base[2], hub_s, 0.04, hub_s, std.math.pi / 4.0, hub_color, 0.95);
+        appendBox(self, base[0], base[1] + 0.02, base[2], hub_s, 0.04, hub_s, 45.0, hub_color, 0.95);
         // Nudge arrows: cones tipped outward along world X (− thinner, + thicker).
-        appendCone(self, base[0] - gap, base[1] + 0.03, base[2], nudge_s, nudge_s, std.math.pi / 2.0, hub_color, 0.95);
-        appendCone(self, base[0] + gap, base[1] + 0.03, base[2], nudge_s, nudge_s, -std.math.pi / 2.0, hub_color, 0.95);
+        appendCone(self, base[0] - gap, base[1] + 0.03, base[2], nudge_s, nudge_s, 90.0, hub_color, 0.95);
+        appendCone(self, base[0] + gap, base[1] + 0.03, base[2], nudge_s, nudge_s, -90.0, hub_color, 0.95);
     }
 }
 
