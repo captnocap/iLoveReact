@@ -1056,6 +1056,12 @@ of PS2 RAM). Our roster = the IDE; the compiled reference grid = the IPL.
 **V30 — Maps, changelevel, and the frozen world (FREEZE-0607). (Added
 2026-06-07.)**
 
+> ⚠ **AMENDED by V34 (ONEMAP-0815, 2026-08-15):** the city/interior MAP SPLIT
+> below — separate interior maps, changelevel doors, the UNLOADED-by-changelevel
+> residency tier — is overruled. Everything lives in ONE map; no teleporting
+> when going inside. The frozen world, the activation predicate,
+> derivation-not-serialization, and the remaining residency tiers stand.
+
 **City and interiors (user-ruled, the Vice City model).** The outdoor city is
 ONE citywide map — it is never subdivided ("city itself wouldnt be, well not
 in our game at least"). Interiors are SEPARATE MAPS entered Vice
@@ -1210,3 +1216,41 @@ return. The user's correction, verbatim:
 STATE AT RULING TIME: names are LIVE-ONLY host state
 (`__mesh_semantic_state` / `__mesh_semantic_assign`) and do NOT ride the saved
 blob. The persistence half is OWED, not built.
+
+**V34 — ONE MAP: interiors live inside the citywide map — no changelevel, no
+teleport (ONEMAP-0815). AMENDS V30. (Added 2026-08-15.)**
+
+The map-separation half of V30 is overruled. The user, verbatim (req_4525):
+
+> we do not seperate the maps anymore. everything is and will be in the same
+> one big map, no teleporting when going inside, so thats why i say its a lot
+> more paramount to have proper floor plans than it may seem
+
+- **ONE world map.** Building interiors — every storey, the mall included, not
+  just the storefront class — are real authored geometry inside the citywide
+  map. Walking through a door is walking through a door: no marker, no loading
+  screen, no map swap.
+- **What V30 loses:** the Vice City changelevel model, separate interior
+  mapfiles, the "interior not entered = UNLOADED (changelevel)" residency
+  tier, and the lobby-as-changelevel split for mixed-use buildings.
+- **What V30 keeps — unchanged, and now doing MORE work:** the frozen world,
+  the activation predicate (engaged ∪ zone ∪ tile-distance ∪ VIS), instant
+  promotion / hysteretic demotion, derivation-not-serialization for ambient
+  state, and the remaining residency ladder: all-default chunk = NONEXISTENT
+  (sparse) → outside predicate = FROZEN STATE ROWS → inside predicate = FULL
+  BEHAVIOR. Interior cost is paid by RESIDENCY, not map boundaries: VIS keeps
+  indoor chunks dark from the street, zone containment keeps a building live
+  while you are inside it, and an unentered tower floor is just frozen/sparse
+  chunks of the one map.
+- **Consequences:** floor plans are paramount — interiors are world geometry
+  authored up front (the lot-plan lane, req_4514/4518/4519), never deferred to
+  a separate map. "Inside vs outside" reads (rain stops under a roof) derive
+  from geometry/zones (roofed enclosure), never from map identity. V29's
+  mapfile machinery stands but describes ONE bundle; V31 already treats chunks
+  as units inside the one citywide map.
+- **The amendment mechanism is the point (user-ruled, same req):** the
+  constitution was designed for foundational rulings early and AMENDMENTS as
+  the game matures. An amended ruling stays in the record wearing an explicit
+  AMENDED-by marker, and the oracle must surface the amendment loudly wherever
+  the old ruling would have answered — an agent reading V30 must meet V34 in
+  the same breath.

@@ -164,7 +164,10 @@ function fmtScore(s: number): string {
 }
 
 function decisionBlock(d: Decision, score: number): string {
-  const lines = [`[${d.id} · ${d.status.toUpperCase()} · ${fmtScore(score)}] ${d.name}`, `  ${d.ruling}`];
+  const amended = d.amendedBy?.length ? ` ⚠ AMENDED by ${d.amendedBy.join(', ')}` : '';
+  const lines = [`[${d.id} · ${d.status.toUpperCase()}${amended} · ${fmtScore(score)}] ${d.name}`, `  ${d.ruling}`];
+  if (d.amendedBy?.length) lines.push(`  ⚠ Read ${d.amendedBy.join(', ')} before acting on this ruling — part of it is overruled.`);
+  if (d.amends?.length) lines.push(`  amends: ${d.amends.join(', ')}`);
   if (d.detail) lines.push(`  ${d.detail}`);
   if (d.retires?.length) lines.push(`  retires: ${d.retires.join('; ')}`);
   if (d.cites?.length) lines.push(`  files: ${d.cites.join(' · ')}`);

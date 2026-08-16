@@ -10,8 +10,9 @@ Standing rulings this guide obeys:
 
 - **V24** — Plan Build (Sims-style) and Creative Build edit the SAME semantic piece
   data; the 1 m grid is the snap substrate, never the object model.
-- **V30** — interiors are separate maps; **only trivial storefront-class walk-ins may
-  live inside the city map**. This is why the mixed-use section splits at the lobby door.
+- **V34 (amends V30)** — ONE map: every interior is real geometry inside the citywide
+  map; no changelevel, no teleport. Floor plans are paramount because they ARE the
+  world — an unentered floor is just frozen/sparse chunks, never a deferred map.
 - **V29** — reference-not-embed: a building is a few unit templates stamped many times,
   never per-unit authored copies.
 - **req_4501** — collinear same-spec wall strokes ARE one wall: a party wall between two
@@ -112,9 +113,11 @@ floors above, and it is the one passers-by judge — the footprint "says come in
 - The **residential lobby** takes a narrow 3–5 tile frontage between storefronts:
   street door → lobby → mail wall → core (stair + elevator). Retail wraps around it.
   Back-of-house (trash, util) shares the alley side with retail service.
-- **Map split (V30)**: each storefront is a trivial walk-in that may live in the CITY
-  map; the lobby door is the **changelevel marker** — the residential floors above are
-  their own interior map. One building, two worlds, split exactly at the lobby.
+- **One map (V34)**: storefronts AND the residential floors above are all real
+  geometry in the citywide map — the lobby door is just a door. The building's cost
+  is paid by residency (V30's surviving half): VIS keeps interior chunks dark from
+  the street, zone containment wakes the whole building when you walk in, and
+  unentered floors sit frozen. Author every storey like it will be walked — it will.
 
 Ground-floor plate at 24×16 (street below, alley above):
 
