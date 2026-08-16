@@ -37,6 +37,7 @@ case "$cmd" in
     tools/seat follow clear >/dev/null 2>&1 || true
     tools/seat follow start "corpus-$name" >/dev/null
     spawn_poller "$dir"
+    echo "$name" > "$ROOT/.active"
     date -u +%FT%TZ > "$dir/begun.txt"
     echo "recording '$name' (source: $(basename "$src")) — retopo away."
     echo "when done: tools/forge/corpus finish $name <package-dir>"
@@ -51,6 +52,7 @@ case "$cmd" in
     [ -d "$dir" ] || { echo "no corpus entry '$name'"; exit 1; }
     [ -f "$dir/finished.txt" ] && { echo "'$name' is already finished"; exit 1; }
     tools/seat follow start "corpus-$name" >/dev/null 2>&1 || true
+    echo "$name" > "$ROOT/.active"
     if [ -f "$dir/.poller.pid" ] && kill -0 "$(cat "$dir/.poller.pid")" 2>/dev/null; then
       echo "resumed '$name' (poller already running)"
     else
@@ -79,6 +81,7 @@ case "$cmd" in
     else
       echo "WARN: no package dir — bundle has trail+journal only; copy the saved package into $dir/final later"
     fi
+    rm -f "$ROOT/.active"
     date -u +%FT%TZ > "$dir/finished.txt"
     echo "bundled $dir:"
     ls "$dir"

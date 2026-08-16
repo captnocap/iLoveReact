@@ -47,6 +47,7 @@ import {
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
 import { hydrateModelShapeCounts } from '../model/modelShapeHydration';
 import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
+import { RETOPO_INTENTS, activeCorpusEntry, recordRetopoIntent } from '../data/retopoIntents';
 import { selectMeshFaces } from '../model/selectMeshFaces';
 import ExtrudeDialog from './ExtrudeDialog';
 import type { ExtrudeKind, ExtrudeParams } from '../data/extrudeParams';
@@ -1390,6 +1391,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [ledger, setLedger] = useState<Ledger>(() => loadLedger());
   const [attribution, setAttribution] = useState<Attribution | null>(null);
   const [attrOpen, setAttrOpen] = useState(false);
+  // Transient confirmation for a recorded retopo intent (req_4607) — the click
+  // must visibly land or the user cannot trust the corpus got it.
+  const [intentFlash, setIntentFlash] = useState<string | null>(null);
+  const flashIntent = (text: string) => {
+    setIntentFlash(text);
+    setTimeout(() => setIntentFlash((current) => (current === text ? null : current)), 1600);
+  };
 
   // Record (or fetch) the attribution for a just-loaded file, keyed by its content sha.
   const recordAttribution = (path: string) => {
@@ -5255,6 +5263,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 : `${selInfo.sel} selected`
               : `${(model.count / 3).toLocaleString()} tris`}
           </Text>
+        )}
+        {/* Retopo-corpus intent chips (req_4607): with a selection and an armed
+            recorder, one click stamps WHY — a fixed vocabulary, so 200 sessions
+            grade on the same scale. Chips only render while recording. */}
+        {model && selMode !== 0 && selInfo.sel > 0 && activeCorpusEntry() !== null && RETOPO_INTENTS.map((intent) => (
+          <Pressable
+            key={intent.id}
+            tooltip={intent.hint}
+            onPress={() => {
+              const entry = recordRetopoIntent(intent.id, readModelSelection());
+              flashIntent(entry ? `✓ ${intent.label} · ${selInfo.sel}` : '✗ not recorded — REC off?');
+            }}
+            style={{ marginLeft: 6, paddingLeft: 7, paddingRight: 7, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#3a4d68', backgroundColor: 'rgba(240,154,71,0.12)' }}
+          >
+            <Text style={{ color: '#f0b57a', fontSize: 11 }}>{intent.label}</Text>
+          </Pressable>
+        ))}
+        {intentFlash && (
+          <Text noWrap style={{ color: '#f0b57a', fontSize: 11, marginLeft: 8 }}>{intentFlash}</Text>
         )}
         <Box style={{ flexGrow: 1 }} />
         {model && attribution && (
