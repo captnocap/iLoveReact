@@ -5110,9 +5110,12 @@ export default function AppFrame() {
     return map;
   }, [catalogGeneration]);
   // Activating the tool with nothing installed says WHY the ghost never
-  // appears and names the verbs that fix it.
+  // appears and names the verbs that fix it. The warn is the ring-visible
+  // truth of what the tool actually armed (req_4521 diagnosis).
   useEffect(() => {
-    if (openingToolActive && !armedOpeningKit) {
+    if (!openingToolActive) return;
+    console.warn(`[wall] place-opening ACTIVE — armedKitId=${stateRef.current.armedOpeningKitId ?? 'none'} resolved=${armedOpeningKit ? armedOpeningKit.label : 'NULL'} installedKits=${installedOpeningKits().length}`);
+    if (!armedOpeningKit) {
       setState((prev) => ({ ...prev, status: 'no door/window kits installed — export one (File → Export → Wall Opening), then pick it in the Build palette' }));
     }
   }, [openingToolActive, armedOpeningKit]);

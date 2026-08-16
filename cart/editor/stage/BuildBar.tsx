@@ -36,6 +36,7 @@ const VIEW_CACHE = new Map<string, PartsThumbView>();
 // Doors/Windows tiles (req_4513) resolve their photograph through the kit's
 // own model package; this map carries paletteId → packageId for thumbViewFor.
 const OPENING_PKG_BY_PALETTE_ID = new Map<string, string>();
+let LAST_OPENING_CENSUS = '';
 
 function thumbViewFor(entry: PlaceableEntry): PartsThumbView | null {
   const hit = VIEW_CACHE.get(entry.id);
@@ -160,7 +161,13 @@ export default function BuildBar(props: { armedPieceId: string | null; armedOpen
   // Doors/Windows categories (req_4513): every installed opening kit is one
   // tile; clicking it arms the Place Door/Window tool with THAT kit — the
   // palette IS the kit picker.
-  const openingGroups = openingPaletteGroups(installedOpeningKits()).map((group) => {
+  const installedKits = installedOpeningKits();
+  const census = `${installedKits.length}:${installedKits.map((kit) => kit.catalogId).join(',')}`;
+  if (census !== LAST_OPENING_CENSUS) {
+    LAST_OPENING_CENSUS = census;
+    console.warn(`[wall] palette opening kits: ${census || 'NONE'}`);
+  }
+  const openingGroups = openingPaletteGroups(installedKits).map((group) => {
     const entries: PlaceableEntry[] = group.entries.map((row) => {
       OPENING_PKG_BY_PALETTE_ID.set(row.paletteId, row.packageId);
       return { id: row.paletteId, label: row.label, hex: '#8a93c0', authored: false };

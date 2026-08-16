@@ -410,8 +410,10 @@ export default function WorldViewport(props: {
       openingGhostRef.current = null;
       setOpeningGhostState((prev) => (prev ? null : prev));
       openingSlotsCacheRef.current = null;
+    } else {
+      console.warn(`[wall] viewport cutOpening armed — kit=${props.openingKit ? props.openingKit.label : 'NONE (prop chain dropped it)'}`);
     }
-  }, [props.tool]);
+  }, [props.tool, props.openingKit]);
   // req_4476 diagnostic: every drawWall-adjacent tool transition, logged from
   // render so the event ring shows the exact flicker sequence.
   const toolTraceRef = useRef(props.tool);
