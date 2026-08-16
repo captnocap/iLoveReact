@@ -214,9 +214,13 @@ pub fn build(
         };
         const opening_rects = try measuredOpeningRects(allocator, edge, entries, length_u);
         defer if (opening_rects.len != 0) allocator.free(opening_rects);
+        const face_half_thickness_m = architecture_scale.unitsToMeters(edge.thickness_u) / 2;
         try appendFacePartitions(
             &builder,
             edge,
+            start,
+            direction,
+            face_half_thickness_m,
             .a,
             edge.side_a.material_id,
             side_a_points,
@@ -229,6 +233,9 @@ pub fn build(
         try appendFacePartitions(
             &builder,
             edge,
+            start,
+            direction,
+            face_half_thickness_m,
             .b,
             edge.side_b.material_id,
             side_b_points,
@@ -424,6 +431,9 @@ fn measuredOpeningRects(
 fn appendFacePartitions(
     builder: *GeometryBuilder,
     edge: *const types.WallEdge,
+    edge_start: *const types.WallVertex,
+    direction: Vector3,
+    half_thickness_m: f32,
     side: types.WallSide,
     material_id: []const u8,
     endpoints: SegmentEndpoints,
@@ -470,6 +480,9 @@ fn appendFacePartitions(
                 try appendFaceRectangle(
                     builder,
                     edge,
+                    edge_start,
+                    direction,
+                    half_thickness_m,
                     side,
                     material_id,
                     endpoints,
@@ -489,6 +502,9 @@ fn appendFacePartitions(
             try appendFaceRectangle(
                 builder,
                 edge,
+                edge_start,
+                direction,
+                half_thickness_m,
                 side,
                 material_id,
                 endpoints,
@@ -508,6 +524,9 @@ fn appendFacePartitions(
 fn appendFaceRectangle(
     builder: *GeometryBuilder,
     edge: *const types.WallEdge,
+    edge_start: *const types.WallVertex,
+    direction: Vector3,
+    half_thickness_m: f32,
     side: types.WallSide,
     material_id: []const u8,
     endpoints: SegmentEndpoints,
@@ -520,8 +539,8 @@ fn appendFaceRectangle(
     row_bottom_u: types.Unit,
     row_top_u: types.Unit,
 ) std.mem.Allocator.Error!void {
-    const start = pointAtColumn(endpoints, column_start_u, edge_length_u);
-    const end = pointAtColumn(endpoints, column_end_u, edge_length_u);
+    const start = pointAtColumn(endpoints, edge_start, direction, normal, half_thickness_m, column_start_u, edge_length_u);
+    const end = pointAtColumn(endpoints, edge_start, direction, normal, half_thickness_m, column_end_u, edge_length_u);
     const quad = verticalQuad(
         start,
         end,
@@ -734,11 +753,29 @@ fn appendOpeningSurface(
     }
 }
 
-fn pointAtColumn(endpoints: SegmentEndpoints, column_u: types.Unit, edge_length_u: types.Unit) PointXZ {
-    const parameter = @as(f32, @floatFromInt(column_u)) / @as(f32, @floatFromInt(edge_length_u));
+/// A face column is a DISTANCE along the wall, never a proportion of it
+/// (req_4535 — "the wall is flat, the door is not going in at a bend"): on
+/// angled walls the quantized integer length differs from the true metric
+/// length, and proportional interpolation drifted the face's cut away from
+/// the reveals/jambs (which always measured intrinsically) — the see-through
+/// slivers around an angled wall's door. Interior columns sit at exact
+/// intrinsic positions on the face plane; the extremes keep the MITERED
+/// endpoints so junction corners still close.
+fn pointAtColumn(
+    endpoints: SegmentEndpoints,
+    edge_start: *const types.WallVertex,
+    direction: Vector3,
+    normal: Vector3,
+    half_thickness_m: f32,
+    column_u: types.Unit,
+    edge_length_u: types.Unit,
+) PointXZ {
+    if (column_u <= 0) return endpoints.start;
+    if (column_u >= edge_length_u) return endpoints.end;
+    const center = centerPointAtColumn(edge_start, direction, column_u);
     return .{
-        .x = endpoints.start.x + (endpoints.end.x - endpoints.start.x) * parameter,
-        .z = endpoints.start.z + (endpoints.end.z - endpoints.start.z) * parameter,
+        .x = center.x + normal.x * half_thickness_m,
+        .z = center.z + normal.z * half_thickness_m,
     };
 }
 

@@ -2900,6 +2900,40 @@ test "flush door at a junction restores the neighbour's end face across the void
     }
 }
 
+test "an angled wall's face cut aligns exactly with the door's reveals (req_4534/4535)" {
+    // The wall is FLAT — its surface must not care about its world angle. A
+    // 45-degree wall (0,0)->(45,45) has metric length 63.64u but quantized
+    // length 63u; the old proportional face law stretched cut columns by that
+    // ratio, drifting the face's hole ~2.7cm off the reveals at column 42 —
+    // the see-through slivers around an angled door. Face cut corners must
+    // land on the SAME intrinsic point the reveal occupies.
+    const door = geometryOpeningKit("kit:door", .door, -10, 10, 0, 34, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("angled", 0, 0, 0, 45, 45, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "angled:e:0", &.{.{
+        .id = "door",
+        .kind = .door,
+        .kit_id = "kit:door",
+        .column_u = 32,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var reveal_right: ?geometry.Point3Meters = null;
+    var face_right: ?geometry.Point3Meters = null;
+    for (bundle.surfaces) |surface| {
+        if (!std.mem.eql(u8, surface.edge_id, "angled:e:0")) continue;
+        if (surface.role == .reveal and surface.column_start_u == 42) reveal_right = surface.quad_m[0];
+        if (surface.role == .face and surface.side == .a and surface.column_start_u == 42) face_right = surface.quad_m[0];
+    }
+    const reveal = reveal_right orelse return error.TestExpectedEqual;
+    const face = face_right orelse return error.TestExpectedEqual;
+    try testing.expectApproxEqAbs(reveal.x, face.x, 0.001);
+    try testing.expectApproxEqAbs(reveal.z, face.z, 0.001);
+}
+
 test "geometry subtracts one measured door and emits its frame and portal" {
     const door = geometryOpeningKit("kit:door", .door, -10, 10, 0, 34, .walk);
     var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
