@@ -353,7 +353,6 @@ export default function WorldViewport(props: {
   openingKitRef.current = props.openingKit;
   /** Set once trackOpeningCursor exists below — the arm effect seeds through it. */
   const trackOpeningCursorRef = useRef<((px: number, py: number) => void) | null>(null);
-  const openingRenderTraceRef = useRef('');
   // The wheel's vertical dial for the armed opening (req_4526) — the SAME
   // gesture as a prop's height dial, in lattice u, clamped by the legal rows.
   const openingLiftRef = useRef(0);
@@ -386,9 +385,6 @@ export default function WorldViewport(props: {
       || (prev?.mode === 'ground' && next?.mode === 'ground'
         && Math.abs(prev.xM - next.xM) < 0.05 && Math.abs(prev.zM - next.zM) < 0.05 && Math.abs(prev.yM - next.yM) < 0.05);
     if (same) return;
-    // req_4524 diagnosis: every ghost transition is ring-visible — this is
-    // cell-crossing rate, not mousemove rate.
-    console.warn(`[wall] ghost ${prev ? prev.mode : 'null'} -> ${next ? (next.mode === 'wall' ? `wall ${next.edgeId}@(${next.anchor.columnU},${next.anchor.rowU}) slot=${next.slot ? `${next.slot.columnU},${next.slot.rowU}` : 'NONE'}${next.reason ? ` reason=${next.reason}` : ''}` : `ground (${next.xM.toFixed(1)},${next.zM.toFixed(1)})`) : 'null'}`);
     openingGhostRef.current = next;
     setOpeningGhostState(next);
   }, []);
@@ -479,7 +475,7 @@ export default function WorldViewport(props: {
       wallGizmoNativeRef.current = false;
       syncHostAnchor(null);
     }
-    if (props.tool !== 'cutOpening') {
+    if (props.tool !== 'cutOpening' || !props.active) {
       openingGhostRef.current = null;
       setOpeningGhostState((prev) => (prev ? null : prev));
       openingSlotsCacheRef.current = null;
@@ -491,7 +487,7 @@ export default function WorldViewport(props: {
       const r = rectRef.current;
       if (r.width > 0) trackOpeningCursorRef.current?.(r.width / 2, r.height / 2);
     }
-  }, [props.tool, props.openingKit, syncHostAnchor]);
+  }, [props.tool, props.active, props.openingKit, syncHostAnchor]);
   // req_4476 diagnostic: every drawWall-adjacent tool transition, logged from
   // render so the event ring shows the exact flicker sequence.
   const toolTraceRef = useRef(props.tool);
@@ -1088,7 +1084,7 @@ export default function WorldViewport(props: {
   // or carry the reason the hovered wall refuses the kit outright.
   const openingTrackTraceRef = useRef(0);
   const trackOpeningCursor = useCallback((px: number, py: number) => {
-    if (toolRef.current !== 'cutOpening') return;
+    if (!activeRef.current || toolRef.current !== 'cutOpening') return;
     // One heartbeat per arm session proves the tracker runs at all (req_4524).
     if (openingTrackTraceRef.current === 0) {
       openingTrackTraceRef.current = 1;
@@ -2145,13 +2141,9 @@ export default function WorldViewport(props: {
   const openingSegs: number[] = [];
   let openingColor = '#9aa3ad';
   let openingReadout: { x: number; y: number; text: string } | null = null;
-  let openingProjectionNote = '';
   const pushGhostRect = (corners: readonly { x: number; y: number; z: number }[] | null, cross: boolean, label: string): void => {
     const projected = corners?.map((corner) => stage.project(corner.x, corner.y, corner.z, rect)) ?? null;
-    if (!projected || !projected.every((point) => point !== null)) {
-      openingProjectionNote = !corners ? 'no corners (degenerate edge)' : `projection dropped ${projected ? projected.filter((point) => point === null).length : 4}/4 corners`;
-      return;
-    }
+    if (!projected || !projected.every((point) => point !== null)) return;
     const pts = projected as { x: number; y: number }[];
     for (let index = 0; index < 4; index += 1) {
       const a = pts[index]!;
@@ -2195,22 +2187,6 @@ export default function WorldViewport(props: {
       if (top) openingReadout = { x: top.x + 8, y: top.y - 20, text: `${kit.label} — bring it to a wall` };
     }
   }
-  // req_4524 render-side truth, one warn per ghost change: what actually got
-  // projected to screen (or why nothing did).
-  {
-    const ghostKey = openingGhost
-      ? (openingGhost.mode === 'wall'
-        ? `w:${openingGhost.edgeId}:${openingGhost.slot ? `${openingGhost.slot.columnU},${openingGhost.slot.rowU}` : 'x'}`
-        : `g:${openingGhost.xM.toFixed(1)},${openingGhost.zM.toFixed(1)}`)
-      : '';
-    if (ghostKey !== openingRenderTraceRef.current) {
-      openingRenderTraceRef.current = ghostKey;
-      if (ghostKey) {
-        console.warn(`[wall] ghost RENDER ${ghostKey} → segs=${openingSegs.length}${openingSegs.length ? ` first=(${openingSegs[0]!.toFixed(0)},${openingSegs[1]!.toFixed(0)}) rect=${rect.width}x${rect.height}` : ` NOTHING${openingProjectionNote ? ` — ${openingProjectionNote}` : ''}`}`);
-      }
-    }
-  }
-
   return (
     <Box
       style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0d141f' }}
