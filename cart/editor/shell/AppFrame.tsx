@@ -8928,16 +8928,33 @@ export default function AppFrame() {
         const operation = String(args.operation ?? 'info');
         if (operation === 'list') {
           const kind = typeof args.kind === 'string' ? args.kind : null;
+          // measure:true is the scale-survey lane (req_4565/4566): every saved
+          // model answers with its doc bounds so off-scale props are found by
+          // sweep, not by opening 200 tabs. Decode-cache reads — a survey wants
+          // the saved truth, and invalidating per row would thrash the cache.
+          const measure = args.measure === true;
           return ok({
             models: visibleModels
               .filter((candidate) => !kind || candidate.kind === kind)
-              .map((candidate) => ({
-                id: candidate.id,
-                name: candidate.name,
-                kind: candidate.kind,
-                saved: resolvePackageDir(candidate.kind, candidate.id) !== null,
-                characterRig: hasCharacterRigCapability(candidate),
-              })),
+              .map((candidate) => {
+                const saved = resolvePackageDir(candidate.kind, candidate.id) !== null;
+                const row: Record<string, unknown> = {
+                  id: candidate.id,
+                  name: candidate.name,
+                  kind: candidate.kind,
+                  saved,
+                  characterRig: hasCharacterRigCapability(candidate),
+                };
+                if (measure && saved) {
+                  const doc = packageMeshDoc(candidate);
+                  const bounds = doc ? meshDocBounds(doc) : null;
+                  row.boundsU = bounds;
+                  row.sizeU = bounds
+                    ? [bounds[3]! - bounds[0]!, bounds[4]! - bounds[1]!, bounds[5]! - bounds[2]!]
+                    : null;
+                }
+                return row;
+              }),
           });
         }
         const requested = typeof args.model === 'string' && args.model.length > 0 ? args.model : modelId;
