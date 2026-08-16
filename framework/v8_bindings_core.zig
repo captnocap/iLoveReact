@@ -1586,6 +1586,25 @@ fn hostMeshTopoWeld(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_logical_status() → JSON {"present","vertexCount"}. Whether the resident
+/// document currently carries an explicit stable-id table. The table is installed
+/// and un-minted by ordinary edit/undo traffic (cuts, bevels, part ops, journal
+/// restores), and its presence used to silently decide whether a weld fused or
+/// stacked twins (req_4661) — the state must be readable, never inferred.
+fn hostMeshLogicalStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var buf: [96]u8 = undefined;
+    const rows = model_source.renderCornerLogicalIds();
+    const out = std.fmt.bufPrint(&buf, "{{\"present\":{},\"vertexCount\":{d}}}", .{
+        rows != null,
+        model_source.logicalVertexCount(),
+    }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, out);
+}
+
 /// __mesh_topo_edge_split() → JSON {"ok","key","count"}. Sever logical
 /// sharing across the selected manifold edges without creating a new part.
 fn hostMeshTopoEdgeSplit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -5359,6 +5378,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_edit_path_pick", hostMeshEditPathPick);
         v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
         v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
+        v8_runtime.registerHostFn("__mesh_logical_status", hostMeshLogicalStatus);
         v8_runtime.registerHostFn("__mesh_topo_edge_split", hostMeshTopoEdgeSplit);
         v8_runtime.registerHostFn("__mesh_topo_edge_tubes", hostMeshTopoEdgeTubes);
         v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);
@@ -5631,6 +5651,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_edit_path_pick", hostMeshEditPathPick);
     v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_weld", hostMeshTopoWeld);
+        v8_runtime.registerHostFn("__mesh_logical_status", hostMeshLogicalStatus);
     v8_runtime.registerHostFn("__mesh_topo_edge_split", hostMeshTopoEdgeSplit);
     v8_runtime.registerHostFn("__mesh_topo_edge_tubes", hostMeshTopoEdgeTubes);
     v8_runtime.registerHostFn("__mesh_retopo_weld_pairs", hostMeshRetopoWeldPairs);

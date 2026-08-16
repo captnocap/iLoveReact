@@ -107,6 +107,9 @@ export type SeatPercept = {
   auditDirections?: number;
   /** Logical UV islands in the resident atlas. Zero means no readable atlas yet. */
   islands: number;
+  /** Explicit stable-id table state — present means weld rebuilds carry identity
+   * rows (and pre-fix hosts silently stopped fusing). Absent on older hosts. */
+  logicalTable?: { present: boolean; vertexCount: number };
   /** Exact coverage-compatible texture footprints after stacking. */
   footprints: number;
   unnamed: number;
@@ -579,6 +582,11 @@ export function readSeatPercept(): SeatPercept | null {
     ...measurePlaceholderRegions(value.regions, value.table),
     activePartId: typeof value.activePartId === 'string' ? value.activePartId : null,
     parts: Array.isArray(value.parts) ? value.parts : [],
+    // Whether the resident document carries the explicit stable-id table RIGHT NOW.
+    // Ordinary traffic installs and un-mints it (cuts/bevels/part ops mint, deep undo
+    // clears), and its presence used to silently decide weld behavior (req_4661) —
+    // it must be a readout, never an inference. Absent on hosts predating the door.
+    logicalTable: parseJson<{ present: boolean; vertexCount: number }>(host.__mesh_logical_status?.()) ?? undefined,
   };
 }
 
