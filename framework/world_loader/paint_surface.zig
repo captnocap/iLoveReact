@@ -124,10 +124,13 @@ fn RenderFloorSurface(comptime RuntimePtr: type) type {
     };
 }
 
-pub fn paintGroundHitAt(runtime: anytype, mx: f32, my: f32, level_y: f32) ?[3]f32 {
+/// Screen (window-absolute) → world ray through the external iso camera:
+/// [origin xyz, direction xyz]. The one copy of the basis math — the ground
+/// march below and the wall-tool overlay's handle/plane tests both use it.
+pub fn screenRayAt(runtime: anytype, mx: f32, my: f32) ?[6]f32 {
     if (runtime.paint_last_w <= 1 or runtime.paint_last_h <= 1) return null;
     const cam = &runtime.camera;
-    if (!cam.external) return null; // painting is an editor-viewport affair
+    if (!cam.external) return null; // an editor-viewport affair
     const nx = ((mx - runtime.paint_last_x) / runtime.paint_last_w) * 2 - 1;
     const ny = 1 - ((my - runtime.paint_last_y) / runtime.paint_last_h) * 2;
     if (nx < -1.05 or nx > 1.05 or ny < -1.05 or ny > 1.05) return null;
@@ -161,7 +164,12 @@ pub fn paintGroundHitAt(runtime: anytype, mx: f32, my: f32, level_y: f32) ?[3]f3
     dx /= dlen;
     dy /= dlen;
     dz /= dlen;
-    return map_paint.surfaceHit(RenderFloorSurface(@TypeOf(runtime)){ .runtime = runtime }, cam.ext_pos.x, cam.ext_pos.y - level_y, cam.ext_pos.z, dx, dy, dz, 2000);
+    return .{ cam.ext_pos.x, cam.ext_pos.y, cam.ext_pos.z, dx, dy, dz };
+}
+
+pub fn paintGroundHitAt(runtime: anytype, mx: f32, my: f32, level_y: f32) ?[3]f32 {
+    const ray = screenRayAt(runtime, mx, my) orelse return null;
+    return map_paint.surfaceHit(RenderFloorSurface(@TypeOf(runtime)){ .runtime = runtime }, ray[0], ray[1] - level_y, ray[2], ray[3], ray[4], ray[5], 2000);
 }
 
 // Painted-water surface derivation (chunkFloor.ts floorToWaterBody, req_1840

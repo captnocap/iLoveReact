@@ -5,7 +5,7 @@
 
 const std = @import("std");
 
-pub const ABI_VERSION: u32 = 11;
+pub const ABI_VERSION: u32 = 13;
 pub const SNAPSHOT_ENVELOPE_VERSION: u32 = 1;
 pub const BUILD_HASH_BYTES: usize = 32;
 pub const MAX_SNAPSHOT_BYTES: usize = 512 * 1024 * 1024;
@@ -468,6 +468,13 @@ pub const CaptureTargetOwnerFn = *const fn (
     owner_len: usize,
 ) callconv(.c) ModuleStatus;
 
+pub const CaptureSetDriveFn = *const fn (
+    node_id: u32,
+    owner: [*]const u8,
+    owner_len: usize,
+    enabled: bool,
+) callconv(.c) ModuleStatus;
+
 pub const CapturePublishPoseFn = *const fn (
     node_id: u32,
     owner: [*]const u8,
@@ -486,11 +493,17 @@ pub const GameApiV1 = extern struct {
     capture_activate_target: CaptureTargetOwnerFn,
     capture_publish_pose: CapturePublishPoseFn,
     capture_clear_pose: CaptureTargetOwnerFn,
+    capture_set_drive: CaptureSetDriveFn,
     capture_close_target: CaptureTargetOwnerFn,
     paint_armed: *const fn (node_id: u32) callconv(.c) bool,
     any_paint_armed: BoolFn,
+    // Draw Wall overlay (req_4520): engine.zig's motion branch keeps frames
+    // coming while any viewport's wall tool is armed.
+    any_wall_tool_armed: BoolFn,
     paint_pointer: *const fn (io: ?*const anyopaque, node_id: u32, phase: u32, x: f32, y: f32) callconv(.c) void,
     mouse_look: *const fn (node_id: u32, dx: f32, dy: f32) callconv(.c) void,
+    authoring_camera_drag: *const fn (node_id: u32, dx: f32, dy: f32, pan: bool) callconv(.c) bool,
+    authoring_camera_dolly: *const fn (node_id: u32, wheel_delta: f32) callconv(.c) bool,
     set_aiming: *const fn (node_id: u32, aiming: bool) callconv(.c) void,
     external_camera: *const fn (node_id: u32) callconv(.c) bool,
     render_detached_world: RenderDetachedFn,

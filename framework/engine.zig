@@ -471,6 +471,12 @@ const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("dev_modules/gam
         return false;
     }
     pub fn mouseLook(_: u32, _: f32, _: f32) void {}
+    pub fn authoringCameraDrag(_: u32, _: f32, _: f32, _: bool) bool {
+        return false;
+    }
+    pub fn authoringCameraDolly(_: u32, _: f32) bool {
+        return false;
+    }
     pub fn setAiming(_: u32, _: bool) void {}
     pub fn isExternalCamera(_: u32) bool {
         return false;
@@ -486,6 +492,10 @@ const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("dev_modules/gam
         return false;
     }
     pub fn paintPointer(_: std.Io, _: u32, _: PaintPhase, _: f32, _: f32) void {}
+    // Draw Wall overlay stub (req_4520) — same unconditional-call-site rule.
+    pub fn anyWallToolArmed() bool {
+        return false;
+    }
 };
 // WORLDWIN-0611: the compiled-world pop-out window — same gate as the loader
 // it hosts. The stub keeps the loop call-sites unconditional.
@@ -840,6 +850,8 @@ var pointer_capture_slot: u32 = 0;
 var pointer_capture_button: u8 = 0;
 var world_loader_mouse_node_id: u32 = 0;
 var world_loader_mouse_aiming: bool = false;
+var world_loader_mouse_authoring: bool = false;
+var world_loader_mouse_panning: bool = false;
 // MAPPAINT req_2473: the loader node whose armed paint tool owns the left-drag.
 // While set, motion events route straight into the host map painter
 // (world_loader.paintPointer) — zero JS per dab, the modelview input pattern
@@ -1260,8 +1272,10 @@ fn followMediaSlider(node: *Node, src: []const u8) void {
     }
 }
 
-fn captureWorldLoaderPointer(node: *Node) void {
+fn captureWorldLoaderPointer(node: *Node, authoring: bool, panning: bool) void {
     world_loader_mouse_node_id = node.id;
+    world_loader_mouse_authoring = authoring;
+    world_loader_mouse_panning = panning;
     input.unfocus();
     _ = setRelativeMouseMode(true);
 }
@@ -1272,6 +1286,8 @@ fn releaseWorldLoaderPointer() void {
     }
     world_loader_mouse_node_id = 0;
     world_loader_mouse_aiming = false;
+    world_loader_mouse_authoring = false;
+    world_loader_mouse_panning = false;
     _ = setRelativeMouseMode(false);
 }
 
@@ -4666,12 +4682,22 @@ pub fn run(config_in: AppConfig) !void {
                                     state_mod.markDirty();
                                     continue;
                                 }
+                                // Animation Foundry preview input is native-owned. The
+                                // mounted loader is externally driven by the V23 camera,
+                                // but raw SDL drag must still reach that controller without
+                                // a JS pointer event/re-render per sample. Shift+left pans;
+                                // ordinary left drag orbits.
+                                if (loader_node.world_loader_preview_stage and event.button.button == c.SDL_BUTTON_LEFT) {
+                                    const mods = c.SDL_GetModState();
+                                    captureWorldLoaderPointer(loader_node, true, (mods & c.SDL_KMOD_SHIFT) != 0);
+                                    continue;
+                                }
                                 // LOADERVIEW req_1776: an editor-driven loader (external camera)
                                 // is a passive viewport — DON'T capture the pointer for in-world
                                 // look; fall through so the event reaches the editor's JS overlay
                                 // (its drag rotates the iso camera). Only a playable loader grabs it.
                                 if (!world_loader.isExternalCamera(loader_node.id)) {
-                                    captureWorldLoaderPointer(loader_node);
+                                    captureWorldLoaderPointer(loader_node, false, false);
                                     if (event.button.button == c.SDL_BUTTON_RIGHT) {
                                         world_loader.setAiming(loader_node.id, true);
                                         world_loader_mouse_aiming = true;
@@ -5158,14 +5184,25 @@ pub fn run(config_in: AppConfig) !void {
                             state_mod.markDirty();
                             continue;
                         }
-                    } else if (world_loader.anyPaintArmed()) {
+                    } else if (world_loader.anyPaintArmed() or world_loader.anyWallToolArmed()) {
                         // hover: the loader polls the mouse per frame for the brush
-                        // beam — just keep frames coming while the cursor moves.
+                        // beam / wall-tool overlay — just keep frames coming while
+                        // the cursor moves (req_4520).
                         state_mod.markDirty();
                     }
                     if (world_loader_mouse_node_id != 0) {
                         if (findWorldLoaderNodeById(config.root, world_loader_mouse_node_id) == null) {
                             releaseWorldLoaderPointer();
+                            continue;
+                        }
+                        if (world_loader_mouse_authoring) {
+                            _ = world_loader.authoringCameraDrag(
+                                world_loader_mouse_node_id,
+                                event.motion.xrel,
+                                event.motion.yrel,
+                                world_loader_mouse_panning,
+                            );
+                            state_mod.markDirty();
                             continue;
                         }
                         world_loader.mouseLook(world_loader_mouse_node_id, event.motion.xrel, event.motion.yrel);
@@ -5458,6 +5495,11 @@ pub fn run(config_in: AppConfig) !void {
                         state_mod.markDirty();
                         continue;
                     }
+                    if (event.button.button == c.SDL_BUTTON_LEFT and world_loader_mouse_authoring) {
+                        releaseWorldLoaderPointer();
+                        state_mod.markDirty();
+                        continue;
+                    }
                     if (event.button.button == c.SDL_BUTTON_RIGHT and world_loader_mouse_node_id != 0 and world_loader_mouse_aiming) {
                         world_loader.setAiming(world_loader_mouse_node_id, false);
                         world_loader_mouse_aiming = false;
@@ -5691,6 +5733,18 @@ pub fn run(config_in: AppConfig) !void {
                     // pointer and must win before the native model camera. Interactive children
                     // are irrelevant to this decision (req_4244).
                     const scroll_container_owns_wheel = events.scrollContainerOwnsWheel(config.root, mx, my);
+                    // The Animation Foundry preview uses the same native input
+                    // authority as the model viewport. Wheel dolly never enters
+                    // JS, but controls and scroll containers layered over the
+                    // preview retain first refusal.
+                    if (!scroll_container_owns_wheel and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {
+                        if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
+                            if (loader_node.world_loader_preview_stage and world_loader.authoringCameraDolly(loader_node.id, event.wheel.y)) {
+                                state_mod.markDirty();
+                                continue;
+                            }
+                        }
+                    }
                     // Native mesh-editor zoom (modelview): wheel over the viewport dollies the
                     // orbit camera. Over chrome or any scroll surface it falls through.
                     if (r3d.meshEditCapturing() and !scroll_container_owns_wheel and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {

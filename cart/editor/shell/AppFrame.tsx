@@ -128,7 +128,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
-import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand } from '../world/architectureCommand';
+import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand, setEdgeDimensionsCommand } from '../world/architectureCommand';
 import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, snapOpeningSlot } from '../world/openingTools';
 import { architectureHost } from '../world/architectureHost';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
@@ -153,8 +153,10 @@ import {
   EXTERNAL_AUTO_RIG_PREVIEW_OVERLAY,
   IDLE_EXTERNAL_AUTO_RIG,
   requestSkinTokensRig,
+  verifyExternalAutoRigPreview,
   type ExternalAutoRigUiState,
 } from '../skeleton/externalAutoRig';
+import { ensureSkinTokensReady } from '../skeleton/skinTokensService';
 import {
   parseCharacterRigSeatAction,
   rigStatusFromSnapshot,
@@ -175,7 +177,7 @@ import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, commandExists, deviceToolReplayable, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishCharacterRigUndoDepths, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import { characterRigHistoryShouldOwnInput } from '../stage/characterRigViewport';
+import { characterRigHistoryShouldOwnInput, characterRigViewportToolHandoff } from '../stage/characterRigViewport';
 import { readSeatCorpusDoc } from '../agent/seatCorpus';
 import { readSeatNotes, seatCorpusAdapter, writeSeatNotes } from '../agent/seatCorpusStore';
 import { backgroundSeatRefusal, compactSeatReply, createAgentSeat, executeSeatRequestAtShell, readSeatPercept, seatBatchGenerationReason, seatRequestTarget, type AgentSeat, type SeatPartPercept, type SeatPercept, type SeatPrimitiveSpec, type SeatReply, type SeatRequest, type SeatShellReceipt } from '../agent/seatApi';
@@ -3269,8 +3271,19 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: 'Auto-Rig needs the visible model to have an open humanoid rig session' }));
       return;
     }
+    if (current.modelTool.blocking !== null) {
+      setState((prev) => ({ ...prev, status: 'Auto-Rig cannot start during an active mesh gesture — finish or cancel it first' }));
+      return;
+    }
     const roll = prior.modelId === modelId ? prior.roll + 1 : 1;
-    publishExternalAutoRigState({ phase: 'running', modelId, roll });
+    publishExternalAutoRigState({ phase: 'running', modelId, roll, step: 'starting' });
+    setState((prev) => ({
+      ...prev,
+      rightPane: 'rig',
+      rightPanelCollapsed: false,
+      modelTool: characterRigViewportToolHandoff(prev.modelTool),
+      status: 'Auto-Rig is preparing the resident model…',
+    }));
     try {
       // The first roll exports an explicit saved revision. A reroll reuses that
       // immutable geometry and must not accidentally persist the preview it is
@@ -3306,6 +3319,19 @@ export default function AppFrame() {
         lo: Number(range[0]),
         hi: Number(range[1]),
       }));
+      await ensureSkinTokensReady((phase) => {
+        if (activeSessionModelIdRef.current !== modelId) return;
+        const lane = externalAutoRigStateRef.current;
+        if (lane.phase === 'running' && lane.modelId === modelId) {
+          publishExternalAutoRigState({ ...lane, step: phase === 'ready' ? 'generating' : 'starting' });
+        }
+        const status = phase === 'checking'
+          ? 'Auto-Rig is checking the SkinTokens service…'
+          : phase === 'starting'
+            ? 'Auto-Rig is starting SkinTokens and loading the ML model…'
+            : 'SkinTokens is ready; generating the rig…';
+        setState((prev) => ({ ...prev, status }));
+      });
       const rig = await requestSkinTokensRig({
         geometryPath: modelPackageGeometryPath(packageDir, pkg.skeleton),
         packageDir,
@@ -3314,20 +3340,25 @@ export default function AppFrame() {
       if (activeSessionModelIdRef.current !== modelId || api.currentOpenTarget?.()?.modelId !== modelId) {
         throw new Error('Auto-Rig finished after the visible model changed; reopen the character and reroll');
       }
+      publishExternalAutoRigState({ phase: 'running', modelId, roll, step: 'applying' });
+      setState((prev) => ({ ...prev, status: 'SkinTokens finished; adopting weights and hydrating the stage…' }));
       const semanticReceipt = withNativeMeshActionSource('dock', () =>
         stampHumanoidSemanticsFromParts(globalThis as any, parts));
       if (!semanticReceipt) {
         throw new Error('Auto-Rig anatomy stamping is unavailable — restart into the rebuilt editor');
       }
+      if (semanticReceipt.changed > 0) markModelDirty(modelId);
       api.command({
         kind: 'adoptExternalRig',
         partNames: metadata.map((part) => part.name),
         rig,
       });
-      const previewSnapshot = api.command({
+      api.command({
         kind: 'setOverlay',
         overlay: EXTERNAL_AUTO_RIG_PREVIEW_OVERLAY,
       });
+      const previewSnapshot = api.command({ kind: 'setViewportActive', active: true });
+      verifyExternalAutoRigPreview(previewSnapshot, rig);
       characterRigSnapshotRef.current = previewSnapshot;
       setCharacterRigSnapshot(previewSnapshot);
       markModelDirty(modelId);
@@ -3343,12 +3374,17 @@ export default function AppFrame() {
         ...prev,
         rightPane: 'rig',
         rightPanelCollapsed: false,
-        status: `Auto-Rig roll ${roll}: ${rig.joints.length} joints previewing${semanticReceipt.recognizedParts > 0 ? `; ${semanticReceipt.recognizedParts} named parts stamped into model semantics` : ''} — adjust, Reroll, or Accept`,
+        status: `Auto-Rig roll ${roll}: stage hydrated ${previewSnapshot.viewportHydration.logicalVertexCount} vertices / ${rig.joints.length} joints${semanticReceipt.recognizedParts > 0 ? `; ${semanticReceipt.recognizedParts} named parts stamped into model semantics` : ''} — adjust, Reroll, or Accept`,
       }));
     } catch (error) {
-      if (externalAutoRigStateRef.current.phase === 'running' &&
-          externalAutoRigStateRef.current.modelId === modelId) publishExternalAutoRigState(IDLE_EXTERNAL_AUTO_RIG);
-      setState((prev) => ({ ...prev, status: `Auto-Rig failed: ${error instanceof Error ? error.message : String(error)}` }));
+      const message = error instanceof Error ? error.message : String(error);
+      publishExternalAutoRigState({ phase: 'failed', modelId, roll, message });
+      setState((prev) => ({
+        ...prev,
+        rightPane: 'rig',
+        rightPanelCollapsed: false,
+        status: `Auto-Rig failed: ${message}`,
+      }));
     }
   };
 
@@ -5090,6 +5126,38 @@ export default function AppFrame() {
       contextOpen: false,
       status: 'Wall deleted',
     }, 'Delete wall'));
+  };
+
+  /** Re-dimension the SELECTED wall (req_4520): the host gizmo's height or
+   *  thickness drag finished — one undoable engine edit, same shape as
+   *  drawWall/delete. Support stays exactly what the edge already had. */
+  const setSelectedWallDimensions = (heightU: number, thicknessU: number) => {
+    const current = stateRef.current;
+    const selection = current.architectureSelection;
+    if (selection.kind !== 'wallEdge') return;
+    const edge = current.architecture.walls.edges.find((entry) => entry.id === selection.edgeId);
+    if (!edge) return;
+    if (edge.heightU === heightU && edge.thicknessU === thicknessU) return;
+    const command = setEdgeDimensionsCommand(
+      architectureCommandId('dimensions', current.seq),
+      current.architecture.revision,
+      edge,
+      heightU,
+      thicknessU,
+    );
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED dimensions ${selection.edgeId}: ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `wall resize rejected: ${result.reason}` }));
+      return;
+    }
+    console.warn(`[wall] wall ${selection.edgeId} re-dimensioned to ${heightU}u × ${thicknessU}u`);
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      seq: prev.seq + 1,
+      status: `Wall resized (${(heightU / 16).toFixed(2)}m × ${(thicknessU / 16).toFixed(2)}m)`,
+    }, 'Resize wall'));
   };
 
   /** The kit the Place Door/Window tool measures with (req_4513): the palette
@@ -8789,6 +8857,7 @@ export default function AppFrame() {
         if (operation === 'status') {
           if (lane.phase === 'running') return fail('Auto-Rig is still running');
           if (lane.phase === 'preview') return ok(lane);
+          if (lane.phase === 'failed') return fail(`Auto-Rig failed: ${lane.message}`);
           return fail(live.status.startsWith('Auto-Rig failed:') ? live.status : 'no Auto-Rig preview is active');
         }
         if (operation === 'start' || operation === 'reroll') {
@@ -11657,6 +11726,7 @@ export default function AppFrame() {
             openingFootprints={openingFootprints}
             wallDefaults={installedWallStyles()[0]?.wallStyleDefaults ?? null}
             onSelectWall={selectWallEdge}
+            onWallDimensions={setSelectedWallDimensions}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}

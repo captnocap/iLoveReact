@@ -43,12 +43,25 @@ export function applyArchitectureCommand(
 
 /** Command ids are minted from the editor's monotonic seq so engine-derived
  * vertex/edge ids (`<commandId>:v:<n>`) stay unique per document. */
-export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening', seq: number): string {
+export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening' | 'dimensions', seq: number): string {
   return `arch:${verb}:${seq}`;
 }
 
 export function deleteEdgeCommand(commandId: string, expectedRevision: number, edgeId: string): ArchitectureCommand {
   return { commandId, expectedRevision, kind: 'deleteEdge', edgeId };
+}
+
+/** Re-dimension a PLACED wall (req_4520): the selected edge's height/thickness
+ * change through the engine, support untouched — the host gizmo's drag is the
+ * authoring gesture, this command is its one semantic edit. */
+export function setEdgeDimensionsCommand(
+  commandId: string,
+  expectedRevision: number,
+  edge: { id: string; support: ArchitectureSource['walls']['edges'][number]['support']; },
+  heightU: number,
+  thicknessU: number,
+): ArchitectureCommand {
+  return { commandId, expectedRevision, kind: 'setEdgeDimensions', edgeId: edge.id, support: edge.support, heightU, thicknessU };
 }
 
 /** Cut one opening: the engine subtracts the kit's measured footprint at the

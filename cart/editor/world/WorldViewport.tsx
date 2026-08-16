@@ -38,7 +38,7 @@ import { mapHeightAt, mapRenderedHeightMax, subscribeMapTerrainChanges } from '.
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
-import { snapWallHeightU, snapWallPoint, snapWallThicknessU, wallPointerRelease, STOREY_HEIGHT_U, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
+import { snapWallPoint, wallPointerRelease, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
 import { setLiveArchitecture } from './architectureBake';
 import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
 import { architectureHost } from './architectureHost';
@@ -229,6 +229,9 @@ export default function WorldViewport(props: {
   /** A Select-tool click resolved to a wall face (piece picks take precedence);
    *  null never rides this — the shared miss path clears both selections. */
   onSelectWall: (hit: { edgeId: string; side: 'a' | 'b' }) => void;
+  /** A host-gizmo dimension drag finished on the SELECTED wall (req_4520):
+   *  apply the new measurements through setEdgeDimensions. */
+  onWallDimensions?: (heightU: number, thicknessU: number) => void;
   /** Cut Opening (req_4503): the armed kit the ghost measures with. Null means
    *  the tool is inert (nothing installed) — the owner reports why. */
   openingKit: OpeningKitArm | null;
@@ -336,6 +339,8 @@ export default function WorldViewport(props: {
   onDrawWallRef.current = props.onDrawWall;
   const onSelectWallRef = useRef(props.onSelectWall);
   onSelectWallRef.current = props.onSelectWall;
+  const onWallDimensionsRef = useRef(props.onWallDimensions);
+  onWallDimensionsRef.current = props.onWallDimensions;
   const onCutOpeningRef = useRef(props.onCutOpening);
   onCutOpeningRef.current = props.onCutOpening;
   const onSelectOpeningRef = useRef(props.onSelectOpening);
@@ -343,11 +348,12 @@ export default function WorldViewport(props: {
   const openingKitRef = useRef(props.openingKit);
   openingKitRef.current = props.openingKit;
   const wallAnchorRef = useRef<WallDrawGesture | null>(null);
-  // The wall ghost (req_4474): the snapped lattice point under the cursor plus
-  // the live anchor, projected into a storey-tall guide rectangle each render.
-  // State (not the ref) so anchoring and cursor cell-crossings re-render; the
-  // lattice snap itself throttles updates to one per crossed metre.
-  const [wallGhost, setWallGhost] = useState<{ anchor: WallLatticePoint | null; cursor: WallLatticePoint | null }>({ anchor: null, cursor: null });
+  // req_4520: the wall overlay — lattice cursor, anchor gizmo, hologram span,
+  // magnet marker, and measurement drags — is HOST-RENDERED per frame
+  // (framework/world_loader/wall_tool.zig). JS keeps only gesture-rate work:
+  // the anchor mirror for the semantic command flow and a params mirror for
+  // commits. Zero JS runs per mouse move (React writes UI, never systems).
+  const wallGizmoNativeRef = useRef(false);
   // Place Door/Window ghost (req_4513): ALWAYS visible while the tool is
   // armed — on a wall it carries the ENGINE's nearest legal slot (or the
   // refusal reason); off a wall it stands at the ground cursor so the armed
@@ -369,6 +375,9 @@ export default function WorldViewport(props: {
       || (prev?.mode === 'ground' && next?.mode === 'ground'
         && Math.abs(prev.xM - next.xM) < 0.05 && Math.abs(prev.zM - next.zM) < 0.05 && Math.abs(prev.yM - next.yM) < 0.05);
     if (same) return;
+    // req_4524 diagnosis: every ghost transition is ring-visible — this is
+    // cell-crossing rate, not mousemove rate.
+    console.warn(`[wall] ghost ${prev ? prev.mode : 'null'} -> ${next ? (next.mode === 'wall' ? `wall ${next.edgeId}@(${next.anchor.columnU},${next.anchor.rowU}) slot=${next.slot ? `${next.slot.columnU},${next.slot.rowU}` : 'NONE'}${next.reason ? ` reason=${next.reason}` : ''}` : `ground (${next.xM.toFixed(1)},${next.zM.toFixed(1)})`) : 'null'}`);
     openingGhostRef.current = next;
     setOpeningGhostState(next);
   }, []);
@@ -390,30 +399,84 @@ export default function WorldViewport(props: {
     () => wallParamsRef.current ?? wallDefaultsRef.current,
     [],
   );
-  const wallGizmoDragRef = useRef<{
-    handle: 'height' | 'thickness';
-    startMouse: { x: number; y: number };
-    startHeightU: number;
-    startThicknessU: number;
-    axis: { x: number; y: number; pxPerMeter: number };
-  } | null>(null);
+  // One resolver for every wall-tool host door: null when the loader has not
+  // mounted or the build lacks the compiled world.
+  const wallDoor = useCallback((name: string): { nodeId: number; fn: (...args: any[]) => any } | null => {
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    const fn = (g as any)[name];
+    return nodeId && typeof fn === 'function' ? { nodeId, fn } : null;
+  }, []);
+  // The host anchor mirror (gesture rate): the overlay's hologram spans from it.
+  const syncHostAnchor = useCallback((point: WallLatticePoint | null) => {
+    const door = wallDoor('__compiled_world_wall_tool_anchor');
+    if (door) door.fn(door.nodeId, point ? 1 : 0, point?.xU ?? 0, point?.zU ?? 0);
+  }, [wallDoor]);
+  // End (or read past) the host's measurement drag and adopt its params — the
+  // gizmo is the params authority while a drag/nudge is in flight (req_4520).
+  const syncWallParamsFromHost = useCallback((): { heightU: number; thicknessU: number; wasDrag: boolean } | null => {
+    const door = wallDoor('__compiled_world_wall_tool_release');
+    if (!door) return null;
+    const ret = door.fn(door.nodeId);
+    if (!ret) return null;
+    const arr = new Float32Array(ret);
+    const heightU = arr[0] ?? 0;
+    const thicknessU = arr[1] ?? 0;
+    if (heightU > 0 && thicknessU > 0) setWallParams({ heightU, thicknessU });
+    return { heightU, thicknessU, wasDrag: (arr[2] ?? 0) !== 0 };
+  }, [wallDoor, setWallParams]);
+  // Arm the host overlay the moment the tool is armed (req_4520 #1: the gizmo
+  // shows on the BUTTON, not on the first click) and keep floor/params synced.
+  useEffect(() => {
+    const door = wallDoor('__compiled_world_wall_tool_arm');
+    if (!door) return;
+    const params = wallParams ?? props.wallDefaults;
+    door.fn(door.nodeId, props.tool === 'drawWall' ? 1 : 0, props.floor, params?.heightU ?? 0, params?.thicknessU ?? 0);
+  }, [props.tool, props.floor, props.wallDefaults, wallParams, wallDoor]);
+  // Magnet vertices for the host's gold marker — source-change rate, visual
+  // only; command-time vertex identity stays in wallTools.ts.
+  useEffect(() => {
+    const door = wallDoor('__compiled_world_wall_tool_magnets');
+    if (!door) return;
+    const vertices = props.architecture.walls.vertices.filter((v) => v.floor === props.floor);
+    const buf = new Float32Array(vertices.length * 2);
+    vertices.forEach((v, i) => { buf[i * 2] = v.xU; buf[i * 2 + 1] = v.zU; });
+    door.fn(door.nodeId, buf);
+  }, [props.architecture, props.floor, wallDoor]);
+  // The selected placed wall grows the same host gizmo on its midpoint —
+  // height/thickness re-grab wired to setEdgeDimensions (req_4520 #4).
+  useEffect(() => {
+    const door = wallDoor('__compiled_world_wall_tool_selection');
+    if (!door) return;
+    const selection = props.architectureSelection;
+    if (selection.kind === 'wallEdge' && props.tool === 'select') {
+      const edge = props.architecture.walls.edges.find((entry) => entry.id === selection.edgeId);
+      const start = edge ? props.architecture.walls.vertices.find((v) => v.id === edge.startVertexId) : null;
+      const end = edge ? props.architecture.walls.vertices.find((v) => v.id === edge.endVertexId) : null;
+      if (edge && start && end) {
+        door.fn(door.nodeId, 1, start.xU, start.zU, end.xU, end.zU, start.floor, edge.heightU, edge.thicknessU);
+        return;
+      }
+    }
+    door.fn(door.nodeId, 0, 0, 0, 0, 0, 0, 0, 0);
+  }, [props.architectureSelection, props.architecture, props.tool, wallDoor]);
   useEffect(() => {
     if (props.tool !== 'drawWall') {
       // req_4476 diagnostic: an anchor dying HERE means the tool flickered away
       // from drawWall between clicks — name the tool it left for.
       if (wallAnchorRef.current) console.warn(`[wall] anchor CANCELLED — tool left drawWall for '${props.tool}'`);
       wallAnchorRef.current = null;
-      wallGizmoDragRef.current = null;
-      setWallGhost((prev) => (prev.anchor || prev.cursor ? { anchor: null, cursor: null } : prev));
+      wallGizmoNativeRef.current = false;
+      syncHostAnchor(null);
     }
     if (props.tool !== 'cutOpening') {
       openingGhostRef.current = null;
       setOpeningGhostState((prev) => (prev ? null : prev));
       openingSlotsCacheRef.current = null;
+      openingTrackTraceRef.current = 0;
     } else {
       console.warn(`[wall] viewport cutOpening armed — kit=${props.openingKit ? props.openingKit.label : 'NONE (prop chain dropped it)'}`);
     }
-  }, [props.tool, props.openingKit]);
+  }, [props.tool, props.openingKit, syncHostAnchor]);
   // req_4476 diagnostic: every drawWall-adjacent tool transition, logged from
   // render so the event ring shows the exact flicker sequence.
   const toolTraceRef = useRef(props.tool);
@@ -941,46 +1004,6 @@ export default function WorldViewport(props: {
     return gp ? { x: gp.x, z: gp.z, terrainY: 0 } : null;
   }, [stage, props.floor]);
 
-  // The wall ghost's cursor leg (req_4474): every hover/drag move in Draw Wall
-  // snaps the ground point onto the lattice; state only changes when the
-  // snapped point crosses into a new cell, so re-renders stay at metre rate.
-  const trackWallCursor = useCallback((px: number, py: number) => {
-    if (toolRef.current !== 'drawWall') return;
-    const ground = groundUnder(px, py);
-    const point = ground ? snapWallPoint(ground.x, ground.z) : null;
-    setWallGhost((prev) => {
-      if (prev.cursor === point) return prev;
-      if (prev.cursor && point && prev.cursor.xU === point.xU && prev.cursor.zU === point.zU) return prev;
-      return { ...prev, cursor: point };
-    });
-  }, [groundUnder]);
-
-  // The wall gizmo's screen frame (req_4479): the anchor base + the vertical
-  // height arm projected to pane px, with the drag's exact px-per-metre
-  // mapping — same construction as the selection gizmo's axes.
-  const wallGizmoScreen = useCallback((): {
-    base: { x: number; y: number };
-    top: { x: number; y: number };
-    axis: { x: number; y: number; pxPerMeter: number };
-  } | null => {
-    const anchor = wallAnchorRef.current;
-    const params = currentWallParams();
-    if (!anchor || anchor.kind !== 'anchored' || !params) return null;
-    const r = rectRef.current;
-    const baseY = anchor.floor * METERS_PER_LEVEL;
-    const ax = anchor.start.xU / ARCHITECTURE_UNITS_PER_METER;
-    const az = anchor.start.zU / ARCHITECTURE_UNITS_PER_METER;
-    const heightM = params.heightU / ARCHITECTURE_UNITS_PER_METER;
-    const base = stage.project(ax, baseY, az, r);
-    const top = stage.project(ax, baseY + heightM, az, r);
-    if (!base || !top) return null;
-    const vx = top.x - base.x;
-    const vy = top.y - base.y;
-    const len = Math.hypot(vx, vy);
-    if (len < 0.001) return null;
-    return { base, top, axis: { x: vx / len, y: vy / len, pxPerMeter: len / heightM } };
-  }, [stage, currentWallParams]);
-
   // Wall pick (req_4480): the ENGINE resolves the click — the same raycast the
   // draw tool's future opening placement uses, so picked geometry is exactly
   // rendered geometry. Null when the host is absent, nothing is drawn, or the
@@ -1012,8 +1035,14 @@ export default function WorldViewport(props: {
   // Cut Opening hover (req_4503): raycast the wall under the cursor, then snap
   // the ghost to the nearest slot the ENGINE enumerated for the armed kit —
   // or carry the reason the hovered wall refuses the kit outright.
+  const openingTrackTraceRef = useRef(0);
   const trackOpeningCursor = useCallback((px: number, py: number) => {
     if (toolRef.current !== 'cutOpening') return;
+    // One heartbeat per arm session proves the tracker runs at all (req_4524).
+    if (openingTrackTraceRef.current === 0) {
+      openingTrackTraceRef.current = 1;
+      console.warn(`[wall] hover tracker LIVE — kit=${openingKitRef.current ? openingKitRef.current.label : 'NONE'} hostLive=${architectureHostLive()} edges=${architectureRef.current.walls.edges.length}`);
+    }
     const kit = openingKitRef.current;
     const source = architectureRef.current;
     if (!kit) {
@@ -1376,23 +1405,19 @@ export default function WorldViewport(props: {
         return;
       }
     }
-    // Wall gizmo grab (req_4479): with a wall anchored, a down on the height
-    // arm's head or the thickness hub owns the whole gesture — the release
-    // neither anchors nor commits, it just finishes the measurement drag.
-    if (!shift && toolRef.current === 'drawWall' && wallAnchorRef.current) {
-      const screen = wallGizmoScreen();
-      const params = currentWallParams();
-      if (screen && params) {
-        const overTop = Math.hypot(p.x - screen.top.x, p.y - screen.top.y) <= GIZMO_HIT_PX + GIZMO_HEAD_PX;
-        const overBase = !overTop && Math.hypot(p.x - screen.base.x, p.y - screen.base.y) <= GIZMO_HUB_HIT_PX * 1.5;
-        if (overTop || overBase) {
-          wallGizmoDragRef.current = {
-            handle: overTop ? 'height' : 'thickness',
-            startMouse: p,
-            startHeightU: params.heightU,
-            startThicknessU: params.thicknessU,
-            axis: screen.axis,
-          };
+    // Wall gizmo (req_4520): the HOST hit-tests the handles — a grab starts a
+    // native measurement drag (tracked per frame with zero JS), a nudge steps
+    // thickness one whole u at press. Nonzero owns the whole gesture: the
+    // release neither anchors, commits, pans, nor picks.
+    if (!shift && (toolRef.current === 'drawWall' || toolRef.current === 'select')) {
+      const door = wallDoor('__compiled_world_wall_tool_press');
+      if (door) {
+        const r = rectRef.current;
+        const ret = door.fn(door.nodeId, r.x + p.x, r.y + p.y);
+        const code = ret ? (new Float32Array(ret)[0] ?? 0) : 0;
+        if (code > 0) {
+          wallGizmoNativeRef.current = true;
+          if (code >= 2) syncWallParamsFromHost(); // nudge: applied at press
           dragRef.current = null;
           return;
         }
@@ -1438,29 +1463,13 @@ export default function WorldViewport(props: {
       flora: null,
     };
     if (paint) paintFaceAt(p.x, p.y, paint);
-  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt, floraSampleAt, gizmoHandleAt, gizmoTarget, gizmoScreen, gizmoWorldAngleAt, props.paintActive, wallGizmoScreen, currentWallParams]);
+  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt, floraSampleAt, gizmoHandleAt, gizmoTarget, gizmoScreen, gizmoWorldAngleAt, props.paintActive, wallDoor, syncWallParamsFromHost]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);
-    // Wall gizmo drag (req_4479): pixels along the projected height arm divide
-    // back into metres; the thickness hub maps horizontal travel through the
-    // same scale. Snapped/clamped by the tool's measurement laws.
-    const wgd = wallGizmoDragRef.current;
-    if (wgd) {
-      const params = currentWallParams();
-      if (params) {
-        if (wgd.handle === 'height') {
-          const alongPx = (p.x - wgd.startMouse.x) * wgd.axis.x + (p.y - wgd.startMouse.y) * wgd.axis.y;
-          const heightU = snapWallHeightU(wgd.startHeightU + (alongPx / wgd.axis.pxPerMeter) * ARCHITECTURE_UNITS_PER_METER);
-          if (heightU !== params.heightU) setWallParams({ ...params, heightU });
-        } else {
-          const alongPx = p.x - wgd.startMouse.x;
-          const thicknessU = snapWallThicknessU(wgd.startThicknessU + (alongPx / wgd.axis.pxPerMeter) * ARCHITECTURE_UNITS_PER_METER);
-          if (thicknessU !== params.thicknessU) setWallParams({ ...params, thicknessU });
-        }
-      }
-      return;
-    }
+    // A native wall-gizmo gesture (req_4520) owns the pointer: the HOST tracks
+    // the measurement drag per frame off the live mouse — JS does nothing here.
+    if (wallGizmoNativeRef.current) return;
     // A live gizmo drag (req_3367) owns the pointer: map travel through the
     // grabbed handle into a candidate transform, preview it, commit on release.
     const gd = gizmoDragRef.current;
@@ -1601,15 +1610,14 @@ export default function WorldViewport(props: {
       }
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-    trackWallCursor(p.x, p.y);
     trackOpeningCursor(p.x, p.y);
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackWallCursor, trackOpeningCursor, currentWallParams, setWallParams]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackOpeningCursor]);
 
   const onUp = useCallback((e: any) => {
     if (interactionLockedRef.current) {
       dragRef.current = null;
       gizmoDragRef.current = null;
-      wallGizmoDragRef.current = null;
+      wallGizmoNativeRef.current = false;
       runRef.current = null;
       setMovePreview(null);
       setGizmoPreview(null);
@@ -1618,12 +1626,16 @@ export default function WorldViewport(props: {
       return;
     }
     publishSnapMark(null); // any release retires the vertex-snap marker
-    // Wall gizmo release (req_4479): the measurement drag is complete — the
-    // adjusted params already live in wallParams; nothing anchors or commits.
-    if (wallGizmoDragRef.current) {
-      const params = currentWallParams();
-      if (params) console.warn(`[wall] pending wall set to ${params.heightU}u tall × ${params.thicknessU}u thick`);
-      wallGizmoDragRef.current = null;
+    // Native wall-gizmo release (req_4520): the HOST owned this gesture — end
+    // its measurement drag, adopt the params, and swallow the click. A drag on
+    // a SELECTED wall's gizmo re-dimensions the placed wall (setEdgeDimensions).
+    if (wallGizmoNativeRef.current) {
+      wallGizmoNativeRef.current = false;
+      const result = syncWallParamsFromHost();
+      if (result) console.warn(`[wall] pending wall set to ${result.heightU}u tall × ${result.thicknessU}u thick`);
+      if (result?.wasDrag && toolRef.current === 'select') {
+        onWallDimensionsRef.current?.(result.heightU, result.thicknessU);
+      }
       return;
     }
     // Gizmo release (req_3367): commit the previewed transform ONCE through the
@@ -1702,7 +1714,7 @@ export default function WorldViewport(props: {
       );
       if (routed.kind === 'anchor') {
         wallAnchorRef.current = routed.gesture;
-        setWallGhost((prev) => ({ ...prev, anchor: routed.gesture.start }));
+        syncHostAnchor(routed.gesture.start);
         console.warn(`[wall] anchored at (${routed.gesture.start.xU}u, ${routed.gesture.start.zU}u) — click or drag to the far end`);
         return;
       }
@@ -1720,12 +1732,12 @@ export default function WorldViewport(props: {
         // retried toward a legal endpoint.
         if (accepted) {
           wallAnchorRef.current = { kind: 'anchored', floor: routed.commit.floor, start: routed.commit.end };
-          setWallGhost((prev) => ({ ...prev, anchor: routed.commit.end }));
+          syncHostAnchor(routed.commit.end);
         }
         return;
       }
       wallAnchorRef.current = null;
-      setWallGhost((prev) => (prev.anchor ? { ...prev, anchor: null } : prev));
+      syncHostAnchor(null);
       console.warn(`[wall] draw dropped — ${routed.reason}`);
       return;
     }
@@ -1811,7 +1823,7 @@ export default function WorldViewport(props: {
       [{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }],
       { mode: 'click', inputAtMs: Date.now(), pointerX: d.x0, pointerY: d.y0 },
     );
-  }, [resolveSnap, groundUnder, applyMoveVertexSnap, publishSnapMark, props.onPlace, props.onMove, local, stage, pickPieceAt, currentWallParams, pickWallAt]);
+  }, [resolveSnap, groundUnder, applyMoveVertexSnap, publishSnapMark, props.onPlace, props.onMove, local, stage, pickPieceAt, currentWallParams, pickWallAt, syncHostAnchor, syncWallParamsFromHost]);
 
   // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
   // mode and report it up with the WINDOW coords (the root-mounted menu lands at the
@@ -2042,98 +2054,9 @@ export default function WorldViewport(props: {
       });
     }
   }
-  // Draw Wall ghost (req_4474): a lattice diamond under the cursor always; once
-  // anchored, a guide rectangle from the anchor to the cursor at the PENDING
-  // wall height (req_4479) — base line, top line, and both verticals — in the
-  // placement-ghost green.
-  const wallSegs: number[] = [];
-  const wallGizmoLines: { color: string; segs: number[]; width: number }[] = [];
-  let wallReadout: { x: number; y: number; text: string } | null = null;
-  if (props.tool === 'drawWall') {
-    const pendingParams = wallParams ?? props.wallDefaults;
-    const baseY = props.floor * METERS_PER_LEVEL;
-    const topY = baseY + (pendingParams?.heightU ?? STOREY_HEIGHT_U) / ARCHITECTURE_UNITS_PER_METER;
-    const ground = (pt: WallLatticePoint) => stage.project(pt.xU / ARCHITECTURE_UNITS_PER_METER, baseY, pt.zU / ARCHITECTURE_UNITS_PER_METER, rect);
-    const top = (pt: WallLatticePoint) => stage.project(pt.xU / ARCHITECTURE_UNITS_PER_METER, topY, pt.zU / ARCHITECTURE_UNITS_PER_METER, rect);
-    const diamond = (mark: { x: number; y: number }, r: number) => {
-      wallSegs.push(
-        mark.x, mark.y - r, mark.x + r, mark.y,
-        mark.x + r, mark.y, mark.x, mark.y + r,
-        mark.x, mark.y + r, mark.x - r, mark.y,
-        mark.x - r, mark.y, mark.x, mark.y - r,
-      );
-    };
-    const anchorGround = wallGhost.anchor ? ground(wallGhost.anchor) : null;
-    const cursorGround = wallGhost.cursor ? ground(wallGhost.cursor) : null;
-    if (cursorGround) diamond(cursorGround, 5);
-    if (anchorGround) diamond(anchorGround, 6);
-    const spans = wallGhost.anchor && wallGhost.cursor
-      && (wallGhost.anchor.xU !== wallGhost.cursor.xU || wallGhost.anchor.zU !== wallGhost.cursor.zU);
-    if (spans && anchorGround && cursorGround) {
-      const anchorTop = top(wallGhost.anchor!);
-      const cursorTop = top(wallGhost.cursor!);
-      wallSegs.push(anchorGround.x, anchorGround.y, cursorGround.x, cursorGround.y);
-      if (anchorTop && cursorTop) {
-        wallSegs.push(
-          anchorTop.x, anchorTop.y, cursorTop.x, cursorTop.y,
-          anchorGround.x, anchorGround.y, anchorTop.x, anchorTop.y,
-          cursorGround.x, cursorGround.y, cursorTop.x, cursorTop.y,
-        );
-      }
-    }
-    // The anchor gizmo (req_4479): a 3D corner spawned on the point — the
-    // vertical height arm (pull to set the pending wall height), a ground L
-    // marking the right angle, and the thickness hub at the base. Studio
-    // gizmo vocabulary throughout (req_3367 colors, arm/head/hub sizes).
-    if (wallGhost.anchor && pendingParams && anchorGround) {
-      const screen = wallGizmoScreen();
-      if (screen) {
-        const active = wallGizmoDragRef.current?.handle ?? null;
-        const perpX = -screen.axis.y;
-        const perpY = screen.axis.x;
-        wallGizmoLines.push({
-          color: active === 'height' ? GIZMO_ACTIVE_COLOR : GIZMO_Y_COLOR,
-          width: 2.5,
-          segs: [
-            screen.base.x, screen.base.y, screen.top.x, screen.top.y,
-            screen.top.x, screen.top.y, screen.top.x + (-screen.axis.x * 0.8 + perpX * 0.55) * GIZMO_HEAD_PX, screen.top.y + (-screen.axis.y * 0.8 + perpY * 0.55) * GIZMO_HEAD_PX,
-            screen.top.x, screen.top.y, screen.top.x + (-screen.axis.x * 0.8 - perpX * 0.55) * GIZMO_HEAD_PX, screen.top.y + (-screen.axis.y * 0.8 - perpY * 0.55) * GIZMO_HEAD_PX,
-          ],
-        });
-        // The 90° ground corner: one-metre arms along world X and Z.
-        const anchorPt = wallGhost.anchor;
-        const armEnd = (dxM: number, dzM: number) => stage.project(
-          anchorPt.xU / ARCHITECTURE_UNITS_PER_METER + dxM,
-          baseY,
-          anchorPt.zU / ARCHITECTURE_UNITS_PER_METER + dzM,
-          rect,
-        );
-        const xArm = armEnd(1, 0);
-        const zArm = armEnd(0, 1);
-        const cornerSegs: number[] = [];
-        if (xArm) cornerSegs.push(anchorGround.x, anchorGround.y, xArm.x, xArm.y);
-        if (zArm) cornerSegs.push(anchorGround.x, anchorGround.y, zArm.x, zArm.y);
-        if (cornerSegs.length) wallGizmoLines.push({ color: GIZMO_RING_COLOR, segs: cornerSegs, width: 1.6 });
-        // Thickness hub: the studio's solid square at the base.
-        const h = GIZMO_HUB_PX;
-        wallGizmoLines.push({
-          color: active === 'thickness' ? GIZMO_ACTIVE_COLOR : GIZMO_HUB_COLOR,
-          width: 4,
-          segs: [
-            anchorGround.x - h, anchorGround.y - h, anchorGround.x + h, anchorGround.y - h,
-            anchorGround.x + h, anchorGround.y - h, anchorGround.x + h, anchorGround.y + h,
-            anchorGround.x + h, anchorGround.y + h, anchorGround.x - h, anchorGround.y + h,
-            anchorGround.x - h, anchorGround.y + h, anchorGround.x - h, anchorGround.y - h,
-          ],
-        });
-        wallReadout = {
-          x: screen.top.x + GIZMO_HEAD_PX + 6,
-          y: screen.top.y - 8,
-          text: `${(pendingParams.heightU / ARCHITECTURE_UNITS_PER_METER).toFixed(2)}m × ${(pendingParams.thicknessU / ARCHITECTURE_UNITS_PER_METER).toFixed(2)}m`,
-        };
-      }
-    }
-  }
+  // Draw Wall overlay: HOST-RENDERED since req_4520 (wall_tool.zig) — the
+  // lattice diamond, anchor gizmo, hologram span, and magnet marker are engine
+  // scene nodes refreshed per frame off the live mouse. Nothing to project here.
 
   // Place Door/Window ghost (req_4513): ALWAYS visible while armed. On a wall
   // face — the kit's measured cut rectangle, green at an engine-legal slot,
@@ -2213,30 +2136,7 @@ export default function WorldViewport(props: {
         </Box>
       ) : null}
 
-      {/* Draw Wall ghost (req_4474) — snapped cursor diamond + anchored span guide. */}
-      {wallSegs.length ? (
-        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
-          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-            <Graph.Polyline segments points={wallSegs} stroke="#34d399" strokeWidth={2} />
-          </Graph>
-        </Box>
-      ) : null}
-
-      {/* Wall anchor gizmo (req_4479) — height arm, ground corner, thickness hub. */}
-      {wallGizmoLines.length ? (
-        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
-          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-            {wallGizmoLines.map((line, index) => (
-              <Graph.Polyline key={index} segments points={line.segs} stroke={line.color} strokeWidth={line.width} />
-            ))}
-          </Graph>
-          {wallReadout ? (
-            <Box style={{ position: 'absolute', left: wallReadout.x, top: wallReadout.y, backgroundColor: '#0d141fcc', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4 }}>
-              <Text style={{ color: '#e5e9f0', fontSize: 12 }}>{wallReadout.text}</Text>
-            </Box>
-          ) : null}
-        </Box>
-      ) : null}
+      {/* Draw Wall overlay — host-rendered engine nodes since req_4520 (wall_tool.zig). */}
 
       {/* Cut Opening ghost (req_4503) — slot-snapped cut rectangle, green legal / red with reason. */}
       {openingSegs.length ? (

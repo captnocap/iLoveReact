@@ -149,6 +149,123 @@ fn argView(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
     return base_bytes[byte_off .. byte_off + byte_len];
 }
 
+// ── Animation Foundry root trajectory ──────────────────────────────────────
+// A semantic revision snapshot enters once; WorldLoader retains/tessellates
+// it and advances the playhead marker from the native motion clock.
+fn animationTrajectoryNodeId(info: v8.FunctionCallbackInfo) ?u32 {
+    if (info.length() == 0 or !info.getArg(0).isNumber()) return null;
+    const raw = argToF64(info, 0) orelse return null;
+    const maximum: f64 = @floatFromInt(std.math.maxInt(u32));
+    if (!std.math.isFinite(raw) or raw < 1 or raw > maximum or @trunc(raw) != raw) return null;
+    return @intFromFloat(raw);
+}
+
+fn animationTrajectoryF32(info: v8.FunctionCallbackInfo, index: u32) ?f32 {
+    if (index >= info.length() or !info.getArg(index).isNumber()) return null;
+    const raw = argToF64(info, index) orelse return null;
+    const maximum: f64 = std.math.floatMax(f32);
+    if (!std.math.isFinite(raw) or raw < -maximum or raw > maximum) return null;
+    return @floatCast(raw);
+}
+
+fn hostSetAnimationTrajectory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = animationTrajectoryNodeId(info) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadTrajectory");
+        return;
+    };
+    world_loader.setAnimationTrajectory(node_id, bytes) catch |err| {
+        var buffer: [96]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:trajectory";
+        setReturnString(info, message);
+        return;
+    };
+    setReturnString(info, "ok");
+}
+
+fn hostClearAnimationTrajectory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = animationTrajectoryNodeId(info) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    world_loader.clearAnimationTrajectory(node_id);
+    setReturnString(info, "ok");
+}
+
+// Frame Path is a one-shot native transaction over the transformed rows that
+// are already mounted. JS supplies its owned orbit angles/tuning and receives
+// the exact target/distance native committed; it never guesses asset facing.
+fn hostFrameAnimationTrajectory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = animationTrajectoryNodeId(info) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const yaw = animationTrajectoryF32(info, 1) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const pitch = animationTrajectoryF32(info, 2) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const field_of_view = animationTrajectoryF32(info, 3) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const minimum_target_y = animationTrajectoryF32(info, 4) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const padding = animationTrajectoryF32(info, 5) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const baseline_distance = animationTrajectoryF32(info, 6) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const minimum_distance = animationTrajectoryF32(info, 7) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const maximum_distance = animationTrajectoryF32(info, 8) orelse {
+        setReturnString(info, "error:BadCameraFrame");
+        return;
+    };
+    const frame = world_loader.frameAnimationTrajectory(
+        node_id,
+        yaw,
+        pitch,
+        field_of_view,
+        minimum_target_y,
+        padding,
+        baseline_distance,
+        minimum_distance,
+        maximum_distance,
+    ) catch |err| {
+        var error_buffer: [96]u8 = undefined;
+        const message = std.fmt.bufPrint(&error_buffer, "error:{s}", .{@errorName(err)}) catch "error:CameraFrame";
+        setReturnString(info, message);
+        return;
+    };
+    var reply_buffer: [256]u8 = undefined;
+    const reply = std.fmt.bufPrint(
+        &reply_buffer,
+        "{{\"ok\":true,\"target\":[{d},{d},{d}],\"distanceMeters\":{d}}}",
+        .{ frame.target[0], frame.target[1], frame.target[2], frame.distance_meters },
+    ) catch {
+        setReturnString(info, "error:CameraFrameReply");
+        return;
+    };
+    setReturnString(info, reply);
+}
+
 fn hostSetLivePieces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const node_id = argToNodeId(info, 0) orelse {
@@ -453,6 +570,108 @@ fn hostSetPaintMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, "ok");
 }
 
+// ── Draw Wall native overlay doors (req_4520) ───────────────────────────────
+// The overlay (lattice cursor, anchor gizmo, hologram span, measurement drags)
+// renders and tracks host-side per frame; these doors carry only gesture-rate
+// state: arming, the JS anchor mirror, the selected wall, magnet vertices, and
+// press/release classification.
+
+// __compiled_world_wall_tool_arm(nodeId, on, floor, heightU, thicknessU)
+fn hostWallToolArm(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const on = (argToF64(info, 1) orelse 0) != 0;
+    const floor: i32 = @intFromFloat(argToF64(info, 2) orelse 0);
+    const height_u: i32 = @intFromFloat(argToF64(info, 3) orelse 0);
+    const thickness_u: i32 = @intFromFloat(argToF64(info, 4) orelse 0);
+    world_loader.setWallToolMode(node_id, on, floor, height_u, thickness_u);
+    setReturnString(info, "ok");
+}
+
+// __compiled_world_wall_tool_anchor(nodeId, has, xU, zU) — the JS anchor mirror.
+fn hostWallToolAnchor(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const has = (argToF64(info, 1) orelse 0) != 0;
+    const x_u: i32 = @intFromFloat(argToF64(info, 2) orelse 0);
+    const z_u: i32 = @intFromFloat(argToF64(info, 3) orelse 0);
+    world_loader.setWallToolAnchor(node_id, has, x_u, z_u);
+    setReturnString(info, "ok");
+}
+
+// __compiled_world_wall_tool_selection(nodeId, on, axU, azU, bxU, bzU, floor, heightU, thicknessU)
+fn hostWallToolSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const on = (argToF64(info, 1) orelse 0) != 0;
+    const ax: i32 = @intFromFloat(argToF64(info, 2) orelse 0);
+    const az: i32 = @intFromFloat(argToF64(info, 3) orelse 0);
+    const bx: i32 = @intFromFloat(argToF64(info, 4) orelse 0);
+    const bz: i32 = @intFromFloat(argToF64(info, 5) orelse 0);
+    const floor: i32 = @intFromFloat(argToF64(info, 6) orelse 0);
+    const height_u: i32 = @intFromFloat(argToF64(info, 7) orelse 0);
+    const thickness_u: i32 = @intFromFloat(argToF64(info, 8) orelse 0);
+    world_loader.setWallToolSelection(node_id, on, ax, az, bx, bz, floor, height_u, thickness_u);
+    setReturnString(info, "ok");
+}
+
+// __compiled_world_wall_tool_magnets(nodeId, Float32Array [xU,zU,...]) — magnet dots.
+fn hostWallToolMagnets(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse &[_]u8{};
+    world_loader.setWallToolMagnets(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
+// __compiled_world_wall_tool_press(nodeId, mx, my) -> Float32Array[1]:
+// 0 pass · 1 handle grab · 2 nudged thinner · 3 nudged thicker. Nonzero means
+// the gizmo owns the gesture and the click must not anchor/commit/pan.
+var g_wall_press_ret: [1]f32 = .{0};
+fn hostWallToolPress(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const mx = argToF64(info, 1) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const my = argToF64(info, 2) orelse {
+        setReturnNull(info);
+        return;
+    };
+    g_wall_press_ret[0] = @floatFromInt(world_loader.wallToolPress(node_id, @floatCast(mx), @floatCast(my)));
+    setReturnF32Buffer(info, g_wall_press_ret[0..]);
+}
+
+// __compiled_world_wall_tool_release(nodeId) -> Float32Array [heightU, thicknessU, wasDrag]
+var g_wall_release_ret: [3]f32 = .{ 0, 0, 0 };
+fn hostWallToolRelease(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    var out: [3]i32 = .{ 0, 0, 0 };
+    world_loader.wallToolRelease(node_id, &out);
+    g_wall_release_ret = .{ @floatFromInt(out[0]), @floatFromInt(out[1]), @floatFromInt(out[2]) };
+    setReturnF32Buffer(info, g_wall_release_ret[0..]);
+}
+
 // __compiled_world_set_resident_meshes(nodeId, Uint8Array meshPropsLump) installs the editor's
 // full cooked-asset catalog (FULLRES req_1909/1911/1912) so every compiled asset is resident and
 // placeable with no rebake. `bytes` is a MESH_PROPS lump (meshes only); empty clears residency.
@@ -550,7 +769,7 @@ fn hostSetPlayerPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnString(info, reply);
 }
 
-// __compiled_world_play_motion(nodeId, path, layer?) mounts one RJAN motion
+// __compiled_world_play_motion(nodeId, path, layer?, playbackRate?, loopingOverride?) mounts one RJAN motion
 // document from disk on one mixer layer of the mounted player (req_4285);
 // an empty path stops that layer and whatever plays underneath resumes.
 // Layer 0 is the base override; higher layers compose by role coverage.
@@ -571,6 +790,19 @@ fn hostPlayMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnString(info, "error:InvalidMotionLayer");
         return;
     }
+    const playback_rate_raw = argToF64(info, 3) orelse 1;
+    if (!std.math.isFinite(playback_rate_raw) or playback_rate_raw <= 0) {
+        setReturnString(info, "error:InvalidPlaybackRate");
+        return;
+    }
+    const looping_override: ?bool = if (info.length() > 4) blk: {
+        const value = info.getArg(4);
+        if (!value.isBoolean()) {
+            setReturnString(info, "error:InvalidLoopingOverride");
+            return;
+        }
+        break :blk value.toBool(info.getIsolate());
+    } else null;
     const host = v8_runtime.hostContext(info.getIsolate());
     const reply = world_loader.playMountedPlayerMotionJsonAlloc(
         host.io,
@@ -578,6 +810,8 @@ fn hostPlayMotion(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         node_id,
         path,
         @intFromFloat(layer_raw),
+        @floatCast(playback_rate_raw),
+        looping_override,
     ) catch |err| {
         var buffer: [128]u8 = undefined;
         const message = std.fmt.bufPrint(&buffer, "error:{s}", .{@errorName(err)}) catch "error:MotionRejected";
@@ -635,6 +869,43 @@ fn hostMotionDocument(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnString(info, reply);
 }
 
+fn motionRequestPath(request: std.json.ObjectMap, key: []const u8) ![]const u8 {
+    const path = switch (request.get(key) orelse return error.BadMotionRequest) {
+        .string => |text| text,
+        else => return error.BadMotionRequest,
+    };
+    if (path.len == 0 or path.len > std.fs.max_path_bytes) return error.BadMotionRequest;
+    return path;
+}
+
+fn writeMotionBytesAtomic(host: *HostContext, path: []const u8, bytes: []const u8) !void {
+    if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| {
+        if (slash != 0) try std.Io.Dir.cwd().createDirPath(host.io, path[0..slash]);
+    }
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return error.BadMotionRequest;
+    {
+        var file = try std.Io.Dir.cwd().createFile(host.io, tmp_path, .{ .truncate = true });
+        errdefer std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        defer file.close(host.io);
+        try file.writeStreamingAll(host.io, bytes);
+        try file.sync(host.io);
+    }
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, host.io) catch |err| {
+        std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
+        return err;
+    };
+}
+
+fn motionSaveReplyAlloc(allocator: std.mem.Allocator, path: []const u8, byte_count: usize) ![]u8 {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    try output.writer.print("{{\"ok\":true,\"bytes\":{d},\"path\":", .{byte_count});
+    try writeMotionJsonString(&output.writer, path);
+    try output.writer.writeByte('}');
+    return allocator.dupe(u8, output.written());
+}
+
 fn motionDocumentReplyAlloc(host: *HostContext, request_json: []const u8) ![]u8 {
     const allocator = std.heap.c_allocator;
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, request_json, .{});
@@ -647,13 +918,7 @@ fn motionDocumentReplyAlloc(host: *HostContext, request_json: []const u8) ![]u8 
         .string => |text| text,
         else => return error.BadMotionRequest,
     };
-    const path = switch (request.get("path") orelse return error.BadMotionRequest) {
-        .string => |text| text,
-        else => return error.BadMotionRequest,
-    };
-    if (path.len == 0 or path.len > std.fs.max_path_bytes) return error.BadMotionRequest;
-
-    if (std.mem.eql(u8, op, "save")) {
+    if (std.mem.eql(u8, op, "save") or std.mem.eql(u8, op, "saveContentAddressed")) {
         const document_value = switch (request.get("document") orelse return error.BadMotionRequest) {
             .object => |map| map,
             else => return error.BadMotionRequest,
@@ -663,33 +928,25 @@ fn motionDocumentReplyAlloc(host: *HostContext, request_json: []const u8) ![]u8 
         const bytes = try motion_json.motion.encodeAlloc(allocator, &document);
         defer allocator.free(bytes);
 
-        if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| {
-            std.Io.Dir.cwd().createDirPath(host.io, path[0..slash]) catch {};
+        if (std.mem.eql(u8, op, "save")) {
+            const path = try motionRequestPath(request, "path");
+            try writeMotionBytesAtomic(host, path, bytes);
+            return motionSaveReplyAlloc(allocator, path, bytes.len);
         }
-        var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return error.BadMotionRequest;
-        {
-            var file = try std.Io.Dir.cwd().createFile(host.io, tmp_path, .{ .truncate = true });
-            errdefer std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
-            defer file.close(host.io);
-            try file.writeStreamingAll(host.io, bytes);
-            try file.sync(host.io);
-        }
-        std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path, host.io) catch |err| {
-            std.Io.Dir.cwd().deleteFile(host.io, tmp_path) catch {};
-            return err;
+        const directory = try motionRequestPath(request, "directory");
+        const basename = motion_json.motion.contentAddressedBasename(bytes);
+        var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buffer, "{s}/{s}", .{ directory, &basename }) catch {
+            return error.BadMotionRequest;
         };
-
-        var output: std.Io.Writer.Allocating = .init(allocator);
-        defer output.deinit();
-        try output.writer.print("{{\"ok\":true,\"bytes\":{d},\"path\":", .{bytes.len});
-        try writeMotionJsonString(&output.writer, path);
-        try output.writer.writeByte('}');
-        return allocator.dupe(u8, output.written());
+        try writeMotionBytesAtomic(host, path, bytes);
+        return motionSaveReplyAlloc(allocator, path, bytes.len);
     }
     if (std.mem.eql(u8, op, "load")) {
+        const path = try motionRequestPath(request, "path");
         const bytes = try std.Io.Dir.cwd().readFileAlloc(host.io, path, allocator, .limited(world_loader.MAX_MOTION_BYTES));
         defer allocator.free(bytes);
+        try motion_json.motion.verifyContentAddressedBasename(std.fs.path.basename(path), bytes);
         var document = try motion_json.motion.decodeAlloc(allocator, bytes);
         defer document.deinit();
         var output: std.Io.Writer.Allocating = .init(allocator);
@@ -698,6 +955,23 @@ fn motionDocumentReplyAlloc(host: *HostContext, request_json: []const u8) ![]u8 
         try motion_json.writeJson(&output.writer, &document);
         try output.writer.writeByte('}');
         return allocator.dupe(u8, output.written());
+    }
+    if (std.mem.eql(u8, op, "exists")) {
+        const path = try motionRequestPath(request, "path");
+        const exists = exists: {
+            _ = std.Io.Dir.cwd().statFile(host.io, path, .{}) catch break :exists false;
+            break :exists true;
+        };
+        return allocator.dupe(u8, if (exists) "{\"ok\":true,\"exists\":true}" else "{\"ok\":true,\"exists\":false}");
+    }
+    if (std.mem.eql(u8, op, "delete")) {
+        const path = try motionRequestPath(request, "path");
+        const existed = existed: {
+            _ = std.Io.Dir.cwd().statFile(host.io, path, .{}) catch break :existed false;
+            try std.Io.Dir.cwd().deleteFile(host.io, path);
+            break :existed true;
+        };
+        return allocator.dupe(u8, if (existed) "{\"ok\":true,\"deleted\":true}" else "{\"ok\":true,\"deleted\":false}");
     }
     return error.BadMotionRequest;
 }
@@ -772,6 +1046,9 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_status", hostStatus);
     v8_runtime.registerHostFn("__compiled_world_set_camera", hostSetCamera);
     v8_runtime.registerHostFn("__compiled_world_clear_camera", hostClearCamera);
+    v8_runtime.registerHostFn("__compiled_world_set_animation_trajectory", hostSetAnimationTrajectory);
+    v8_runtime.registerHostFn("__compiled_world_clear_animation_trajectory", hostClearAnimationTrajectory);
+    v8_runtime.registerHostFn("__compiled_world_frame_animation_trajectory", hostFrameAnimationTrajectory);
     v8_runtime.registerHostFn("__compiled_world_set_live_pieces", hostSetLivePieces);
     v8_runtime.registerHostFn("__compiled_world_clear_live_pieces", hostClearLivePieces);
     v8_runtime.registerHostFn("__compiled_world_set_live_lights", hostSetLiveLights);
@@ -790,6 +1067,12 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_hide_walls", hostSetHideWalls);
     v8_runtime.registerHostFn("__compiled_world_ground_hit", hostGroundHit);
     v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
+    v8_runtime.registerHostFn("__compiled_world_wall_tool_arm", hostWallToolArm);
+    v8_runtime.registerHostFn("__compiled_world_wall_tool_anchor", hostWallToolAnchor);
+    v8_runtime.registerHostFn("__compiled_world_wall_tool_selection", hostWallToolSelection);
+    v8_runtime.registerHostFn("__compiled_world_wall_tool_magnets", hostWallToolMagnets);
+    v8_runtime.registerHostFn("__compiled_world_wall_tool_press", hostWallToolPress);
+    v8_runtime.registerHostFn("__compiled_world_wall_tool_release", hostWallToolRelease);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_set_player_character", hostSetPlayerCharacter);
     v8_runtime.registerHostFn("__compiled_world_npc_character_session", hostNpcCharacterSession);

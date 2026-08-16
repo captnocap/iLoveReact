@@ -17,6 +17,7 @@ const m_instances = @import("instances.zig");
 const m_streaming_support = @import("streaming_support.zig");
 const m_live_inputs = @import("live_inputs.zig");
 const runtime_dynamics = @import("runtime_dynamics.zig");
+const wall_tool = @import("wall_tool.zig");
 
 const MATERIAL_TILE_PX = m_config.MATERIAL_TILE_PX;
 const INSTANCE_STRIDE = m_config.INSTANCE_STRIDE;
@@ -663,6 +664,9 @@ pub fn applyLiveMeshProps(self: anytype, io: std.Io, environ: *const std.process
     }
     appendLiveSkinBoxes(self);
     appendLiveLights(self);
+    // Draw Wall native overlay (req_4520): hover diamond, anchor gizmo, hologram
+    // span — refreshed and re-published here every frame, zero JS per mouse move.
+    wall_tool.appendOverlay(self);
 }
 fn liveSlotHasGeometry(count: u32) bool {
     return count > 0;

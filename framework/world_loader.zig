@@ -33,6 +33,7 @@ const scene3d = @import("dev_modules/scene3d_runtime.zig");
 const layout = @import("layout.zig");
 const text_engine = @import("primitive/text.zig");
 const game_physics = @import("game/physics.zig");
+const game_camera = @import("game/camera.zig");
 const Node = layout.Node;
 const log = std.debug;
 
@@ -53,6 +54,7 @@ const character_animation = @import("world_loader/animation.zig");
 const character_camera = @import("world_loader/camera.zig");
 const npc_character_session = @import("world_loader/npc_character_session.zig");
 pub const player_character_pose = @import("world_loader/player_character_pose.zig");
+const animation_trajectory = @import("world_loader/animation_trajectory.zig");
 const character_hashes = @import("skeleton/character_hashes.zig");
 pub const pose_stream = player_character_pose.pose_stream;
 pub const rig_pose = player_character_pose.rig_pose;
@@ -60,6 +62,9 @@ pub const rig_pose = player_character_pose.rig_pose;
 comptime {
     if (npc_character_session.MAX_INSTANCES + 1 > scene3d.SKIN_POOL) {
         @compileError("mounted player + NPC session exceeds gpu/3d skin palette slots");
+    }
+    if (animation_trajectory.PENDING_SLOT_CAPACITY != MAX_EMBEDDED_LOADERS) {
+        @compileError("animation trajectory mailbox capacity must match embedded WorldLoader capacity");
     }
 }
 
@@ -138,6 +143,77 @@ const applyPendingPhysics = live_inputs.applyPendingPhysics;
 const applyPendingLive = live_inputs.applyPendingLive;
 const applyLiveColliders = live_inputs.applyLiveColliders;
 
+/// Semantic Animation Foundry root-path door. The payload is validated and
+/// retained before the mounted runtime ever sees it; malformed replacements
+/// leave the current 3D path intact.
+pub const setAnimationTrajectory = animation_trajectory.setPending;
+const applyPendingAnimationTrajectory = animation_trajectory.applyPending;
+
+/// Clear is synchronous because reclaiming the mailbox slot before a mounted
+/// runtime observes its tombstone would leave stale borrowed nodes visible.
+/// The slot's fixed row buffers remain process-resident for pointer-stable GPU
+/// cache reuse; only its semantic/node ownership is released here.
+pub fn clearAnimationTrajectory(node_id: u32) void {
+    animation_trajectory.clearPending(node_id);
+    if (findMounted(node_id)) |entry| {
+        if (entry.runtime) |runtime| applyPendingAnimationTrajectory(runtime);
+    }
+    animation_trajectory.releasePending(node_id);
+}
+
+pub const AnimationTrajectoryCameraFrame = animation_trajectory.CameraFrame;
+
+/// Frame the mounted trajectory in the same transformed coordinate space the
+/// renderer uses, then commit one native orbit transaction. The returned
+/// target/distance lets the editor persist exactly what native applied without
+/// learning the mounted character asset's facing offset.
+pub fn frameAnimationTrajectory(
+    node_id: u32,
+    yaw_degrees: f32,
+    pitch_degrees: f32,
+    field_of_view_degrees: f32,
+    minimum_target_y: f32,
+    padding: f32,
+    baseline_distance_meters: f32,
+    minimum_distance_meters: f32,
+    maximum_distance_meters: f32,
+) !AnimationTrajectoryCameraFrame {
+    if (!std.math.isFinite(yaw_degrees) or !std.math.isFinite(pitch_degrees) or
+        !std.math.isFinite(field_of_view_degrees) or
+        field_of_view_degrees <= 0 or field_of_view_degrees >= 180)
+    {
+        return error.InvalidAnimationCamera;
+    }
+    const runtime = try requireMountedRuntime(node_id);
+    applyPendingAnimationTrajectory(runtime);
+    const frame = try animation_trajectory.cameraFrameForRuntime(
+        runtime,
+        minimum_target_y,
+        padding,
+        baseline_distance_meters,
+        minimum_distance_meters,
+        maximum_distance_meters,
+    );
+    // A native viewport drag may have changed yaw/pitch since the last
+    // one-shot JS camera command. Preserve the retained controller's real
+    // orientation when framing instead of snapping back to stale transport
+    // parameters.
+    const retained_orbit = game_camera.orbitForNode(node_id);
+    const frame_yaw = if (retained_orbit) |orbit| orbit.yaw else yaw_degrees;
+    const frame_pitch = if (retained_orbit) |orbit| orbit.pitch else pitch_degrees;
+    const frame_fov = if (retained_orbit) |orbit| orbit.fov else field_of_view_degrees;
+    game_camera.setModeForNode(node_id, .orbit);
+    game_camera.setOrbitForNode(node_id, .{
+        .target = .{ .x = frame.target[0], .y = frame.target[1], .z = frame.target[2] },
+        .yaw = frame_yaw,
+        .pitch = frame_pitch,
+        .dist = frame.distance_meters,
+        .zoom = 1,
+        .fov = frame_fov,
+    });
+    return frame;
+}
+
 const paint_surface = @import("world_loader/paint_surface.zig");
 const applyPaintLayer = @import("world_loader/paint_runtime.zig").applyPaintLayer;
 
@@ -170,6 +246,41 @@ pub fn groundHitAt(node_id: u32, mx: f32, my: f32, level_y: f32) ?[3]f32 {
 const paintGroundHitAt = paint_surface.paintGroundHitAt;
 const paintWaterSurface = paint_surface.paintWaterSurface;
 
+// ── Draw Wall native overlay (req_4520) — cart doors, gesture rate ─────────
+const wall_tool = @import("world_loader/wall_tool.zig");
+
+pub fn setWallToolMode(node_id: u32, on: bool, floor: i32, height_u: i32, thickness_u: i32) void {
+    wall_tool.setMode(node_id, on, floor, height_u, thickness_u);
+}
+
+pub fn setWallToolAnchor(node_id: u32, has: bool, x_u: i32, z_u: i32) void {
+    wall_tool.setAnchor(node_id, has, x_u, z_u);
+}
+
+pub fn setWallToolSelection(node_id: u32, on: bool, ax_u: i32, az_u: i32, bx_u: i32, bz_u: i32, floor: i32, height_u: i32, thickness_u: i32) void {
+    wall_tool.setSelection(node_id, on, ax_u, az_u, bx_u, bz_u, floor, height_u, thickness_u);
+}
+
+pub fn setWallToolMagnets(node_id: u32, bytes: []const u8) void {
+    wall_tool.setMagnets(node_id, bytes);
+}
+
+/// Gesture-rate press classification: nonzero means the gizmo owns the gesture.
+pub fn wallToolPress(node_id: u32, mx: f32, my: f32) u8 {
+    const entry = findMounted(node_id) orelse return 0;
+    const runtime = entry.runtime orelse return 0;
+    return @intFromEnum(wall_tool.press(runtime, node_id, mx, my));
+}
+
+/// Gesture-rate release: ends any measurement drag, reports the pending params.
+pub fn wallToolRelease(node_id: u32, out: *[3]i32) void {
+    wall_tool.release(node_id, out);
+}
+
+pub fn anyWallToolArmed() bool {
+    return wall_tool.anyWallToolArmed();
+}
+
 fn findMounted(node_id: u32) ?*MountedLoader {
     for (&g_mounted_loaders) |*entry| {
         const runtime = entry.runtime orelse continue;
@@ -185,11 +296,12 @@ fn findVacantMounted() ?*MountedLoader {
     return null;
 }
 
-fn mountSourceHash(game_file: []const u8, store_dir: []const u8) u64 {
+fn mountSourceHash(game_file: []const u8, store_dir: []const u8, preview_stage: bool) u64 {
     var hash = std.hash.Wyhash.init(0);
     hash.update(game_file);
     hash.update(&.{0});
     hash.update(store_dir);
+    hash.update(&.{@intFromBool(preview_stage)});
     return hash.final();
 }
 
@@ -230,11 +342,9 @@ fn requireMountedRuntime(node_id: u32) !*Runtime {
 fn configurePlayerCharacterNodes(
     runtime: *Runtime,
     character: *const character_assets.CharacterAsset,
-    bind: *const character_specimen.BindSpecimen,
     skin_geometry_key: []const u8,
-    bind_geometry_key: []const u8,
 ) !void {
-    try character_animation.configurePlayerCharacterSpecimens(
+    try character_animation.configureCapturePlayerCharacter(
         runtime.kid_list.items,
         runtime.player_first_child,
         runtime.player_bind_child,
@@ -245,19 +355,15 @@ fn configurePlayerCharacterNodes(
             .palette = character.palette,
             .bone_count = @intCast(character.boneCount()),
         },
-        .{
-            .geometry_key = bind_geometry_key,
-            .vertices = bind.vertices,
-            .vertex_count = bind.vertex_count,
-        },
     );
 }
 
 fn disablePlayerCharacterNodes(runtime: *Runtime) bool {
-    return character_animation.disablePlayerCharacterSpecimens(
+    return character_animation.disableCapturePlayerCharacter(
         runtime.kid_list.items,
         runtime.player_first_child,
         runtime.player_bind_child,
+        runtime.preview_stage,
     );
 }
 
@@ -356,7 +462,7 @@ pub fn activateMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) 
     try next_pose.activate(owner_id, .{ 0, 0, 0 }, candidate.local_rotations);
     var active_owner: player_character_pose.OwnerId = .{};
     try active_owner.set(owner_id);
-    try runtime.player_geom_keys.ensureUnusedCapacity(runtime.allocator, 2);
+    try runtime.player_geom_keys.ensureUnusedCapacity(runtime.allocator, 1);
 
     var next_bind = try character_specimen.extractBindSpecimen(
         runtime.allocator,
@@ -370,22 +476,13 @@ pub fn activateMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) 
         .{std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(candidate.vertices))},
     );
     errdefer runtime.allocator.free(skin_geometry_key);
-    const bind_geometry_key = try std.fmt.allocPrint(
-        runtime.allocator,
-        "player-character-bind-{x}",
-        .{std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(next_bind.vertices))},
-    );
-    errdefer runtime.allocator.free(bind_geometry_key);
-
     // This is the last fallible operation. It validates both reserved indices
     // before mutating either borrowed node view, so every failure above leaves
-    // the active owner, asset, bind copy, and nodes untouched.
+    // the active owner, asset, bounds copy, and nodes untouched.
     try configurePlayerCharacterNodes(
         runtime,
         candidate,
-        &next_bind,
         skin_geometry_key,
-        bind_geometry_key,
     );
 
     // The capture target replaces the character; any mounted motion document
@@ -403,13 +500,10 @@ pub fn activateMountedPlayerCharacterTarget(node_id: u32, owner_id: []const u8) 
     runtime.player_target_active_owner = active_owner;
     runtime.player_target_camera_aspect = null;
     runtime.player_geom_keys.appendAssumeCapacity(skin_geometry_key);
-    runtime.player_geom_keys.appendAssumeCapacity(bind_geometry_key);
-    character_animation.placePlayerCharacterSpecimens(
+    character_animation.placeSinglePlayerCharacter(
         runtime.kid_list.items,
         runtime.player_first_child,
-        runtime.player_bind_child,
         character_animation.characterDiagnosticAnchor(),
-        next_bind.separation_x,
         runtime.scene.player_character.?.facing_yaw_offset_degrees,
     );
     if (previous) |old| old.deinit();
@@ -424,7 +518,15 @@ pub fn publishMountedPlayerCharacterPose(
     frame: pose_stream.Frame,
 ) !u64 {
     const runtime = try requireMountedRuntime(node_id);
-    if (runtime.scene.player_character == null) return error.MissingMountedCharacter;
+    const character = if (runtime.scene.player_character) |*value| value else return error.MissingMountedCharacter;
+    if (!runtime.player_target_active_owner.matches(owner_id)) return error.CharacterTargetOwnerMismatch;
+    if (!runtime.player_character_pose.ownedBy(owner_id)) {
+        try runtime.player_character_pose.activate(
+            owner_id,
+            runtime.player_character_pose.last_root_translation,
+            character.local_rotations,
+        );
+    }
     return runtime.player_character_pose.publishFrame(owner_id, frame);
 }
 
@@ -436,6 +538,17 @@ pub fn clearMountedPlayerCharacterPose(node_id: u32, owner_id: []const u8) void 
     const character = if (runtime.scene.player_character) |*value| value else return;
     const bind = runtime.player_character_pose.advance(0, .idle, 0) catch return;
     character.evaluate(bind.root_translation, bind.rotations()) catch {};
+}
+
+/// Toggle only capture's authority over the mounted pose. The target asset,
+/// camera feed, inference session, diagnostics, and any RJAN mixer layers stay
+/// resident. Re-enabling is completed atomically by the next published capture
+/// frame, which enters external mode from the pose currently on screen.
+pub fn setMountedPlayerCharacterCaptureDrive(node_id: u32, owner_id: []const u8, enabled: bool) !void {
+    const runtime = try requireMountedRuntime(node_id);
+    if (!runtime.player_target_active_owner.matches(owner_id)) return error.CharacterTargetOwnerMismatch;
+    if (enabled) return;
+    _ = runtime.player_character_pose.clear(owner_id);
 }
 
 pub const MAX_MOTION_BYTES: usize = 64 << 20;
@@ -465,6 +578,8 @@ pub fn playMountedPlayerMotionJsonAlloc(
     node_id: u32,
     path: []const u8,
     layer: usize,
+    playback_rate: f32,
+    looping_override: ?bool,
 ) ![]u8 {
     const runtime = try requireMountedRuntime(node_id);
     if (layer >= player_character_pose.MAX_MOTION_LAYERS) return error.InvalidMotionLayer;
@@ -483,7 +598,13 @@ pub fn playMountedPlayerMotionJsonAlloc(
     dropMountedPlayerMotionLayer(runtime, layer);
     runtime.player_motion[layer] = document;
     const resident = &runtime.player_motion[layer].?;
-    runtime.player_character_pose.playMotionLayer(resident, character.retargetBoneIds(), layer) catch |err| {
+    runtime.player_character_pose.playMotionLayerAtRateWithLoopingOverride(
+        resident,
+        character.retargetBoneIds(),
+        layer,
+        playback_rate,
+        looping_override,
+    ) catch |err| {
         resident.deinit();
         runtime.player_motion[layer] = null;
         return err;
@@ -499,11 +620,12 @@ pub fn playMountedPlayerMotionJsonAlloc(
         else => try output.writer.writeByte(byte),
     };
     try output.writer.print(
-        "\",\"durationSeconds\":{d},\"looping\":{s},\"channelCount\":{d}}}",
+        "\",\"durationSeconds\":{d},\"looping\":{s},\"channelCount\":{d},\"playbackRate\":{d}}}",
         .{
             resident.duration_seconds,
-            if (resident.looping) "true" else "false",
+            if (looping_override orelse resident.looping) "true" else "false",
             resident.channel_ids.len,
+            playback_rate,
         },
     );
     return allocator.dupe(u8, output.written());
@@ -554,7 +676,7 @@ fn refreshMountedPlayerCharacterDiagnosticCamera(runtime: *Runtime) void {
         &runtime.camera,
         bind.bounds_min,
         bind.bounds_max,
-        bind.separation_x,
+        0,
         runtime.last_aspect,
     )) return;
     runtime.player_target_camera_aspect = runtime.last_aspect;
@@ -586,7 +708,7 @@ pub fn setMountedPlayerCharacterPoseBytes(node_id: u32, bytes: []const u8) !?u64
 
 pub fn mount(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node_id: u32, game_file: []const u8, store_dir: []const u8) !void {
     if (node_id == 0) return error.BadNodeId;
-    unmount(io, node_id);
+    unmountRuntime(io, node_id);
     const entry = findVacantMounted() orelse return error.TooManyWorldLoaders;
     entry.runtime = try Runtime.create(io, environ, allocator, game_file, store_dir, node_id);
     entry.active = true;
@@ -597,10 +719,32 @@ pub fn mount(io: std.Io, environ: *const std.process.Environ.Map, allocator: std
 /// value as a cross-library protocol.
 pub fn mountBlank(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node_id: u32, game_file: []const u8) !void {
     if (node_id == 0) return error.BadNodeId;
-    unmount(io, node_id);
+    unmountRuntime(io, node_id);
     const entry = findVacantMounted() orelse return error.TooManyWorldLoaders;
     entry.runtime = try Runtime.createBlank(io, environ, allocator, game_file, node_id);
     entry.active = true;
+}
+
+/// Tool previews are explicit blank worlds even if their diagnostic path later
+/// exists. The stage flag is not inferred from file absence, so ordinary
+/// paint-first and play surfaces can never acquire this floor accidentally.
+pub fn mountPreviewStage(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node_id: u32, game_file: []const u8) !void {
+    try mountBlank(io, environ, allocator, node_id, game_file);
+    errdefer unmountRuntime(io, node_id);
+    const runtime = try requireMountedRuntime(node_id);
+    runtime.preview_stage = true;
+    try character_animation.configurePreviewGround(
+        runtime.kid_list.items,
+        runtime.player_bind_child,
+    );
+    if (runtime.scene.player_character) |*character| {
+        character_animation.placeSinglePlayerCharacter(
+            runtime.kid_list.items,
+            runtime.player_first_child,
+            character_animation.characterDiagnosticAnchor(),
+            character.facing_yaw_offset_degrees,
+        );
+    }
 }
 
 pub fn ensureBlankMounted(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node_id: u32, game_file: []const u8) !void {
@@ -608,13 +752,30 @@ pub fn ensureBlankMounted(io: std.Io, environ: *const std.process.Environ.Map, a
     try mountBlank(io, environ, allocator, node_id, game_file);
 }
 
-pub fn unmount(io: std.Io, node_id: u32) void {
+pub fn ensurePreviewStageMounted(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node_id: u32, game_file: []const u8) !void {
+    if (findMounted(node_id)) |entry| {
+        if (entry.runtime) |runtime| {
+            if (runtime.preview_stage) return;
+        }
+    }
+    try mountPreviewStage(io, environ, allocator, node_id, game_file);
+}
+
+/// Destroy only the mounted runtime. Mount/mountBlank use this internal path so
+/// trajectory ingress published before a lazy mount survives same-node replace.
+fn unmountRuntime(io: std.Io, node_id: u32) void {
+    game_camera.unbindNode(node_id);
     if (findMounted(node_id)) |entry| {
         if (entry.runtime) |runtime| runtime.destroy(io);
         entry.runtime = null;
         entry.active = false;
     }
     clearMountFailure(node_id);
+}
+
+pub fn unmount(io: std.Io, node_id: u32) void {
+    unmountRuntime(io, node_id);
+    animation_trajectory.releasePending(node_id);
 }
 
 fn runtimeForNode(io: std.Io, environ: *const std.process.Environ.Map, allocator: std.mem.Allocator, node: *Node) !*Runtime {
@@ -624,12 +785,16 @@ fn runtimeForNode(io: std.Io, environ: *const std.process.Environ.Map, allocator
     }
     const game_file = node.world_loader_game_file orelse "zig-out/game/hmsc.gamefile";
     const store_dir = node.world_loader_store_dir orelse STORE_DIR;
-    const source_hash = mountSourceHash(game_file, store_dir);
+    const source_hash = mountSourceHash(game_file, store_dir, node.world_loader_preview_stage);
     const now_ms = std.Io.Clock.now(.awake, io).toMilliseconds();
     if (findMountFailure(node.id, source_hash)) |failure| {
         if (now_ms < failure.retry_after_ms) return error.MountBackoff;
     }
-    mount(io, environ, allocator, node.id, game_file, store_dir) catch |err| {
+    const mount_result = if (node.world_loader_preview_stage)
+        mountPreviewStage(io, environ, allocator, node.id, game_file)
+    else
+        mount(io, environ, allocator, node.id, game_file, store_dir);
+    mount_result catch |err| {
         rememberMountFailure(node.id, source_hash, now_ms + MOUNT_RETRY_BACKOFF_MS);
         return err;
     };
@@ -662,6 +827,7 @@ pub fn renderEmbedded(io: std.Io, environ: *const std.process.Environ.Map, alloc
     applyPendingLive(runtime); // LIVEHOST req_1798: just-placed pieces, drawn without a rebake
     applyLiveColliders(runtime, runtime_live_scene); // req_2792: those same pieces COLLIDE — walls are solid in playtest
     applyPendingPhysics(runtime); // GLOBALS req_2770: live physics tuning, read by the next step
+    applyPendingAnimationTrajectory(runtime);
     // MAPPAINT req_2473: the pane rect feeds the screen→ray mapping; the paint
     // layer mirrors painted chunks + colliders and dresses the brush beam.
     runtime.paint_last_x = x;
@@ -686,6 +852,7 @@ pub fn renderDetachedView(io: std.Io, environ: *const std.process.Environ.Map, n
     const entry = findMounted(node_id) orelse return null;
     const runtime = entry.runtime orelse return null;
     runtime.last_aspect = w / @max(h, 1);
+    applyPendingAnimationTrajectory(runtime);
     runtime.stepNow(io, environ);
     runtime_lifecycle.ensureMaterials(runtime, io, environ);
     return scene3d.renderDetached(io, environ, target, &runtime.root, w, h);
@@ -704,6 +871,19 @@ pub fn mouseLook(node_id: u32, dx: f32, dy: f32) void {
     const entry = findMounted(node_id) orelse return;
     const runtime = entry.runtime orelse return;
     runtime.mouseLook(dx, dy);
+}
+
+/// Animation preview input is distinct from playable-world mouse-look: the
+/// preview is bound to the retained V23 camera controller, and SDL deltas must
+/// never fall back to the legacy runtime camera or cross into JavaScript.
+pub fn authoringCameraDrag(node_id: u32, dx: f32, dy: f32, pan: bool) bool {
+    if (findMounted(node_id) == null) return false;
+    return game_camera.applyAuthoringOrbitDragForNode(node_id, dx, dy, pan);
+}
+
+pub fn authoringCameraDolly(node_id: u32, wheel_delta: f32) bool {
+    if (findMounted(node_id) == null) return false;
+    return game_camera.applyAuthoringOrbitDollyForNode(node_id, wheel_delta);
 }
 
 /// LOADERVIEW req_1757: drive the camera from the editor's already-solved iso pose
