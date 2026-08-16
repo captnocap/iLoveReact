@@ -724,6 +724,17 @@ export default function AppFrame() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
   const [nativeUpdateNotice, setNativeUpdateNotice] = useHotState<NativeUpdateNoticeState | null>('editor.native-update-notice.v1', null);
+  // Retopo-corpus recording light (req_4604): hot twig so the REC state survives
+  // JS reloads mid-session; disk is truth (a RECORDING row in corpus list), so a
+  // cold boot recovers the light instead of silently losing an armed recorder.
+  const [corpusRec, setCorpusRec] = useHotState<string | null>('editor.corpus-recording.v1', null);
+  useEffect(() => {
+    void execAsync('tools/forge/corpus list').then((result) => {
+      const row = result.stdout.split('\n').find((line) => line.includes('RECORDING'));
+      setCorpusRec(row ? (row.trim().split(/\s+/)[0] ?? null) : null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [orphanHostsNotice, setOrphanHostsNotice] = useHotState<OrphanHostsNoticeState | null>('editor.orphan-hosts-notice.v1', null);
   const [unsavedDocumentName, setUnsavedDocumentName] = useState<string | null>(null);
   const [unsavedActionLabels, setUnsavedActionLabels] = useState<{ save?: string; discard?: string; cancel?: string }>({});
@@ -11995,6 +12006,34 @@ export default function AppFrame() {
           nativeUpdateOpen={nativeUpdateNotice?.collapsed === false}
           onNativeUpdate={() => setNativeUpdateNotice((current) => current ? { ...current, collapsed: !current.collapsed } : null)}
           loreStatus={blobService}
+          corpusRec={corpusRec}
+          onCorpusToggle={() => {
+            const active = visibleModels.find((model) => model.id === activeModelId);
+            if (corpusRec) {
+              const dir = active ? resolvePackageDir(active.kind, active.id) : null;
+              const entry = corpusRec;
+              void execAsync(`tools/forge/corpus finish "${entry}"${dir ? ` "${dir}"` : ''}`).then((result) => {
+                setCorpusRec(null);
+                setState((prev) => ({ ...prev, status: result.code === 0
+                  ? `corpus: bundled ${entry}${dir ? '' : ' (no saved package — copy final/ in later)'}`
+                  : `corpus finish FAILED — run tools/forge/corpus finish ${entry} by hand` }));
+              });
+              return;
+            }
+            if (!active) {
+              setState((prev) => ({ ...prev, status: 'corpus: open the model you are about to retopo, then start recording' }));
+              return;
+            }
+            const entry = active.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'entry';
+            void execAsync(`tools/forge/corpus begin "${entry}"`).then((result) => {
+              if (result.code === 0) {
+                setCorpusRec(entry);
+                setState((prev) => ({ ...prev, status: `corpus: RECORDING ${entry} — retopo away` }));
+              } else {
+                setState((prev) => ({ ...prev, status: 'corpus: begin failed — is tools/forge/corpus runnable?' }));
+              }
+            });
+          }}
           onFpsSample={(fps) => animationApplication.controller.reportEditorFps(fps)}
           animationQueue={{
             runState: animationProjection.batch.runState,

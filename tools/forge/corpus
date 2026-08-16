@@ -13,11 +13,13 @@ ROOT=userdata/retopo-corpus
 cmd=${1:?usage: corpus begin|finish|list}
 case "$cmd" in
   begin)
-    name=${2:?corpus begin <name> <source-mesh-file>}
-    src=${3:?corpus begin <name> <source-mesh-file>}
+    name=${2:?corpus begin <name> [source-mesh-file]}
+    src=${3:-}
     dir="$ROOT/$name"
     mkdir -p "$dir/source"
-    cp "$src" "$dir/source/"
+    # Source is optional: every saved package carries its own import copy in
+    # mesh/, so a UI-started recording can rely on finish's package bundle.
+    if [ -n "$src" ]; then cp "$src" "$dir/source/"; fi
     tools/seat follow clear >/dev/null 2>&1 || true
     tools/seat follow start "corpus-$name" >/dev/null
     # The host journal is a 32-op undo WINDOW (req_4602) — one read at finish only
@@ -30,8 +32,8 @@ case "$cmd" in
     echo "when done: tools/forge/corpus finish $name <package-dir>"
     ;;
   finish)
-    name=${2:?corpus finish <name> <package-dir>}
-    pkg=${3:?corpus finish <name> <package-dir>}
+    name=${2:?corpus finish <name> [package-dir]}
+    pkg=${3:-}
     dir="$ROOT/$name"
     [ -d "$dir" ] || { echo "no corpus entry '$name' — run begin first"; exit 1; }
     if [ -f "$dir/.poller.pid" ]; then
@@ -44,8 +46,12 @@ case "$cmd" in
       rm -f "$dir/trail.json"
     fi
     tools/seat follow stop >/dev/null 2>&1 || true
-    rm -rf "$dir/final"
-    cp -r "$pkg" "$dir/final"
+    if [ -n "$pkg" ] && [ -d "$pkg" ]; then
+      rm -rf "$dir/final"
+      cp -r "$pkg" "$dir/final"
+    else
+      echo "WARN: no package dir — bundle has trail+journal only; copy the saved package into $dir/final later"
+    fi
     date -u +%FT%TZ > "$dir/finished.txt"
     echo "bundled $dir:"
     ls "$dir"

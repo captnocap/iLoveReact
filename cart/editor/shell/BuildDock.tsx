@@ -1,6 +1,6 @@
 // SECTION H — Status Bar (see shell/regions.ts SECTIONS): the bottom build
 // dock — undo/redo, build journal, eventbus, perf, memory, status line, coords.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { head, onEvent, since, type EditorEvent } from '../../../runtime/editorbus';
@@ -15,6 +15,48 @@ import { mapHistory } from '../../../runtime/game/map';
 import type { RecoveryServerStatusV1 } from '../../../runtime/vcs/lore';
 
 const BUS_METRIC_TAIL = 256;
+
+/** Narrow shell projection: callers map their persisted queue truth into this shape. */
+export type BuildDockAnimationQueueProjection = Readonly<{
+  runState: 'stopped' | 'running' | 'paused';
+  current: Readonly<{ jobId: string; seed: number }> | null;
+  generated: number;
+  rejected: number;
+  pending: number;
+  pressureSuspended: boolean;
+}>;
+
+export type AnimationQueueChipModel = Readonly<{
+  stateLabel: string;
+  currentLabel: string;
+  countsLabel: string;
+  pressureLabel: string;
+  tooltip: string;
+}>;
+
+export function animationQueueChipModel(queue: BuildDockAnimationQueueProjection): AnimationQueueChipModel {
+  const stateLabel = queue.runState.toUpperCase();
+  const currentLabel = queue.current ? `${queue.current.jobId}:${queue.current.seed}` : '—';
+  const countsLabel = `G ${queue.generated} · R ${queue.rejected} · P ${queue.pending}`;
+  const pressureLabel = queue.pressureSuspended ? 'YIELD' : 'LOAD OK';
+  return {
+    stateLabel,
+    currentLabel,
+    countsLabel,
+    pressureLabel,
+    tooltip: `Animation queue ${queue.runState} · current ${currentLabel} · generated ${queue.generated} · rejected ${queue.rejected} · pending ${queue.pending} · ${queue.pressureSuspended ? 'yielding for editor pressure' : 'editor pressure clear'}`,
+  };
+}
+
+/** Pure change gate used by the effect below; it never owns or polls telemetry. */
+export function publishChangedFpsSample(
+  previous: number | undefined,
+  next: number,
+  listener?: (fps: number) => void,
+): number {
+  if (previous !== next) listener?.(next);
+  return next;
+}
 
 function readBusTail(): { count: number; events: EditorEvent[] } {
   const count = head();
@@ -36,6 +78,10 @@ export default function BuildDock({
   onNativeUpdate,
   loreStatus,
   onLore,
+  onFpsSample,
+  animationQueue,
+  corpusRec,
+  onCorpusToggle,
 }: {
   state: EditorState;
   journal: BuildJournalSnapshot;
@@ -51,6 +97,10 @@ export default function BuildDock({
   onNativeUpdate: () => void;
   loreStatus: RecoveryServerStatusV1;
   onLore: () => void;
+  onFpsSample?: (fps: number) => void;
+  animationQueue?: BuildDockAnimationQueueProjection;
+  corpusRec?: string | null;
+  onCorpusToggle?: () => void;
 }) {
   const [bus, setBus] = useState(readBusTail);
   useEffect(() => onEvent(() => setBus(readBusTail())), []);
@@ -106,6 +156,10 @@ export default function BuildDock({
   // Real host telemetry — polled at 2Hz (cheap; never per-frame). Empty sources
   // render as 0/— instead of seeded historical data.
   const { value: fps } = useTelemetry({ kind: 'fps', pollMs: 500 });
+  const publishedFps = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    publishedFps.current = publishChangedFpsSample(publishedFps.current, fps, onFpsSample);
+  }, [fps, onFpsSample]);
   const { data: frame } = useTelemetry<{ frame_total_us?: number; gpu_us?: number }>({ kind: 'frame', pollMs: 500 });
   const { data: gpu } = useTelemetry<{ scene3d_triangles?: number; scene3d_draw_calls?: number }>({ kind: 'gpu', pollMs: 500 });
   const { data: system } = useTelemetry<{ process_rss_bytes?: number; mem_total_bytes?: number }>({ kind: 'system', pollMs: 1000 });
@@ -126,14 +180,41 @@ export default function BuildDock({
       <C.HW_DockValue>{loreStatus.state.toUpperCase()}</C.HW_DockValue>
     </C.HW_DockBuild>
   );
+  // Retopo-corpus recording light (req_4604): forgetting to arm the recorder is
+  // the failure mode this exists for, so ON must be loud — warning-orange dot +
+  // the entry name, always in the dock. Click toggles begin/finish.
+  const corpusChip = onCorpusToggle ? (
+    <C.HW_DockBuild
+      onPress={onCorpusToggle}
+      tooltip={corpusRec
+        ? `Recording retopo corpus entry "${corpusRec}" — save the model, then click to stop and bundle`
+        : 'Start retopo-corpus recording for the active model (edit trail + journal + final package)'}
+    >
+      <Icon name={corpusRec ? 'CircleDot' : 'Circle'} size={12} color={accentFor(corpusRec ? 'warning' : 'textFaint')} />
+      <C.HW_DockLabel>REC</C.HW_DockLabel>
+      <C.HW_DockValue>{corpusRec ?? 'OFF'}</C.HW_DockValue>
+    </C.HW_DockBuild>
+  ) : null;
   const frameMs = frame?.frame_total_us ? frame.frame_total_us / 1000 : 0;
   const gpuMs = frame?.gpu_us ? frame.gpu_us / 1000 : 0;
   const triCount = gpu?.scene3d_triangles ?? 0;
   const drawCalls = gpu?.scene3d_draw_calls ?? 0;
+  const queueModel = animationQueue ? animationQueueChipModel(animationQueue) : null;
+  const queueChip = queueModel && animationQueue ? (
+    <C.HW_DockGroup tooltip={queueModel.tooltip}>
+      <Icon name="Activity" size={12} color={accentFor(animationQueue.pressureSuspended ? 'warning' : animationQueue.runState === 'running' ? 'success' : 'textFaint')} />
+      <C.HW_DockLabel>QUEUE</C.HW_DockLabel>
+      <C.HW_DockValue>{queueModel.stateLabel}</C.HW_DockValue>
+      <C.HW_DockCoord>{queueModel.currentLabel}</C.HW_DockCoord>
+      <C.HW_DockLabel>{queueModel.countsLabel}</C.HW_DockLabel>
+      <C.HW_DockValue>{queueModel.pressureLabel}</C.HW_DockValue>
+    </C.HW_DockGroup>
+  ) : null;
   if (isKnowledgeDoc) {
     return (
       <C.HW_BuildDock>
         <C.HW_Spacer />
+        {queueChip}
         <C.HW_DockPerfButton onPress={onPerf}>
           <C.HW_DockLabel>FPS:</C.HW_DockLabel>
           <C.HW_DockCoord>{fps > 0 ? Math.round(fps) : '-'}</C.HW_DockCoord>
@@ -152,6 +233,7 @@ export default function BuildDock({
             <C.HW_DockValue>READY</C.HW_DockValue>
           </C.HW_DockBuild>
         ) : null}
+        {corpusChip}
         {loreBadge}
       </C.HW_BuildDock>
     );
@@ -206,6 +288,7 @@ export default function BuildDock({
         <C.HW_DockValue>{telemetry.parity}</C.HW_DockValue>
       </C.HW_DockGroup>
       <C.HW_Spacer />
+      {queueChip}
       <C.HW_DockDivider />
       <C.HW_DockPerfButton onPress={onPerf}>
         <C.HW_DockLabel>FPS:</C.HW_DockLabel>
@@ -231,6 +314,7 @@ export default function BuildDock({
           <C.HW_DockValue>READY</C.HW_DockValue>
         </C.HW_DockBuild>
       ) : null}
+      {corpusChip}
       {loreBadge}
     </C.HW_BuildDock>
   );
