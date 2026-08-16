@@ -9301,6 +9301,15 @@ export default function AppFrame() {
         renameModel(id, name);
         return ok({ id, name });
       }
+      // Full resident mesh journal for the retopo corpus (req_4602): the follow
+      // firehose only keeps delete→create-face pairs, so training-data capture
+      // reads the WHOLE op log (loop cuts, transforms, undo restores, naming)
+      // through the same host door part-ownership already trusts.
+      if (action === 'history-log') {
+        const raw = (globalThis as any).__mesh_history_log?.();
+        if (typeof raw !== 'string' || raw.length === 0) return fail('no resident mesh journal — open a model first');
+        try { return ok(JSON.parse(raw)); } catch { return fail('the host journal log was not valid JSON'); }
+      }
       if (action === 'model-import') {
         const path = String(args.path ?? '').trim();
         if (!path) return fail('a .glb, .obj, or .stl path is required');

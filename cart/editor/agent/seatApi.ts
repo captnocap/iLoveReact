@@ -2795,6 +2795,7 @@ export function executeSeatRequest(seat: AgentSeat, request: SeatRequest): SeatR
       case 'part-duplicate': case 'part-merge': case 'part-path-array': case 'part-import':
       case 'parts-group': case 'parts-ungroup': case 'group-rename': case 'group-visibility':
       case 'group-duplicate': case 'group-dissolve': case 'outliner-move': case 'role-name':
+      case 'history-log':
       case 'model-rename': case 'model-import': case 'model-export': case 'model-starter':
       case 'model-open': case 'auto-rig':
       case 'thumbnail':

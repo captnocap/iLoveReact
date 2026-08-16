@@ -20,6 +20,11 @@ case "$cmd" in
     cp "$src" "$dir/source/"
     tools/seat follow clear >/dev/null 2>&1 || true
     tools/seat follow start "corpus-$name" >/dev/null
+    # The host journal is a 32-op undo WINDOW (req_4602) — one read at finish only
+    # catches the tail, so a poller samples it through the session; dedupe by
+    # actionId happens at training time, not here.
+    nohup bash -c "while :; do tools/seat action history-log '{}' >> '$dir/journal-samples.jsonl' 2>/dev/null; sleep 20; done" >/dev/null 2>&1 &
+    echo $! > "$dir/.poller.pid"
     date -u +%FT%TZ > "$dir/begun.txt"
     echo "recording '$name' (source: $(basename "$src")) — retopo away."
     echo "when done: tools/forge/corpus finish $name <package-dir>"
@@ -29,6 +34,11 @@ case "$cmd" in
     pkg=${3:?corpus finish <name> <package-dir>}
     dir="$ROOT/$name"
     [ -d "$dir" ] || { echo "no corpus entry '$name' — run begin first"; exit 1; }
+    if [ -f "$dir/.poller.pid" ]; then
+      kill "$(cat "$dir/.poller.pid")" 2>/dev/null || true
+      rm -f "$dir/.poller.pid"
+    fi
+    tools/seat action history-log '{}' >> "$dir/journal-samples.jsonl" 2>/dev/null || true
     if ! tools/seat follow read > "$dir/trail.json" 2>/dev/null; then
       echo "WARN: edit trail read failed — bundle continues with source+final only"
       rm -f "$dir/trail.json"
@@ -50,7 +60,9 @@ case "$cmd" in
       [ -f "$entry/finished.txt" ] && state="done $(cat "$entry/finished.txt")"
       trail="no-trail"
       [ -f "$entry/trail.json" ] && trail="trail:$(du -h "$entry/trail.json" | cut -f1)"
-      echo "$(basename "$entry")  $state  $trail"
+      journal="no-journal"
+      [ -f "$entry/journal-samples.jsonl" ] && journal="journal:$(wc -l < "$entry/journal-samples.jsonl")smp"
+      echo "$(basename "$entry")  $state  $trail  $journal"
     done
     echo "-- $total entries"
     ;;
