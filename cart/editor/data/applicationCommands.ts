@@ -104,6 +104,8 @@ export const WORLD_FOCUS_TOOL_COMMAND_ID = 'focus-selection';
 export const WORLD_PAINT_FACES_TOOL_COMMAND_ID = 'paint-faces';
 export const WORLD_STICKER_TOOL_COMMAND_ID = 'place-sticker';
 export const WORLD_DRAW_WALL_TOOL_COMMAND_ID = 'draw-wall';
+export const WORLD_CUT_DOOR_TOOL_COMMAND_ID = 'cut-door';
+export const WORLD_CUT_WINDOW_TOOL_COMMAND_ID = 'cut-window';
 export const WORLD_TOOL_COMMAND_IDS = [
   WORLD_SELECT_TOOL_COMMAND_ID,
   WORLD_PLACE_TOOL_COMMAND_ID,
@@ -112,6 +114,8 @@ export const WORLD_TOOL_COMMAND_IDS = [
   WORLD_PAINT_FACES_TOOL_COMMAND_ID,
   WORLD_STICKER_TOOL_COMMAND_ID,
   WORLD_DRAW_WALL_TOOL_COMMAND_ID,
+  WORLD_CUT_DOOR_TOOL_COMMAND_ID,
+  WORLD_CUT_WINDOW_TOOL_COMMAND_ID,
 ] as const;
 export type WorldToolCommandId = typeof WORLD_TOOL_COMMAND_IDS[number];
 export const WORLD_UNDO_COMMAND_ID = 'world.history.undo';
@@ -422,6 +426,9 @@ const WORLD_TOOL_DEFS: readonly {
   { id: WORLD_PAINT_FACES_TOOL_COMMAND_ID, label: 'Paint Faces', icon: 'Paintbrush', menu: 'Build', chord: 'N' },
   { id: WORLD_STICKER_TOOL_COMMAND_ID, label: 'Place Sticker', icon: 'Sticker', menu: 'Build', chord: 'K' },
   { id: WORLD_DRAW_WALL_TOOL_COMMAND_ID, label: 'Draw Wall', icon: 'BrickWall', menu: 'Build', chord: 'G' },
+  // Cut Opening (req_4503): one tool, parameterized by the armed kit kind.
+  { id: WORLD_CUT_DOOR_TOOL_COMMAND_ID, label: 'Cut Door', icon: 'DoorOpen', menu: 'Build', chord: 'O' },
+  { id: WORLD_CUT_WINDOW_TOOL_COMMAND_ID, label: 'Cut Window', icon: 'Blinds', menu: 'Build', chord: 'U' },
 ];
 
 export function isWorldToolCommandId(id: string): id is WorldToolCommandId {

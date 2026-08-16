@@ -4,7 +4,7 @@
 // viewport was always armed to place a floor, so placement fired on every click regardless of
 // which tool was active — turning on Focus didn't stop you dropping pieces. This maps the armed
 // command id to the one tool that gets the click, so exactly one behaviour is live at a time.
-export type WorldTool = 'select' | 'place' | 'move' | 'focus' | 'paintFace' | 'sticker' | 'drawWall';
+export type WorldTool = 'select' | 'place' | 'move' | 'focus' | 'paintFace' | 'sticker' | 'drawWall' | 'cutOpening';
 
 export function worldToolFor(activeCommandId: string): WorldTool {
   switch (activeCommandId) {
@@ -12,6 +12,10 @@ export function worldToolFor(activeCommandId: string): WorldTool {
     // Draw Wall (req_4473): click-click commits one semantic wall span; the
     // native engine builds the geometry. Never places a catalog piece.
     case 'draw-wall': return 'drawWall';
+    // Cut Opening (req_4503): door and window are ONE tool parameterized by the
+    // armed kit; the ghost snaps to engine-enumerated slots, a click cuts.
+    case 'cut-door': return 'cutOpening';
+    case 'cut-window': return 'cutOpening';
     case 'move-selection': return 'move';
     case 'focus-selection': return 'focus';
     // Paint Faces (req_2879): touching a face applies the active material to that

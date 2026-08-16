@@ -17,7 +17,7 @@ import {
   emptyArchitectureSource,
   parseArchitectureSource,
 } from '../world/architecture';
-import { installArchitectureCatalogFromPackages, projectedWallStyles } from '../world/architectureCatalog';
+import { installArchitectureCatalogFromPackages, projectedOpeningKits, projectedWallStyles } from '../world/architectureCatalog';
 import type { ArchitectureCatalogEntry } from '../world/architecture';
 import { architectureHostLive } from '../../../runtime/game/build';
 
@@ -103,15 +103,34 @@ type InitialWorldArchitecture = { architecture?: unknown };
 /** Install every validated disk-declared kit atomically. No declarations means
  * no architecture capability call, which keeps non-game isolated editor tests pure. */
 let PROJECTED_WALL_STYLES: ArchitectureCatalogEntry[] | null = null;
+let PROJECTED_OPENING_KITS: ArchitectureCatalogEntry[] | null = null;
+let CATALOG_GENERATION = 0;
 
-/** The measured wall styles from the disk packages, projected once per JS
- * context — the Draw Wall tool's style source (req_4473). */
+/** The measured wall styles from the disk packages, projected once per catalog
+ * generation — the Draw Wall tool's style source (req_4473). */
 export function installedWallStyles(): ArchitectureCatalogEntry[] {
   if (PROJECTED_WALL_STYLES === null) PROJECTED_WALL_STYLES = projectedWallStyles(MODEL_PACKAGES);
   return PROJECTED_WALL_STYLES;
 }
 
+/** The measured opening kits — the Cut Opening tool's kit source (req_4503). */
+export function installedOpeningKits(): ArchitectureCatalogEntry[] {
+  if (PROJECTED_OPENING_KITS === null) PROJECTED_OPENING_KITS = projectedOpeningKits(MODEL_PACKAGES);
+  return PROJECTED_OPENING_KITS;
+}
+
+/** Bumps whenever the catalog reinstalls (boot, or a live kit export) — memo
+ * keys read this instead of re-projecting per render. */
+export function architectureCatalogGeneration(): number {
+  return CATALOG_GENERATION;
+}
+
 export function bootArchitectureCatalog(): void {
+  // A reinstall invalidates the per-generation projections: a kit the user
+  // just exported must arm without an app reboot.
+  PROJECTED_WALL_STYLES = null;
+  PROJECTED_OPENING_KITS = null;
+  CATALOG_GENERATION += 1;
   if (!MODEL_PACKAGES.some(pkg => pkg.placeable?.as === 'architecture-kit')) return;
   // Headless contexts (test bundles, hostless carts) have kits on disk but no
   // native capability; skipping is correct there. With a live host the install

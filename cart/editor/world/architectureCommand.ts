@@ -8,7 +8,7 @@
 // the persisted source is bounded authored data held immutably in React state and
 // the engine re-validates every source it is handed. Selection stability across
 // undo belongs to the deferred receipt plumbing, not this boundary.
-import type { ArchitectureSource } from './architecture';
+import type { ArchitectureSource, WallCell, WallHinge, WallOpeningKind, WallSide } from './architecture';
 import {
   architectureHost,
   type ArchitectureCommand,
@@ -43,10 +43,44 @@ export function applyArchitectureCommand(
 
 /** Command ids are minted from the editor's monotonic seq so engine-derived
  * vertex/edge ids (`<commandId>:v:<n>`) stay unique per document. */
-export function architectureCommandId(verb: 'draw' | 'delete-edge', seq: number): string {
+export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening', seq: number): string {
   return `arch:${verb}:${seq}`;
 }
 
 export function deleteEdgeCommand(commandId: string, expectedRevision: number, edgeId: string): ArchitectureCommand {
   return { commandId, expectedRevision, kind: 'deleteEdge', edgeId };
+}
+
+/** Cut one opening: the engine subtracts the kit's measured footprint at the
+ * slot and mints the opening record `<commandId>:o:0`. Facing defaults to the
+ * side the camera saw (the raycast hit side); hinge starts at the run start —
+ * both editable later through configureOpening (req_4503). */
+export function insertOpeningCommand(
+  commandId: string,
+  expectedRevision: number,
+  edgeId: string,
+  kit: { catalogId: string; kind: WallOpeningKind },
+  slot: WallCell,
+  facingSide: WallSide,
+  hinge: WallHinge = 'start',
+): ArchitectureCommand {
+  return {
+    commandId,
+    expectedRevision,
+    kind: 'insertOpening',
+    edgeId,
+    opening: {
+      openingId: `${commandId}:o:0`,
+      kind: kit.kind,
+      kitId: kit.catalogId,
+      columnU: slot.columnU,
+      rowU: slot.rowU,
+      facingSide,
+      hinge,
+    },
+  };
+}
+
+export function deleteOpeningCommand(commandId: string, expectedRevision: number, openingId: string): ArchitectureCommand {
+  return { commandId, expectedRevision, kind: 'deleteOpening', openingId };
 }

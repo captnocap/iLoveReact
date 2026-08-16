@@ -40,8 +40,9 @@ import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
 import { snapWallHeightU, snapWallPoint, snapWallThicknessU, wallPointerRelease, STOREY_HEIGHT_U, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
 import { setLiveArchitecture } from './architectureBake';
-import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource } from './architecture';
+import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
 import { architectureHost } from './architectureHost';
+import { openingEdgeRefusal, openingGhostCorners, snapOpeningSlot, type OpeningKitArm } from './openingTools';
 import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
@@ -228,6 +229,17 @@ export default function WorldViewport(props: {
   /** A Select-tool click resolved to a wall face (piece picks take precedence);
    *  null never rides this — the shared miss path clears both selections. */
   onSelectWall: (hit: { edgeId: string; side: 'a' | 'b' }) => void;
+  /** Cut Opening (req_4503): the armed kit the ghost measures with. Null means
+   *  the tool is inert (nothing installed) — the owner reports why. */
+  openingKit: OpeningKitArm | null;
+  /** A legal-slot click; the owner issues exactly one insertOpening command.
+   *  Returns engine acceptance so a reject leaves the ghost hovering. */
+  onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: WallCell }) => boolean;
+  /** A Select click that hit an opening's frame — selects the opening record. */
+  onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
+  /** Measured footprint per installed opening kit id — the selected-opening
+   *  outline resolves its rectangle through this regardless of the armed tool. */
+  openingFootprints: Readonly<Record<string, import('./architecture').ArchitectureFootprint>>;
   /** Commit a snapped preview after one Move-tool drag. */
   onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
@@ -324,12 +336,39 @@ export default function WorldViewport(props: {
   onDrawWallRef.current = props.onDrawWall;
   const onSelectWallRef = useRef(props.onSelectWall);
   onSelectWallRef.current = props.onSelectWall;
+  const onCutOpeningRef = useRef(props.onCutOpening);
+  onCutOpeningRef.current = props.onCutOpening;
+  const onSelectOpeningRef = useRef(props.onSelectOpening);
+  onSelectOpeningRef.current = props.onSelectOpening;
+  const openingKitRef = useRef(props.openingKit);
+  openingKitRef.current = props.openingKit;
   const wallAnchorRef = useRef<WallDrawGesture | null>(null);
   // The wall ghost (req_4474): the snapped lattice point under the cursor plus
   // the live anchor, projected into a storey-tall guide rectangle each render.
   // State (not the ref) so anchoring and cursor cell-crossings re-render; the
   // lattice snap itself throttles updates to one per crossed metre.
   const [wallGhost, setWallGhost] = useState<{ anchor: WallLatticePoint | null; cursor: WallLatticePoint | null }>({ anchor: null, cursor: null });
+  // Cut Opening ghost (req_4503): the hovered wall face plus the ENGINE's
+  // nearest legal slot (or the reason there is none). State so cell-crossings
+  // re-render; the ref mirror gives the click handler the settled hover.
+  const [openingGhost, setOpeningGhostState] = useState<{
+    edgeId: string; side: 'a' | 'b'; anchor: WallCell; slot: WallCell | null; reason: string | null;
+  } | null>(null);
+  const openingGhostRef = useRef(openingGhost);
+  const setOpeningGhost = useCallback((next: typeof openingGhost) => {
+    const prev = openingGhostRef.current;
+    const same = prev === next || (prev && next
+      && prev.edgeId === next.edgeId && prev.side === next.side && prev.reason === next.reason
+      && prev.anchor.columnU === next.anchor.columnU && prev.anchor.rowU === next.anchor.rowU
+      && (prev.slot === next.slot || (!!prev.slot && !!next.slot
+        && prev.slot.columnU === next.slot.columnU && prev.slot.rowU === next.slot.rowU)));
+    if (same) return;
+    openingGhostRef.current = next;
+    setOpeningGhostState(next);
+  }, []);
+  // Legal slots per (source revision, edge, kit) — the engine enumerates once
+  // per hovered edge and the cache dies with any wall edit (revision bump).
+  const openingSlotsCacheRef = useRef<{ key: string; slots: WallCell[] } | null>(null);
   // Pending wall measurements (req_4479): the anchor gizmo adjusts these BEFORE
   // any wall exists; commits carry them as overrides of the style defaults.
   // Sticky for the session — set a height once, chain a whole box at it.
@@ -360,6 +399,11 @@ export default function WorldViewport(props: {
       wallAnchorRef.current = null;
       wallGizmoDragRef.current = null;
       setWallGhost((prev) => (prev.anchor || prev.cursor ? { anchor: null, cursor: null } : prev));
+    }
+    if (props.tool !== 'cutOpening') {
+      openingGhostRef.current = null;
+      setOpeningGhostState((prev) => (prev ? null : prev));
+      openingSlotsCacheRef.current = null;
     }
   }, [props.tool]);
   // req_4476 diagnostic: every drawWall-adjacent tool transition, logged from
@@ -933,7 +977,10 @@ export default function WorldViewport(props: {
   // draw tool's future opening placement uses, so picked geometry is exactly
   // rendered geometry. Null when the host is absent, nothing is drawn, or the
   // ray misses every wall face.
-  const pickWallAt = useCallback((px: number, py: number): { edgeId: string; side: 'a' | 'b' } | null => {
+  const pickWallAt = useCallback((px: number, py: number): {
+    edgeId: string; side: 'a' | 'b'; kind: 'wallFace' | 'openingFrame';
+    openingId?: string; columnU: number; rowU: number;
+  } | null => {
     const source = architectureRef.current;
     if (!architectureHostLive() || source.walls.edges.length === 0) return null;
     const ray = stage.worldRay(px, py, rectRef.current);
@@ -943,12 +990,64 @@ export default function WorldViewport(props: {
         direction: [ray.dir.x, ray.dir.y, ray.dir.z],
         maximumDistanceMeters: 1000,
       });
-      return hit ? { edgeId: hit.edgeId, side: hit.side } : null;
+      return hit ? {
+        edgeId: hit.edgeId, side: hit.side, kind: hit.kind,
+        ...(hit.openingId ? { openingId: hit.openingId } : {}),
+        columnU: hit.columnU, rowU: hit.rowU,
+      } : null;
     } catch (error) {
       console.warn(`[wall] pick raycast failed: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }, [stage]);
+
+  // Cut Opening hover (req_4503): raycast the wall under the cursor, then snap
+  // the ghost to the nearest slot the ENGINE enumerated for the armed kit —
+  // or carry the reason the hovered wall refuses the kit outright.
+  const trackOpeningCursor = useCallback((px: number, py: number) => {
+    if (toolRef.current !== 'cutOpening') return;
+    const kit = openingKitRef.current;
+    const source = architectureRef.current;
+    if (!kit || !architectureHostLive() || source.walls.edges.length === 0) {
+      setOpeningGhost(null);
+      return;
+    }
+    const hit = pickWallAt(px, py);
+    if (!hit || hit.kind !== 'wallFace') {
+      setOpeningGhost(null);
+      return;
+    }
+    const edge = source.walls.edges.find((candidate) => candidate.id === hit.edgeId);
+    if (!edge) {
+      setOpeningGhost(null);
+      return;
+    }
+    const anchor = { columnU: hit.columnU, rowU: hit.rowU };
+    const refusal = openingEdgeRefusal(kit, edge);
+    if (refusal) {
+      setOpeningGhost({ edgeId: hit.edgeId, side: hit.side, anchor, slot: null, reason: refusal });
+      return;
+    }
+    const cacheKey = `${source.revision}:${hit.edgeId}:${kit.catalogId}`;
+    let slots = openingSlotsCacheRef.current?.key === cacheKey ? openingSlotsCacheRef.current.slots : null;
+    if (!slots) {
+      try {
+        slots = architectureHost.openingSlots(source, hit.edgeId, kit.catalogId);
+      } catch (error) {
+        console.warn(`[wall] opening slots failed: ${error instanceof Error ? error.message : String(error)}`);
+        slots = [];
+      }
+      openingSlotsCacheRef.current = { key: cacheKey, slots };
+    }
+    const slot = snapOpeningSlot(slots, hit.columnU, hit.rowU);
+    setOpeningGhost({
+      edgeId: hit.edgeId,
+      side: hit.side,
+      anchor,
+      slot,
+      reason: slot ? null : `no room for ${kit.label} on this wall`,
+    });
+  }, [pickWallAt, setOpeningGhost]);
 
   // Prop stacking (req_3363): the placement ray may strike a placed piece's TOP
   // FACE before the terrain — a table top is a placement surface, exactly the
@@ -1483,7 +1582,8 @@ export default function WorldViewport(props: {
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
     trackWallCursor(p.x, p.y);
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackWallCursor, currentWallParams, setWallParams]);
+    trackOpeningCursor(p.x, p.y);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackWallCursor, trackOpeningCursor, currentWallParams, setWallParams]);
 
   const onUp = useCallback((e: any) => {
     if (interactionLockedRef.current) {
@@ -1609,6 +1709,18 @@ export default function WorldViewport(props: {
       console.warn(`[wall] draw dropped — ${routed.reason}`);
       return;
     }
+    // Cut Opening (req_4503): a settled click at a green ghost cuts. The ghost
+    // already holds the engine-enumerated slot the hover snapped to; a red
+    // hover click just repeats its reason instead of guessing a cut.
+    if (toolRef.current === 'cutOpening' && !d.pan && !d.turned) {
+      const ghost = openingGhostRef.current;
+      if (!ghost || !ghost.slot) {
+        console.warn(`[wall] cut click refused — ${ghost?.reason ?? 'no wall under the cursor'}`);
+        return;
+      }
+      onCutOpeningRef.current({ edgeId: ghost.edgeId, side: ghost.side, slot: ghost.slot });
+      return;
+    }
     // req_2548 diagnostic — every way a click can silently place nothing.
     if (d.turned) {
       // Move commits precisely once on drop; its local preview never mutated the
@@ -1644,8 +1756,14 @@ export default function WorldViewport(props: {
       // are the finer, denser targets.
       if (!pieceId && tool === 'select' && d.selectionIntent === 'replace') {
         const wallHit = pickWallAt(d.x0, d.y0);
+        // An opening's frame selects the OPENING record (req_4503); a plain
+        // face keeps selecting the wall edge.
+        if (wallHit?.kind === 'openingFrame' && wallHit.openingId) {
+          onSelectOpeningRef.current({ edgeId: wallHit.edgeId, openingId: wallHit.openingId });
+          return;
+        }
         if (wallHit) {
-          onSelectWallRef.current(wallHit);
+          onSelectWallRef.current({ edgeId: wallHit.edgeId, side: wallHit.side });
           return;
         }
       }
@@ -1773,6 +1891,35 @@ export default function WorldViewport(props: {
   }
   // Selected semantic wall (req_4480): the edge's face rectangle in the same
   // cyan selection vocabulary — base and top lines plus both verticals.
+  // Selected opening (req_4503): outline the opening's cut rectangle in the
+  // same cyan vocabulary — resolved from the persisted source record.
+  if (props.tool !== 'place' && props.architectureSelection.kind === 'wallOpening') {
+    const selection = props.architectureSelection;
+    const edge = props.architecture.walls.edges.find((candidate) => candidate.id === selection.edgeId);
+    const opening = edge?.openings?.find((candidate) => candidate.id === selection.openingId);
+    const startVertex = edge ? props.architecture.walls.vertices.find((vertex) => vertex.id === edge.startVertexId) : null;
+    const endVertex = edge ? props.architecture.walls.vertices.find((vertex) => vertex.id === edge.endVertexId) : null;
+    const kitFootprint = opening ? props.openingFootprints[opening.kitId] ?? null : null;
+    if (edge && opening && startVertex && endVertex && edge.support.kind === 'absolute') {
+      const footprint = kitFootprint ?? { minColumn: 0, minRow: 0, maxColumnExclusive: 1, maxRowExclusive: 1 };
+      const corners = openingGhostCorners(
+        { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+        { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+        edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
+        { columnU: opening.columnU, rowU: opening.rowU },
+        footprint,
+      );
+      const projected = corners?.map((corner) => stage.project(corner.x, corner.y, corner.z, rect)) ?? null;
+      if (projected && projected.every((point) => point !== null)) {
+        const pts = projected as { x: number; y: number }[];
+        for (let index = 0; index < 4; index += 1) {
+          const a = pts[index]!;
+          const b = pts[(index + 1) % 4]!;
+          selectedSegs.push(a.x, a.y, b.x, b.y);
+        }
+      }
+    }
+  }
   if (props.tool !== 'place' && props.architectureSelection.kind === 'wallEdge') {
     const selection = props.architectureSelection;
     const edge = props.architecture.walls.edges.find((candidate) => candidate.id === selection.edgeId);
@@ -1964,6 +2111,48 @@ export default function WorldViewport(props: {
     }
   }
 
+  // Cut Opening ghost (req_4503): the kit's measured cut rectangle on the
+  // hovered wall face — green at an engine-legal slot, red with the reason
+  // when the wall (or the hovered spot) refuses the kit.
+  const openingSegs: number[] = [];
+  let openingLegal = false;
+  let openingReadout: { x: number; y: number; text: string } | null = null;
+  if (props.tool === 'cutOpening' && openingGhost && props.openingKit) {
+    const edge = props.architecture.walls.edges.find((candidate) => candidate.id === openingGhost.edgeId);
+    const startVertex = edge ? props.architecture.walls.vertices.find((vertex) => vertex.id === edge.startVertexId) : null;
+    const endVertex = edge ? props.architecture.walls.vertices.find((vertex) => vertex.id === edge.endVertexId) : null;
+    if (edge && startVertex && endVertex && edge.support.kind === 'absolute') {
+      openingLegal = openingGhost.slot !== null;
+      const corners = openingGhostCorners(
+        { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+        { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
+        edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
+        openingGhost.slot ?? openingGhost.anchor,
+        props.openingKit.footprint,
+      );
+      const projected = corners?.map((corner) => stage.project(corner.x, corner.y, corner.z, rect)) ?? null;
+      if (projected && projected.every((point) => point !== null)) {
+        const pts = projected as { x: number; y: number }[];
+        for (let index = 0; index < 4; index += 1) {
+          const a = pts[index]!;
+          const b = pts[(index + 1) % 4]!;
+          openingSegs.push(a.x, a.y, b.x, b.y);
+        }
+        if (!openingLegal) {
+          // The refused ghost carries an X so red-green colorblind users still
+          // read the refusal from shape alone.
+          openingSegs.push(pts[0]!.x, pts[0]!.y, pts[2]!.x, pts[2]!.y, pts[1]!.x, pts[1]!.y, pts[3]!.x, pts[3]!.y);
+        }
+        const topmost = pts.reduce((best, point) => (point.y < best.y ? point : best), pts[0]!);
+        openingReadout = {
+          x: topmost.x + 8,
+          y: topmost.y - 20,
+          text: openingGhost.reason ? `${props.openingKit.label} — ${openingGhost.reason}` : props.openingKit.label,
+        };
+      }
+    }
+  }
+
   return (
     <Box
       style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0d141f' }}
@@ -2006,6 +2195,20 @@ export default function WorldViewport(props: {
           {wallReadout ? (
             <Box style={{ position: 'absolute', left: wallReadout.x, top: wallReadout.y, backgroundColor: '#0d141fcc', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4 }}>
               <Text style={{ color: '#e5e9f0', fontSize: 12 }}>{wallReadout.text}</Text>
+            </Box>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {/* Cut Opening ghost (req_4503) — slot-snapped cut rectangle, green legal / red with reason. */}
+      {openingSegs.length ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+            <Graph.Polyline segments points={openingSegs} stroke={openingLegal ? '#34d399' : '#f87171'} strokeWidth={2} />
+          </Graph>
+          {openingReadout ? (
+            <Box style={{ position: 'absolute', left: openingReadout.x, top: openingReadout.y, backgroundColor: '#0d141fcc', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4 }}>
+              <Text style={{ color: openingLegal ? '#e5e9f0' : '#f8b4b4', fontSize: 12 }}>{openingReadout.text}</Text>
             </Box>
           ) : null}
         </Box>

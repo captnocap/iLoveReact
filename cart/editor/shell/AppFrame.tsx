@@ -128,10 +128,12 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
-import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand } from '../world/architectureCommand';
-import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION } from '../world/architecture';
+import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand } from '../world/architectureCommand';
+import { armedOpeningKitFromEntries, snapOpeningSlot } from '../world/openingTools';
+import { architectureHost } from '../world/architectureHost';
+import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
-import { bootArchitectureCatalog, installedWallStyles } from '../data/initialState';
+import { architectureCatalogGeneration, bootArchitectureCatalog, installedOpeningKits, installedWallStyles } from '../data/initialState';
 // The durable working session (req_4435): what a cold start restores, and the
 // record the Home surface's Continue card reads.
 import {
@@ -4291,8 +4293,12 @@ export default function AppFrame() {
           return;
         }
         if (command.id === 'delete-selection' || command.id === WORLD_PIECE_DELETE_COMMAND_ID) {
-          // Selected semantic wall (req_4480): the edge deletes through the
-          // engine; pieces keep their existing lanes below.
+          // Selected opening (req_4503) / semantic wall (req_4480): both
+          // delete through the engine; pieces keep their existing lanes below.
+          if (current.architectureSelection.kind === 'wallOpening' && !current.selectedPieceId && current.selectedPieceIds.length === 0) {
+            deleteSelectedOpening();
+            return;
+          }
           if (current.architectureSelection.kind === 'wallEdge' && !current.selectedPieceId && current.selectedPieceIds.length === 0) {
             deleteSelectedWallEdge();
             return;
@@ -5084,6 +5090,96 @@ export default function AppFrame() {
       contextOpen: false,
       status: 'Wall deleted',
     }, 'Delete wall'));
+  };
+
+  /** The kit the Cut Opening tool measures with — resolved from the installed
+   *  catalog per generation, exactly the Draw Wall first-style convention. */
+  const armedOpeningKind = state.activeCommandId === 'cut-door' ? ('door' as const)
+    : state.activeCommandId === 'cut-window' ? ('window' as const) : null;
+  const catalogGeneration = architectureCatalogGeneration();
+  const armedOpeningKit = useMemo(
+    () => (armedOpeningKind ? armedOpeningKitFromEntries(installedOpeningKits(), armedOpeningKind) : null),
+    [armedOpeningKind, catalogGeneration],
+  );
+  const openingFootprints = useMemo(() => {
+    const map: Record<string, ArchitectureFootprint> = {};
+    for (const entry of installedOpeningKits()) {
+      if (entry.measurement.footprint) map[entry.catalogId] = entry.measurement.footprint;
+    }
+    return map;
+  }, [catalogGeneration]);
+  // Arming a cut tool with nothing installed says WHY the ghost never appears
+  // and names the export verb that fixes it.
+  useEffect(() => {
+    if (armedOpeningKind && !armedOpeningKit) {
+      const label = armedOpeningKind === 'door' ? 'Door' : 'Window';
+      setState((prev) => ({ ...prev, status: `no ${armedOpeningKind} kit installed — open your model, then File → Export → Wall Opening → ${label}` }));
+    }
+  }, [armedOpeningKind, armedOpeningKit]);
+
+  /** Cut Opening (req_4503): one green-ghost click becomes exactly one
+   *  insertOpening command; the engine subtracts the measured footprint and
+   *  the returned source rides the same world undo journal as drawWall. */
+  const cutOpening = (hit: { edgeId: string; side: 'a' | 'b'; slot: WallCell }): boolean => {
+    const current = stateRef.current;
+    const kind = current.activeCommandId === 'cut-door' ? ('door' as const)
+      : current.activeCommandId === 'cut-window' ? ('window' as const) : null;
+    const kit = kind ? armedOpeningKitFromEntries(installedOpeningKits(), kind) : null;
+    if (!kit) {
+      setState((prev) => ({ ...prev, status: 'cut opening: no kit armed — File → Export → Wall Opening installs one' }));
+      return false;
+    }
+    const commandId = architectureCommandId('opening', current.seq);
+    const command = insertOpeningCommand(commandId, current.architecture.revision, hit.edgeId, kit, hit.slot, hit.side);
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED ${kit.label} cut into ${hit.edgeId} @ (${hit.slot.columnU}u,${hit.slot.rowU}u): ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `cut ${kit.label.toLowerCase()} rejected: ${result.reason}` }));
+      return false;
+    }
+    console.warn(`[wall] ${kit.label} cut into ${hit.edgeId} @ (${hit.slot.columnU}u,${hit.slot.rowU}u) facing ${hit.side}`);
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      seq: prev.seq + 1,
+      status: `${kit.label} cut — walk through it in /play; Del deletes, Ctrl+Z undoes`,
+    }, `Cut ${kit.label.toLowerCase()}`));
+    return true;
+  };
+
+  /** A Select click resolved to an opening's frame (req_4503). */
+  const selectOpening = (hit: { edgeId: string; openingId: string }) => {
+    setState((prev) => ({
+      ...prev,
+      architectureSelection: { kind: 'wallOpening', edgeId: hit.edgeId, openingId: hit.openingId },
+      selectedPieceId: null,
+      selectedPieceIds: [],
+      status: 'selected opening — Del deletes it',
+    }));
+  };
+
+  /** Delete the selected opening through the engine — the wall heals to a
+   *  solid face; one undoable world edit, same shape as deleteSelectedWallEdge. */
+  const deleteSelectedOpening = () => {
+    const current = stateRef.current;
+    const selection = current.architectureSelection;
+    if (selection.kind !== 'wallOpening') return;
+    const command = deleteOpeningCommand(architectureCommandId('delete-opening', current.seq), current.architecture.revision, selection.openingId);
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED opening delete ${selection.openingId}: ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `delete opening rejected: ${result.reason}` }));
+      return;
+    }
+    console.warn(`[wall] opening deleted (${selection.openingId}) — wall healed solid`);
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+      seq: prev.seq + 1,
+      contextOpen: false,
+      status: 'Opening deleted — wall healed',
+    }, 'Delete opening'));
   };
 
   /** Commit one viewport drag after its local snapped preview has settled. This
@@ -9927,6 +10023,53 @@ export default function AppFrame() {
     });
   }, []);
 
+  // RJIT_ARCHOPEN="kind,edgeId,columnU,rowU[;…]": synthetic opening cuts after
+  // the ARCHDRAW walls settle — proves export→install→slots→insertOpening→bake
+  // headlessly (`rjit shot editor` + the event ring). Each cut resolves the
+  // installed kit for its kind, snaps to the engine's nearest legal slot around
+  // the requested cell, cuts, then logs band/collide deltas a beat later.
+  useEffect(() => {
+    const script = (globalThis as any).__env_get?.('RJIT_ARCHOPEN') as string | null | undefined;
+    if (!script) return;
+    const cuts = script.split(';').map((entry) => entry.trim()).filter(Boolean);
+    cuts.forEach((cut, i) => {
+      setTimeout(() => {
+        const [kindRaw, edgeId, columnRaw, rowRaw] = cut.split(',').map((value) => value.trim());
+        const kind = kindRaw === 'door' || kindRaw === 'window' ? kindRaw : null;
+        const columnU = Number(columnRaw);
+        const rowU = Number(rowRaw);
+        if (!kind || !edgeId || !Number.isSafeInteger(columnU) || !Number.isSafeInteger(rowU)) {
+          console.error(`[archopen] '${cut}' is not kind,edgeId,columnU,rowU — skipped`);
+          return;
+        }
+        const kit = armedOpeningKitFromEntries(installedOpeningKits(), kind);
+        if (!kit) {
+          console.error(`[archopen] no ${kind} kit installed — export one first (File → Export → Wall Opening)`);
+          return;
+        }
+        const source = stateRef.current.architecture;
+        let slots: WallCell[] = [];
+        try {
+          slots = architectureHost.openingSlots(source, edgeId, kit.catalogId);
+        } catch (error) {
+          console.error(`[archopen] slot enumeration failed for ${edgeId}: ${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
+        const slot = snapOpeningSlot(slots, columnU, rowU);
+        if (!slot) {
+          console.error(`[archopen] ${edgeId} offers no legal slot for ${kit.label} (${slots.length} enumerated)`);
+          return;
+        }
+        cutOpening({ edgeId, side: 'a', slot });
+        setTimeout(() => {
+          const s = stateRef.current;
+          const openings = s.architecture.walls.edges.reduce((count, edge) => count + edge.openings.length, 0);
+          console.error(`[archopen] after (${cut}) → status="${s.status}" openings=${openings} liveMeshes=${liveArchitectureResidentMeshes().length} collideRows=${liveArchitectureCollideRows().length / 12}`);
+        }, 500);
+      }, 4200 + i * 900);
+    });
+  }, []);
+
   // Eyedropper (req_3097): ModelView samples the painted atlas under the cursor
   // (__model_paint_sample) and announces the hex here — same announce-global
   // pattern as __modelPartRangesChanged. The pick funnels through the spine's
@@ -11480,6 +11623,10 @@ export default function AppFrame() {
             onPaintFaces={paintPieceFaces}
             onPaintFlora={paintWorldFlora}
             onDrawWall={drawWall}
+            openingKit={armedOpeningKit}
+            onCutOpening={cutOpening}
+            onSelectOpening={selectOpening}
+            openingFootprints={openingFootprints}
             wallDefaults={installedWallStyles()[0]?.wallStyleDefaults ?? null}
             onSelectWall={selectWallEdge}
             onStampSticker={stampSticker}

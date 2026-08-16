@@ -195,6 +195,19 @@ export function projectedWallStyles(packages: readonly ArchitectureManifestPacka
   }
 }
 
+/** The measured opening kits among projected entries — the Cut Opening tool's
+ * kit source (req_4503). Same refusal posture as the wall styles: a malformed
+ * projection reports loudly and arms nothing. */
+export function projectedOpeningKits(packages: readonly ArchitectureManifestPackage[]): ArchitectureCatalogEntry[] {
+  try {
+    return projectArchitectureCatalog(packages)
+      .filter(entry => entry.family === 'wall' && entry.role === 'opening');
+  } catch (error) {
+    console.error(`[architecture] opening-kit projection failed: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
+
 export function structuredArchitectureCatalogQuery(query: ArchitectureCatalogQuery): ArchitectureCatalogQuery {
   validateArchitectureCatalogQuery(query);
   return {
