@@ -279,7 +279,12 @@ fn gizmoBase(st: *WallToolState) ?[3]f32 {
 /// per-frame update tracks natively; a nudge steps thickness one whole u.
 pub fn press(runtime: anytype, node_id: u32, mx: f32, my: f32) PressResult {
     const st = stateFor(node_id) orelse return .pass;
-    if (!(st.armed or st.sel)) return .pass;
+    // Handles exist only once the gizmo is PLANTED — on the draw anchor or the
+    // selected wall. Pre-anchor the cursor IS the click target (req_4531: the
+    // ride-along gizmo ate the first click as a hub grab and desynced the
+    // whole flow), so every pre-anchor press passes through to anchoring.
+    const interactive = (st.armed and st.anchored) or (st.sel and !st.armed);
+    if (!interactive) return .pass;
     if (!mouseInPane(runtime, mx, my)) return .pass;
     const base = gizmoBase(st) orelse return .pass;
     const ray = rayAt(runtime, mx, my) orelse return .pass;
@@ -411,14 +416,31 @@ pub fn appendOverlay(self: anytype) void {
         const hy = @as(f32, @floatFromInt(st.floor)) * METERS_PER_LEVEL;
         const s = DIAMOND_PX * worldPerPixel(self, hx, hy, hz);
         appendBox(self, hx, hy + 0.01, hz, s, 0.03, s, std.math.pi / 4.0, EMERALD, 0.95);
+        // Pre-anchor: a faint one-storey pole telegraphs "this tool builds
+        // walls" — deliberately NOT interactive and with no handles, so the
+        // first click can never be eaten by chrome riding the cursor
+        // (req_4531). The real gizmo plants once the anchor exists.
+        if (!st.anchored and st.drag == .none) {
+            const pole_w = ARM_THICKNESS_PX * 0.8 * worldPerPixel(self, hx, hy, hz);
+            appendBox(self, hx, hy + height_m * 0.5, hz, pole_w, height_m, pole_w, 0, ARM_GREEN, 0.4);
+        }
     }
-    // Magnet marker: gold — "your next click reuses this exact corner".
+    // Magnet marker: cyan — "your next click reuses this exact corner".
     if (st.magnet_valid) {
         const mx_m = st.magnet_x_u / UNITS_PER_METER;
         const mz_m = st.magnet_z_u / UNITS_PER_METER;
         const my_m = @as(f32, @floatFromInt(st.floor)) * METERS_PER_LEVEL;
         const s = (DIAMOND_PX + 4) * worldPerPixel(self, mx_m, my_m, mz_m);
-        appendBox(self, mx_m, my_m + 0.02, mz_m, s, 0.05, s, std.math.pi / 4.0, AMBER, 0.95);
+        appendBox(self, mx_m, my_m + 0.02, mz_m, s, 0.05, s, std.math.pi / 4.0, CYAN, 0.95);
+    }
+    // The planted anchor (req_4531 flow step 3): the committed start point is
+    // AMBER — unmistakably "the wall starts here, your next click ends it".
+    if (st.armed and st.anchored) {
+        const ax_m = @as(f32, @floatFromInt(st.anchor_x_u)) / UNITS_PER_METER;
+        const az_m = @as(f32, @floatFromInt(st.anchor_z_u)) / UNITS_PER_METER;
+        const ay_m = @as(f32, @floatFromInt(st.floor)) * METERS_PER_LEVEL;
+        const s = (DIAMOND_PX + 3) * worldPerPixel(self, ax_m, ay_m, az_m);
+        appendBox(self, ax_m, ay_m + 0.02, az_m, s, 0.05, s, std.math.pi / 4.0, AMBER, 0.95);
     }
     // The hologram span (req_4520 #3): a translucent wall VOLUME from the
     // anchor to the cursor at the pending height × thickness — the unmissable
@@ -449,9 +471,10 @@ pub fn appendOverlay(self: anytype) void {
             );
         }
     }
-    // The anchor gizmo: height arm + head, thickness hub + nudge arrows. In
-    // selection mode the same rig stands on the selected wall's midpoint.
-    {
+    // The measurement gizmo: height arm + head, thickness hub + nudge arrows.
+    // PLANTED chrome only (req_4531): it stands on the draw anchor or the
+    // selected wall's midpoint — never on the free cursor.
+    if ((st.armed and st.anchored) or (st.sel and !st.armed)) {
         const arm_w = ARM_THICKNESS_PX * wpp;
         const head_s = HEAD_PX * wpp;
         const hub_s = HUB_PX * wpp;
