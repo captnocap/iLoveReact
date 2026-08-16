@@ -19,7 +19,7 @@ import { resolvePackageDir } from '../data/modelPackageStore';
 import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
 import { runtimeCompiledPaintAtlas } from '../data/paintAtlasCompiler';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
-import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
+import { compileDoorMesh, DOOR_EXPORT_TUNING, resolveDoorHinge, resolveDoorLeafPart } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from './architectureBake';
 import { compileOutlinerCollision } from '../model/meshCollision';
@@ -155,6 +155,18 @@ function residentMeshFor(
     return null;
   }
   const tuning = ap.edit === 'garageDoor' ? DOOR_EXPORT_TUNING.garage : DOOR_EXPORT_TUNING.walk;
+  // The named knob decides the hinge side (req_4537): knob side is never the
+  // hinge. No knob named → the historic min-X hinge stands, and the warn says
+  // how to change it.
+  const leafPart = resolveDoorLeafPart(parts);
+  const hinge = leafPart.ok
+    ? resolveDoorHinge(doc, leafPart.index)
+    : { hingeMaxX: false as const, inferred: false as const, reason: 'no resolvable Door Leaf part' };
+  if (hinge.inferred) {
+    console.warn(`[authored-door] '${ap.label}' hinge inferred from the '${hinge.knobRegion}' region: ${hinge.hingeMaxX ? 'max-X edge (knob on the min side)' : 'min-X edge (knob on the max side)'}`);
+  } else {
+    console.warn(`[authored-door] '${ap.label}' hinge defaults to the min-X edge — ${hinge.reason}; Name Selection a 'knob' region to steer it`);
+  }
   const slots = compiled.mesh.leafGlass
     ? [
       { start: compiled.mesh.leaf.start, count: compiled.mesh.leafGlass.start - compiled.mesh.leaf.start },
@@ -169,7 +181,7 @@ function residentMeshFor(
     // The live host swings every slot from leafSlot onward and routes the glass
     // tail through its depth-write-off transparent pass.
     slots,
-    door: { leafSlot: 0, reachMeters: tuning.reachMeters, vehicle: tuning.vehicle, startOpen: false },
+    door: { leafSlot: 0, reachMeters: tuning.reachMeters, vehicle: tuning.vehicle, startOpen: false, ...(hinge.hingeMaxX ? { hingeMaxX: true } : {}) },
     collisionBoxes: compiled.mesh.collisionBoxes,
   };
 }

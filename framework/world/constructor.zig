@@ -10,7 +10,8 @@
 //! world_loader.zig.
 
 const std = @import("std");
-const pose_markers = @import("../skeleton/pose_markers.zig");
+const character_assets = @import("../world_loader/character_assets.zig");
+const npc_character_policy = @import("../world_loader/npc_character_policy.zig");
 const gamefile = @import("gamefile.zig");
 const live_mesh_doors = @import("live_mesh_doors.zig");
 const terrain_grid = @import("../gpu/terrain_grid.zig");
@@ -23,10 +24,9 @@ const mapfile = gamefile.mapfile;
 // codec; decoding here, in the game host that links stb, is the path that works.
 const c = @import("../c.zig").imports;
 
-pub const Error = gamefile.Error || error{
+pub const Error = gamefile.Error || npc_character_policy.Error || error{
     NoMapTiles,
     UnsupportedTileEncoding,
-    BadPlayerModel,
     BadHeightfields,
     BadColliders,
     BadPhysicsConfig,
@@ -66,16 +66,6 @@ pub const DYNAMIC_PART_FLOATS: usize = 13;
 
 const SCENE_ENV_VERSION: u32 = 1;
 const SCENE_ENV_FLOATS: usize = 35;
-const PLAYER_MODEL_VERSION: u32 = 2;
-const PLAYER_ANIMATION_VERSION: u32 = 1;
-const PLAYER_ANIMATION_HASH_BYTES: usize = 32;
-// NPC population lumps (req_0935). NPC models reuse the PLAYER_MODEL group
-// layout verbatim, so decodeNpcModels shares readModelGroup with the player.
-const NPC_MODELS_VERSION: u32 = 1;
-const NPC_SPAWNS_VERSION: u32 = 1;
-const NPC_SPAWN_BYTES: usize = 24; // u32 modelIndex + f32 x,z,yaw + u32 kind + u32 faction
-const PLAYER_MODEL_ASSET_KEY: u32 = 2001;
-const PLAYER_ANIMATION_ASSET_KEY: u32 = 2002;
 /// Manifest asset-kind tag for decal image payloads (DECALIMG-0610) — the
 /// writer twin is cart/hmsc-int/compile/decalAssets.ts ASSET_KIND_DECAL_IMAGE.
 const DECAL_IMAGE_ASSET_KIND: u16 = 11;
@@ -111,60 +101,7 @@ pub const SceneEnv = struct {
     cam_far_factor: f32 = 3.0,
 };
 
-pub const PlayerModelGroup = struct {
-    color: [3]f32,
-    alpha: f32,
-    vertices: []f32,
-    vertex_count: u32,
-    tex_w: u32,
-    tex_h: u32,
-    tex_rgba: ?[]u8,
-    position: [3]f32,
-    rotation: [3]f32,
-    scale: [3]f32,
-
-    pub fn deinit(self: PlayerModelGroup, allocator: std.mem.Allocator) void {
-        allocator.free(self.vertices);
-        if (self.tex_rgba) |tex| allocator.free(tex);
-    }
-};
-
-/// One bone of a skinned figure (SKIN-3499): its bind-pose center (the
-/// inverse-bind translation) and its authored tint. Bone order matches the
-/// per-vertex joint indices AND the animation clips' node order.
-pub const PlayerSkinBone = struct {
-    center: [3]f32,
-    color: [3]f32,
-    /// Animation-capture diagnostic only. `.none` means no marker node.
-    marker_kind: pose_markers.Kind = .none,
-};
-
-/// The skinned player figure (SKIN-3499): ONE model-space mesh with per-vertex
-/// bone indices/weights, drawn palette-blended instead of as N part nodes.
-/// Vertices are stride-16 f32 [pos3, normal3, uv2, joint4, weight4].
-pub const PlayerSkin = struct {
-    vertices: []f32,
-    vertex_count: u32,
-    bones: []PlayerSkinBone,
-
-    pub fn deinit(self: PlayerSkin, allocator: std.mem.Allocator) void {
-        allocator.free(self.vertices);
-        allocator.free(self.bones);
-    }
-};
-
-/// One baked NPC spawn (req_0935). model_index selects a Scene.npc_models entry;
-/// kind/faction are reserved for the Stage-2 Zig combat AI (the Stage-1 loader
-/// renders + animates only). y is NOT stored — the loader grounds each NPC on
-/// the terrain the same way it grounds the player spawn.
-pub const NpcSpawn = struct {
-    model_index: u32,
-    x: f32,
-    z: f32,
-    yaw: f32,
-    kind: u32,
-    faction: u32,
-};
+pub const PlayerCharacter = character_assets.CharacterAsset;
 
 pub const MeshPropMesh = struct {
     key: []u8,
@@ -236,6 +173,10 @@ pub const MeshPropDoor = struct {
     reach: f32,
     vehicle: bool,
     start_open: bool,
+    /// req_4537: the hinge sits at the leaf's max-X local edge instead of the
+    /// default min-X — inferred editor-side from the model's named knob region
+    /// (the knob side is never the hinge). Bit 2 of the door flag word.
+    hinge_max_x: bool = false,
 };
 
 pub const MeshPropInstance = struct {
@@ -266,44 +207,6 @@ pub const MeshProps = struct {
         for (self.instances) |inst| inst.deinit(allocator);
         allocator.free(self.meshes);
         allocator.free(self.instances);
-    }
-};
-
-pub const PlayerTransform = struct {
-    position: [3]f32,
-    rotation: [3]f32,
-    scale: [3]f32,
-};
-
-pub const PlayerAnimationKeyframe = struct {
-    time: f32,
-    transforms: []PlayerTransform,
-
-    pub fn deinit(self: PlayerAnimationKeyframe, allocator: std.mem.Allocator) void {
-        allocator.free(self.transforms);
-    }
-};
-
-pub const PlayerAnimationClip = struct {
-    id: u32,
-    duration: f32,
-    looping: bool,
-    keyframes: []PlayerAnimationKeyframe,
-
-    pub fn deinit(self: PlayerAnimationClip, allocator: std.mem.Allocator) void {
-        for (self.keyframes) |key| key.deinit(allocator);
-        allocator.free(self.keyframes);
-    }
-};
-
-pub const PlayerAnimationSet = struct {
-    node_count: u32,
-    content_hash: [PLAYER_ANIMATION_HASH_BYTES]u8,
-    clips: []PlayerAnimationClip,
-
-    pub fn deinit(self: PlayerAnimationSet, allocator: std.mem.Allocator) void {
-        for (self.clips) |clip| clip.deinit(allocator);
-        if (self.clips.len > 0) allocator.free(self.clips);
     }
 };
 
@@ -760,22 +663,8 @@ pub const Scene = struct {
     piece_count: u32,
     /// The render environment (lighting / sky / camera) — data, not hardcoded.
     env: SceneEnv,
-    /// The compiled player model: local-coordinate mesh groups, moved by the
-    /// runtime player transform in world_loader.zig.
-    player_model: []PlayerModelGroup,
-    /// The SKINNED player figure (SKIN-3499): when present it wins over
-    /// player_model — one palette-blended node instead of N part nodes.
-    /// Defaults null; only the live skin push populates it today.
-    player_skin: ?PlayerSkin = null,
-    /// Baked transform clips for the compiled player model.
-    player_animation: PlayerAnimationSet,
-    /// The NPC figure models (req_0935): each entry is one figure's mesh groups
-    /// in the SAME layout as player_model. NPCs reuse player_animation. Empty
-    /// when the NPC_MODELS lump is absent.
-    npc_models: [][]PlayerModelGroup,
-    /// NPC spawn rows — which model, where, facing, plus kind/faction reserved
-    /// for the Stage-2 combat AI. Empty when the NPC_SPAWNS lump is absent.
-    npc_spawns: []NpcSpawn,
+    /// Strict saved character. Missing/stale bindings never populate this field.
+    player_character: ?PlayerCharacter = null,
     /// Regular-grid terrain heightfields. The loader hands these to the native
     /// Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
     heightfields: []HeightfieldMesh,
@@ -826,16 +715,7 @@ pub const Scene = struct {
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
         allocator.free(self.instances);
-        for (self.player_model) |group| group.deinit(allocator);
-        allocator.free(self.player_model);
-        if (self.player_skin) |skin| skin.deinit(allocator);
-        self.player_animation.deinit(allocator);
-        for (self.npc_models) |model| {
-            for (model) |group| group.deinit(allocator);
-            allocator.free(model);
-        }
-        allocator.free(self.npc_models);
-        allocator.free(self.npc_spawns);
+        if (self.player_character) |character| character.deinit();
         for (self.heightfields) |field| field.deinit(allocator);
         allocator.free(self.heightfields);
         for (self.materials) |material| material.deinit(allocator);
@@ -861,14 +741,6 @@ const DecodedInstances = struct { values: []f32, count: u32, stride: u32, pieces
 
 fn readF32(data: []const u8, at: usize) f32 {
     return @bitCast(std.mem.readInt(u32, data[at..][0..4], .little));
-}
-
-fn emptyPlayerAnimationSet() PlayerAnimationSet {
-    return .{
-        .node_count = 0,
-        .content_hash = [_]u8{0} ** PLAYER_ANIMATION_HASH_BYTES,
-        .clips = &.{},
-    };
 }
 
 /// Decode an instance lump payload
@@ -929,155 +801,6 @@ fn decodeFlora(allocator: std.mem.Allocator, data: []const u8) Error!FloraCells 
         };
     }
     return .{ .cell_size = cell_size, .cells = cells };
-}
-
-/// Read ONE mesh group at `at` and return it plus the next read offset. This is
-/// the canonical PLAYER_MODEL group layout (68-byte header + verts + optional
-/// texture); the NPC_MODELS lump reuses it byte-for-byte, so decodePlayerModel
-/// and decodeNpcModels share this reader. The TS twin is writeModelGroup in
-/// cart/hmsc-int/compile/playerModel.ts — keep them in lockstep.
-const ReadGroupResult = struct { group: PlayerModelGroup, at: usize };
-
-fn readModelGroup(allocator: std.mem.Allocator, data: []const u8, at_in: usize) Error!ReadGroupResult {
-    var at = at_in;
-    if (at + 68 > data.len) return Error.BadPlayerModel;
-    const color = [3]f32{ readF32(data, at + 0), readF32(data, at + 4), readF32(data, at + 8) };
-    const alpha = readF32(data, at + 12);
-    const vertex_count = std.mem.readInt(u32, data[at + 16 ..][0..4], .little);
-    const tex_w = std.mem.readInt(u32, data[at + 20 ..][0..4], .little);
-    const tex_h = std.mem.readInt(u32, data[at + 24 ..][0..4], .little);
-    const tex_len = std.mem.readInt(u32, data[at + 28 ..][0..4], .little);
-    const position = [3]f32{ readF32(data, at + 32), readF32(data, at + 36), readF32(data, at + 40) };
-    const rotation = [3]f32{ readF32(data, at + 44), readF32(data, at + 48), readF32(data, at + 52) };
-    const scale = [3]f32{ readF32(data, at + 56), readF32(data, at + 60), readF32(data, at + 64) };
-    at += 68;
-
-    const floats = @as(usize, vertex_count) * 8;
-    const vertex_bytes = floats * 4;
-    if (at + vertex_bytes + @as(usize, tex_len) > data.len) return Error.BadPlayerModel;
-    const vertices = try allocator.alloc(f32, floats);
-    errdefer allocator.free(vertices);
-    var vi: usize = 0;
-    while (vi < floats) : (vi += 1) {
-        vertices[vi] = readF32(data, at + vi * 4);
-    }
-    at += vertex_bytes;
-
-    const tex_rgba: ?[]u8 = if (tex_len > 0) blk: {
-        if (tex_w == 0 or tex_h == 0) return Error.BadPlayerModel;
-        const tex = try allocator.alloc(u8, tex_len);
-        @memcpy(tex, data[at .. at + tex_len]);
-        at += tex_len;
-        break :blk tex;
-    } else null;
-
-    return .{ .group = .{
-        .color = color,
-        .alpha = alpha,
-        .vertices = vertices,
-        .vertex_count = vertex_count,
-        .tex_w = tex_w,
-        .tex_h = tex_h,
-        .tex_rgba = tex_rgba,
-        .position = position,
-        .rotation = rotation,
-        .scale = scale,
-    }, .at = at };
-}
-
-fn decodePlayerModel(allocator: std.mem.Allocator, data: []const u8) Error![]PlayerModelGroup {
-    if (data.len < 8) return try allocator.alloc(PlayerModelGroup, 0);
-    if (std.mem.readInt(u32, data[0..4], .little) != PLAYER_MODEL_VERSION) return try allocator.alloc(PlayerModelGroup, 0);
-    const count = std.mem.readInt(u32, data[4..8], .little);
-    if (count == 0) return try allocator.alloc(PlayerModelGroup, 0);
-
-    var groups = try allocator.alloc(PlayerModelGroup, count);
-    var initialized: usize = 0;
-    errdefer {
-        for (groups[0..initialized]) |group| group.deinit(allocator);
-        allocator.free(groups);
-    }
-
-    var at: usize = 8;
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        const res = try readModelGroup(allocator, data, at);
-        groups[i] = res.group;
-        at = res.at;
-        initialized += 1;
-    }
-    return groups;
-}
-
-/// NPC_MODELS lump (req_0935): u32 version | u32 modelCount | per model:
-/// u32 groupCount | groups[] (each group via readModelGroup). Absent / wrong
-/// version / zero models ⇒ empty slice (no NPCs). TS twin: encodeNpcModelsLump.
-fn decodeNpcModels(allocator: std.mem.Allocator, data: []const u8) Error![][]PlayerModelGroup {
-    if (data.len < 8) return try allocator.alloc([]PlayerModelGroup, 0);
-    if (std.mem.readInt(u32, data[0..4], .little) != NPC_MODELS_VERSION) return try allocator.alloc([]PlayerModelGroup, 0);
-    const model_count = std.mem.readInt(u32, data[4..8], .little);
-    if (model_count == 0) return try allocator.alloc([]PlayerModelGroup, 0);
-
-    var models = try allocator.alloc([]PlayerModelGroup, model_count);
-    var models_init: usize = 0;
-    errdefer {
-        for (models[0..models_init]) |model| {
-            for (model) |group| group.deinit(allocator);
-            allocator.free(model);
-        }
-        allocator.free(models);
-    }
-
-    var at: usize = 8;
-    var m: usize = 0;
-    while (m < model_count) : (m += 1) {
-        if (at + 4 > data.len) return Error.BadPlayerModel;
-        const group_count = std.mem.readInt(u32, data[at..][0..4], .little);
-        at += 4;
-        var groups = try allocator.alloc(PlayerModelGroup, group_count);
-        var groups_init: usize = 0;
-        errdefer {
-            for (groups[0..groups_init]) |group| group.deinit(allocator);
-            allocator.free(groups);
-        }
-        var g: usize = 0;
-        while (g < group_count) : (g += 1) {
-            const res = try readModelGroup(allocator, data, at);
-            groups[g] = res.group;
-            at = res.at;
-            groups_init += 1;
-        }
-        models[m] = groups;
-        models_init += 1;
-    }
-    return models;
-}
-
-/// NPC_SPAWNS lump (req_0935): u32 version | u32 count | per spawn:
-/// u32 modelIndex | f32 x,z,yaw | u32 kind | u32 faction. Absent / wrong
-/// version / zero count ⇒ empty slice. TS twin: encodeNpcSpawnsLump.
-fn decodeNpcSpawns(allocator: std.mem.Allocator, data: []const u8) Error![]NpcSpawn {
-    if (data.len < 8) return try allocator.alloc(NpcSpawn, 0);
-    if (std.mem.readInt(u32, data[0..4], .little) != NPC_SPAWNS_VERSION) return try allocator.alloc(NpcSpawn, 0);
-    const count = std.mem.readInt(u32, data[4..8], .little);
-    if (count == 0) return try allocator.alloc(NpcSpawn, 0);
-    if (8 + @as(usize, count) * NPC_SPAWN_BYTES > data.len) return Error.BadPlayerModel;
-
-    var spawns = try allocator.alloc(NpcSpawn, count);
-    var at: usize = 8;
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        spawns[i] = .{
-            .model_index = std.mem.readInt(u32, data[at + 0 ..][0..4], .little),
-            .x = readF32(data, at + 4),
-            .z = readF32(data, at + 8),
-            .yaw = readF32(data, at + 12),
-            .kind = std.mem.readInt(u32, data[at + 16 ..][0..4], .little),
-            .faction = std.mem.readInt(u32, data[at + 20 ..][0..4], .little),
-        };
-        at += NPC_SPAWN_BYTES;
-    }
-    return spawns;
 }
 
 pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!MeshProps {
@@ -1206,7 +929,15 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
                 const start_open = std.mem.readInt(u32, data[at + 12 ..][0..4], .little) != 0;
                 at += 16;
                 if (leaf_slot >= slots.len) return Error.BadMeshProps;
-                door = .{ .leaf_slot = leaf_slot, .reach = reach, .vehicle = vehicle, .start_open = start_open };
+                door = .{
+                    .leaf_slot = leaf_slot,
+                    .reach = reach,
+                    .vehicle = vehicle,
+                    .start_open = start_open,
+                    // Bit 2 of the flag word (req_4537): hinge at max-X. Bit 1
+                    // stays plain door-presence, so older writers decode as before.
+                    .hinge_max_x = (has_door & 2) != 0,
+                };
             }
         }
         // AUTHORED collider boxes (req_1900, v7) — u32 count, then 6×f32 per box.
@@ -1330,73 +1061,6 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
         }
     }
     return .{ .meshes = meshes, .instances = instances };
-}
-
-fn decodePlayerAnimationPayload(allocator: std.mem.Allocator, payload: []const u8, hash: [PLAYER_ANIMATION_HASH_BYTES]u8) Error!PlayerAnimationSet {
-    if (payload.len < 12) return Error.BadPlayerModel;
-    if (std.mem.readInt(u32, payload[0..4], .little) != PLAYER_ANIMATION_VERSION) return Error.BadPlayerModel;
-    const clip_count = std.mem.readInt(u32, payload[4..8], .little);
-    const node_count = std.mem.readInt(u32, payload[8..12], .little);
-    var clips = try allocator.alloc(PlayerAnimationClip, clip_count);
-    var clip_initialized: usize = 0;
-    errdefer {
-        for (clips[0..clip_initialized]) |clip| clip.deinit(allocator);
-        allocator.free(clips);
-    }
-
-    var at: usize = 12;
-    var ci: usize = 0;
-    while (ci < clip_count) : (ci += 1) {
-        if (at + 16 > payload.len) return Error.BadPlayerModel;
-        const clip_id = std.mem.readInt(u32, payload[at + 0 ..][0..4], .little);
-        const duration = readF32(payload, at + 4);
-        const looping = std.mem.readInt(u32, payload[at + 8 ..][0..4], .little) != 0;
-        const key_count = std.mem.readInt(u32, payload[at + 12 ..][0..4], .little);
-        at += 16;
-
-        var keyframes = try allocator.alloc(PlayerAnimationKeyframe, key_count);
-        var key_initialized: usize = 0;
-        errdefer {
-            for (keyframes[0..key_initialized]) |key| key.deinit(allocator);
-            allocator.free(keyframes);
-        }
-        var ki: usize = 0;
-        while (ki < key_count) : (ki += 1) {
-            if (at + 4 > payload.len) return Error.BadPlayerModel;
-            const time = readF32(payload, at);
-            at += 4;
-            const transforms = try allocator.alloc(PlayerTransform, node_count);
-            errdefer allocator.free(transforms);
-            var ni: usize = 0;
-            while (ni < node_count) : (ni += 1) {
-                if (at + 36 > payload.len) return Error.BadPlayerModel;
-                transforms[ni] = .{
-                    .position = .{ readF32(payload, at + 0), readF32(payload, at + 4), readF32(payload, at + 8) },
-                    .rotation = .{ readF32(payload, at + 12), readF32(payload, at + 16), readF32(payload, at + 20) },
-                    .scale = .{ readF32(payload, at + 24), readF32(payload, at + 28), readF32(payload, at + 32) },
-                };
-                at += 36;
-            }
-            keyframes[ki] = .{ .time = time, .transforms = transforms };
-            key_initialized += 1;
-        }
-        clips[ci] = .{ .id = clip_id, .duration = duration, .looping = looping, .keyframes = keyframes };
-        clip_initialized += 1;
-    }
-    return .{ .node_count = node_count, .content_hash = hash, .clips = clips };
-}
-
-fn decodePlayerAnimation(allocator: std.mem.Allocator, data: []const u8) Error!PlayerAnimationSet {
-    if (data.len == 0) return emptyPlayerAnimationSet();
-    if (data.len < 4 + PLAYER_ANIMATION_HASH_BYTES + 12) return Error.BadPlayerModel;
-    if (std.mem.readInt(u32, data[0..4], .little) != PLAYER_ANIMATION_VERSION) return Error.BadPlayerModel;
-    var expected: [PLAYER_ANIMATION_HASH_BYTES]u8 = undefined;
-    @memcpy(expected[0..], data[4 .. 4 + PLAYER_ANIMATION_HASH_BYTES]);
-    const payload = data[4 + PLAYER_ANIMATION_HASH_BYTES ..];
-    var actual: [PLAYER_ANIMATION_HASH_BYTES]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(payload, &actual, .{});
-    if (!std.mem.eql(u8, &expected, &actual)) return Error.BadPlayerModel;
-    return decodePlayerAnimationPayload(allocator, payload, expected);
 }
 
 /// Decode the WATER lump (encodeWaterBodies): header (version, count, color3+
@@ -2167,13 +1831,6 @@ fn decodeWallFlags(allocator: std.mem.Allocator, data: []const u8) Error![]u8 {
     return out;
 }
 
-fn streamReferences(stream: gamefile.Stream, key: u32) bool {
-    for (stream.refs) |ref| {
-        if (ref == key) return true;
-    }
-    return false;
-}
-
 fn readInstalledAsset(io: std.Io, allocator: std.mem.Allocator, file: gamefile.GameFile, store_dir: std.Io.Dir, key: u32) Error!?[]u8 {
     const hash = file.assetHashForKey(key) orelse return null;
     const hex = std.fmt.bytesToHex(hash, .lower);
@@ -2183,8 +1840,7 @@ fn readInstalledAsset(io: std.Io, allocator: std.mem.Allocator, file: gamefile.G
 /// A BLANK scene — the paint-first editor's empty canvas (BLANKBOOT req_2490).
 /// Boots when no game file exists yet, so the world is exactly the live layers
 /// (painted map, placed pieces) over nothing. Every slice is empty, every
-/// optional null, the environment its defaults; deinit is a no-op on all of it
-/// (empty frees return immediately, PlayerAnimationSet guards len 0).
+/// optional null, and the environment uses its defaults.
 pub fn blankScene() Scene {
     return .{
         .width = 0,
@@ -2199,10 +1855,6 @@ pub fn blankScene() Scene {
         .wall_flags = &.{},
         .piece_count = 0,
         .env = .{},
-        .player_model = &.{},
-        .player_animation = .{ .node_count = 0, .content_hash = @splat(0), .clips = &.{} },
-        .npc_models = &.{},
-        .npc_spawns = &.{},
         .heightfields = &.{},
         .baked_colliders = null,
         .physics_config = null,
@@ -2235,6 +1887,10 @@ pub fn construct(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, st
     // The game-map stream's data is a nested RJMP map container; pull its tiles.
     const map_lumps = try mapfile.readLumps(allocator, file.map.data, null);
     defer allocator.free(map_lumps);
+    try npc_character_policy.requireSupportedStaging(
+        mapfile.findLump(map_lumps, mapfile.LumpType.retired_npc_models) != null,
+        mapfile.findLump(map_lumps, mapfile.LumpType.retired_npc_spawns) != null,
+    );
     const tiles_lump = mapfile.findLump(map_lumps, mapfile.LumpType.tiles) orelse return Error.NoMapTiles;
 
     const grid = switch (tiles_lump.encoding) {
@@ -2267,40 +1923,6 @@ pub fn construct(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, st
         decodeEnvironment(lump.data)
     else
         .{};
-    var player_model_asset: ?[]u8 = null;
-    defer if (player_model_asset) |bytes_model| allocator.free(bytes_model);
-    const player_model: []PlayerModelGroup = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_model)) |lump|
-        try decodePlayerModel(allocator, lump.data)
-    else if (streamReferences(file.map, PLAYER_MODEL_ASSET_KEY)) blk: {
-        player_model_asset = try readInstalledAsset(io, allocator, file, store_dir, PLAYER_MODEL_ASSET_KEY);
-        break :blk if (player_model_asset) |bytes_model| try decodePlayerModel(allocator, bytes_model) else try allocator.alloc(PlayerModelGroup, 0);
-    } else try allocator.alloc(PlayerModelGroup, 0);
-    var player_animation_asset: ?[]u8 = null;
-    defer if (player_animation_asset) |bytes_animation| allocator.free(bytes_animation);
-    const player_animation = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_animation)) |lump|
-        try decodePlayerAnimation(allocator, lump.data)
-    else if (streamReferences(file.map, PLAYER_ANIMATION_ASSET_KEY)) blk: {
-        player_animation_asset = try readInstalledAsset(io, allocator, file, store_dir, PLAYER_ANIMATION_ASSET_KEY);
-        break :blk if (player_animation_asset) |bytes_animation| try decodePlayerAnimation(allocator, bytes_animation) else emptyPlayerAnimationSet();
-    } else emptyPlayerAnimationSet();
-    // NPC population (req_0935): inline lumps in the map container (unlike the
-    // player model, which streams as a content-addressed asset). Absent ⇒ empty.
-    const npc_models = if (mapfile.findLump(map_lumps, mapfile.LumpType.npc_models)) |lump|
-        try decodeNpcModels(allocator, lump.data)
-    else
-        try allocator.alloc([]PlayerModelGroup, 0);
-    errdefer {
-        for (npc_models) |model| {
-            for (model) |group| group.deinit(allocator);
-            allocator.free(model);
-        }
-        allocator.free(npc_models);
-    }
-    const npc_spawns = if (mapfile.findLump(map_lumps, mapfile.LumpType.npc_spawns)) |lump|
-        try decodeNpcSpawns(allocator, lump.data)
-    else
-        try allocator.alloc(NpcSpawn, 0);
-    errdefer allocator.free(npc_spawns);
     const heightfields = if (mapfile.findLump(map_lumps, mapfile.LumpType.heightfields)) |lump|
         try decodeHeightfields(allocator, lump.data)
     else
@@ -2436,10 +2058,6 @@ pub fn construct(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, st
         .has_instance_lump = instances_lump != null,
         .piece_count = inst.pieces,
         .env = env,
-        .player_model = player_model,
-        .player_animation = player_animation,
-        .npc_models = npc_models,
-        .npc_spawns = npc_spawns,
         .heightfields = heightfields,
         .materials = materials,
         .material_refs = material_refs,

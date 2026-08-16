@@ -45,7 +45,7 @@ export type ResidentMesh = {
   /** Contiguous vertex sub-ranges. Door exports use one trailing leaf slot. */
   slots?: { start: number; count: number }[];
   /** MESH_PROPS v6 two-state panel declaration; leafSlot indexes `slots`. */
-  door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
+  door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean; hingeMaxX?: boolean };
   /** Local-frame authored colliders: Outliner bands, or door jamb/header bands. */
   collisionBoxes?: ResidentCollisionBox[];
   /** Exact local-frame player narrowphase: xyz triples, three vertices/triangle. */
@@ -157,7 +157,10 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
       dv.setUint32(o + 4, slot.count, true);
       o += 8;
     }
-    dv.setUint32(o, m.door ? 1 : 0, true); o += 4;
+    // Door flag word is a BITFIELD (req_4537): bit 1 = door present, bit 2 =
+    // hinge at the leaf's max-X edge (knob-side inference). Old decoders test
+    // nonzero, so the extra bit degrades to a plain min-X-hinged door.
+    dv.setUint32(o, m.door ? (1 | (m.door.hingeMaxX ? 2 : 0)) : 0, true); o += 4;
     if (m.door) {
       dv.setUint32(o, m.door.leafSlot, true);
       dv.setFloat32(o + 4, m.door.reachMeters, true);

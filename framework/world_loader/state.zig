@@ -133,6 +133,10 @@ pub const CameraState = struct {
     // SNAPS to it (no smoothing, no spring-arm) and ignores the player. setExternalCamera()
     // flips it on; the player-trailing game camera is untouched when off.
     external: bool = false,
+    /// True only while framework/game/camera's per-node V23 controller owns
+    /// this loader. It distinguishes native authoring detach from the older
+    /// explicit external-camera transport above.
+    native_controller: bool = false,
     ext_pos: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
     ext_look: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
     ext_fov: f32 = CAMERA_FOV_DEGREES,
@@ -305,7 +309,9 @@ pub fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.Mesh
     // at the panel's Z center — taken to WORLD via the instance transform. The
     // rotation MUST match the engine's m4rotateY (x'=x·c+z·s, z'=-x·s+z·c) or the
     // swing pivot won't cancel and the leaf slides across instead (req_1953).
-    const hinge_lx = lo[0];
+    // req_4537: the model's named knob decides the side — the knob side is
+    // never the hinge. Editor-inferred, carried on the door meta.
+    const hinge_lx = if (door.hinge_max_x) hi[0] else lo[0];
     return .{
         .open = door.start_open,
         .progress = if (door.start_open) 1.0 else 0.0,

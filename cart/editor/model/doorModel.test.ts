@@ -4,7 +4,7 @@
 //   tools/esbuild cart/editor/model/doorModel.test.ts --bundle \
 //     --outfile=/tmp/editor-door-model.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-door-model.test.js
-import { compileDoorMesh, resolveDoorLeafPart } from './doorModel';
+import { compileDoorMesh, resolveDoorHinge, resolveDoorLeafPart } from './doorModel';
 import type { MeshDocPartMeta, PackageMeshDoc } from '../data/meshDoc';
 
 let passed = 0, failed = 0;
@@ -87,6 +87,42 @@ test('compiler rejects an all-leaf model because a door also needs a static fram
   };
   const result = compileDoorMesh(onlyLeaf.vertices, onlyLeaf, [{ name: 'Door Leaf', color: '#222', visible: true }]);
   assert(!result.ok, 'all-leaf model compiled without a frame');
+});
+
+test('the named knob decides the hinge side; no knob keeps the historic min-X hinge (req_4537)', () => {
+  // Frame group 0, leaf group 1. Leaf spans x -1..1; the knob face sits on
+  // the min-X half → the hinge must flip to max-X.
+  const vertices = new Float32Array([
+    ...triangle([-1.2, 0, -0.1], [1.2, 0, -0.1], [1.2, 2.2, -0.1]), // frame
+    ...triangle([-1, 0, 0], [1, 0, 0], [1, 2, 0]),                  // leaf body
+    ...triangle([-0.9, 1, 0.05], [-0.8, 1, 0.05], [-0.85, 1.1, 0.05]), // knob on min-X side
+  ]);
+  const doc = {
+    vertices,
+    faceGroups: new Uint32Array([0, 1, 1]),
+    ranges: [{ lo: 0, hi: 1 }, { lo: 1, hi: 2 }],
+    semanticRegions: new Uint32Array([0xffffffff, 0xffffffff, 8]),
+    semanticTable: { regions: [{ id: 8, name: 'knob' }] },
+  };
+  const flipped = resolveDoorHinge(doc, 1);
+  assert(flipped.inferred && flipped.hingeMaxX, 'knob on the min side must flip the hinge to max-X');
+  // Knob on the max-X half → the default min-X hinge stands.
+  const mirrored = {
+    ...doc,
+    vertices: new Float32Array([
+      ...triangle([-1.2, 0, -0.1], [1.2, 0, -0.1], [1.2, 2.2, -0.1]),
+      ...triangle([-1, 0, 0], [1, 0, 0], [1, 2, 0]),
+      ...triangle([0.8, 1, 0.05], [0.9, 1, 0.05], [0.85, 1.1, 0.05]),
+    ]),
+  };
+  const kept = resolveDoorHinge(mirrored, 1);
+  assert(kept.inferred && !kept.hingeMaxX, 'knob on the max side keeps the min-X hinge');
+  // No knob region → honest non-inference, never a guess.
+  const unnamed = resolveDoorHinge({ ...doc, semanticTable: { regions: [{ id: 8, name: 'handle' }] } }, 1);
+  assert(!unnamed.inferred && !unnamed.hingeMaxX, "without a 'knob' region the default stands");
+  // A knob region that names no faces refuses too.
+  const empty = resolveDoorHinge({ ...doc, semanticRegions: new Uint32Array([0xffffffff, 0xffffffff, 0xffffffff]) }, 1);
+  assert(!empty.inferred, 'an empty knob region infers nothing');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

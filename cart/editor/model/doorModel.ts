@@ -44,6 +44,65 @@ export function resolveDoorLeafPart(parts: readonly DoorLeafCandidate[]): DoorLe
   return { ok: true, index: matches[0]!.index };
 }
 
+export type DoorHingeInference =
+  | { hingeMaxX: boolean; inferred: true; knobRegion: string }
+  | { hingeMaxX: false; inferred: false; reason: string };
+
+/** The model's named KNOB decides the hinge side (req_4537 — "my knobed side
+ * is the one that should not be the hinge"): the knob's faces sit on one half
+ * of the leaf's X extent, and the hinge takes the OPPOSITE edge. The knob is
+ * the semantic face region named exactly 'knob' (the mesh editor's Name
+ * Selection lane — semantics live in the RJMD doc, never a sidecar). No knob
+ * region → the engine's historic min-X hinge stands. */
+export function resolveDoorHinge(
+  doc: {
+    vertices: Float32Array;
+    faceGroups: Uint32Array | null;
+    semanticRegions?: Uint32Array | null;
+    semanticTable?: { regions: readonly { id: number; name: string }[] } | null;
+    ranges: readonly { lo: number; hi: number }[];
+  },
+  leafPartIndex: number,
+): DoorHingeInference {
+  const regions = doc.semanticRegions;
+  const table = doc.semanticTable;
+  if (!regions || !table) return { hingeMaxX: false, inferred: false, reason: 'no named face regions in the document' };
+  const knob = table.regions.find((region) => region.name.trim().toLowerCase() === 'knob');
+  if (!knob) return { hingeMaxX: false, inferred: false, reason: "no face region named 'knob'" };
+  const faceCount = Math.floor(doc.vertices.length / 24);
+  const leafRange = doc.ranges[leafPartIndex] ?? null;
+  const inLeaf = (face: number): boolean => {
+    if (!leafRange || !doc.faceGroups) return true;
+    const group = doc.faceGroups[face]!;
+    return group >= leafRange.lo && group < leafRange.hi;
+  };
+  let knobX = 0;
+  let knobWeight = 0;
+  let leafMinX = Infinity;
+  let leafMaxX = -Infinity;
+  for (let face = 0; face < Math.min(faceCount, regions.length); face += 1) {
+    const base = face * 24;
+    if (regions[face] === knob.id) {
+      knobX += doc.vertices[base]! + doc.vertices[base + 8]! + doc.vertices[base + 16]!;
+      knobWeight += 3;
+    }
+    if (inLeaf(face)) {
+      for (let corner = 0; corner < 3; corner += 1) {
+        const x = doc.vertices[base + corner * 8]!;
+        if (x < leafMinX) leafMinX = x;
+        if (x > leafMaxX) leafMaxX = x;
+      }
+    }
+  }
+  if (knobWeight === 0) return { hingeMaxX: false, inferred: false, reason: "the 'knob' region names no faces" };
+  if (!(leafMaxX > leafMinX)) return { hingeMaxX: false, inferred: false, reason: 'the leaf has no X extent' };
+  const knobCenterX = knobX / knobWeight;
+  const leafMidX = (leafMinX + leafMaxX) / 2;
+  // Knob on the max-X half → hinge stays min-X (the engine default);
+  // knob on the min-X half → hinge flips to max-X.
+  return { hingeMaxX: knobCenterX < leafMidX, inferred: true, knobRegion: knob.name };
+}
+
 export type CompiledDoorMesh = {
   vertices: Float32Array;
   leaf: { start: number; count: number };
