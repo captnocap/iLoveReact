@@ -153,6 +153,11 @@ export default function Stage(props: {
    * Returns whether the engine accepted it — a reject keeps the anchor put
    * (req_4479) so the user retries the same span, not a chained one. */
   onDrawWall: (commit: import('../world/wallTools').WallDrawCommit) => boolean;
+  /** Place Door/Window (req_4513): palette-armed kit + verbs, routed to the viewport. */
+  openingKit: import('../world/openingTools').OpeningKitArm | null;
+  onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: import('../world/architecture').WallCell }) => boolean;
+  onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
+  openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
   /** The measured style's default wall measurements — the gizmo's seed (req_4479). */
   wallDefaults: { heightU: number; thicknessU: number } | null;
   /** A Select-tool click resolved to a wall face (req_4480). */
@@ -271,6 +276,10 @@ export default function Stage(props: {
           onDrawWall={props.onDrawWall}
           wallDefaults={props.wallDefaults}
           onSelectWall={props.onSelectWall}
+          openingKit={props.openingKit}
+          onCutOpening={props.onCutOpening}
+          onSelectOpening={props.onSelectOpening}
+          openingFootprints={props.openingFootprints}
         />
         {worldActive ? null : activeDocument.kind === 'home' ? (
           props.homeSurface

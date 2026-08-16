@@ -81,6 +81,11 @@ export default function WorldEditorSurface(props: {
   /** Wall selection (req_4480): the selected record + the Select-click report. */
   architectureSelection: ArchitectureSelection;
   onSelectWall: (hit: { edgeId: string; side: 'a' | 'b' }) => void;
+  /** Place Door/Window (req_4513): the palette-armed kit + its verbs. */
+  openingKit: import('../world/openingTools').OpeningKitArm | null;
+  onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: import('../world/architecture').WallCell }) => boolean;
+  onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
+  openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -133,6 +138,10 @@ export default function WorldEditorSurface(props: {
         wallDefaults={props.wallDefaults}
         architectureSelection={props.architectureSelection}
         onSelectWall={props.onSelectWall}
+        openingKit={props.openingKit}
+        onCutOpening={props.onCutOpening}
+        onSelectOpening={props.onSelectOpening}
+        openingFootprints={props.openingFootprints}
         floor={props.floor}
         viewRecall={props.viewRecall}
         views={props.views}

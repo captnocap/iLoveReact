@@ -5378,6 +5378,10 @@ export default function AppFrame() {
       ...prev,
       armedPieceId: pieceId,
       armedOpeningKitId: null,
+      // Arming a piece from the palette IS choosing Place mode (req_4513): a
+      // tile click while the door tool is active must not leave you in a mode
+      // that ignores the piece you just picked.
+      activeCommandId: 'place-piece',
       armedYawDegrees: 0,
       // A palette arm drops any copy stamp (req_2733) — you're placing the
       // DEFINITION again, not the copied instance's materials.
