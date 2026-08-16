@@ -10,15 +10,22 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=userdata/retopo-corpus
 
-# The host journal is a 32-op undo WINDOW and the follow trail lives in host
-# MEMORY (req_4602/4605) — so the poller drains BOTH to disk every 20s. Closing
-# the app then never loses more than the last poll interval; while the app is
-# down the seat calls fail silently and resume when it returns.
+# The follow trail lives in host MEMORY (req_4602/4605), so the poller drains it
+# to disk every 20s — closing the app never loses more than the last interval.
+# The journal (history-log) is sampled MUCH slower and only between edits was
+# ever the intent: pulling its multi-MB undo/redo states through the V8 string
+# boundary every 20s during heavy editing crashed the host in V8's scavenger GC
+# twice (req_4644 — SIGILL in scavenger.cc under the allocation storm). 3-minute
+# cadence keeps op labels flowing at ~1/60th the heap pressure; finish still
+# takes a final full sample.
 spawn_poller() {
   local dir=$1
-  nohup bash -c "while :; do
-    tools/seat action history-log '{}' >> '$dir/journal-samples.jsonl' 2>/dev/null
+  nohup bash -c "tick=0; while :; do
     tools/seat follow read >> '$dir/trail-samples.jsonl' 2>/dev/null
+    tick=\$((tick+1))
+    if [ \$((tick % 9)) -eq 0 ]; then
+      tools/seat action history-log '{}' >> '$dir/journal-samples.jsonl' 2>/dev/null
+    fi
     sleep 20
   done" >/dev/null 2>&1 &
   echo $! > "$dir/.poller.pid"
@@ -38,6 +45,7 @@ case "$cmd" in
     tools/seat follow start "corpus-$name" >/dev/null
     spawn_poller "$dir"
     echo "$name" > "$ROOT/.active"
+    rm -f "$dir/finished.txt" # re-begin of a same-named entry reopens it (req_4644)
     date -u +%FT%TZ > "$dir/begun.txt"
     echo "recording '$name' (source: $(basename "$src")) — retopo away."
     echo "when done: tools/forge/corpus finish $name <package-dir>"
