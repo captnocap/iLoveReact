@@ -731,7 +731,11 @@ export default function AppFrame() {
   useEffect(() => {
     void execAsync('tools/forge/corpus list').then((result) => {
       const row = result.stdout.split('\n').find((line) => line.includes('RECORDING'));
-      setCorpusRec(row ? (row.trim().split(/\s+/)[0] ?? null) : null);
+      const entry = row ? (row.trim().split(/\s+/)[0] ?? null) : null;
+      setCorpusRec(entry);
+      // A relit light must mean an armed recorder: resume re-starts the follow
+      // session and respawns the poller if the machine restart killed it.
+      if (entry) void execAsync(`tools/forge/corpus resume "${entry}"`);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

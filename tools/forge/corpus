@@ -10,7 +10,21 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=userdata/retopo-corpus
 
-cmd=${1:?usage: corpus begin|finish|list}
+# The host journal is a 32-op undo WINDOW and the follow trail lives in host
+# MEMORY (req_4602/4605) — so the poller drains BOTH to disk every 20s. Closing
+# the app then never loses more than the last poll interval; while the app is
+# down the seat calls fail silently and resume when it returns.
+spawn_poller() {
+  local dir=$1
+  nohup bash -c "while :; do
+    tools/seat action history-log '{}' >> '$dir/journal-samples.jsonl' 2>/dev/null
+    tools/seat follow read >> '$dir/trail-samples.jsonl' 2>/dev/null
+    sleep 20
+  done" >/dev/null 2>&1 &
+  echo $! > "$dir/.poller.pid"
+}
+
+cmd=${1:?usage: corpus begin|resume|finish|list}
 case "$cmd" in
   begin)
     name=${2:?corpus begin <name> [source-mesh-file]}
@@ -22,14 +36,27 @@ case "$cmd" in
     if [ -n "$src" ]; then cp "$src" "$dir/source/"; fi
     tools/seat follow clear >/dev/null 2>&1 || true
     tools/seat follow start "corpus-$name" >/dev/null
-    # The host journal is a 32-op undo WINDOW (req_4602) — one read at finish only
-    # catches the tail, so a poller samples it through the session; dedupe by
-    # actionId happens at training time, not here.
-    nohup bash -c "while :; do tools/seat action history-log '{}' >> '$dir/journal-samples.jsonl' 2>/dev/null; sleep 20; done" >/dev/null 2>&1 &
-    echo $! > "$dir/.poller.pid"
+    spawn_poller "$dir"
     date -u +%FT%TZ > "$dir/begun.txt"
     echo "recording '$name' (source: $(basename "$src")) — retopo away."
     echo "when done: tools/forge/corpus finish $name <package-dir>"
+    ;;
+  resume)
+    # Re-arm an unfinished entry after an app or machine restart: fresh follow
+    # session (same label — earlier events are already drained to trail-samples),
+    # poller respawned only if its pid is dead. The dock's REC light calls this
+    # on boot so a relit light always means an armed recorder.
+    name=${2:?corpus resume <name>}
+    dir="$ROOT/$name"
+    [ -d "$dir" ] || { echo "no corpus entry '$name'"; exit 1; }
+    [ -f "$dir/finished.txt" ] && { echo "'$name' is already finished"; exit 1; }
+    tools/seat follow start "corpus-$name" >/dev/null 2>&1 || true
+    if [ -f "$dir/.poller.pid" ] && kill -0 "$(cat "$dir/.poller.pid")" 2>/dev/null; then
+      echo "resumed '$name' (poller already running)"
+    else
+      spawn_poller "$dir"
+      echo "resumed '$name' (poller respawned)"
+    fi
     ;;
   finish)
     name=${2:?corpus finish <name> [package-dir]}
@@ -66,6 +93,7 @@ case "$cmd" in
       [ -f "$entry/finished.txt" ] && state="done $(cat "$entry/finished.txt")"
       trail="no-trail"
       [ -f "$entry/trail.json" ] && trail="trail:$(du -h "$entry/trail.json" | cut -f1)"
+      [ -f "$entry/trail-samples.jsonl" ] && trail="$trail+$(wc -l < "$entry/trail-samples.jsonl")drain"
       journal="no-journal"
       [ -f "$entry/journal-samples.jsonl" ] && journal="journal:$(wc -l < "$entry/journal-samples.jsonl")smp"
       echo "$(basename "$entry")  $state  $trail  $journal"
