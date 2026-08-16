@@ -2849,6 +2849,57 @@ fn countOpeningSurfaceRole(
     return count;
 }
 
+test "flush door at a junction restores the neighbour's end face across the void (req_4528)" {
+    // Wall A: (0,0)->(64,0). Wall B: (0,0)->(0,64). Door on A flush at the
+    // shared vertex (footprint -10..10, column 10 -> left_u 0). A's body used
+    // to cover B's junction cross-section; the door void punctures that cover,
+    // so B must re-emit its end face across the door's rows (0..34) — the
+    // miter-diagonal patch that seals the corner cavity — while the covered
+    // remainder above the door stays capless.
+    const door = geometryOpeningKit("kit:door", .door, -10, 10, 0, 34, .walk);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("a", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("b", 1, 0, 0, 0, 64, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "a:e:0", &.{.{
+        .id = "door",
+        .kind = .door,
+        .kit_id = "kit:door",
+        .column_u = 10,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var junction_bands: usize = 0;
+    var far_bands: usize = 0;
+    for (bundle.surfaces) |surface| {
+        if (!std.mem.eql(u8, surface.edge_id, "b:e:0") or surface.role != .end) continue;
+        if (surface.column_start_u == 0) {
+            junction_bands += 1;
+            try testing.expectEqual(@as(architecture.Unit, 0), surface.row_bottom_u);
+            try testing.expectEqual(@as(architecture.Unit, 34), surface.row_top_u);
+        } else {
+            far_bands += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 1), junction_bands);
+    try testing.expectEqual(@as(usize, 1), far_bands);
+
+    // Without the door the junction stays fully covered — no end band at the
+    // shared vertex (the req_4481 baseline this fix must not disturb).
+    var plain = try emptyOwnedArchitectureSource(testing.allocator);
+    defer plain.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &plain, &entries, drawWallCommand("a", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &plain, &entries, drawWallCommand("b", 1, 0, 0, 0, 64, null, null));
+    var plain_bundle = try buildExpectedGeometry(testing.allocator, &plain, &entries);
+    defer plain_bundle.deinit(testing.allocator);
+    for (plain_bundle.surfaces) |surface| {
+        if (!std.mem.eql(u8, surface.edge_id, "b:e:0") or surface.role != .end) continue;
+        try testing.expect(surface.column_start_u != 0);
+    }
+}
+
 test "geometry subtracts one measured door and emits its frame and portal" {
     const door = geometryOpeningKit("kit:door", .door, -10, 10, 0, 34, .walk);
     var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };

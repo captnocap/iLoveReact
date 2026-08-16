@@ -259,6 +259,7 @@ pub fn build(
         var start_gaps: [MAX_END_GAPS]EndGap = undefined;
         const start_gap_count = exposedEndGaps(
             source,
+            entries,
             derived_topology,
             edge,
             edge.start_vertex_id,
@@ -291,6 +292,7 @@ pub fn build(
         var end_gaps: [MAX_END_GAPS]EndGap = undefined;
         const end_gap_count = exposedEndGaps(
             source,
+            entries,
             derived_topology,
             edge,
             edge.end_vertex_id,
@@ -936,13 +938,48 @@ const EndGap = struct { bottom_u: types.Unit, top_u: types.Unit };
 /// Incident edges at one vertex bound the cover-span count; junctions are tiny.
 const MAX_END_GAPS = 8;
 
+/// A covering edge's body is NOT solid where one of its own openings sits
+/// FLUSH against the shared vertex (req_4528 — the flush door at a junction
+/// exposed the neighbour's unrendered interior through the void). Returns the
+/// opening's absolute vertical span when its footprint touches the covering
+/// edge's end at this vertex; null otherwise.
+fn flushOpeningSpanAtVertex(
+    source: *const types.ArchitectureSource,
+    entries: []const catalog.CatalogEntry,
+    other: *const types.WallEdge,
+    other_bottom_u: types.Unit,
+    vertex_id: []const u8,
+    opening: *const types.WallOpening,
+) ?EndGap {
+    const kit = findCatalogEntry(entries, opening.kit_id) orelse return null;
+    const footprint = kit.measurement.footprint orelse return null;
+    const left_u = opening.column_u + footprint.min_column;
+    const right_u = opening.column_u + footprint.max_column_exclusive;
+    const at_start = std.mem.eql(u8, other.start_vertex_id, vertex_id);
+    if (at_start) {
+        if (left_u != 0) return null;
+    } else {
+        const start = findSourceVertex(source, other.start_vertex_id) orelse return null;
+        const end = findSourceVertex(source, other.end_vertex_id) orelse return null;
+        if (right_u != completeDistanceUnits(start, end)) return null;
+    }
+    return .{
+        .bottom_u = other_bottom_u + opening.row_u + footprint.min_row,
+        .top_u = other_bottom_u + opening.row_u + footprint.max_row_exclusive,
+    };
+}
+
 /// Coverage decides end faces (req_4481): subtract every OTHER incident
 /// edge's body interval from this edge's own [bottom, top] at the vertex and
 /// return the exposed remainders. The same subtraction is the intended lane
 /// for future coverers — a slab over a cap, an opening kit over a reveal:
-/// candidate face minus covering bodies, emit what remains.
+/// candidate face minus covering bodies, emit what remains. A covering body
+/// is itself punctured by its FLUSH openings (req_4528): the void a door cuts
+/// against the junction covers nothing, so the end face returns across the
+/// door's rows and seals the miter.
 fn exposedEndGaps(
     source: *const types.ArchitectureSource,
+    entries: []const catalog.CatalogEntry,
     derived: *const topology.DerivedTopology,
     edge: *const types.WallEdge,
     vertex_id: []const u8,
@@ -962,9 +999,39 @@ fn exposedEndGaps(
                 .absolute => |support| support.base_y_u,
                 .slab => continue,
             };
-            if (cover_len >= cover.len) break;
-            cover[cover_len] = .{ .bottom_u = other_bottom, .top_u = other_bottom + other.height_u };
-            cover_len += 1;
+            // The covering interval, minus every flush opening void.
+            var pieces: [MAX_END_GAPS]EndGap = undefined;
+            pieces[0] = .{ .bottom_u = other_bottom, .top_u = other_bottom + other.height_u };
+            var pieces_len: usize = 1;
+            for (other.openings) |*opening| {
+                const void_span = flushOpeningSpanAtVertex(source, entries, other, other_bottom, vertex_id, opening) orelse continue;
+                var next: [MAX_END_GAPS]EndGap = undefined;
+                var next_len: usize = 0;
+                for (pieces[0..pieces_len]) |piece| {
+                    if (void_span.top_u <= piece.bottom_u or void_span.bottom_u >= piece.top_u) {
+                        if (next_len < next.len) {
+                            next[next_len] = piece;
+                            next_len += 1;
+                        }
+                        continue;
+                    }
+                    if (void_span.bottom_u > piece.bottom_u and next_len < next.len) {
+                        next[next_len] = .{ .bottom_u = piece.bottom_u, .top_u = void_span.bottom_u };
+                        next_len += 1;
+                    }
+                    if (void_span.top_u < piece.top_u and next_len < next.len) {
+                        next[next_len] = .{ .bottom_u = void_span.top_u, .top_u = piece.top_u };
+                        next_len += 1;
+                    }
+                }
+                pieces = next;
+                pieces_len = next_len;
+            }
+            for (pieces[0..pieces_len]) |piece| {
+                if (cover_len >= cover.len) break;
+                cover[cover_len] = piece;
+                cover_len += 1;
+            }
         }
         break;
     }
