@@ -35,7 +35,8 @@ if [ ! -x /workspace/bin/instant-meshes ]; then
   mv "/tmp/im/Instant Meshes" /workspace/bin/instant-meshes
   chmod +x /workspace/bin/instant-meshes
 fi
-apt-get install -y -qq libxxf86vm1 libxrandr2 libxinerama1 libxcursor1 libx11-6 \
+apt-get update -qq >/dev/null 2>&1 || true
+apt-get install -y -qq libopengl0 libxxf86vm1 libxrandr2 libxinerama1 libxcursor1 libx11-6 \
   libxext6 libxrender1 libxfixes3 libxcb1 libxau6 libxdmcp6 >/dev/null 2>&1 || \
   echo "WARN: X11 runtime libs install failed - instant-meshes may not run"
 # (--help exits non-zero, so probe linkability, not exit status)
