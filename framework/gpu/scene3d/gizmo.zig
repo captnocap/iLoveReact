@@ -109,7 +109,12 @@ pub const OV_FACE_DOT_SEL_PX: f32 = 5.0;
 // (~678k) stays gated because no one should face-edit soup.
 pub const OV_MAX_FACE_TINT: u32 = 200000; // tint/dot pass guard (tris)
 pub const OV_FACE_CORNER_ID_PX: f32 = 11.0;
-pub const OV_MAX_FACE_CORNER_ID_TRIS: u32 = 256;
+// Guard sized to the sibling OV_MAX_FACE_TINT, NOT a small "reasonable selection"
+// number (req_4665: the original 256-tri cap == 128 quads, so selecting the 129th
+// face made every corner-identity dot vanish at once — the classic low-limit
+// silent-truncation landmine of req_0892). The capsule batch it feeds degrades
+// loudly at MAX_CAPSULES; don't set this low again.
+pub const OV_MAX_FACE_CORNER_ID_TRIS: u32 = 200000;
 pub const OV_FACE_CORNER_HUE_STEP_DEGREES: u32 = 137;
 pub const OV_FACE_CORNER_CHROMA_BYTE: u32 = 184;
 pub const OV_FACE_CORNER_VALUE_BYTE: u32 = 255;
