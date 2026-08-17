@@ -2137,9 +2137,9 @@ pub fn faceBaryToIslandUv(face: u32, u: f32, v: f32) ?[2]f32 {
 // A brush can "dip into a bucket of shader": the host renders a shader recipe to a
 // small RGBA image (material_tex.bakePixels) and hands the pixels here; a dab then
 // SAMPLES that image per texel instead of laying one flat colour, so the stroke
-// deposits the material's LOOK onto the low-poly face. The material's canvas is one
-// TILE (1×1 m — the shader canvas contract); `g_mat_scale` is tiles PER METER of
-// world surface, so the look lands at the same physical density on every face.
+// deposits the material's LOOK onto the low-poly face. One shader canvas covers the
+// whole atlas UV space so painted shaders never repeat (req_4670); `g_mat_scale`
+// repeats the canvas that many times across the atlas (default 1 — no repetition).
 // Cleared → dabs go back to flat-colour painting.
 var g_mat_rgba: ?[]u8 = null;
 var g_mat_w: u32 = 0;
@@ -2147,7 +2147,8 @@ var g_mat_h: u32 = 0;
 var g_mat_scale: f32 = 1.0;
 
 /// Adopt a material image as the active brush ink (copied — the caller keeps ownership
-/// of `rgba`). `scale` is tiles per METER of world surface. False on a malformed image.
+/// of `rgba`). `scale` repeats the canvas across the whole atlas (1 = never repeats).
+/// False on a malformed image.
 pub fn setMaterialInk(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
     if (w == 0 or h == 0 or rgba.len != @as(usize, w) * @as(usize, h) * 4) return false;
     const copy = alloc.alloc(u8, rgba.len) catch return false;
@@ -2254,17 +2255,16 @@ pub fn baryOfPointOnFace(face: u32, p: [3]f32) [2]f32 {
     return .{ (d22 * dp1 - d12 * dp2) / det, (d11 * dp2 - d12 * dp1) / det };
 }
 
-/// Sample the material ink at an atlas texel, in WORLD space: texels convert to meters
-/// through the layout's texels-per-meter density, so one material tile spans 1 m on
-/// every face (× g_mat_scale tiles/m). Still one continuous window across the whole
-/// authored face — the look runs over the diagonal without restarting. The old
-/// island-NORMALIZED mapping gave every face the same tile count regardless of its
-/// world size, so a long mullion stretched the look while a short face packed it
-/// dense, with no control over either (req_4669).
-fn sampleMatAtTexel(isl: paint_islands.Island, fx: f32, fy: f32) [4]u8 {
-    const texels_per_m: f32 = if (g_layout) |lay| @max(1e-6, lay.density) else 1.0;
-    const u = (fx + 0.5 - @as(f32, @floatFromInt(isl.x))) / texels_per_m;
-    const v = (fy + 0.5 - @as(f32, @floatFromInt(isl.y))) / texels_per_m;
+/// Sample the material ink at an atlas texel, in ATLAS space: one shader canvas covers
+/// the ENTIRE UV space (USER RULING req_4670 — painted shaders never repeat; world
+/// tiling belongs to texture-slotted walls, not the brush). Every island samples its
+/// own window of the one continuous field, and because generated layouts pack islands
+/// at uniform texels-per-meter, the look lands at the same physical density on every
+/// face. The old island-NORMALIZED mapping restarted the canvas per face, so a long
+/// mullion stretched the look while a short face packed it dense (req_4669).
+fn sampleMatAtTexel(fx: f32, fy: f32) [4]u8 {
+    const u = (fx + 0.5) / @as(f32, @floatFromInt(@max(1, g_atlas_w)));
+    const v = (fy + 0.5) / @as(f32, @floatFromInt(@max(1, g_atlas_h)));
     return sampleMat(u * g_mat_scale, v * g_mat_scale);
 }
 
@@ -2480,7 +2480,7 @@ pub fn paintPolygon(face: u32, points: []const f32, rgba: [4]u8, mat: bool, flow
             const v = (fy + 0.5 - @as(f32, @floatFromInt(island.y))) / island_h_f;
             if (!pointInPolygon(points, u, v)) continue;
             if (!pointInIsland(lay, island_index, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
-            const ink = if (mat) sampleMatAtTexel(island, fx, fy) else rgba;
+            const ink = if (mat) sampleMatAtTexel(fx, fy) else rgba;
             blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amount, if (blend <= 7) blend else 0);
             wrote = true;
         }
@@ -2518,12 +2518,12 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
                 const fx: f32 = @floatFromInt(tx);
                 const fy: f32 = @floatFromInt(ty);
                 if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
-                const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
+                const ink: [4]u8 = if (mat) sampleMatAtTexel(fx, fy) else rgba;
                 blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt, spec.blend);
             }
         }
         const ct = faceCentroidTexel(lay, face);
-        const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, @floatFromInt(ct[0]), @floatFromInt(ct[1])) else rgba;
+        const ink: [4]u8 = if (mat) sampleMatAtTexel(@floatFromInt(ct[0]), @floatFromInt(ct[1])) else rgba;
         blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt, spec.blend);
         markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
         return;
@@ -2581,7 +2581,7 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
             // Clip to the island silhouette — the dab covers every member triangle it
             // overlaps, so the diagonal is invisible to the stroke.
             if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
-            const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
+            const ink: [4]u8 = if (mat) sampleMatAtTexel(fx, fy) else rgba;
             blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov, spec.blend);
         }
     }
