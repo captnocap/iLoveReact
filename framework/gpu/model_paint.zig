@@ -2137,15 +2137,17 @@ pub fn faceBaryToIslandUv(face: u32, u: f32, v: f32) ?[2]f32 {
 // A brush can "dip into a bucket of shader": the host renders a shader recipe to a
 // small RGBA image (material_tex.bakePixels) and hands the pixels here; a dab then
 // SAMPLES that image per texel instead of laying one flat colour, so the stroke
-// deposits the material's LOOK onto the low-poly face. `g_mat_scale` tiles the image
-// across each face patch. Cleared → dabs go back to flat-colour painting.
+// deposits the material's LOOK onto the low-poly face. The material's canvas is one
+// TILE (1×1 m — the shader canvas contract); `g_mat_scale` is tiles PER METER of
+// world surface, so the look lands at the same physical density on every face.
+// Cleared → dabs go back to flat-colour painting.
 var g_mat_rgba: ?[]u8 = null;
 var g_mat_w: u32 = 0;
 var g_mat_h: u32 = 0;
 var g_mat_scale: f32 = 1.0;
 
 /// Adopt a material image as the active brush ink (copied — the caller keeps ownership
-/// of `rgba`). `scale` tiles the image across each face patch. False on a malformed image.
+/// of `rgba`). `scale` is tiles per METER of world surface. False on a malformed image.
 pub fn setMaterialInk(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
     if (w == 0 or h == 0 or rgba.len != @as(usize, w) * @as(usize, h) * 4) return false;
     const copy = alloc.alloc(u8, rgba.len) catch return false;
@@ -2252,12 +2254,17 @@ pub fn baryOfPointOnFace(face: u32, p: [3]f32) [2]f32 {
     return .{ (d22 * dp1 - d12 * dp2) / det, (d11 * dp2 - d12 * dp1) / det };
 }
 
-/// Sample the material ink at an atlas texel, in ISLAND space: uv (0..1) spans the
-/// island's rect — one continuous window across the whole authored face, so the look
-/// runs over the diagonal without restarting. Tiled by g_mat_scale.
+/// Sample the material ink at an atlas texel, in WORLD space: texels convert to meters
+/// through the layout's texels-per-meter density, so one material tile spans 1 m on
+/// every face (× g_mat_scale tiles/m). Still one continuous window across the whole
+/// authored face — the look runs over the diagonal without restarting. The old
+/// island-NORMALIZED mapping gave every face the same tile count regardless of its
+/// world size, so a long mullion stretched the look while a short face packed it
+/// dense, with no control over either (req_4669).
 fn sampleMatAtTexel(isl: paint_islands.Island, fx: f32, fy: f32) [4]u8 {
-    const u = (fx + 0.5 - @as(f32, @floatFromInt(isl.x))) / @as(f32, @floatFromInt(@max(1, isl.w)));
-    const v = (fy + 0.5 - @as(f32, @floatFromInt(isl.y))) / @as(f32, @floatFromInt(@max(1, isl.h)));
+    const texels_per_m: f32 = if (g_layout) |lay| @max(1e-6, lay.density) else 1.0;
+    const u = (fx + 0.5 - @as(f32, @floatFromInt(isl.x))) / texels_per_m;
+    const v = (fy + 0.5 - @as(f32, @floatFromInt(isl.y))) / texels_per_m;
     return sampleMat(u * g_mat_scale, v * g_mat_scale);
 }
 
