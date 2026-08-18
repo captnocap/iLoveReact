@@ -1668,7 +1668,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
             const b1 = b_index[(authority_rung + 1) % a_run.count];
             const candidate = [4]u32{ a0, a1, b1, b0 };
             const reference = agreed_normal orelse
-                mesh_edit.bridgeBoundaryReferenceNormalPub(.{ a0, a1 }, .{ b0, b1 }, candidate) orelse
+                mesh_edit.bridgeBoundaryReferenceNormalPub(.{ a0, a1 }, .{ b0, b1 }, &candidate) orelse
                 mesh_edit.bridgeCrossReferenceNormalPub(.{ a0, a1 }, .{ b0, b1 }, .{ a0, b0 }, .{ a1, b1 }) orelse
                 continue;
             const pa = mesh_edit.vertPosPub(a0);
@@ -1736,11 +1736,11 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 edges[1],
                 .{ edges[0][0], c_id },
                 .{ edges[0][1], d_id },
-            ) orelse mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], candidate) orelse
+            ) orelse mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], &candidate) orelse
                 // A side the quad already shares with the mesh outranks a disagreement
                 // between the two selected edges: it is a real surface the new face
                 // touches, so it decides the fill outright (req_4204).
-                mesh_edit.bridgeConnectingSideReferenceNormalPub(edges[0], edges[1], candidate);
+                mesh_edit.bridgeConnectingSideReferenceNormalPub(edges[0], edges[1], &candidate);
             if (winding == null) z3d.topoRefuse("the bridge quad has no winding authority: the two selected edges' surfaces disagree on facing, the quad's other two sides are not BOTH present as authored edges whose surfaces agree, boundary circulation across the selected pair disagrees, and no side the quad already shares resolved it either. One of the two surfaces is probably inside-out — flip it and retry.");
             if (winding) |reference| ok = z3d.appendQuadSplitFacingLogical(
                 &verts,
@@ -1758,28 +1758,48 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 reference,
             );
             if (winding != null and !ok) z3d.topoRefuse("the bridge quad resolved a winding but its geometry could not be appended");
-        } else if (agreed_normal) |reference_normal| {
+        } else {
             var order: [3]u32 = undefined;
             if (mesh_edit.triangleFromAdjacentEdges(edges[0], edges[1], &order)) {
-                ok = z3d.appendTriFacingLogical(
-                    &verts,
-                    &logical,
-                    mesh_edit.vertPosPub(order[0]),
-                    mesh_edit.vertPosPub(order[1]),
-                    mesh_edit.vertPosPub(order[2]),
-                    .{
-                        z3d.fillCornerLogicalId(&logical, order[0], edges) orelse return z3d.refuseCreateFaceMissingLogicalRow(),
-                        z3d.fillCornerLogicalId(&logical, order[1], edges) orelse return z3d.refuseCreateFaceMissingLogicalRow(),
-                        z3d.fillCornerLogicalId(&logical, order[2], edges) orelse return z3d.refuseCreateFaceMissingLogicalRow(),
-                    },
-                    reference_normal,
-                );
-                if (!ok) z3d.topoRefuse("the corner triangle resolved a winding but its geometry could not be appended");
+                // The corner triangle resolves winding like the quad bridge does
+                // (req_4685): the agreed neighbor normal when the two surfaces
+                // concur, else boundary circulation across the selected pair,
+                // else the triangle's third side when it already exists as an
+                // authored edge. A corner turning a hard transition — a notch's
+                // roof edge against its wall edge — has no averaged normal, but
+                // its circulation still has one exact answer.
+                const winding = agreed_normal orelse
+                    mesh_edit.bridgeBoundaryReferenceNormalPub(edges[0], edges[1], &order) orelse
+                    mesh_edit.bridgeConnectingSideReferenceNormalPub(edges[0], edges[1], &order);
+                if (winding) |reference_normal| {
+                    ok = z3d.appendTriFacingLogical(
+                        &verts,
+                        &logical,
+                        mesh_edit.vertPosPub(order[0]),
+                        mesh_edit.vertPosPub(order[1]),
+                        mesh_edit.vertPosPub(order[2]),
+                        .{
+                            z3d.fillCornerLogicalId(&logical, order[0], edges) orelse return z3d.refuseCreateFaceMissingLogicalRow(),
+                            z3d.fillCornerLogicalId(&logical, order[1], edges) orelse return z3d.refuseCreateFaceMissingLogicalRow(),
+                            z3d.fillCornerLogicalId(&logical, order[2], edges) orelse return z3d.refuseCreateFaceMissingLogicalRow(),
+                        },
+                        reference_normal,
+                    );
+                    if (!ok) z3d.topoRefuse("the corner triangle resolved a winding but its geometry could not be appended");
+                } else z3d.topoRefuse("the corner triangle has no winding authority: the surfaces beside the two selected edges disagree on facing, boundary circulation across them disagrees, and the triangle's third side is not an authored edge whose face could decide it. One of the surfaces is probably inside-out — flip it and retry.");
             } else z3d.topoRefuse("the two selected edges share a vertex but do not close a triangle — their far endpoints are not joined");
-        } else z3d.topoRefuse("the two selected edges share a vertex, but the surfaces beside them disagree on facing, and a corner triangle has no winding fallback. Flip whichever face is inside-out and retry.");
-    } else if (agreed_normal) |reference_normal| {
+        }
+    } else {
         var order: [4]u32 = undefined;
-        if (z3d.closedEdgeLoopOrder(edges, &order)) |n| {
+        if (z3d.closedEdgeLoopOrder(edges, &order)) |n| loop_fill: {
+            // Same authority ladder for the closed loop (req_4685): the averaged
+            // neighbor normal when every selected edge's surface concurs, else the
+            // loop's own boundary circulation.
+            const winding = agreed_normal orelse mesh_edit.loopBoundaryReferenceNormalPub(order[0..n]);
+            const reference_normal = winding orelse {
+                z3d.topoRefuse("the loop fill has no winding authority: the surfaces beside the selected edges disagree on facing and their boundary circulation does not agree on one either. One of the surfaces is probably inside-out — flip it and retry.");
+                break :loop_fill;
+            };
             const p0 = mesh_edit.vertPosPub(order[0]);
             const p1 = mesh_edit.vertPosPub(order[1]);
             const p2 = mesh_edit.vertPosPub(order[2]);
@@ -1815,7 +1835,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
                 );
             if (!ok) z3d.topoRefuse("the loop fill resolved a winding but its geometry could not be appended");
         } else z3d.topoRefuse("the selected edges do not form a CLOSED loop of exactly 3 or 4 edges — past 2 edges that is the only shape Create Face fills");
-    } else z3d.topoRefuse("a 3/4-edge loop fill takes its winding from the averaged normal of every selected edge's surface, and at least two of them oppose");
+    }
     if (!ok) {
         verts.deinit(std.heap.c_allocator);
         if (z3d.g_topo_refusal.len == 0) z3d.topoRefuse("no fill shape was produced for this selection");

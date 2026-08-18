@@ -292,14 +292,14 @@ export function describeCreateFaceReadiness(snapshot: ModelSelectionSnapshot): C
     if (degree.size !== count || open.length > 0) {
       blocking.push(`a ${count}-edge fill must be a CLOSED loop — ${degree.size} distinct corners over ${count} edges, and ${open.length} of them are not shared by exactly two selected edges`);
     }
-    hostDecides.push('whether the surfaces beside all selected edges agree on a facing — the loop fill takes its winding from their averaged normal and refuses when any two oppose');
+    hostDecides.push('whether a winding survives: the averaged normal of every selected edge\'s surface when they agree on a facing, else the loop\'s own boundary circulation — each side with exactly one incident face votes, and the votes must agree');
     return { shape: 'loop-fill', blocking, hostDecides };
   }
 
   const [first, second] = edges;
   if (!first || !second) return { shape: 'none', blocking: ['the selected edges could not be read'], hostDecides };
   if (edgesShareVertex(first, second)) {
-    hostDecides.push('whether the two surfaces beside the selected edges agree on a facing — a corner triangle has no fallback and refuses outright when they oppose');
+    hostDecides.push('whether a winding survives: the two surfaces beside the selected edges when they agree on a facing, else boundary circulation across the selected pair, else the triangle\'s third side when it already exists as an authored edge');
     return { shape: 'corner', blocking, hostDecides };
   }
   // The disjoint bridge has three winding authorities in order: the two edges' own

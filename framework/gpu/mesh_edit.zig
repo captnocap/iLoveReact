@@ -2064,7 +2064,7 @@ fn boundaryFaceRunsEdgeForward(edge: Edge) ?bool {
     return found;
 }
 
-fn loopRunsEdgeForward(loop: [4]u32, edge: Edge) ?bool {
+fn loopRunsEdgeForward(loop: []const u32, edge: Edge) ?bool {
     var side: usize = 0;
     while (side < loop.len) : (side += 1) {
         const a = loop[side];
@@ -2075,17 +2075,20 @@ fn loopRunsEdgeForward(loop: [4]u32, edge: Edge) ?bool {
     return null;
 }
 
-/// The candidate quad's own surface normal, signed by whether its written order is
-/// the one to keep. Degenerate loops have no usable normal and reject.
-fn candidateLoopNormal(candidate: [4]u32, keep: bool) ?[3]f32 {
+/// The candidate loop's own surface normal — triangle or quad — signed by whether
+/// its written order is the one to keep. Degenerate loops have no usable normal
+/// and reject.
+fn candidateLoopNormal(candidate: []const u32, keep: bool) ?[3]f32 {
+    if (candidate.len < 3) return null;
     const a = vertPosPub(candidate[0]);
-    const b = vertPosPub(candidate[1]);
-    const c = vertPosPub(candidate[2]);
-    const d = vertPosPub(candidate[3]);
-    const area_normal = vecAdd(
-        vecCross(vecSub(b, a), vecSub(c, a)),
-        vecCross(vecSub(c, a), vecSub(d, a)),
-    );
+    var area_normal: [3]f32 = .{ 0, 0, 0 };
+    var corner: usize = 1;
+    while (corner + 1 < candidate.len) : (corner += 1) {
+        area_normal = vecAdd(area_normal, vecCross(
+            vecSub(vertPosPub(candidate[corner]), a),
+            vecSub(vertPosPub(candidate[corner + 1]), a),
+        ));
+    }
     const normal = vecNorm(area_normal);
     if (vecDot(normal, normal) < 0.5) return null;
     return if (keep) normal else vecMul(normal, -1);
@@ -2095,13 +2098,14 @@ fn sameUndirectedEdge(a: Edge, b: Edge) bool {
     return (a[0] == b[0] and a[1] == b[1]) or (a[0] == b[1] and a[1] == b[0]);
 }
 
-/// Final Create Face winding authority for a valid two-edge boundary bridge when
+/// Final Create Face winding authority for a valid two-edge boundary fill when
 /// neither opposite neighbor-normal pair agrees. Surface normals can legitimately
 /// conflict around a corner transition; boundary circulation cannot. The candidate
-/// face must traverse both selected manifold edges opposite to their sole incident
-/// triangles. If those two constraints disagree, the bridge remains ambiguous and
+/// loop — a bridge quad or a shared-vertex corner triangle (req_4685) — must
+/// traverse both selected manifold edges opposite to their sole incident
+/// triangles. If those two constraints disagree, the fill remains ambiguous and
 /// is rejected instead of minting an inconsistently wound face.
-pub fn bridgeBoundaryReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u32) ?[3]f32 {
+pub fn bridgeBoundaryReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: []const u32) ?[3]f32 {
     if (!ensureTopology()) return null;
     var keep_candidate: ?bool = null;
     inline for (.{ sel0, sel1 }) |edge| {
@@ -2131,16 +2135,36 @@ pub fn bridgeBoundaryReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u3
 /// case of exactly one connecting edge. Here every non-selected side that exists as a
 /// manifold boundary votes; absent, interior, and non-manifold sides abstain rather
 /// than reject, and the surviving votes must agree.
-pub fn bridgeConnectingSideReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: [4]u32) ?[3]f32 {
+pub fn bridgeConnectingSideReferenceNormalPub(sel0: Edge, sel1: Edge, candidate: []const u32) ?[3]f32 {
     if (!ensureTopology()) return null;
     inline for (.{ sel0, sel1 }) |edge| {
         _ = edgeExtrusionFramePub(edgeIndexBetween(edge[0], edge[1]) orelse return null) orelse return null;
     }
+    return circulationVoteLoopNormal(candidate, sel0, sel1);
+}
+
+/// Winding for a closed 3/4-edge loop fill whose neighbor normals disagree
+/// (req_4685): every side of the loop is a selected edge, and every one that
+/// exists as a manifold boundary edge votes with its circulation. A loop turning
+/// a hard corner — a notch whose top edge borders the roof surface while its
+/// flanks border the walls — has no averaged normal, but its circulation still
+/// has one exact answer.
+pub fn loopBoundaryReferenceNormalPub(candidate: []const u32) ?[3]f32 {
+    if (!ensureTopology()) return null;
+    return circulationVoteLoopNormal(candidate, null, null);
+}
+
+/// Shared circulation ballot: each candidate side outside the skipped selected
+/// pair that is a manifold boundary edge votes on whether the written loop order
+/// is the one to keep (the new face must traverse a boundary edge opposite to
+/// its sole incident face). Abstaining is not agreeing — no votes, no normal.
+fn circulationVoteLoopNormal(candidate: []const u32, skip0: ?Edge, skip1: ?Edge) ?[3]f32 {
     var keep_candidate: ?bool = null;
     var side: usize = 0;
     while (side < candidate.len) : (side += 1) {
         const edge: Edge = .{ candidate[side], candidate[(side + 1) % candidate.len] };
-        if (sameUndirectedEdge(edge, sel0) or sameUndirectedEdge(edge, sel1)) continue;
+        if (skip0) |skip| if (sameUndirectedEdge(edge, skip)) continue;
+        if (skip1) |skip| if (sameUndirectedEdge(edge, skip)) continue;
         const adjacent_forward = boundaryFaceRunsEdgeForward(edge) orelse continue;
         const candidate_forward = loopRunsEdgeForward(candidate, edge) orelse continue;
         const keep = adjacent_forward != candidate_forward;

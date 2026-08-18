@@ -1183,7 +1183,7 @@ test "bridge winding follows the oriented boundary when every neighbor-normal pa
     const reference = mesh_edit.bridgeBoundaryReferenceNormalPub(
         selected_0,
         selected_1,
-        .{ a.?, b.?, c.?, d.? },
+        &.{ a.?, b.?, c.?, d.? },
     ).?;
     try testing.expectApproxEqAbs(@as(f32, 0), reference[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0), reference[1], 0.0001);
@@ -1252,7 +1252,7 @@ test "a side the quad already shares decides the bridge the selected pair cannot
 
     // Every authority that only ever looks at the SELECTED pair goes silent.
     try testing.expect(mesh_edit.selectedEdgesReferenceNormalPub() == null);
-    try testing.expect(mesh_edit.bridgeBoundaryReferenceNormalPub(selected_0, selected_1, candidate) == null);
+    try testing.expect(mesh_edit.bridgeBoundaryReferenceNormalPub(selected_0, selected_1, &candidate) == null);
     // …and the cross-reference rescue cannot fire, because (v1,v2) does not exist.
     try testing.expect(mesh_edit.bridgeCrossReferenceNormalPub(
         selected_0,
@@ -1263,7 +1263,7 @@ test "a side the quad already shares decides the bridge the selected pair cannot
 
     // The one side that IS there answers outright: face 2 runs v3 → v0, so the quad
     // must run v0 → v3, which is the reverse of the order written above.
-    const reference = mesh_edit.bridgeConnectingSideReferenceNormalPub(selected_0, selected_1, candidate).?;
+    const reference = mesh_edit.bridgeConnectingSideReferenceNormalPub(selected_0, selected_1, &candidate).?;
     try testing.expectApproxEqAbs(@as(f32, 0), reference[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0), reference[1], 0.0001);
     try testing.expect(reference[2] < -0.999);
@@ -1273,8 +1273,130 @@ test "a side the quad already shares decides the bridge the selected pair cannot
     try testing.expect(mesh_edit.bridgeConnectingSideReferenceNormalPub(
         selected_0,
         selected_1,
-        .{ v0.?, v1.?, v3.?, v2.? },
+        &.{ v0.?, v1.?, v3.?, v2.? },
     ) == null);
+}
+
+test "a corner triangle takes its winding from boundary circulation across a perpendicular notch" {
+    // req_4685. Three boundary edges close a triangular notch: the top edge borders
+    // the horizontal roof surface (normal +y) while the two flank edges border the
+    // front wall (normal +z). Selecting top+flank reads perpendicular neighbor
+    // normals, so the agreed-normal gate goes silent — the exact pair the user
+    // could never fill while flank+flank (both +z) worked. Boundary circulation
+    // resolves every pair the same way.
+    //
+    //        L ────────── R        top face carries (L,R), running L → R
+    //         \    fill  /         left flank carries (L,C), running C → L
+    //          \        /          right flank carries (R,C), running R → C
+    //           \      /
+    //              C
+    var soup = [_]f32{
+        // roof — horizontal, normal +y, traverses L → R
+        0,   1,   0,  0, 1, 0, 0, 0,
+        1,   1,   0,  0, 1, 0, 0, 0,
+        0.5, 1,   -1, 0, 1, 0, 0, 0,
+        // left flank — front wall, normal +z, traverses C → L
+        0,   1,   0,  0, 0, 1, 0, 0,
+        0,   0,   0,  0, 0, 1, 0, 0,
+        0.5, 0.5, 0,  0, 0, 1, 0, 0,
+        // right flank — front wall, normal +z, traverses R → C
+        1,   1,   0,  0, 0, 1, 0, 0,
+        0.5, 0.5, 0,  0, 0, 1, 0, 0,
+        1,   0,   0,  0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(4685, soup[0..], 9, &.{ 0, 1, 2 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var l: ?u32 = null;
+    var r: ?u32 = null;
+    var c: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[2] != 0) continue;
+        if (at[0] == 0 and at[1] == 1) l = vertex;
+        if (at[0] == 1 and at[1] == 1) r = vertex;
+        if (at[0] == 0.5 and at[1] == 0.5) c = vertex;
+    }
+    const top: mesh_edit.Edge = .{ l.?, r.? };
+    const left: mesh_edit.Edge = .{ l.?, c.? };
+
+    var edge: u32 = 0;
+    while (edge < mesh_edit.edgeCount()) : (edge += 1) {
+        const ends = mesh_edit.edgeEndpointsPub(edge);
+        inline for (.{ top, left }) |wanted| {
+            if ((ends[0] == wanted[0] and ends[1] == wanted[1]) or
+                (ends[0] == wanted[1] and ends[1] == wanted[0]))
+            {
+                try testing.expect(mesh_edit.selectEdgeByIndex(edge, true));
+            }
+        }
+    }
+
+    // The perpendicular pair has no agreed neighbor normal — the historical refusal.
+    try testing.expect(mesh_edit.selectedEdgesReferenceNormalPub() == null);
+
+    // The corner triangle the pair implies: shared L, far ends R and C.
+    var order: [3]u32 = undefined;
+    try testing.expect(mesh_edit.triangleFromAdjacentEdges(top, left, &order));
+    try testing.expectEqual(r.?, order[0]);
+    try testing.expectEqual(l.?, order[1]);
+    try testing.expectEqual(c.?, order[2]);
+
+    // Both selected edges' circulation votes agree: the fill faces the front (+z).
+    const circulation = mesh_edit.bridgeBoundaryReferenceNormalPub(top, left, &order).?;
+    try testing.expectApproxEqAbs(@as(f32, 0), circulation[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), circulation[1], 0.0001);
+    try testing.expect(circulation[2] > 0.999);
+
+    // The third side (R,C) already exists on the right flank and votes the same way.
+    const third_side = mesh_edit.bridgeConnectingSideReferenceNormalPub(top, left, &order).?;
+    try testing.expect(third_side[2] > 0.999);
+}
+
+test "a closed loop fill takes its winding from circulation when its corners turn hard" {
+    // req_4685, loop form: selecting ALL THREE notch edges asks for the 3-edge loop
+    // fill, whose only authority was the averaged neighbor normal — the same
+    // perpendicular roof/wall disagreement refused it. The loop's own circulation
+    // votes once per side and every vote agrees.
+    var soup = [_]f32{
+        0,   1,   0,  0, 1, 0, 0, 0,
+        1,   1,   0,  0, 1, 0, 0, 0,
+        0.5, 1,   -1, 0, 1, 0, 0, 0,
+        0,   1,   0,  0, 0, 1, 0, 0,
+        0,   0,   0,  0, 0, 1, 0, 0,
+        0.5, 0.5, 0,  0, 0, 1, 0, 0,
+        1,   1,   0,  0, 0, 1, 0, 0,
+        0.5, 0.5, 0,  0, 0, 1, 0, 0,
+        1,   0,   0,  0, 0, 1, 0, 0,
+    };
+    mesh_edit.test_support.loadGroupedSoup(4686, soup[0..], 9, &.{ 0, 1, 2 });
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.edge);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var l: ?u32 = null;
+    var r: ?u32 = null;
+    var c: ?u32 = null;
+    var vertex: u32 = 0;
+    while (vertex < mesh_edit.vertCount()) : (vertex += 1) {
+        const at = mesh_edit.vertPosPub(vertex);
+        if (at[2] != 0) continue;
+        if (at[0] == 0 and at[1] == 1) l = vertex;
+        if (at[0] == 1 and at[1] == 1) r = vertex;
+        if (at[0] == 0.5 and at[1] == 0.5) c = vertex;
+    }
+
+    // Either written orientation of the loop resolves to the same outward facing:
+    // circulation decides keep-or-flip, not the caller's corner order.
+    inline for (.{ [3]u32{ l.?, r.?, c.? }, [3]u32{ l.?, c.?, r.? } }) |loop| {
+        const reference = mesh_edit.loopBoundaryReferenceNormalPub(&loop).?;
+        try testing.expectApproxEqAbs(@as(f32, 0), reference[0], 0.0001);
+        try testing.expectApproxEqAbs(@as(f32, 0), reference[1], 0.0001);
+        try testing.expect(reference[2] > 0.999);
+    }
 }
 
 test "twin-edge probe requires matching face incidence between source and twin" {
