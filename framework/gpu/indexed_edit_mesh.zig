@@ -5034,14 +5034,20 @@ pub const Mesh = struct {
         return a[0] * b[1] - a[1] * b[0];
     }
 
-    fn faceRayBoundaryDistance(
+    const FaceRayBoundaryHit = struct { distance: f32, param: f32 };
+
+    /// Nearest boundary crossing of a centroid ray, as both a distance and a
+    /// perimeter parameter (cumulative arc length around the face loop, taken
+    /// from `corner_params`, whose last entry is the full perimeter).
+    fn faceRayBoundaryHit(
         mesh: *const Mesh,
         face_id: u32,
         frame: FacePolygonFrame,
         direction: Vec2,
-    ) ?f32 {
+        corner_params: []const f32,
+    ) ?FaceRayBoundaryHit {
         const face = &mesh.faces.items[face_id];
-        var nearest = std.math.inf(f32);
+        var nearest: ?FaceRayBoundaryHit = null;
         for (face.vertices.items, 0..) |vertex_id, corner| {
             const next_id = face.vertices.items[(corner + 1) % face.vertices.items.len];
             const a3 = sub3(mesh.vertices.items[vertex_id].position, frame.center);
@@ -5059,9 +5065,35 @@ pub const Mesh = struct {
             {
                 continue;
             }
-            nearest = @min(nearest, distance);
+            if (nearest == null or distance < nearest.?.distance) {
+                const clamped = std.math.clamp(along_edge, 0.0, 1.0);
+                nearest = .{
+                    .distance = distance,
+                    .param = corner_params[corner] +
+                        clamped * (corner_params[corner + 1] - corner_params[corner]),
+                };
+            }
         }
-        return if (std.math.isFinite(nearest)) nearest else null;
+        return nearest;
+    }
+
+    /// True when the (a, b, c, d) loop turns the frame's way at all four
+    /// corners — a reflex or twisted ring-quad candidate returns false.
+    fn ringQuadConvex(mesh: *const Mesh, frame: FacePolygonFrame, a_id: u32, b_id: u32, c_id: u32, d_id: u32) bool {
+        const ids = [4]u32{ a_id, b_id, c_id, d_id };
+        var points: [4]Vec2 = undefined;
+        for (ids, 0..) |vertex_id, at| {
+            const offset = sub3(mesh.vertices.items[vertex_id].position, frame.center);
+            points[at] = .{ dot3(offset, frame.u), dot3(offset, frame.v) };
+        }
+        for (0..4) |at| {
+            const p = points[(at + 3) % 4];
+            const q = points[at];
+            const r = points[(at + 1) % 4];
+            const turn = (q[0] - p[0]) * (r[1] - q[1]) - (q[1] - p[1]) * (r[0] - q[0]);
+            if (turn <= 0) return false;
+        }
+        return true;
     }
 
     fn polygonVertexUv(
@@ -5094,10 +5126,12 @@ pub const Mesh = struct {
     }
 
     /// Replace one convex planar authored face with a regular N-gon center and a
-    /// welded transition ring. A normalized perimeter zipper advances the outer
-    /// and inner loops together: equal steps mint quads, unmatched steps mint
-    /// triangles. It therefore supports every target side count without ever
-    /// hiding the transition in six-vertex authored faces.
+    /// welded transition ring. Each inner vertex is assigned to the source edge
+    /// its centroid ray crosses; every source edge then stitches to exactly the
+    /// inner vertices that face it (quads on the flats, triangle fans and corner
+    /// triangles where densities differ). It therefore supports every target
+    /// side count and any face proportion without crossing spokes or twisted
+    /// ring quads, and never hides the transition in six-vertex authored faces.
     pub fn polygonizeFace(mesh: *Mesh, face_id: u32, width_raw: f32, target_sides: usize) !?u32 {
         beginMutation(.face_to_ngon);
         if (target_sides < FacePolygonTuning.minimum_target_sides or
@@ -5128,11 +5162,28 @@ pub const Mesh = struct {
         const angle_step = 2.0 * std.math.pi / @as(f32, @floatFromInt(target_sides));
         const phase = edge_angle - std.math.pi / 2.0 - angle_step / 2.0;
 
+        // Cumulative arc length at each source corner; the last entry is the
+        // full perimeter. Each inner vertex's centroid ray records where it
+        // crosses this parameterization, which is the geometric truth the
+        // transition stitch below is built from.
+        const outer_param = try mesh.allocator.alloc(f32, outer.len + 1);
+        defer mesh.allocator.free(outer_param);
+        outer_param[0] = 0;
+        for (outer, 0..) |vertex_id, corner| {
+            const next = mesh.vertices.items[outer[(corner + 1) % outer.len]].position;
+            outer_param[corner + 1] = outer_param[corner] +
+                length3(sub3(next, mesh.vertices.items[vertex_id].position));
+        }
+
+        const inner_param = try mesh.allocator.alloc(f32, target_sides);
+        defer mesh.allocator.free(inner_param);
         var radius_limit = std.math.inf(f32);
         for (0..target_sides) |side| {
             const angle = phase + angle_step * @as(f32, @floatFromInt(side));
             const direction = Vec2{ @cos(angle), @sin(angle) };
-            radius_limit = @min(radius_limit, mesh.faceRayBoundaryDistance(face_id, frame, direction) orelse return null);
+            const hit = mesh.faceRayBoundaryHit(face_id, frame, direction, outer_param) orelse return null;
+            radius_limit = @min(radius_limit, hit.distance);
+            inner_param[side] = hit.param;
         }
         const radius = radius_limit - width_raw;
         if (!std.math.isFinite(radius) or radius <= IMPORT_WELD_EPS * 2.0) return null;
@@ -5157,38 +5208,101 @@ pub const Mesh = struct {
 
         const source_group = source.group;
         const center_face = try mesh.appendDerivedFace(face_id, inner.items, inner_uvs.items, source_group);
-        var outer_at: usize = 0;
-        var inner_at: usize = 0;
-        while (outer_at < outer.len or inner_at < inner.items.len) {
-            const outer_step = (outer_at + 1) * inner.items.len;
-            const inner_step = (inner_at + 1) * outer.len;
-            if (outer_step == inner_step) {
-                const cell = [4]u32{
-                    outer[outer_at % outer.len],
-                    outer[(outer_at + 1) % outer.len],
-                    inner.items[(inner_at + 1) % inner.items.len],
-                    inner.items[inner_at % inner.items.len],
-                };
-                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &cell);
-                outer_at += 1;
-                inner_at += 1;
-            } else if (outer_step < inner_step) {
-                const cell = [3]u32{
-                    outer[outer_at % outer.len],
-                    outer[(outer_at + 1) % outer.len],
-                    inner.items[inner_at % inner.items.len],
-                };
-                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &cell);
-                outer_at += 1;
-            } else {
-                const cell = [3]u32{
-                    outer[outer_at % outer.len],
-                    inner.items[(inner_at + 1) % inner.items.len],
-                    inner.items[inner_at % inner.items.len],
-                };
-                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &cell);
-                inner_at += 1;
+        // Stitch the transition ring by GEOMETRY, not index arithmetic. Each
+        // inner vertex's centroid ray recorded WHERE it crosses the source
+        // perimeter (inner_param), which assigns it to exactly one source
+        // edge. A source edge with no facing inner vertex gets one triangle
+        // to the vertex whose arc spans it; one facing vertex gets one
+        // triangle; two or more get corner fans around a single centered
+        // quad — the pattern a hand author draws. Crossing a source corner
+        // always mints its corner triangle. The retired index-lockstep
+        // zipper compared loop-count fractions instead, welding each inner
+        // vertex to whichever corner the counter had reached — the crossing
+        // spokes, slivers, and twisted ring quads of req_4686.
+        var traversal_start: usize = 0;
+        for (inner_param, 0..) |param, side| {
+            if (param < inner_param[traversal_start]) traversal_start = side;
+        }
+        var consumed: usize = 0;
+        var cur = inner.items[(traversal_start + target_sides - 1) % target_sides];
+        for (0..outer.len) |corner| {
+            const outer_a = outer[corner];
+            const outer_b = outer[(corner + 1) % outer.len];
+            var facing: usize = 0;
+            while (consumed + facing < target_sides and
+                inner_param[(traversal_start + consumed + facing) % target_sides] < outer_param[corner + 1])
+            {
+                facing += 1;
             }
+            // Perimeter-end rounding must not strand the largest parameters.
+            if (corner == outer.len - 1) facing = target_sides - consumed;
+            if (facing == 0) {
+                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, outer_b, cur });
+                continue;
+            }
+            const first = inner.items[(traversal_start + consumed) % target_sides];
+            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, first, cur });
+            cur = first;
+            if (facing == 1) {
+                try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, outer_b, cur });
+            } else {
+                // The pivot is the facing vertex nearest the edge's middle.
+                // A quad may only stand on an inner edge flanking the pivot
+                // AND only when it is actually convex: on an elongated face
+                // the inner chord tilts against a long source edge, and the
+                // forced quad goes reflex (back-facing sliver). When neither
+                // flank supports a convex quad, the pivot takes the whole
+                // source edge as a triangle and both sides fan to their
+                // nearest corner — exactly the hand-authored pattern.
+                var pivot: usize = 0;
+                var pivot_gap = std.math.inf(f32);
+                const edge_mid = (outer_param[corner] + outer_param[corner + 1]) / 2.0;
+                for (0..facing) |index| {
+                    const gap = @abs(inner_param[(traversal_start + consumed + index) % target_sides] - edge_mid);
+                    if (gap < pivot_gap) {
+                        pivot_gap = gap;
+                        pivot = index;
+                    }
+                }
+                var quad_at: ?usize = null;
+                const flanks = [2]?usize{
+                    if (pivot + 1 < facing) pivot else null,
+                    if (pivot >= 1) pivot - 1 else null,
+                };
+                for (flanks) |flank| {
+                    const candidate = flank orelse continue;
+                    if (quad_at != null) break;
+                    const near = inner.items[(traversal_start + consumed + candidate) % target_sides];
+                    const far = inner.items[(traversal_start + consumed + candidate + 1) % target_sides];
+                    if (mesh.ringQuadConvex(frame, outer_a, outer_b, far, near)) quad_at = candidate;
+                }
+                for (1..facing) |step| {
+                    const next_vert = inner.items[(traversal_start + consumed + step) % target_sides];
+                    if (quad_at) |quad_step| {
+                        if (step - 1 == quad_step) {
+                            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, outer_b, next_vert, cur });
+                        } else if (step - 1 < quad_step) {
+                            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, next_vert, cur });
+                        } else {
+                            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_b, next_vert, cur });
+                        }
+                    } else {
+                        if (step - 1 == pivot) {
+                            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, outer_b, cur });
+                        }
+                        if (step - 1 < pivot) {
+                            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, next_vert, cur });
+                        } else {
+                            try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_b, next_vert, cur });
+                        }
+                    }
+                    cur = next_vert;
+                }
+                if (quad_at == null and pivot == facing - 1) {
+                    try mesh.appendFacePolygonRingCell(face_id, outer, outer_uvs, inner.items, inner_uvs.items, &.{ outer_a, outer_b, cur });
+                }
+            }
+            consumed += facing;
         }
         mesh.faces.items[face_id].alive = false;
         return center_face;

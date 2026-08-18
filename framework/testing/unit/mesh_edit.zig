@@ -3474,6 +3474,54 @@ test "face polygon keeps its first edge aligned while the side count changes" {
     }
 }
 
+test "face polygon ring cells stay convex and forward-facing on an elongated rectangle" {
+    // req_4686: on non-square faces (wall panels) the retired index-lockstep
+    // zipper welded inner vertices to whichever corner its counter reached,
+    // minting twisted (back-facing) quads and crossing slivers. Every ring
+    // cell must instead be a convex polygon wound the same way as the source.
+    const corners = [4][3]f32{
+        .{ -2, -0.5, 0 },
+        .{ 2, -0.5, 0 },
+        .{ 2, 0.5, 0 },
+        .{ -2, 0.5, 0 },
+    };
+    for ([_]usize{ 3, 5, 8, 13, 20 }) |target_sides| {
+        var soup = [_]f32{0} ** (2 * 3 * 8);
+        for ([2][3]u32{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }, 0..) |triangle, face| {
+            for (triangle, 0..) |corner, slot| {
+                const at = (face * 3 + slot) * 8;
+                @memcpy(soup[at .. at + 3], corners[corner][0..]);
+            }
+        }
+        const groups = [_]u32{ 9, 9 };
+        const parts = [_]u32{ 3, 3 };
+        var indexed = try indexed_edit_mesh.Mesh.fromSoup(testing.allocator, soup[0..], 2, groups[0..], parts[0..]);
+        defer indexed.deinit();
+        const selection = indexed.resolveFacePolygon(&.{ true, true }) orelse
+            return error.ExpectedFacePolygonSelection;
+        const center_id = (try indexed.polygonizeFace(selection.face_id, 0.1, target_sides)) orelse
+            return error.ExpectedFacePolygon;
+        for (indexed.faces.items) |face| {
+            if (!face.alive or face.id == center_id) continue;
+            const loop = face.vertices.items;
+            for (loop, 0..) |vertex_id, at| {
+                const prev = indexed.vertices.items[loop[(at + loop.len - 1) % loop.len]].position;
+                const here = indexed.vertices.items[vertex_id].position;
+                const next = indexed.vertices.items[loop[(at + 1) % loop.len]].position;
+                const turn = (here[0] - prev[0]) * (next[1] - here[1]) -
+                    (here[1] - prev[1]) * (next[0] - here[0]);
+                try testing.expect(turn > 0);
+            }
+        }
+        // A stitch that skips or double-consumes an inner edge tears the ring;
+        // the only open edges must remain the rectangle's own four.
+        try testing.expectEqual(@as(u32, 4), try countOpenEdges(&indexed));
+        var lowered = try indexed.lower();
+        defer lowered.deinit();
+        for (lowered.positions) |position| try testing.expect(std.math.isFinite(position));
+    }
+}
+
 test "boundary chamfer supports non-doubling and multi-segment targets" {
     const selected_edges = [4][2][3]f32{
         .{ boundary_chamfer_inner[0], boundary_chamfer_inner[1] },
