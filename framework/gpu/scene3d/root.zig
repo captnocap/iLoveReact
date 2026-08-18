@@ -191,6 +191,7 @@ pub var g_quadify: ?QuadifySession = null;
 // an error — the grab simply falls back to plain move and the readout says so.
 pub var g_curve_pull_armed: bool = false;
 pub var g_curve_pull_source_ids: ?[]u32 = null;
+pub var g_curve_pull_source_stable: ?[]u32 = null;
 pub var g_curve_pull_source_base: ?[][3]f32 = null;
 pub var g_curve_pull_source_params: ?[]f32 = null;
 pub var g_curve_pull_source_grab: usize = 0;
@@ -204,6 +205,10 @@ pub var g_curve_pull_mirror_count: usize = 0;
 pub var g_curve_pull_mirror_parts: [7]u32 = .{model_source.NO_PART} ** 7;
 pub var g_curve_pull_cuts: u32 = 0;
 pub var g_curve_pull_topology_changed: bool = false;
+// One adaptive rebuild refusal stops further attempts for the REST of the gesture;
+// the drag keeps bending the current path at its current density instead of
+// silently freezing frame after frame (req_4671).
+pub var g_curve_pull_densify_blocked: bool = false;
 
 // ── Mesh-element selection (the host-native editor surface) ───────────────────────
 // ── Native mesh-editor input capture (modelview) ─────────────────────────────────

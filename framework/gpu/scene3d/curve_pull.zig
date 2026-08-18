@@ -56,11 +56,13 @@ const z3d = @import("root.zig");
 
 pub fn curvePullAdaptiveReset() void {
     if (z3d.g_curve_pull_source_ids) |rows| std.heap.c_allocator.free(rows);
+    if (z3d.g_curve_pull_source_stable) |rows| std.heap.c_allocator.free(rows);
     if (z3d.g_curve_pull_source_base) |rows| std.heap.c_allocator.free(rows);
     if (z3d.g_curve_pull_source_params) |rows| std.heap.c_allocator.free(rows);
     if (z3d.g_curve_pull_base_colors) |rows| std.heap.c_allocator.free(rows);
     if (z3d.g_curve_pull_mirror_points) |rows| std.heap.c_allocator.free(rows);
     z3d.g_curve_pull_source_ids = null;
+    z3d.g_curve_pull_source_stable = null;
     z3d.g_curve_pull_source_base = null;
     z3d.g_curve_pull_source_params = null;
     z3d.g_curve_pull_base_colors = null;
@@ -74,6 +76,7 @@ pub fn curvePullAdaptiveReset() void {
     z3d.g_curve_pull_mirror_parts = .{model_source.NO_PART} ** 7;
     z3d.g_curve_pull_cuts = 0;
     z3d.g_curve_pull_topology_changed = false;
+    z3d.g_curve_pull_densify_blocked = false;
 }
 
 pub fn curvePullPointsSame(a: []const [3]f32, b: []const [3]f32) bool {
@@ -90,10 +93,12 @@ pub fn curvePullPointsSame(a: []const [3]f32, b: []const [3]f32) bool {
 
 pub fn curvePullAdaptiveSource() ?mesh_edit.CurvePullPath {
     const ids = z3d.g_curve_pull_source_ids orelse return null;
+    const stable = z3d.g_curve_pull_source_stable orelse return null;
     const base = z3d.g_curve_pull_source_base orelse return null;
     const params = z3d.g_curve_pull_source_params orelse return null;
     return .{
         .ids = ids,
+        .stable = stable,
         .base = base,
         .params = params,
         .grab = z3d.g_curve_pull_source_grab,
@@ -110,17 +115,24 @@ pub fn curvePullAdaptiveCapture() bool {
     const path = mesh_edit.curvePullPath() orelse return false;
     if (z3d.g_guard_indexed_before == null) return false;
     const ids = std.heap.c_allocator.dupe(u32, path.ids) catch return false;
+    const stable = std.heap.c_allocator.dupe(u32, path.stable) catch {
+        std.heap.c_allocator.free(ids);
+        return false;
+    };
     const base = std.heap.c_allocator.dupe([3]f32, path.base) catch {
         std.heap.c_allocator.free(ids);
+        std.heap.c_allocator.free(stable);
         return false;
     };
     const params = std.heap.c_allocator.dupe(f32, path.params) catch {
         std.heap.c_allocator.free(ids);
+        std.heap.c_allocator.free(stable);
         std.heap.c_allocator.free(base);
         return false;
     };
     const colors = z3d.collectCurrentFaceColors() orelse {
         std.heap.c_allocator.free(ids);
+        std.heap.c_allocator.free(stable);
         std.heap.c_allocator.free(base);
         std.heap.c_allocator.free(params);
         return false;
@@ -131,6 +143,7 @@ pub fn curvePullAdaptiveCapture() bool {
     if (mirror_mask != 0) {
         mirror_points = std.heap.c_allocator.alloc([3]f32, path.ids.len * 7) catch {
             std.heap.c_allocator.free(ids);
+            std.heap.c_allocator.free(stable);
             std.heap.c_allocator.free(base);
             std.heap.c_allocator.free(params);
             std.heap.c_allocator.free(colors);
@@ -178,6 +191,7 @@ pub fn curvePullAdaptiveCapture() bool {
     }
 
     z3d.g_curve_pull_source_ids = ids;
+    z3d.g_curve_pull_source_stable = stable;
     z3d.g_curve_pull_source_base = base;
     z3d.g_curve_pull_source_params = params;
     z3d.g_curve_pull_source_grab = path.grab;
@@ -191,9 +205,40 @@ pub fn curvePullAdaptiveCapture() bool {
     return true;
 }
 
+/// Lower `indexed` and install it as the resident mesh, colors inherited from the
+/// gesture's grab-time snapshot. Consumes nothing; adopts `indexed` on success.
+/// Shared by the forward densify install and the failure rollback below.
+fn curvePullInstallIndexed(indexed: *indexed_edit_mesh.Mesh, base_colors: []const u8) bool {
+    var lowered = indexed.lower() catch return false;
+    defer lowered.deinit();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
+    const install_groups: ?[]const u32 = if (z3d.g_curve_pull_had_groups) lowered.groups else null;
+    if (!z3d.lcInstallLowered(
+        lowered.positions,
+        lowered.uvs,
+        lowered.tri_count,
+        install_groups,
+        lowered.materials,
+        lowered.semantic_regions,
+        lowered.semantic_instances,
+        colors,
+        z3d.flattenedLogicalRows(lowered.triangle_vertices),
+        @intCast(indexed.vertices.items.len),
+    )) return false;
+    if (z3d.g_curve_pull_part_count > 0) z3d.renormalizePartRanges(lowered.parts, z3d.g_curve_pull_part_count);
+    z3d.adoptIndexedEditMesh(indexed, &lowered);
+    return true;
+}
+
 /// Replace the current adaptive level from the exact grab-time indexed mesh, then
 /// re-arm and apply the current absolute offset.  Only threshold crossings call this;
 /// ordinary drag frames remain the same O(selected path) position mutation as v1.
+/// TRANSACTIONAL (req_4671): a failure after the densified topology installs rolls
+/// the resident mesh back to the grab-time snapshot — a half-applied rebuild used
+/// to strand unadopted rings on the straight chords, and every retry gesture then
+/// doubled the density again.
 pub fn curvePullAdaptiveRebuild(offset: [3]f32, cuts: u32) bool {
     const source = z3d.curvePullAdaptiveSource() orelse return false;
     const before = if (z3d.g_guard_indexed_before) |*mesh| mesh else return false;
@@ -223,32 +268,22 @@ pub fn curvePullAdaptiveRebuild(offset: [3]f32, cuts: u32) bool {
     };
     defer dense.deinit();
 
-    var lowered = indexed.lower() catch return false;
-    defer lowered.deinit();
-    const colors = std.heap.c_allocator.alloc(u8, @as(usize, lowered.tri_count) * 4) catch return false;
-    defer std.heap.c_allocator.free(colors);
-    if (!mesh_edit.inheritFaceRgba(base_colors, lowered.source_triangles, colors)) return false;
-    const install_groups: ?[]const u32 = if (z3d.g_curve_pull_had_groups) lowered.groups else null;
-
     z3d.g_curve_pull_preserve_gizmo_guard = true;
     defer z3d.g_curve_pull_preserve_gizmo_guard = false;
-    if (!z3d.lcInstallLowered(
-        lowered.positions,
-        lowered.uvs,
-        lowered.tri_count,
-        install_groups,
-        lowered.materials,
-        lowered.semantic_regions,
-        lowered.semantic_instances,
-        colors,
-        z3d.flattenedLogicalRows(lowered.triangle_vertices),
-        @intCast(indexed.vertices.items.len),
-    )) return false;
-    if (z3d.g_curve_pull_part_count > 0) z3d.renormalizePartRanges(lowered.parts, z3d.g_curve_pull_part_count);
-    z3d.adoptIndexedEditMesh(&indexed, &lowered);
+    if (!curvePullInstallIndexed(&indexed, base_colors)) return false;
     const grab_t = source.params[source.grab];
-    if (!mesh_edit.curvePullAdoptDensified(&dense, source.mode, source.part, grab_t)) return false;
-    if (!z3d.applyMeshMutation(mesh_edit.curvePullApply(offset))) return false;
+    const rearmed = mesh_edit.curvePullAdoptDensified(&dense, source.mode, source.part, grab_t) and
+        z3d.applyMeshMutation(mesh_edit.curvePullApply(offset));
+    if (!rearmed) {
+        // The rings are installed but the deformation could not re-arm over them.
+        // Put the grab-time mesh back so no half-state survives the refusal.
+        z3d.topoRefuse("CurvePullAdoptRefused");
+        var restore = before.clone() catch return false;
+        defer restore.deinit();
+        if (!curvePullInstallIndexed(&restore, base_colors)) return false;
+        _ = z3d.applyMeshMutation(mesh_edit.curvePullApply(offset));
+        return false;
+    }
     z3d.g_curve_pull_cuts = cuts;
     z3d.g_curve_pull_topology_changed = cuts > 0;
     return true;

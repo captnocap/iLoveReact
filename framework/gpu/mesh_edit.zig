@@ -731,6 +731,9 @@ var g_built_for: u32 = 0; // facecount the current topology was built for (0 = n
 var g_verts: ?[]f32 = null; // unique vertex positions, 3 f32 each
 var g_vert_count: u32 = 0;
 var g_vert_part: ?[]u32 = null; // one outliner part id per logical vertex
+// Per dense (welded) vertex: the document's durable stable id — the index the
+// INDEXED edit mesh files that vertex under. Identity when no logical table exists.
+var g_vert_stable: ?[]u32 = null;
 var g_corner_vert: ?[]u32 = null; // facecount*3 → logical vertex index
 var g_edges: ?[]u32 = null; // edgecount*2 → logical vertex indices (a<b)
 var g_edge_count: u32 = 0;
@@ -2700,6 +2703,7 @@ pub fn reset() void {
     g_face_base = .{};
     if (g_verts) |v| alloc.free(v);
     if (g_vert_part) |p| alloc.free(p);
+    if (g_vert_stable) |s| alloc.free(s);
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
     if (g_edge_boundary) |b| alloc.free(b);
@@ -2728,6 +2732,7 @@ pub fn reset() void {
     g_snap = null;
     g_verts = null;
     g_vert_part = null;
+    g_vert_stable = null;
     g_corner_vert = null;
     g_edges = null;
     g_edge_boundary = null;
@@ -2775,6 +2780,23 @@ pub const test_support = if (builtin.is_test) struct {
         clear();
         model_source.setFaceGroups(groups);
         model_paint.setTarget(key, verts, count);
+    }
+
+    /// Same load, plus a durable logical-corner table — the fixture for every id
+    /// boundary where stable ids and welded first-encounter ranks may disagree.
+    pub fn loadGroupedSoupWithLogical(
+        key: u64,
+        verts: []f32,
+        count: u32,
+        groups: []const u32,
+        logical_rows: []const u32,
+        logical_vertex_count: u32,
+    ) bool {
+        clear();
+        model_source.retain("mesh-edit-test", verts, count);
+        model_source.setFaceGroups(groups);
+        model_paint.setTarget(key, verts, count);
+        return model_source.setLogicalTopology(logical_rows, logical_vertex_count);
     }
 
     pub fn regroup(groups: []const u32) void {
@@ -3459,11 +3481,19 @@ pub const LegacyLogicalTopology = struct {
     corner_vertices: []u32,
     vertex_positions: []f32,
     vertex_parts: []u32,
+    // Per DENSE vertex: the document's durable stable id. The explicit builder
+    // compacts stable ids into first-encounter ranks, but the indexed edit mesh
+    // addresses its vertex table BY stable id — any op that hands a welded vert
+    // id across that boundary must translate through this column (req_4671:
+    // Curve Pull's adaptive densify read indexed verts with dense ids and
+    // refused with CurvePullSourceDrift once the two orders diverged).
+    vertex_stable_ids: []u32,
 
     pub fn deinit(topology: *LegacyLogicalTopology) void {
         if (topology.corner_vertices.len > 0) topology.allocator.free(topology.corner_vertices);
         if (topology.vertex_positions.len > 0) topology.allocator.free(topology.vertex_positions);
         if (topology.vertex_parts.len > 0) topology.allocator.free(topology.vertex_parts);
+        if (topology.vertex_stable_ids.len > 0) topology.allocator.free(topology.vertex_stable_ids);
         topology.* = undefined;
     }
 };
@@ -3509,11 +3539,16 @@ fn buildLegacyLogicalTopologyAlloc(
     const owned_positions = try vertex_positions.toOwnedSlice(allocator);
     errdefer allocator.free(owned_positions);
     const owned_parts = try vertex_parts.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_parts);
+    // No durable table: the weld order IS the only identity, stable == dense.
+    const identity_stable = try allocator.alloc(u32, owned_parts.len);
+    for (identity_stable, 0..) |*stable, dense| stable.* = @intCast(dense);
     return .{
         .allocator = allocator,
         .corner_vertices = corner_vertices,
         .vertex_positions = owned_positions,
         .vertex_parts = owned_parts,
+        .vertex_stable_ids = identity_stable,
     };
 }
 
@@ -3545,6 +3580,8 @@ fn buildExplicitLogicalTopologyAlloc(
     defer vertex_positions.deinit(allocator);
     var vertex_parts = std.ArrayListUnmanaged(u32).empty;
     defer vertex_parts.deinit(allocator);
+    var vertex_stable_ids = std.ArrayListUnmanaged(u32).empty;
+    defer vertex_stable_ids.deinit(allocator);
     const corner_vertices = try allocator.alloc(u32, corner_count);
     errdefer allocator.free(corner_vertices);
 
@@ -3558,6 +3595,7 @@ fn buildExplicitLogicalTopologyAlloc(
             entry.value_ptr.* = @intCast(vertex_positions.items.len / 3);
             try vertex_positions.appendSlice(allocator, &point);
             try vertex_parts.append(allocator, part);
+            try vertex_stable_ids.append(allocator, stable_id);
         } else {
             const dense = entry.value_ptr.*;
             const prior_base = @as(usize, dense) * 3;
@@ -3577,11 +3615,14 @@ fn buildExplicitLogicalTopologyAlloc(
     const owned_positions = try vertex_positions.toOwnedSlice(allocator);
     errdefer allocator.free(owned_positions);
     const owned_parts = try vertex_parts.toOwnedSlice(allocator);
+    errdefer allocator.free(owned_parts);
+    const owned_stable = try vertex_stable_ids.toOwnedSlice(allocator);
     return .{
         .allocator = allocator,
         .corner_vertices = corner_vertices,
         .vertex_positions = owned_positions,
         .vertex_parts = owned_parts,
+        .vertex_stable_ids = owned_stable,
     };
 }
 
@@ -3737,6 +3778,7 @@ fn ensureTopology() bool {
     const owned_edges = edges.toOwnedSlice(alloc) catch return false;
     g_verts = topology.vertex_positions;
     g_vert_part = topology.vertex_parts;
+    g_vert_stable = topology.vertex_stable_ids;
     g_corner_vert = corner_vert;
     g_edges = owned_edges;
     topology_adopted = true;
@@ -4879,6 +4921,7 @@ pub const curve_pull_tuning = struct {
 };
 
 var g_curve_ids: ?[]u32 = null; // ordered run, endpoint → endpoint
+var g_curve_stable: ?[]u32 = null; // same run in durable stable ids (indexed-mesh index space)
 var g_curve_base: ?[][3]f32 = null; // grab-time positions, same order
 var g_curve_params: ?[]f32 = null; // normalized chord-length station of each vert
 var g_curve_grab: usize = 0; // index into the run of the pulled vertex
@@ -4887,7 +4930,12 @@ var g_curve_mode: Mode = .none;
 var g_curve_part: u32 = model_source.NO_PART;
 
 pub const CurvePullPath = struct {
+    /// Dense welded vert ids — valid ONLY against this module's live topology.
     ids: []const u32,
+    /// The same run as durable stable ids — the ONLY ids the indexed edit mesh
+    /// may be addressed with (req_4671: these two orders diverge after any
+    /// delete/reorder; conflating them read unrelated vertices).
+    stable: []const u32,
     base: []const [3]f32,
     params: []const f32,
     grab: usize,
@@ -4902,6 +4950,8 @@ pub const CurvePullMirrorSeed = struct {
 
 pub const CurvePullDensifiedPath = struct {
     allocator: std.mem.Allocator,
+    /// STABLE ids (indexed-mesh index space) — curvePullAdoptDensified translates
+    /// them into the rebuilt dense welded ids itself.
     ids: []u32,
     base: [][3]f32,
     params: []f32,
@@ -4916,10 +4966,12 @@ pub const CurvePullDensifiedPath = struct {
 
 pub fn curvePullEnd() void {
     if (g_curve_ids) |ids| alloc.free(ids);
+    if (g_curve_stable) |stable| alloc.free(stable);
     if (g_curve_base) |base| alloc.free(base);
     if (g_curve_params) |params| alloc.free(params);
     if (g_curve_mask) |mask| alloc.free(mask);
     g_curve_ids = null;
+    g_curve_stable = null;
     g_curve_base = null;
     g_curve_params = null;
     g_curve_mask = null;
@@ -4935,6 +4987,7 @@ pub fn curvePullActive() bool {
 pub fn curvePullPath() ?CurvePullPath {
     return .{
         .ids = g_curve_ids orelse return null,
+        .stable = g_curve_stable orelse return null,
         .base = g_curve_base orelse return null,
         .params = g_curve_params orelse return null,
         .grab = g_curve_grab,
@@ -5062,7 +5115,23 @@ pub fn curvePullBegin() bool {
         alloc.free(params);
         return false;
     };
+    const stable_rows = g_vert_stable orelse {
+        alloc.free(ids);
+        alloc.free(base);
+        alloc.free(params);
+        alloc.free(scratch);
+        return false;
+    };
+    const stable = alloc.alloc(u32, count) catch {
+        alloc.free(ids);
+        alloc.free(base);
+        alloc.free(params);
+        alloc.free(scratch);
+        return false;
+    };
+    for (ids, 0..) |id, station| stable[station] = stable_rows[id];
     g_curve_ids = ids;
+    g_curve_stable = stable;
     g_curve_base = base;
     g_curve_params = params;
     g_curve_grab = grab;
@@ -5286,7 +5355,7 @@ pub fn curvePullDensifyIndexed(
     cuts: u32,
 ) !CurvePullDensifiedPath {
     if (source.ids.len < 3 or source.base.len != source.ids.len or source.params.len != source.ids.len or
-        cuts > curve_pull_tuning.max_cuts_per_edge)
+        source.stable.len != source.ids.len or cuts > curve_pull_tuning.max_cuts_per_edge)
     {
         return error.InvalidCurvePullPath;
     }
@@ -5296,7 +5365,9 @@ pub fn curvePullDensifyIndexed(
     const output_count = std.math.add(usize, multiplied, 1) catch return error.CurvePullPathTooLarge;
     if (output_count > curve_pull_tuning.max_path_verts) return error.CurvePullPathTooLarge;
 
-    for (source.ids, source.base) |id, point| {
+    // The indexed mesh files vertices under STABLE ids — dense welded ids are a
+    // different order after any delete/reorder (req_4671).
+    for (source.stable, source.base) |id, point| {
         if (id >= mesh.vertices.items.len or !mesh.vertices.items[id].alive or
             !curvePointNear(mesh.vertices.items[id].position, point) or
             !indexedVertexBelongsToPart(mesh, id, source.part))
@@ -5322,7 +5393,7 @@ pub fn curvePullDensifyIndexed(
             return error.CurvePullLoopCutRefused;
         }
 
-        ids[write] = source.ids[segment];
+        ids[write] = source.stable[segment];
         base[write] = a;
         params[write] = source.params[segment];
         write += 1;
@@ -5337,7 +5408,7 @@ pub fn curvePullDensifyIndexed(
             write += 1;
         }
     }
-    ids[write] = source.ids[source.ids.len - 1];
+    ids[write] = source.stable[source.stable.len - 1];
     base[write] = source.base[source.base.len - 1];
     params[write] = source.params[source.params.len - 1];
     write += 1;
@@ -5373,30 +5444,54 @@ pub fn curvePullAdoptDensified(path: *const CurvePullDensifiedPath, selection_mo
         path.base.len != path.ids.len or path.params.len != path.ids.len or
         path.ids.len > curve_pull_tuning.max_path_verts or !ensureTopology()) return false;
     const parts = g_vert_part orelse return false;
+    const stable_rows = g_vert_stable orelse return false;
+
+    // The densified path arrives in STABLE ids (the indexed mesh's index space);
+    // everything below — parts, edges, selection — speaks this module's dense
+    // welded ids. Translate first (req_4671).
+    const ids = alloc.alloc(u32, path.ids.len) catch return false;
+    var translate_ok = false;
+    defer if (!translate_ok) alloc.free(ids);
+    var wanted = std.AutoHashMapUnmanaged(u32, u32).empty;
+    defer wanted.deinit(alloc);
+    for (path.ids) |stable| {
+        const entry = wanted.getOrPut(alloc, stable) catch return false;
+        if (entry.found_existing) return false; // a run never visits a vertex twice
+        entry.value_ptr.* = g_vert_count; // sentinel: not yet resolved
+    }
+    for (stable_rows, 0..) |stable, dense| {
+        if (wanted.getPtr(stable)) |slot| slot.* = @intCast(dense);
+    }
+    for (path.ids, 0..) |stable, station| {
+        const dense = wanted.get(stable) orelse return false;
+        if (dense >= g_vert_count) return false;
+        ids[station] = dense;
+    }
+
     var i: usize = 0;
-    while (i < path.ids.len) : (i += 1) {
-        const id = path.ids[i];
-        if (id >= g_vert_count or id >= parts.len or parts[id] != part or
+    while (i < ids.len) : (i += 1) {
+        const id = ids[i];
+        if (id >= parts.len or parts[id] != part or
             !std.math.isFinite(path.params[i]) or
             (i > 0 and path.params[i] <= path.params[i - 1])) return false;
         if (i > 0) {
-            const edge = edgeIndexBetween(path.ids[i - 1], id) orelse return false;
+            const edge = edgeIndexBetween(ids[i - 1], id) orelse return false;
             if (!edgeIsBoundaryPub(edge) or !edgeInScopePub(edge)) return false;
         }
     }
 
-    const ids = alloc.dupe(u32, path.ids) catch return false;
+    const stable_ids = alloc.dupe(u32, path.ids) catch return false;
     const base = alloc.dupe([3]f32, path.base) catch {
-        alloc.free(ids);
+        alloc.free(stable_ids);
         return false;
     };
     const params = alloc.dupe(f32, path.params) catch {
-        alloc.free(ids);
+        alloc.free(stable_ids);
         alloc.free(base);
         return false;
     };
     const scratch = alloc.alloc(bool, g_vert_count) catch {
-        alloc.free(ids);
+        alloc.free(stable_ids);
         alloc.free(base);
         alloc.free(params);
         return false;
@@ -5407,8 +5502,10 @@ pub fn curvePullAdoptDensified(path: *const CurvePullDensifiedPath, selection_mo
         if (@abs(station - grab_t) < @abs(params[grab] - grab_t)) grab = index;
     }
 
+    translate_ok = true;
     curvePullEnd();
     g_curve_ids = ids;
+    g_curve_stable = stable_ids;
     g_curve_base = base;
     g_curve_params = params;
     g_curve_grab = grab;
@@ -5422,7 +5519,7 @@ pub fn curvePullAdoptDensified(path: *const CurvePullDensifiedPath, selection_mo
             return false;
         };
         @memset(selected, false);
-        for (path.ids) |id| selected[id] = true;
+        for (ids) |id| selected[id] = true;
     } else {
         const selected = g_sel_edge orelse {
             curvePullEnd();
@@ -5430,7 +5527,7 @@ pub fn curvePullAdoptDensified(path: *const CurvePullDensifiedPath, selection_mo
         };
         @memset(selected, false);
         i = 1;
-        while (i < path.ids.len) : (i += 1) selected[edgeIndexBetween(path.ids[i - 1], path.ids[i]).?] = true;
+        while (i < ids.len) : (i += 1) selected[edgeIndexBetween(ids[i - 1], ids[i]).?] = true;
     }
     applyFaceHighlight();
     return true;
@@ -7208,6 +7305,7 @@ pub const Session = struct {
     g_verts: @TypeOf(g_verts) = null,
     g_vert_count: @TypeOf(g_vert_count) = 0,
     g_vert_part: @TypeOf(g_vert_part) = null,
+    g_vert_stable: @TypeOf(g_vert_stable) = null,
     g_corner_vert: @TypeOf(g_corner_vert) = null,
     g_edges: @TypeOf(g_edges) = null,
     g_edge_count: @TypeOf(g_edge_count) = 0,
@@ -7287,6 +7385,7 @@ pub fn sessionInvalidateTransients() void {
 pub fn sessionDeinitParked(s: *Session) void {
     if (s.g_verts) |value| alloc.free(value);
     if (s.g_vert_part) |value| alloc.free(value);
+    if (s.g_vert_stable) |value| alloc.free(value);
     if (s.g_corner_vert) |value| alloc.free(value);
     if (s.g_edges) |value| alloc.free(value);
     if (s.g_edge_boundary) |value| alloc.free(value);

@@ -231,19 +231,30 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool, 
             if (z3d.g_curve_pull_armed and mesh_edit.curvePullActive()) {
                 const units = target / z3d.GIZMO_STEP_M;
                 const offset = z3d.vmul(av, target);
-                if (z3d.curvePullAdaptiveSource()) |source| {
-                    const wanted_cuts = mesh_edit.curvePullAdaptiveCutsFor(source, offset, z3d.g_curve_pull_cuts);
-                    if (wanted_cuts != z3d.g_curve_pull_cuts) {
-                        if (!z3d.curvePullAdaptiveRebuild(offset, wanted_cuts)) {
-                            z3d.setGizmoReadout("curve: adaptive loop cut refused", .{});
-                            return false;
+                if (!z3d.g_curve_pull_densify_blocked) {
+                    if (z3d.curvePullAdaptiveSource()) |source| {
+                        const wanted_cuts = mesh_edit.curvePullAdaptiveCutsFor(source, offset, z3d.g_curve_pull_cuts);
+                        if (wanted_cuts != z3d.g_curve_pull_cuts) {
+                            if (z3d.curvePullAdaptiveRebuild(offset, wanted_cuts)) {
+                                z3d.setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge", .{ if (units < 0) "-" else "+", @abs(units), wanted_cuts });
+                                z3d.g_gizmo_applied = target;
+                                return true;
+                            }
+                            // One refusal ends densification for THIS gesture; the bend
+                            // itself continues at the current density. The old behavior
+                            // returned false here EVERY frame — the drag silently froze
+                            // at the threshold, which read as a "maximum pull range"
+                            // (req_4671).
+                            z3d.g_curve_pull_densify_blocked = true;
+                            log.print("[mesh] curve pull densify refused ({s}) — bending continues at {d} cut/edge\n", .{ z3d.topoRefusal(), z3d.g_curve_pull_cuts });
                         }
-                        z3d.setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge", .{ if (units < 0) "-" else "+", @abs(units), wanted_cuts });
-                        z3d.g_gizmo_applied = target;
-                        return true;
                     }
                 }
-                z3d.setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge", .{ if (units < 0) "-" else "+", @abs(units), z3d.g_curve_pull_cuts });
+                if (z3d.g_curve_pull_densify_blocked) {
+                    z3d.setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge (densify refused)", .{ if (units < 0) "-" else "+", @abs(units), z3d.g_curve_pull_cuts });
+                } else {
+                    z3d.setGizmoReadout("bend {s}{d:.2}u · {d} cut/edge", .{ if (units < 0) "-" else "+", @abs(units), z3d.g_curve_pull_cuts });
+                }
                 const m = mesh_edit.curvePullApply(offset);
                 if (!z3d.applyMeshMutation(m)) return false;
                 z3d.g_gizmo_applied = target;

@@ -3,8 +3,65 @@
 
 const std = @import("std");
 const testing = std.testing;
-const mesh_edit = @import("mesh_edit");
+// The named module roots at framework/mesh_edit_test_root.zig (module file
+// imports are directory-bounded; see that shim) and re-exports the impl.
+const mesh_edit = @import("mesh_edit").impl;
 const indexed_edit_mesh = @import("indexed_edit_mesh");
+
+test "parked mesh-edit session teardown frees every owned channel exactly once" {
+    const allocator = std.heap.c_allocator;
+    var parked = mesh_edit.Session{};
+    errdefer mesh_edit.sessionDeinitParked(&parked);
+
+    parked.g_mode = .face;
+    parked.g_built_for = 91;
+    parked.g_vert_count = 1;
+    parked.g_edge_count = 1;
+    parked.g_scope_count = 1;
+    parked.g_scope_built = 91;
+    parked.g_mirror_built_for = 1;
+    parked.g_mirror_built_mask = 1;
+    parked.g_tint_suspend = 2;
+    parked.g_occ_bw = 1;
+    parked.g_occ_bh = 1;
+    parked.g_occ_ready = true;
+
+    parked.g_verts = try allocator.alloc(f32, 3);
+    parked.g_vert_part = try allocator.alloc(u32, 1);
+    parked.g_corner_vert = try allocator.alloc(u32, 3);
+    parked.g_edges = try allocator.alloc(u32, 2);
+    parked.g_edge_boundary = try allocator.alloc(bool, 1);
+    parked.g_edge_incidence = try allocator.alloc(u16, 1);
+    parked.g_edge_wire = try allocator.alloc(bool, 1);
+    parked.g_scope_vert = try allocator.alloc(bool, 1);
+    parked.g_scope_edge = try allocator.alloc(bool, 1);
+    parked.g_affect_vert = try allocator.alloc(bool, 1);
+    parked.g_mirror_twin = try allocator.alloc(u32, 1);
+    parked.g_mirror_affect = try allocator.alloc(bool, 1);
+    parked.g_sel_vert = try allocator.alloc(bool, 1);
+    parked.g_sel_edge = try allocator.alloc(bool, 1);
+    parked.g_sel_face = try allocator.alloc(bool, 1);
+    parked.g_snap = try allocator.alloc(bool, 1);
+    parked.g_camera_visible_vert = try allocator.alloc(bool, 1);
+    parked.g_camera_visible_edge = try allocator.alloc(bool, 1);
+    parked.g_occ_depth = try allocator.alloc(f32, 1);
+
+    const legacy_patch = try allocator.alloc(u8, 4);
+    try parked.g_face_base.put(allocator, 17, legacy_patch);
+
+    mesh_edit.sessionDeinitParked(&parked);
+    mesh_edit.sessionDeinitParked(&parked);
+
+    try testing.expectEqual(mesh_edit.Mode.none, parked.g_mode);
+    try testing.expectEqual(@as(u32, 0), parked.g_built_for);
+    try testing.expectEqual(@as(?[]f32, null), parked.g_verts);
+    try testing.expectEqual(@as(?[]u32, null), parked.g_vert_part);
+    try testing.expectEqual(@as(?[]bool, null), parked.g_sel_face);
+    try testing.expectEqual(@as(?[]bool, null), parked.g_camera_visible_edge);
+    try testing.expectEqual(@as(usize, 0), parked.g_occ_depth.len);
+    try testing.expectEqual(@as(usize, 0), parked.g_face_base.count());
+    try testing.expectEqual(@as(u32, 0), parked.g_tint_suspend);
+}
 
 test "authored face count follows large live group additions and empty deletion" {
     try testing.expectEqual(@as(?u32, 0), mesh_edit.authoredFaceCountFromGroups(&.{}));
@@ -3658,6 +3715,8 @@ test "curve pull densification loop-cuts the full quad strip and returns the exp
     }
     const source = mesh_edit.CurvePullPath{
         .ids = source_ids[0..],
+        // This mesh has no durable table: indexed ids ARE the only identity.
+        .stable = source_ids[0..],
         .base = source_base[0..],
         .params = source_params[0..],
         .grab = 2,
@@ -3686,6 +3745,141 @@ test "curve pull densification loop-cuts the full quad strip and returns the exp
         }
         try testing.expect(found_bottom);
     }
+}
+
+// req_4671: the indexed edit mesh files vertices under durable STABLE ids while
+// mesh_edit welds into first-encounter ranks. On any model whose logical table is
+// not in encounter order (every model after a delete/reorder), the old densify
+// indexed the wrong vertices and refused with CurvePullSourceDrift — the live
+// symptom was Curve Pull silently freezing at the density threshold ("maximum
+// pull range") or, worse, installing rings it then failed to adopt.
+test "curve pull densify + adopt survive a stable-id order that differs from weld rank" {
+    const quads = 4;
+    var soup: [quads * 2 * 3 * 8]f32 = undefined;
+    var groups: [quads * 2]u32 = undefined;
+    var logical_rows: [quads * 2 * 3]u32 = undefined;
+    // Distinct strip positions in weld first-encounter order (see loadQuadStrip's
+    // corner emission): the durable table numbers them in the REVERSE order.
+    const rank_positions = [10][2]f32{
+        .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 }, .{ 2, 0 },
+        .{ 2, 1 }, .{ 3, 0 }, .{ 3, 1 }, .{ 4, 0 }, .{ 4, 1 },
+    };
+    var row: usize = 0;
+    var quad: usize = 0;
+    while (quad < quads) : (quad += 1) {
+        const x0: f32 = @floatFromInt(quad);
+        const x1 = x0 + 1;
+        const corners = [6][2]f32{
+            .{ x0, 0 }, .{ x1, 0 }, .{ x1, 1 },
+            .{ x0, 0 }, .{ x1, 1 }, .{ x0, 1 },
+        };
+        for (corners) |point| {
+            soup[row * 8 + 0] = point[0];
+            soup[row * 8 + 1] = point[1];
+            soup[row * 8 + 2] = 0;
+            soup[row * 8 + 3] = 0;
+            soup[row * 8 + 4] = 0;
+            soup[row * 8 + 5] = 1;
+            soup[row * 8 + 6] = 0;
+            soup[row * 8 + 7] = 0;
+            var rank: u32 = 0;
+            for (rank_positions, 0..) |candidate, index| {
+                if (candidate[0] == point[0] and candidate[1] == point[1]) rank = @intCast(index);
+            }
+            logical_rows[row] = 9 - rank; // reversed stable numbering
+            row += 1;
+        }
+        groups[quad * 2] = @intCast(quad);
+        groups[quad * 2 + 1] = @intCast(quad);
+    }
+    try testing.expect(mesh_edit.test_support.loadGroupedSoupWithLogical(4671, soup[0..], quads * 2 * 3, groups[0..], logical_rows[0..], 10));
+    defer mesh_edit.test_support.clear();
+    defer mesh_edit.curvePullEnd();
+    mesh_edit.setMode(.vertex);
+    mesh_edit.setEditScope(0, 4);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    var indexed = try indexed_edit_mesh.Mesh.fromSoupWithLogicalSemantics(
+        testing.allocator,
+        soup[0..],
+        quads * 2,
+        groups[0..],
+        null,
+        null,
+        null,
+        null,
+        logical_rows[0..],
+        10,
+    );
+    defer indexed.deinit();
+
+    try testing.expectEqual(@as(u32, 5), selectTopRow());
+    try testing.expect(mesh_edit.curvePullBegin());
+    const path = mesh_edit.curvePullPath().?;
+    // The fixture must actually exercise the divergence.
+    var some_id_differs = false;
+    for (path.ids, path.stable) |dense, stable| {
+        if (dense != stable) some_id_differs = true;
+    }
+    try testing.expect(some_id_differs);
+
+    // Old code read indexed.vertices[dense] here and died with CurvePullSourceDrift.
+    var dense_path = try mesh_edit.curvePullDensifyIndexed(testing.allocator, &indexed, path, &.{}, 1);
+    defer dense_path.deinit();
+    try testing.expectEqual(@as(usize, 9), dense_path.ids.len);
+    for (dense_path.ids, dense_path.base) |id, point| {
+        const vertex = indexed.vertices.items[id];
+        try testing.expect(vertex.alive);
+        try testing.expectApproxEqAbs(point[0], vertex.position[0], 1e-6);
+        try testing.expectApproxEqAbs(point[1], vertex.position[1], 1e-6);
+        try testing.expectApproxEqAbs(point[2], vertex.position[2], 1e-6);
+    }
+
+    // Re-arm over the densified topology exactly the way the host rebuild does:
+    // lower the cut mesh, reload it as the resident soup, adopt, and bend.
+    var lowered = try indexed.lower();
+    defer lowered.deinit();
+    const lowered_corners = @as(usize, lowered.tri_count) * 3;
+    const lowered_soup = try testing.allocator.alloc(f32, lowered_corners * 8);
+    defer testing.allocator.free(lowered_soup);
+    const lowered_rows = try testing.allocator.alloc(u32, lowered_corners);
+    defer testing.allocator.free(lowered_rows);
+    for (0..lowered_corners) |corner| {
+        lowered_soup[corner * 8 + 0] = lowered.positions[corner * 3 + 0];
+        lowered_soup[corner * 8 + 1] = lowered.positions[corner * 3 + 1];
+        lowered_soup[corner * 8 + 2] = lowered.positions[corner * 3 + 2];
+        lowered_soup[corner * 8 + 3] = 0;
+        lowered_soup[corner * 8 + 4] = 0;
+        lowered_soup[corner * 8 + 5] = 1;
+        lowered_soup[corner * 8 + 6] = lowered.uvs[corner * 2 + 0];
+        lowered_soup[corner * 8 + 7] = lowered.uvs[corner * 2 + 1];
+        lowered_rows[corner] = lowered.triangle_vertices[corner / 3][corner % 3];
+    }
+    try testing.expect(mesh_edit.test_support.loadGroupedSoupWithLogical(
+        4672,
+        lowered_soup,
+        lowered.tri_count * 3,
+        lowered.groups,
+        lowered_rows,
+        @intCast(indexed.vertices.items.len),
+    ));
+    mesh_edit.setMode(.vertex);
+    try testing.expect(mesh_edit.ensureTopologyPub());
+
+    const grab_t = path.params[path.grab];
+    try testing.expect(mesh_edit.curvePullAdoptDensified(&dense_path, .vertex, path.part, grab_t));
+    const bend = mesh_edit.curvePullApply(.{ 0, 0, 0.6 });
+    try testing.expect(bend.changed);
+    // The mid-segment CUT vertices must ride the arc, not stay on the chords.
+    var moved_cut_verts: u32 = 0;
+    var v: u32 = 0;
+    while (v < mesh_edit.vertCount()) : (v += 1) {
+        const p = mesh_edit.vertPosPub(v);
+        if (p[1] < 0.5) continue; // top run only
+        const is_cut_station = @mod(p[0], 1.0) > 1e-3 and @mod(p[0], 1.0) < 1.0 - 1e-3;
+        if (is_cut_station and p[2] > 1e-4) moved_cut_verts += 1;
+    }
+    try testing.expect(moved_cut_verts >= 2);
 }
 
 test "curve pull refuses branched selections and loops" {

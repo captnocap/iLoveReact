@@ -113,6 +113,23 @@ writeback bends them. The structural rebuild preserves face colors, materials,
 semantics, logical ids, part ranges, authored atlas UVs, and the original gizmo
 journal/guard snapshot, so bend plus densification remains one undo action.
 
+**Two id spaces meet here, and they are not the same (req_4671).** mesh_edit
+welds soup corners into DENSE first-encounter ranks; the indexed edit mesh files
+vertices under the document's durable STABLE ids. They coincide only on a
+freshly minted table — any delete/reorder permutes one against the other. The
+densify path used to index the indexed mesh with dense ids: on every edited
+model the drift check then read unrelated vertices and refused
+(`CurvePullSourceDrift`), the drag froze at the threshold every frame (users
+read it as a "maximum pull range"), and on partial alignment it installed rings
+it then failed to adopt — stranded chord rings that doubled on every retry.
+Now `CurvePullPath` carries both columns (`ids` dense, `stable` durable),
+densify addresses the indexed mesh only through `stable`, the densified path
+returns stable ids, and `curvePullAdoptDensified` translates them back through
+the rebuilt weld. The rebuild is transactional — a failure after install
+reinstalls the grab-time mesh — and a refusal no longer freezes the drag: it
+logs the host's reason once, the readout appends `(densify refused)`, and the
+bend continues at the current density for the rest of the gesture.
+
 ## Tests
 
 `framework/testing/unit/mesh_edit.zig` additionally proves shallow/deep density

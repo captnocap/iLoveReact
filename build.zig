@@ -1981,8 +1981,10 @@ pub fn build(b: *std.Build) void {
     mesh_edge_semantics_test_step.dependOn(&run_mesh_edge_semantics_test.step);
 
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
+    // Rooted at framework/ via a shim: model_paint (imported by mesh_edit) reaches
+    // ../diag/, which is outside a module rooted at framework/gpu/ (req_4671).
     const mesh_edit_impl_test_mod = b.createModule(.{
-        .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
+        .root_source_file = b.path("framework/mesh_edit_test_root.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
