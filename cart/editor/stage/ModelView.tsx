@@ -1190,7 +1190,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // document switch appear to turn X-Ray on by itself.
   const [xray, setXray] = useState(false);
   const [persistentAdditive, setPersistentAdditive] = useState(toolTwig?.persistentAdditive ?? false);
-  const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
+  const [paintMode, setPaintModeRaw] = useState(false); // twig-restored in the boot effect (needs the atlas)
+  // PAINT-FLIP TRIPWIRE (req_4687, TEMP): the freeze storm is modelTool.paint
+  // oscillating at commit rate — log every setPaintMode with its caller so the
+  // fighting writer is named. Unminified dev bundle → real function names.
+  const setPaintMode: typeof setPaintModeRaw = (value) => {
+    try {
+      const callers = new Error().stack?.split('\n').slice(2, 5).map((frame) => frame.trim()).join(' <- ');
+      (globalThis as any).__freezeTripwire?.(`[setPaintMode] ${typeof value === 'function' ? '(updater fn)' : value} @ ${callers}`);
+    } catch {}
+    setPaintModeRaw(value);
+  };
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
   const [curvePullMode, setCurvePullMode] = useState(false); // Curve Pull (req_4325): Move drags bend a selected vertex run
@@ -1347,17 +1357,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Falls back to the plain count whenever the selection spans regions or parts.
   const selectionPath = useMemo(() => {
     if (selMode !== 3 || selInfo.sel < 1) return null;
+    const t0 = Date.now();
+    // req_4673 hang hunt: report this memo's cost on the way out of every early
+    // return — it runs at render time on each selection revision.
+    const timed = <T,>(result: T): T => {
+      const ms = Date.now() - t0;
+      if (ms > 100) console.warn(`[bevel-timing] selectionPath memo=${ms}ms`);
+      return result;
+    };
     const snapshot = readModelSelection();
-    if (!snapshot || snapshot.mode !== 3 || snapshot.truncated || snapshot.triangles.length === 0) return null;
+    if (!snapshot || snapshot.mode !== 3 || snapshot.truncated || snapshot.triangles.length === 0) return timed(null);
     const percept = readSeatPercept();
-    if (!percept) return null;
+    if (!percept) return timed(null);
     const regions = new Set<number | 'none'>();
     const groups: number[] = [];
     for (const triangle of snapshot.triangles) {
       regions.add(typeof triangle.region === 'number' ? triangle.region : 'none');
       if (typeof triangle.group === 'number') groups.push(triangle.group);
     }
-    if (regions.size !== 1) return null;
+    if (regions.size !== 1) return timed(null);
     const regionId = [...regions][0]!;
     const regionName = regionId === 'none'
       ? 'unnamed'
@@ -1369,7 +1387,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const owner = groups.length === 0 ? undefined : shellParts.find((part) =>
       part.lo != null && part.hi != null && groups.every((group) => group >= part.lo! && group < part.hi!));
     const crumbs = owner ? [...owner.groupPath.map((group) => group.name), owner.name, regionName] : [regionName];
-    return crumbs.join(' › ');
+    return timed(crumbs.join(' › '));
   }, [selMode, selInfo, selectionRevision, model?.key]);
   const [guard, setGuard] = useState<GuardInfo | null>(null);
   // Shader-ink bake failure — surfaced LOUD. The old shape discarded the door's
@@ -1489,9 +1507,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // and the part-range mirror resyncs from host truth on the same signal (req_2644).
   const adoptMesh = (r: TopoResult | null): boolean => {
     if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
+      const t0 = Date.now();
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
       adoptHostSelection(selInfo);
+      const tSel = Date.now();
       resyncPartRanges();
+      const tRanges = Date.now();
       const paintStale = paintLayoutIsStale();
       if (paintStale) {
         atlasReadyRef.current = false;
@@ -1503,6 +1524,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         atlasReadyRef.current = true;
       }
       refreshUvIfLive();
+      const tEnd = Date.now();
+      // req_4673 hang hunt: only a slow adopt reports, and it names its limb.
+      if (tEnd - t0 > 50) console.warn(`[bevel-timing] adopt split: selection=${tSel - t0}ms partRanges=${tRanges - tSel}ms uvRefresh=${tEnd - tRanges}ms`);
       return true;
     }
     return false;
@@ -1564,8 +1588,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     maxTargetSides: number;
     fallbackReason: string | null;
   }>(null);
+  // req_4673 hang hunt: the popup steps stall for seconds but apptick-split sees
+  // nothing, so split the handler itself (doors vs JS adopt) and probe the gap
+  // between handler return and the next JS breath — a big gap means the stall is
+  // in the native render/install path AFTER the handler, not in a door.
+  const bevelStepReport = (label: string, t0: number, splits: string) => {
+    const handlerEnd = Date.now();
+    console.warn(`[bevel-timing] ${label}: ${splits} handlerTotal=${handlerEnd - t0}ms`);
+    setTimeout(() => {
+      const gap = Date.now() - handlerEnd;
+      if (gap > 100) console.warn(`[bevel-timing] ${label}: post-handler stall before next tick=${gap}ms`);
+    }, 0);
+  };
   const openBevel = () => {
+    const t0 = Date.now();
     const info = meshBevelBegin();
+    const tBegin = Date.now();
     if (!info?.ok || (info.kind !== 'edge' && info.kind !== 'edges' && info.kind !== 'vertex' && info.kind !== 'boundary' && info.kind !== 'face-polygon') ||
         typeof info.defaultWidth !== 'number' || typeof info.minimumWidth !== 'number' || typeof info.maxWidth !== 'number') {
       setError('Select one filled convex face, one or more sharp manifold edges from one part, one corner with at least 3 edges, or every edge of one open boundary loop');
@@ -1588,6 +1626,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return;
     }
     const preview = meshBevelPreview(width / U_PER_TILE, targetSides);
+    const tPreview = Date.now();
     setBv({
       kind: info.kind,
       width,
@@ -1600,21 +1639,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fallbackReason: preview?.fallbackReason ?? null,
     });
     adoptMesh(preview);
+    bevelStepReport('open', t0, `beginDoor=${tBegin - t0}ms previewDoor=${tPreview - tBegin}ms adopt=${Date.now() - tPreview}ms`);
   };
   const changeBevel = (widthRaw: number, targetSidesRaw = bv?.targetSides ?? 0) => {
     if (!bv) return;
+    const t0 = Date.now();
     const width = Math.max(bv.min, Math.min(bv.max, roundBevelUnits(widthRaw)));
     const targetSides = bv.kind === 'boundary' || bv.kind === 'face-polygon'
       ? Math.max(bv.minTargetSides, Math.min(bv.maxTargetSides, Math.trunc(targetSidesRaw)))
       : 0;
     const preview = meshBevelPreview(width / U_PER_TILE, targetSides);
+    const tPreview = Date.now();
     setBv({ ...bv, width, targetSides, fallbackReason: preview?.fallbackReason ?? null });
     adoptMesh(preview);
+    bevelStepReport('step', t0, `previewDoor=${tPreview - t0}ms adopt=${Date.now() - tPreview}ms`);
   };
   const closeBevel = (commit: boolean) => {
     if (!bv) return;
-    adoptMesh(meshBevelEnd(commit));
+    const t0 = Date.now();
+    const result = meshBevelEnd(commit);
+    const tEnd = Date.now();
+    adoptMesh(result);
     setBv(null);
+    bevelStepReport(commit ? 'apply' : 'cancel', t0, `endDoor=${tEnd - t0}ms adopt=${Date.now() - tEnd}ms`);
   };
 
   // ── Face loop cut popup (the studio treatment): direction picks which of the clicked
@@ -1865,12 +1912,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Counts already carry the host's authoritative mode; mirror both so toolbar highlights
   // cannot drift from the active native tool.
   const adoptHostSelection = (fallback: SelInfo = { mode: 0, verts: 0, edges: 0, sel: 0 }): SelInfo => {
+    const t0 = Date.now();
     const info = readSelInfo() ?? fallback;
+    const tCounts = Date.now();
     const mode = Math.max(0, Math.min(3, info.mode | 0));
     const next = mode === info.mode ? info : { ...info, mode };
     setSelInfo(next);
+    const tInfo = Date.now();
     setSelectionRevision((value) => value + 1);
+    const tRev = Date.now();
     setSelMode(mode);
+    const tSetters = Date.now();
+    if (tSetters - tCounts > 50) console.warn(`[bevel-timing] setter split: selInfo=${tInfo - tCounts}ms selRevision=${tRev - tInfo}ms selMode=${tSetters - tRev}ms`);
     if (mode !== 0) {
       setPaintMode(false);
       setPathPlaneMode(false);
@@ -1878,6 +1931,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setFocusMode(false);
       meshFocusTool(false);
     }
+    const tEnd = Date.now();
+    // req_4673 hang hunt: countsDoor is __mesh_edit_counts (lazy topology rebuild);
+    // focus covers the mode-exit setters + __mesh_edit_focus door.
+    if (tEnd - t0 > 50) console.warn(`[bevel-timing] selection split: countsDoor=${tCounts - t0}ms setters=${tSetters - tCounts}ms focus=${tEnd - tSetters}ms`);
     return next;
   };
 
@@ -2859,7 +2916,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   useEffect(() => {
     if (!model) return;
     if (!atlasReadyRef.current && !atlasInvalidatedRef.current) {
-      if (hydratePersistedAtlas() === 'ready') buildUvPanel();
+      const t0 = Date.now();
+      const status = hydratePersistedAtlas();
+      const ms = Date.now() - t0;
+      if (ms > 100) console.warn(`[bevel-timing] atlas hydration=${ms}ms status=${status} (re-runs per mesh key while not ready)`);
+      if (status === 'ready') buildUvPanel();
     }
     const gv = initialMesh?.glassFirstVertex;
     if (shouldRestoreSavedGlass({
@@ -2877,7 +2938,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // session acknowledgement so the exact marker does not immediately reopen;
   // a cold process has no hot acknowledgement and surfaces it again.
   useEffect(() => {
-    if (!model || !paintTarget || !paintTargetOnDisk || !modelPaintLayoutIsStale(paintTarget)) return;
+    const t0 = Date.now();
+    if (!model || !paintTarget || !paintTargetOnDisk || !modelPaintLayoutIsStale(paintTarget)) {
+      const ms = Date.now() - t0;
+      if (ms > 100) console.warn(`[bevel-timing] stale-layout probe=${ms}ms (per mesh key)`);
+      return;
+    }
     const disk = readPaintLayoutDiskFacts(paintTarget);
     const marker = paintLayoutConflictRevision(disk);
     host.__model_paint_layout_invalidate?.();
@@ -4066,12 +4132,41 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // faces/triangles from the native percept's current authored grouping, uv'd from a
   // readable non-stale whole-model atlas, and mounts an honest 0 until the rig slice
   // lands. The initial document grouping is a load seed, never a live count.
+  //
+  // COALESCED + GATED (req_4673): this rebuild reads several heavyweight doors and
+  // its bridgeChanged notification synchronously re-renders the Inspector — over a
+  // second per run on a real model. Its deps churn once per setState flush during a
+  // single adopt, so running it inline made every bevel-popup step pay ~5 rebuilds
+  // (the multi-second "hang between every step"). The Inspector is held inert while
+  // a blocking session is live (req_2626 HH), so mid-session rebuilds carry no
+  // information anyone can see: skip them outright and rebuild once on close. The
+  // zero-delay timeout coalesces a burst of dep changes into one rebuild AFTER the
+  // gesture's handler returns, off the click's critical path.
+  const focusBridgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
+    if (blocking) return;
+    if (focusBridgeTimerRef.current !== null) clearTimeout(focusBridgeTimerRef.current);
+    focusBridgeTimerRef.current = setTimeout(() => {
+      focusBridgeTimerRef.current = null;
+      rebuildFocusBridge();
+    }, 0);
+    return () => {
+      if (focusBridgeTimerRef.current !== null) {
+        clearTimeout(focusBridgeTimerRef.current);
+        focusBridgeTimerRef.current = null;
+      }
+    };
+  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark, semanticRevision, selectionRevision, blocking]);
+  const rebuildFocusBridge = () => {
     const g = globalThis as any;
+    const tEffect = Date.now();
     const packageDir = paintTarget ? resolvePackageDir(paintTarget.kind, paintTarget.id) : null;
     const diskDoc = packageDir ? readMeshDoc(packageDir) : null;
+    const tDoc = Date.now();
     // One percept read serves both the semantics diagnosis and the geometry facts.
     const percept = readSeatPercept();
+    const tPercept = Date.now();
+    if (tPercept - tEffect > 100) console.warn(`[bevel-timing] focus-bridge effect: readMeshDoc=${tDoc - tEffect}ms percept=${tPercept - tDoc}ms`);
     const semantics = modelFocusSemantics({
       regions: diskDoc?.semanticRegions ?? undefined,
       instances: diskDoc?.semanticInstances ?? undefined,
@@ -4178,7 +4273,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     g.__modelFocusBridge = bridge;
     g.__modelSemanticDiagnostics = semantics;
     g.__modelFocusBridgeChanged?.();
-  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark, semanticRevision, selectionRevision]);
+    const effectMs = Date.now() - tEffect;
+    if (effectMs > 100) console.warn(`[bevel-timing] focus-bridge rebuild total=${effectMs}ms (bridgeChanged tail=${Date.now() - tPercept}ms)`);
+  };
 
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
   // key (W/P/F/G/S/R/0/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
@@ -4496,6 +4593,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // Same orphan rule for the whole-topology dry run: its popup state lived in
       // the old JS world, so the retained host base must be restored immediately.
       host.__mesh_quadify_end?.(0);
+      // And for bevel / Face to N-gon (req_4679/req_4682): a live host bevel
+      // session is MODAL in the engine's input loop, so an orphan left armed
+      // fake-confirms its preview and blocks every face pick until something
+      // re-enters bevel. Cancel restores the captured pre-bevel base exactly.
+      host.__mesh_bevel_end?.(0);
       // The host atlas is document state, not Paint-tool state. A remount must
       // publish its UV preview even when the brush was inactive; otherwise the
       // model renders the retained texture while the inspector falsely says none.

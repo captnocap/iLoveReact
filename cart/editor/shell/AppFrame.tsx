@@ -4295,6 +4295,12 @@ export default function AppFrame() {
     // prefix guard keeps this router from swallowing them before their handlers
     // (req_2585 — the export leaf hit this and silently no-op'd).
     if (commandId.startsWith('mesh-') && isMeshToolCommand(commandId)) {
+      // MESH-CMD TRIPWIRE (req_4687, TEMP): the storm invokes mesh-paint and a
+      // selMode command alternately at commit rate — name the invoker.
+      try {
+        const callers = new Error().stack?.split('\n').slice(2, 6).map((frame) => frame.trim()).join(' <- ');
+        (globalThis as any).__freezeTripwire?.(`[mesh-cmd] ${commandId} source=${source} @ ${callers}`);
+      } catch {}
       const api = modelToolApiRef.current;
       if (api) withNativeMeshActionSource(source, () => {
         if (commandId === 'mesh-view') api.selMode(0);
@@ -11607,6 +11613,14 @@ export default function AppFrame() {
         ),
       )
     : [], [state.openMenu, animationMenuAvailabilityKey]);
+
+  // PANEL-SLOT TRIPWIRE (req_4687, TEMP): the freeze's remount storm is the side-panel
+  // slot alternating PaintPanel ↔ LibraryPanel at commit rate. Log every change of the
+  // slot's inputs so the storm's flip sequence names the oscillating field.
+  const panelSlotProbe = `kind=${activeDocumentKind} paintUi=${paintUiActive} labUi=${labUiActive} renderer=${activeLeftPanelDefinition?.renderer ?? 'none'} domain=${state.activeDomain} modelPaint=${state.modelTool.paint} doc=${state.activeWorkspaceDocumentId}`;
+  useEffect(() => {
+    (globalThis as any).__freezeTripwire?.(`[panel-slot] ${panelSlotProbe}`);
+  }, [panelSlotProbe]);
 
   return (
     <C.HW_App>

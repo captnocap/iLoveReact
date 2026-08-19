@@ -198,14 +198,36 @@ if (!(globalThis as any).__zigOS_tick) {
   // FREEZE TRIPWIRE FILE (req_4687, TEMP): events.db retains only ~90s at the
   // current render-log flood rate, so avalanche evidence must land in a file.
   // Rolling buffer, rewritten wholesale per hit — tripwire hits are rare.
-  const _tripLines: string[] = [];
+  // Episode-aware buffer: a storm writes hundreds of near-identical lines per
+  // minute, and the ONSET lines are the diagnostic gold — so keep the head of
+  // the current episode verbatim, roll only the tail. A >60s quiet gap starts
+  // a new episode (the old one collapses to a one-line summary).
+  let _tripHead: string[] = [];
+  let _tripTail: string[] = [];
+  let _tripPrior: string[] = [];
+  let _tripLastMs = 0;
+  let _tripEpisodeN = 0;
   (globalThis as any).__freezeTripwire = (line: string): void => {
     try {
+      const now = Date.now();
+      if (now - _tripLastMs > 60_000 && (_tripHead.length || _tripTail.length)) {
+        _tripPrior.push(`── episode ${_tripEpisodeN} ended: ${_tripHead.length + _tripTail.length}+ lines, last at ${new Date(_tripLastMs).toISOString()}; head kept below ──`);
+        _tripPrior.push(..._tripHead.slice(0, 40));
+        if (_tripPrior.length > 200) _tripPrior.splice(0, _tripPrior.length - 200);
+        _tripHead = []; _tripTail = [];
+        _tripEpisodeN += 1;
+      }
+      _tripLastMs = now;
       const clicks = ((globalThis as any).__dispatchRing || []).join(' | ');
-      _tripLines.push(`${new Date().toISOString()} ${line}${clicks ? `\n  recent-clicks: ${clicks}` : ''}`);
-      if (_tripLines.length > 400) _tripLines.splice(0, _tripLines.length - 400);
+      const entry = `${new Date().toISOString()} ${line}${clicks ? `\n  recent-clicks: ${clicks}` : ''}`;
+      if (_tripHead.length < 200) _tripHead.push(entry);
+      else {
+        _tripTail.push(entry);
+        if (_tripTail.length > 600) _tripTail.splice(0, _tripTail.length - 600);
+      }
       const home = (globalThis as any).__env_get?.('HOME') || '/tmp';
-      (globalThis as any).__fs_write?.(`${home}/.cache/reactjit/freeze-tripwire.log`, _tripLines.join('\n') + '\n');
+      (globalThis as any).__fs_write?.(`${home}/.cache/reactjit/freeze-tripwire.log`,
+        _tripPrior.join('\n') + (_tripPrior.length ? '\n\n' : '') + _tripHead.join('\n') + (_tripTail.length ? `\n  … rolling tail (${_tripTail.length} kept) …\n` + _tripTail.join('\n') : '') + '\n');
     } catch {}
   };
 
@@ -214,7 +236,7 @@ if (!(globalThis as any).__zigOS_tick) {
   // remount commit. When the pending count crosses a threshold (then every
   // doubling), name the leaking callbacks by source text so the loop that
   // multiplies is identified, not just counted.
-  let _timerCensusNext = 128;
+  let _timerCensusNext = 64;
   const _timerCensus = (): void => {
     if (_timers.length < _timerCensusNext) return;
     _timerCensusNext *= 2;
@@ -222,11 +244,12 @@ if (!(globalThis as any).__zigOS_tick) {
     for (const t of _timers) {
       if (t.cleared) continue;
       let src = '(anon)';
-      try { src = String(t.fn).replace(/\s+/g, ' ').slice(0, 140); } catch {}
+      try { src = String(t.fn).replace(/\s+/g, ' ').slice(0, 200); } catch {}
       bySrc.set(src, (bySrc.get(src) ?? 0) + 1);
     }
-    const top = [...bySrc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-    const report = `[timer-census] pending=${_timers.length} (next report at ${_timerCensusNext}) top sources:\n` + top.map(([s, n]) => `  x${n}: ${s}`).join('\n');
+    const sorted = [...bySrc.entries()].sort((a, b) => b[1] - a[1]);
+    const top = sorted.slice(0, 16);
+    const report = `[timer-census] pending=${_timers.length} distinctSources=${bySrc.size} (next report at ${_timerCensusNext}) top sources:\n` + top.map(([s, n]) => `  x${n}: ${s}`).join('\n');
     console.warn(report);
     (globalThis as any).__freezeTripwire?.(report);
   };
