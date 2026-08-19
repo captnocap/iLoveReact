@@ -195,12 +195,49 @@ if (!(globalThis as any).__zigOS_tick) {
 
   (globalThis as any).performance = (globalThis as any).performance || { now: () => _nowMs };
 
+  // FREEZE TRIPWIRE FILE (req_4687, TEMP): events.db retains only ~90s at the
+  // current render-log flood rate, so avalanche evidence must land in a file.
+  // Rolling buffer, rewritten wholesale per hit — tripwire hits are rare.
+  const _tripLines: string[] = [];
+  (globalThis as any).__freezeTripwire = (line: string): void => {
+    try {
+      const clicks = ((globalThis as any).__dispatchRing || []).join(' | ');
+      _tripLines.push(`${new Date().toISOString()} ${line}${clicks ? `\n  recent-clicks: ${clicks}` : ''}`);
+      if (_tripLines.length > 400) _tripLines.splice(0, _tripLines.length - 400);
+      const home = (globalThis as any).__env_get?.('HOME') || '/tmp';
+      (globalThis as any).__fs_write?.(`${home}/.cache/reactjit/freeze-tripwire.log`, _tripLines.join('\n') + '\n');
+    } catch {}
+  };
+
+  // TIMER CENSUS (req_4687, TEMP): the modeling↔painting freeze was a timer
+  // avalanche — pending timers grew 10 → 215 → 8437, each firing a full-subtree
+  // remount commit. When the pending count crosses a threshold (then every
+  // doubling), name the leaking callbacks by source text so the loop that
+  // multiplies is identified, not just counted.
+  let _timerCensusNext = 128;
+  const _timerCensus = (): void => {
+    if (_timers.length < _timerCensusNext) return;
+    _timerCensusNext *= 2;
+    const bySrc = new Map<string, number>();
+    for (const t of _timers) {
+      if (t.cleared) continue;
+      let src = '(anon)';
+      try { src = String(t.fn).replace(/\s+/g, ' ').slice(0, 140); } catch {}
+      bySrc.set(src, (bySrc.get(src) ?? 0) + 1);
+    }
+    const top = [...bySrc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const report = `[timer-census] pending=${_timers.length} (next report at ${_timerCensusNext}) top sources:\n` + top.map(([s, n]) => `  x${n}: ${s}`).join('\n');
+    console.warn(report);
+    (globalThis as any).__freezeTripwire?.(report);
+  };
+
   (globalThis as any).setTimeout = (fn: () => void, ms?: number): number => {
     if (typeof fn !== 'function') {
       console.error('[timer] setTimeout got non-function:', typeof fn, fn);
     }
     const id = _timerSeq++;
     _timers.push({ id, due: _nowMs + (ms ?? 0), fn, interval: 0, cleared: false });
+    _timerCensus();
     return id;
   };
 
@@ -211,6 +248,7 @@ if (!(globalThis as any).__zigOS_tick) {
     const id = _timerSeq++;
     const period = Math.max(1, ms ?? 0);
     _timers.push({ id, due: _nowMs + period, fn, interval: period, cleared: false });
+    _timerCensus();
     return id;
   };
 
@@ -461,6 +499,14 @@ function eventAliases(type: string): string[] {
   const h = handlerRegistry.get(id);
   const keys = h ? Object.keys(h).join(',') : '(no-entry)';
   if (typeof hl === 'function') { try { hl(0, `[dispatch] id=${id} type=${type} handlers=${keys}`); } catch {} }
+  // DISPATCH BREADCRUMBS (req_4687, TEMP): keep the last few clicks so the
+  // freeze-tripwire reports can say which press preceded a timer avalanche.
+  if (type === 'onClick' || type === 'onMouseDown') {
+    const g: any = globalThis as any;
+    const ring: string[] = g.__dispatchRing || (g.__dispatchRing = []);
+    ring.push(`${Date.now()} ${type} id=${id} handlers=${keys}`);
+    if (ring.length > 8) ring.splice(0, ring.length - 8);
+  }
   const dT0 = (globalThis as any).performance?.now?.() ?? Date.now();
   try {
     const payload = type === 'onMouseDown' || type === 'onMouseMove' || type === 'onMouseUp'

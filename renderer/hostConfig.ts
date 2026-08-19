@@ -776,6 +776,33 @@ function flushCoalesced(cmds: Command[]): void {
         try { gh.__hostLog(0, `[flush-bytes] +${(payload.length / 1024).toFixed(0)}KB → total ${(g_totalFlushBytes / 1024 / 1024).toFixed(1)}MB (#${g_flushCount}, ${cmds.length} cmd)${big ? ` :: ${opStr}` : ''}`); } catch {}
       }
     }
+    // REMOUNT-STORM SAMPLER (req_4687, TEMP): the modeling↔painting freeze was a
+    // loop of ~790KB flushes each CREATE-ing a ~2700-node subtree from scratch.
+    // When a flush is that CREATE-heavy, name what it built: created types by
+    // count plus the first text contents, which identify the panel being
+    // remounted without needing the component tree.
+    if (big) {
+      let createN = 0;
+      const byType = new Map<string, number>();
+      const texts: string[] = [];
+      for (const c of cmds) {
+        if (c.op === 'CREATE') {
+          createN += 1;
+          const ty = String((c as any).type ?? '?');
+          byType.set(ty, (byType.get(ty) ?? 0) + 1);
+        } else if (c.op === 'CREATE_TEXT' && texts.length < 12) {
+          const t = String((c as any).text ?? '').slice(0, 40);
+          if (t.trim()) texts.push(t);
+        }
+      }
+      if (createN >= 1000) {
+        const gh: any = globalThis as any;
+        const tyStr = [...byType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, n]) => `${t}=${n}`).join(' ');
+        const report = `[remount-storm] CREATE=${createN} types: ${tyStr} | texts: ${texts.map((t) => JSON.stringify(t)).join(', ')}`;
+        if (typeof gh.__hostLog === 'function') { try { gh.__hostLog(1, report); } catch {} }
+        try { gh.__freezeTripwire?.(report); } catch {}
+      }
+    }
     (transportFlush as unknown as (p: string) => void)(payload);
     return;
   }
