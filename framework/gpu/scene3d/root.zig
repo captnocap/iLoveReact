@@ -902,7 +902,6 @@ pub const JournalEntry = @import("hidden_groups.zig").JournalEntry;
 pub const freeJournalHidden = @import("hidden_groups.zig").freeJournalHidden;
 pub const cloneJournalHidden = @import("hidden_groups.zig").cloneJournalHidden;
 pub const cloneHiddenGroup = @import("hidden_groups.zig").cloneHiddenGroup;
-pub const JOURNAL_CAP = @import("hidden_groups.zig").JOURNAL_CAP;
 pub const JOURNAL_BYTE_BUDGET = @import("hidden_groups.zig").JOURNAL_BYTE_BUDGET;
 pub const JOURNAL_ATLAS_BYTE_CAP = @import("hidden_groups.zig").JOURNAL_ATLAS_BYTE_CAP;
 pub const MESH_ACTION_CAP = @import("hidden_groups.zig").MESH_ACTION_CAP;

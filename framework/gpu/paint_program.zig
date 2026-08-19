@@ -394,7 +394,7 @@ const JournalStateData = struct {
     }
 };
 
-const JOURNAL_CAP = 64;
+// No entry-count cap: the byte budget is the only wall (req_4700).
 const JOURNAL_BYTE_BUDGET: usize = 32 * 1024 * 1024;
 
 var g_undo_snaps: std.ArrayList(Snapshot) = .empty;
@@ -747,7 +747,7 @@ fn pushUndo(label: []const u8) void {
     };
     var total: usize = 0;
     for (g_undo_snaps.items) |*s| total += snapshotBytes(s);
-    while (g_undo_snaps.items.len > JOURNAL_CAP or (total > JOURNAL_BYTE_BUDGET and g_undo_snaps.items.len > 1)) {
+    while (total > JOURNAL_BYTE_BUDGET and g_undo_snaps.items.len > 1) {
         var old = g_undo_snaps.orderedRemove(0);
         total -= snapshotBytes(&old);
         freeSnapshot(&old);
@@ -1736,4 +1736,89 @@ fn applyParse(c: *Cursor, ver: u16, blob: []const u8) bool {
         };
     }
     return true;
+}
+
+// ── Per-document session (req_3850) ────────────────────────────────────────
+// The editable paint recipe is document state just as surely as the atlas pixels in
+// model_paint. Before this owner existed, 3d.zig parked the raster with each model but
+// left this module's layers, strokes, history, baseline, and material recipes in one
+// process-global slot. An A→B→A switch could therefore show A's pixels with B's
+// editing history — a visually plausible split authority that failed only on the next
+// undo, replay, or save.
+//
+// Park and load are ownership-neutral VALUE moves, matching mesh_edit, model_source,
+// and model_paint. Pointer fields are not cloned and are not freed: the parked record
+// becomes their sole authority only after the coordinator resets or loads the globals.
+// The record for the active document is merely an alias and is overwritten on the next
+// park. Every `g_*` below is included deliberately, including an open stroke and the
+// one-shot topology carries; silently leaving either process-global would splice the
+// next gesture or replacement into whichever document happened to become active.
+pub const Session = struct {
+    g_layers: @TypeOf(g_layers) = .empty,
+    g_active_layer: @TypeOf(g_active_layer) = 0,
+    g_next_layer_id: @TypeOf(g_next_layer_id) = 1,
+    g_strokes: @TypeOf(g_strokes) = .empty,
+    g_mats: @TypeOf(g_mats) = .empty,
+    g_open: @TypeOf(g_open) = .empty,
+    g_open_live: @TypeOf(g_open_live) = false,
+    g_open_label: @TypeOf(g_open_label) = "stroke",
+    g_open_fill_seen: @TypeOf(g_open_fill_seen) = .{},
+    g_have_active: @TypeOf(g_have_active) = false,
+    g_active_is_mat: @TypeOf(g_active_is_mat) = false,
+    g_active_mat: @TypeOf(g_active_mat) = 0,
+    g_active_rgb: @TypeOf(g_active_rgb) = .{ 0, 0, 0 },
+    g_recording: @TypeOf(g_recording) = true,
+    g_baseline: @TypeOf(g_baseline) = null,
+    g_ord_cache: @TypeOf(g_ord_cache) = null,
+    g_carry_layers: @TypeOf(g_carry_layers) = null,
+    g_carry_active: @TypeOf(g_carry_active) = 0,
+    g_carry_next: @TypeOf(g_carry_next) = 1,
+    g_carry_program_once: @TypeOf(g_carry_program_once) = false,
+    g_undo_snaps: @TypeOf(g_undo_snaps) = .empty,
+    g_redo_snaps: @TypeOf(g_redo_snaps) = .empty,
+};
+
+pub fn sessionSave(session: *Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |field|
+        @field(session, field.name) = @field(@This(), field.name);
+}
+
+pub fn sessionLoad(session: *const Session) void {
+    inline for (@typeInfo(Session).@"struct".fields) |field|
+        @field(@This(), field.name) = @field(session, field.name);
+}
+
+pub fn sessionReset() void {
+    const fresh = Session{};
+    inline for (@typeInfo(Session).@"struct".fields) |field|
+        @field(@This(), field.name) = @field(fresh, field.name);
+    // Deliberately frees NOTHING: ownership of the previous state lives in the
+    // record the coordinator just parked.
+}
+
+/// Destroy one genuinely parked record. Calling this for the active record while its
+/// pointers are still installed in globals would be a use-after-free; the model-session
+/// registry first parks the active globals and resets them before invoking this hook.
+/// Resetting the record afterward makes the operation idempotent and keeps an aborted
+/// registry teardown from retaining stale aliases.
+pub fn sessionDeinitParked(session: *Session) void {
+    freeLayerList(&session.g_layers);
+    session.g_layers.deinit(alloc);
+    freeStrokeList(&session.g_strokes);
+    session.g_strokes.deinit(alloc);
+    freeMatList(&session.g_mats);
+    session.g_mats.deinit(alloc);
+    session.g_open.deinit(alloc);
+    session.g_open_fill_seen.deinit(alloc);
+    if (session.g_baseline) |pixels| alloc.free(pixels);
+    if (session.g_ord_cache) |ordinals| alloc.free(ordinals);
+    if (session.g_carry_layers) |layers| {
+        for (layers) |layer| alloc.free(layer.name);
+        alloc.free(layers);
+    }
+    freeSnapshotStack(&session.g_undo_snaps);
+    session.g_undo_snaps.deinit(alloc);
+    freeSnapshotStack(&session.g_redo_snaps);
+    session.g_redo_snaps.deinit(alloc);
+    session.* = .{};
 }

@@ -761,7 +761,7 @@ pub fn journalCommit(snap: *?z3d.JournalEntry) void {
     z3d.g_journal_undo.appendAssumeCapacity(e);
     var total: usize = 0;
     for (z3d.g_journal_undo.items) |*it| total += z3d.journalEntryBytes(it);
-    while (z3d.g_journal_undo.items.len > z3d.JOURNAL_CAP or (total > z3d.JOURNAL_BYTE_BUDGET and z3d.g_journal_undo.items.len > 1)) {
+    while (total > z3d.JOURNAL_BYTE_BUDGET and z3d.g_journal_undo.items.len > 1) {
         var old = z3d.g_journal_undo.orderedRemove(0);
         total -= z3d.journalEntryBytes(&old);
         z3d.journalFreeEntry(&old);
@@ -948,7 +948,7 @@ pub fn meshJournalLogJson(allocator: std.mem.Allocator) ?[]u8 {
     } else null;
 
     return mesh_journal_log.encode(allocator, .{
-        .capacity = z3d.JOURNAL_CAP,
+        .capacity = 0, // 0 = no entry-count cap; byte_budget is the wall (req_4700)
         .byte_budget = z3d.JOURNAL_BYTE_BUDGET,
         .journal_bytes = journal_bytes,
         .pending_gizmo = z3d.g_gizmo_snap != null,

@@ -525,7 +525,8 @@ pub fn cloneHiddenGroup(hidden: z3d.JournalHidden) !z3d.HiddenGroup {
         .colors = colors,
     };
 }
-pub const JOURNAL_CAP = 32;
+// No entry-count cap: the byte budget is the only wall (req_4700 — a 32-entry
+// cap silently ate deep undo chains while the budget sat almost empty).
 pub const JOURNAL_BYTE_BUDGET: usize = 192 * 1024 * 1024;
 // UV inspection/import is cart-capped at 32 MiB; leave headroom for native
 // callers while refusing a single texture snapshot that could consume the
