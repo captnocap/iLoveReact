@@ -10,7 +10,6 @@ const types = @import("wall_types");
 const catalog = @import("building_catalog");
 const topology = @import("wall_topology");
 
-const generated_pane_material_id = "architecture:generated:pane";
 
 pub const Point2Meters = struct { u: f32, v: f32 };
 pub const Point3Meters = struct { x: f32, y: f32, z: f32 };
@@ -630,25 +629,14 @@ fn appendOpeningGeometry(
     }
 
     if (openingHasPane(rect.opening.kind)) {
-        try builder.appendSurface(try ownedSurfaceBand(
-            builder.allocator,
-            edge.id,
-            rect.opening.id,
-            .pane,
-            rect.opening.facing_side,
-            generated_pane_material_id,
-            0,
-            rect.left_u,
-            rect.right_u,
-            rect.bottom_u,
-            rect.top_u,
-            verticalQuad(left_center, right_center, bottom_y_m, top_y_m),
-            if (rect.opening.facing_side == .a) side_a_normal else .{
-                .x = -side_a_normal.x,
-                .y = 0,
-                .z = -side_a_normal.z,
-            },
-        ));
+        // The KIT owns the pane (RULED req_4487: the exported model IS the
+        // mounted asset — frame + glazing together; the wall keeps only its
+        // cut flesh). The engine used to emit its own generated `.pane` band
+        // here — a single-winding quad at the wall centerline that rendered
+        // as an OPAQUE plug over the mounted kit's real glass from the facing
+        // side and was backface-culled from the other (req_4709: "only one
+        // side of them is working"). Gameplay solids remain the wall's job:
+        // a glazed cut still blocks walking, nav, sound, and sight.
         try builder.appendOpeningBlocker(
             edge.id,
             rect.opening.id,

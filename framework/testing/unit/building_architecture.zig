@@ -2967,8 +2967,12 @@ test "geometry partitions two measured windows on one edge" {
     });
     var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
     defer bundle.deinit(testing.allocator);
-    try testing.expectEqual(@as(usize, 1), countOpeningSurfaceRole(&bundle, "window-a", .pane));
-    try testing.expectEqual(@as(usize, 1), countOpeningSurfaceRole(&bundle, "window-b", .pane));
+    // The KIT owns the pane (req_4487/req_4709): the engine never emits its
+    // own glazing quad — it rendered as an opaque one-sided plug over the
+    // mounted kit's real glass. The gameplay solids stay the wall's job.
+    try testing.expectEqual(@as(usize, 0), countOpeningSurfaceRole(&bundle, "window-a", .pane));
+    try testing.expectEqual(@as(usize, 0), countOpeningSurfaceRole(&bundle, "window-b", .pane));
+    try testing.expect(bundle.colliders.len > 0);
     try testing.expect(bundle.surfaces.len > 8);
 }
 
