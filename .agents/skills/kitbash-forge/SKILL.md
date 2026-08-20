@@ -51,6 +51,36 @@ runpodctl pod delete <pod-id>                             # ALWAYS — volume pe
 
 Costs: 5090 secure ~$0.99/hr (community ~$0.69 but no volume attach). `--terminate-after`
 is the backstop; `--stop-after` keeps billing disk. Balance check: `runpodctl user`.
+When the 5090 is out of stock in EU-RO-1 (common), **RTX PRO 4500 Blackwell** (32GB,
+$0.72/hr, stock usually High) is a drop-in — same sm_120 arch. Survey availability:
+`runpodctl gpu list` filtered to EU-RO-1 + secureCloud + memoryInGb ≥ 24.
+
+## TRELLIS.2 lane (PBR drafts — req_4710)
+
+Alternative Stage B model: `microsoft/TRELLIS.2-4B` instead of Hunyuan3D-2 — emits a
+PBR GLB (base color / roughness / metallic / opacity, WebP textures; glass comes out
+as real opacity). Same pod recipe as above; scripts are
+`tools/forge/bootstrap_trellis2.sh` + `tools/forge/batch_trellis2.py` (scp both to
+`/workspace/` each session, repo is source of truth). Bootstrap is idempotent via
+`/workspace/.t2-marks/` — first run ~48 min (extension compiles + 16GB weights), all
+later runs seconds. Persistent on the volume: `/workspace/venv-t2`,
+`/workspace/TRELLIS.2`, weights under `/workspace/hf`. Batch reads `/workspace/in-t2/`,
+writes `/workspace/out-t2/<name>.glb`, prints `t2 -> name.glb` per piece and
+`BATCH_DONE`. Knobs: `T2_DECIMATE` (300000), `T2_TEX` (2048), `T2_SEED` (42),
+`T2_PIPELINE` (`512|1024|1024_cascade|1536_cascade`, default = model config).
+
+- **Blackwell facts:** upstream's own recipe (torch 2.6/cu124 + flash-attn 2.7.3)
+  cannot drive sm_120. The bootstrap builds nvdiffrast/nvdiffrec/CuMesh/FlexGEMM/
+  o-voxel from source against the image's torch 2.9.1+cu128
+  (`TORCH_CUDA_ARCH_LIST=12.0`, `CUDA_HOME=/usr/local/cuda` — nvcc exists in the
+  image but is not on non-interactive-SSH PATH). No flash-attn: no wheel matches
+  that torch and a source build costs ~an hour — the lane runs `ATTN_BACKEND=sdpa`,
+  which trellis2's attention config supports natively.
+- **DINOv3 gate:** the image conditioner is `facebook/dinov3-vitl16-pretrain-lvd1689m`,
+  a MANUALLY GATED Meta repo — pipeline load 401s until the HF account has accepted
+  the license (form on the repo page: name, DOB, country, affiliation — user-only,
+  never fill it for them). The account token persists at `/workspace/hf/token`
+  (= `$HF_HOME/token`, picked up automatically once access is granted).
 
 ## Stage A — sheets and crops (no pod needed)
 
