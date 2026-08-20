@@ -128,6 +128,28 @@ function residentMeshFor(
         return null;
       }
     }
+    // Studio glass on an UNTEXTURED model (req_4707: "the glass doesnt do
+    // glass"): with no atlas there is no alpha to carry the glass, so the
+    // doc's trailing glass run becomes its own wire slot and the host routes
+    // it through the transparent pass — the exact mechanism flat glass doors
+    // already use. Textured models keep the atlas-alpha route; the split only
+    // applies when the render geometry IS the doc geometry (same vertex order).
+    const glassFirstVertex = doc?.glassFirstVertex ?? null;
+    const vertexCount = vertices.length / 8;
+    if (!png && glassFirstVertex !== null && glassFirstVertex > 0 && glassFirstVertex < vertexCount
+      && doc && doc.vertices.length === vertices.length) {
+      return {
+        key,
+        vertices,
+        slots: [
+          { start: 0, count: glassFirstVertex },
+          { start: glassFirstVertex, count: vertexCount - glassFirstVertex },
+        ],
+        glassSlot: 1,
+        ...(collision.boxes.length > 0 ? { collisionBoxes: collision.boxes } : {}),
+        ...(collision.triangles.length > 0 ? { collisionTriangles: collision.triangles } : {}),
+      };
+    }
     return {
       key,
       vertices,

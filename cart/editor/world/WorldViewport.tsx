@@ -2174,13 +2174,20 @@ export default function WorldViewport(props: {
       if (edge && startVertex && endVertex && edge.support.kind === 'absolute') {
         const legal = openingGhost.slot !== null;
         openingColor = legal ? '#34d399' : '#f87171';
+        // The readout carries the cut's SILL HEIGHT as data (req_4707): a
+        // raised window reads "window_003 · 0.94m" and the number follows the
+        // wheel's row walk, so vertical placement is precise, not eyeballed.
+        const sillM = openingGhost.slot
+          ? (openingGhost.slot.rowU + kit.footprint.minRow) / ARCHITECTURE_UNITS_PER_METER
+          : 0;
+        const legalLabel = sillM > 0.004 ? `${kit.label} · ${sillM.toFixed(2)}m` : kit.label;
         pushGhostRect(openingGhostCorners(
           { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
           { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
           edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
           openingGhost.slot ?? openingGhost.anchor,
           kit.footprint,
-        ), !legal, openingGhost.reason ? `${kit.label} — ${openingGhost.reason}` : kit.label);
+        ), !legal, openingGhost.reason ? `${kit.label} — ${openingGhost.reason}` : legalLabel);
       }
     } else {
       // Ground preview: the kit's REAL mesh ghost rides the cursor (the live

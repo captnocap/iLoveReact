@@ -46,6 +46,11 @@ export type ResidentMesh = {
   slots?: { start: number; count: number }[];
   /** MESH_PROPS v6 two-state panel declaration; leafSlot indexes `slots`. */
   door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean; hingeMaxX?: boolean };
+  /** MESH_PROPS v11 (req_4707): index into `slots` of the FIRST Studio glass
+   *  slot — that slot and everything after it is the model's trailing glass
+   *  run, routed through the transparent pass even without a door. Untextured
+   *  models need this: with no atlas there is no alpha to carry the glass. */
+  glassSlot?: number;
   /** Local-frame authored colliders: Outliner bands, or door jamb/header bands. */
   collisionBoxes?: ResidentCollisionBox[];
   /** Exact local-frame player narrowphase: xyz triples, three vertices/triangle. */
@@ -74,7 +79,7 @@ function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: n
   return { radius: Math.max(w, h, d) * 0.5 || 1, w: w || 1, d: d || 1, h: h || 1 };
 }
 
-const MESH_PROPS_VERSION = 10;
+const MESH_PROPS_VERSION = 11;
 
 /** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
  *  instanceCount 0 (a catalog, not a baked scene); a mesh with a painted atlas embeds
@@ -100,6 +105,9 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     if (m.door && (m.door.leafSlot < 0 || m.door.leafSlot >= slots.length)) {
       throw new Error(`resident door '${m.key}' leaf slot ${m.door.leafSlot} is outside ${slots.length} slot(s)`);
     }
+    if (m.glassSlot !== undefined && (!Number.isInteger(m.glassSlot) || m.glassSlot < 0 || m.glassSlot >= slots.length)) {
+      throw new Error(`resident mesh '${m.key}' glass slot ${m.glassSlot} is outside ${slots.length} slot(s)`);
+    }
     for (const box of boxes) {
       const values = [box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ];
       if (!values.every(Number.isFinite) || box.maxX <= box.minX || box.maxY <= box.minY || box.maxZ <= box.minZ) {
@@ -124,6 +132,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     total += 4 + boxes.length * 24; // boxCount + 6×f32 rows
     total += 4 + (m.materialUvs?.length ?? 0) * 4; // v9 materialUvCount + uv pairs
     total += 4 + (collisionTriangles?.length ?? 0) * 4; // v10 triangleCount + xyz corners
+    total += 4; // v11 glassSlotPlusOne (0 = none)
   }
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
@@ -195,6 +204,8 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
         o += 4;
       }
     }
+    // v11 (req_4707): the trailing Studio glass run's first slot, +1 (0 = none).
+    dv.setUint32(o, m.glassSlot !== undefined ? m.glassSlot + 1 : 0, true); o += 4;
   }
   return bytes;
 }

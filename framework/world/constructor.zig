@@ -50,7 +50,7 @@ const INTERACTABLES_VERSION: u32 = 1;
 const DYNAMIC_PROPS_VERSION: u32 = 1;
 const ELEVATORS_VERSION: u32 = 1;
 const DOORS_VERSION: u32 = 1;
-const MESH_PROPS_VERSION: u32 = 10;
+const MESH_PROPS_VERSION: u32 = 11;
 const WATER_VERSION: u32 = 2;
 const TICKER_VERSION: u32 = 1;
 /// Bound on a ticker's column count — mirrors ledTicker.MAX_TICKER_COLS so a
@@ -138,6 +138,12 @@ pub const MeshPropMesh = struct {
     // triangles packed xyz×3 in the mesh's local frame. Boxes remain the cheap
     // broadphase/camera shape; player contact narrows against these planes.
     collision_triangles: []f32 = &.{},
+    // STUDIO GLASS SLOT (req_4707, MESH_PROPS v11) — when nonzero, slots at
+    // index >= (value-1) are the model's trailing Studio glass run: route them
+    // through the depth-write-off transparent pass even without a door. An
+    // UNTEXTURED model has no atlas alpha to carry its glass; this is the only
+    // way its panes can render translucent.
+    glass_slot_plus_one: u32 = 0,
 
     pub fn deinit(self: MeshPropMesh, allocator: std.mem.Allocator) void {
         allocator.free(self.key);
@@ -999,6 +1005,15 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
                 error.OutOfMemory => return error.OutOfMemory,
             };
         }
+        // STUDIO GLASS SLOT (req_4707, v11) — u32 glassSlotPlusOne; 0 = none.
+        // Must index a real slot when set.
+        var glass_slot_plus_one: u32 = 0;
+        if (version >= 11) {
+            if (at + 4 > data.len) return Error.BadMeshProps;
+            glass_slot_plus_one = std.mem.readInt(u32, data[at..][0..4], .little);
+            at += 4;
+            if (glass_slot_plus_one > slots.len) return Error.BadMeshProps;
+        }
         meshes[mi] = .{
             .key = key,
             .color = color,
@@ -1016,6 +1031,7 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
             .texture_has_translucency = texture_has_translucency,
             .slots = slots,
             .door = door,
+            .glass_slot_plus_one = glass_slot_plus_one,
             .collision_boxes = collision_boxes,
             .collision_triangles = collision_triangles,
         };

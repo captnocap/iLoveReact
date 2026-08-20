@@ -1,5 +1,5 @@
 // cart/editor/world/meshProps.test.ts — resident door metadata matches the
-// framework/world/constructor.zig MESH_PROPS v10 decoder byte-for-byte.
+// framework/world/constructor.zig MESH_PROPS v11 decoder byte-for-byte.
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/world/meshProps.test.ts --bundle \
@@ -30,7 +30,7 @@ test('door resident row carries opaque/glass leaf slots, interaction metadata, a
     ],
   }]);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  assert(dv.getUint32(0, true) === 10, 'not MESH_PROPS v10');
+  assert(dv.getUint32(0, true) === 11, 'not MESH_PROPS v11');
   assert(dv.getUint32(4, true) === 1 && dv.getUint32(8, true) === 0, 'catalog header changed');
   const keyLength = dv.getUint32(12, true);
   let at = 16 + keyLength + 36 + vertices.length * 4;
@@ -50,7 +50,37 @@ test('door resident row carries opaque/glass leaf slots, interaction metadata, a
   at += 3 * 24;
   assert(dv.getUint32(at, true) === 0, 'door unexpectedly carries face-material UVs'); at += 4;
   assert(dv.getUint32(at, true) === 0, 'door unexpectedly carries exact collision triangles'); at += 4;
+  assert(dv.getUint32(at, true) === 0, 'door leaf glass rides the door block, never the v11 glass slot'); at += 4;
   assert(at === bytes.byteLength, `encoder size drift: parsed ${at}, wrote ${bytes.byteLength}`);
+});
+
+test('v11 marks the trailing Studio glass run of a door-less untextured model (req_4707)', () => {
+  const bytes = encodeResidentMeshes([{
+    key: 'opening:window',
+    vertices,
+    slots: [{ start: 0, count: 6 }, { start: 6, count: 3 }],
+    glassSlot: 1,
+  }]);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const keyLength = dv.getUint32(12, true);
+  let at = 16 + keyLength + 36 + vertices.length * 4;
+  at += 4; // pngLen=0 — untextured is the case that NEEDS the slot
+  assert(dv.getUint32(at, true) === 2, 'body/glass slots missing'); at += 4;
+  at += 16; // two slot rows
+  at += 4; // hasDoor=0
+  at += 4; // collisionBoxCount=0
+  at += 4; // materialUvCount=0
+  at += 4; // collisionTriangleCount=0
+  assert(dv.getUint32(at, true) === 2, 'glassSlotPlusOne must encode glassSlot 1 as 2'); at += 4;
+  assert(at === bytes.byteLength, 'glass slot payload size drifted');
+});
+
+test('encoder rejects a glass slot outside the slot table', () => {
+  let threw = false;
+  try {
+    encodeResidentMeshes([{ key: 'opening:bad-glass', vertices, glassSlot: 0 }]);
+  } catch { threw = true; }
+  assert(threw, 'an out-of-range glass slot reached the host decoder');
 });
 
 test('v10 retains the v9 separate material UV pair per resident vertex', () => {
@@ -74,6 +104,7 @@ test('v10 retains the v9 separate material UV pair per resident vertex', () => {
   }
   at += materialUvs.length * 4;
   assert(dv.getUint32(at, true) === 0, 'textured face unexpectedly carries collision triangles'); at += 4;
+  assert(dv.getUint32(at, true) === 0, 'textured face unexpectedly declares a glass slot'); at += 4;
   assert(at === bytes.byteLength, 'material UV payload size drifted');
 });
 
@@ -98,6 +129,7 @@ test('v10 carries exact saved-Outliner collision triangles after material UVs', 
     assert(Math.abs(dv.getFloat32(at + i * 4, true) - collisionTriangles[i]!) < 1e-6, `collision coordinate ${i} changed`);
   }
   at += collisionTriangles.length * 4;
+  assert(dv.getUint32(at, true) === 0, 'sloped wall unexpectedly declares a glass slot'); at += 4;
   assert(at === bytes.byteLength, 'exact collision payload size drifted');
 });
 

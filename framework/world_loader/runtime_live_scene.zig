@@ -218,8 +218,10 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
     // No texture slots, or no per-slot mats (ghost / unskinned new placement) → the whole
     // mesh on one optional override (back-compat: a single-surface prop's lone skin).
     // A door MUST split even without material overrides: its leaf slot needs
-    // an independent node for the hinge animation.
-    if (mesh.door == null and (mesh.slots.len == 0 or r.mats.len == 0)) {
+    // an independent node for the hinge animation. A mesh carrying a Studio
+    // glass slot (req_4707) must split too: its trailing run draws translucent
+    // while the body stays opaque — one whole-mesh node cannot do both.
+    if (mesh.door == null and mesh.glass_slot_plus_one == 0 and (mesh.slots.len == 0 or r.mats.len == 0)) {
         const override: ?[]const u8 = if (r.mats.len > 0 and r.mats[0] != 0) self.live_mat_keys.get(r.mats[0]) else null;
         // A painted resident mesh carrying GENUINELY TRANSLUCENT texels keeps its
         // draw out of the opaque depth-writing pass, so it blends over the world
@@ -260,10 +262,15 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
         // is Studio-marked leaf glass. A placed live mesh has no baked material
         // ref for that slot, so route it explicitly through the transparent
         // depth-write-OFF pass. Its atlas alpha remains authoritative.
-        const live_door_glass = alpha == null and if (mesh.door) |door|
+        // req_4707: a door-less mesh's declared glass slot (wire v11 — the
+        // model's trailing Studio glass run) routes exactly the same way; an
+        // untextured window's panes have no other carrier for translucency.
+        const door_glass = if (mesh.door) |door|
             live_mesh_doors.routeSlotTransparent(si, door.leaf_slot, mesh.slots.len, mesh.texture_has_translucency)
         else
             false;
+        const glass_run = mesh.glass_slot_plus_one > 0 and si + 1 >= @as(usize, mesh.glass_slot_plus_one);
+        const live_door_glass = alpha == null and (door_glass or glass_run);
         // req_3428: the one exception to the textured-alpha route is a slot
         // carrying a LIVE MATERIAL REGION — it stays opaque so the region
         // overlay wins at equal depth, and the transparent glass shell then

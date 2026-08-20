@@ -586,7 +586,23 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
                 };
                 const material_ref = if (si < inst.slot_materials.len) inst.slot_materials[si] else 0;
                 const leaf_node_index = self.kid_list.items.len;
-                try appendMeshPropNode(self, mesh, inst, key, slot.start, slot.count, material_ref, null, null);
+                // req_4707: a door-less mesh's declared Studio glass slot (wire
+                // v11) routes through the transparent pass in the BAKED draw too,
+                // with the same flat-glass alpha + tint the live path applies —
+                // an untextured window's panes have no atlas alpha to carry them.
+                const glass_run = mesh.door == null and mesh.glass_slot_plus_one > 0 and si + 1 >= @as(usize, mesh.glass_slot_plus_one);
+                const slot_alpha: ?f32 = if (glass_run)
+                    (if (mesh.tex_rgba != null) m_state.LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else m_state.LIVE_DOOR_FLAT_GLASS_ALPHA)
+                else
+                    null;
+                try appendMeshPropNode(self, mesh, inst, key, slot.start, slot.count, material_ref, slot_alpha, null);
+                if (glass_run and mesh.tex_rgba == null) {
+                    for (self.kid_list.items[leaf_node_index..]) |*node| {
+                        node.scene3d_color_r = m_state.GLASS_TINT[0];
+                        node.scene3d_color_g = m_state.GLASS_TINT[1];
+                        node.scene3d_color_b = m_state.GLASS_TINT[2];
+                    }
+                }
                 // req_1864/req_1908: bind the door's leaf node range to its live
                 // machine; stepCookedDoors owns the leaf transform every frame
                 // (swings it about the hinge), so no instant drop here. req_2020:
