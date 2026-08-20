@@ -8,6 +8,8 @@ line per piece and BATCH_DONE at the end (same polling grammar as batch3d.py).
 Env knobs:
   T2_DECIMATE  decimation target faces passed to o_voxel to_glb   (default 300000)
   T2_TEX       texture size                                       (default 2048)
+  T2_SEED      generation seed                                    (default 42)
+  T2_PIPELINE  '512' | '1024' | '1024_cascade' | '1536_cascade'   (default: model config)
 """
 import os
 os.environ.setdefault("ATTN_BACKEND", "sdpa")  # no flash-attn on this lane (torch 2.9.1+cu128)
@@ -30,6 +32,8 @@ IN_DIR = "/workspace/in-t2"
 OUT_DIR = "/workspace/out-t2"
 DECIMATE = int(os.environ.get("T2_DECIMATE", "300000"))
 TEX = int(os.environ.get("T2_TEX", "2048"))
+SEED = int(os.environ.get("T2_SEED", "42"))
+PIPE_TYPE = os.environ.get("T2_PIPELINE") or None
 
 images = sorted(
     p for pat in ("*.png", "*.jpg", "*.jpeg", "*.webp")
@@ -54,7 +58,7 @@ for path in todo:
     t0 = time.time()
     try:
         image = Image.open(path)
-        mesh = pipeline.run(image)[0]
+        mesh = pipeline.run(image, seed=SEED, pipeline_type=PIPE_TYPE)[0]
         mesh.simplify(16777216)  # nvdiffrast vertex limit, per upstream example.py
         glb = o_voxel.postprocess.to_glb(
             vertices=mesh.vertices,

@@ -46,7 +46,7 @@ if ! step basics; then
   # must stay --no-deps or pip drags in a second torch (the image ships none).
   $PIP install -q torchvision==0.24.1 --no-deps
   $PIP install -q imageio imageio-ffmpeg tqdm easydict opencv-python-headless ninja \
-    trimesh transformers pandas lpips zstandard kornia timm "huggingface_hub[cli]"
+    trimesh transformers pandas lpips zstandard kornia timm einops "huggingface_hub[cli]"
   $PIP install -q git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
   done_step basics
 fi
