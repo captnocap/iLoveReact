@@ -13,6 +13,14 @@ import { openingWorldPose } from './openingTools';
 import { architectureHostLive } from '../../../runtime/game/build';
 import type { MeshRef, ResidentMesh } from './meshProps';
 
+/** Wall-clock ms. NOT performance.now(): the runtime shims it to the host's
+ * __jsTick timestamp, which is FROZEN for the whole tick — every intra-tick
+ * phase would read 0.0. V8's real Date.now() resolves the sub-tick phases this
+ * once-per-placement attribution needs. */
+export function nowMs(): number {
+  return Date.now();
+}
+
 const BUNDLE_MAGIC = 0x42414a52; // "RJAB" little-endian
 const BUNDLE_VERSION = 1;
 const WALL_SECTION_VERSION = 1;
@@ -373,10 +381,13 @@ export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: 
     return;
   }
   try {
+    const t0 = nowMs();
     const bundle = architectureHost.compile(source);
+    const tCompile = nowMs();
     const sourceHash = bundleSourceHashHex(bundle);
     const bands = decodeWallRenderBands(bundle);
     const floors = decodeFloorTriangles(bundle);
+    const tDecode = nowMs();
     const byRole = new Map<WallRenderBand['role'], WallRenderBand[]>();
     for (const band of bands) {
       const group = byRole.get(band.role);
@@ -461,8 +472,12 @@ export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: 
       }
     }
     if (mounted) console.warn(`[architecture] ${mounted} opening kit model(s) mounted in their cuts`);
+    const tMesh = nowMs();
     LIVE = { source, openingDepthsU, meshes, refs, collideRows: collideRows(source, bands) };
-    console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) + ${floors.length} floor tri(s) in ${floorFaces.size} room(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s)`);
+    const tDone = nowMs();
+    // One aggregate line per bake (V27: per-placement, never per-frame) so a
+    // slow placement attributes to a phase instead of an opaque jsTick.
+    console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) + ${floors.length} floor tri(s) in ${floorFaces.size} room(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s) | compile=${(tCompile - t0).toFixed(1)}ms decode=${(tDecode - tCompile).toFixed(1)}ms mesh=${(tMesh - tDecode).toFixed(1)}ms collide=${(tDone - tMesh).toFixed(1)}ms`);
   } catch (error) {
     console.error(`[architecture] live wall bake FAILED — walls not rendered: ${error instanceof Error ? error.message : String(error)}`);
     LIVE = { source, openingDepthsU, meshes: [], refs: [], collideRows: [] };

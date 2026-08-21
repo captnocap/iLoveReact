@@ -21,7 +21,7 @@ import { runtimeCompiledPaintAtlas } from '../data/paintAtlasCompiler';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING, resolveDoorHinge, resolveDoorLeafPart } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
-import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from './architectureBake';
+import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes, nowMs } from './architectureBake';
 import { compileOutlinerCollision } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
 import { compileTextureSlotMesh } from '../model/modelTextureSlots';
@@ -228,6 +228,7 @@ export function pushLiveWorld(
     if (pieces.length) console.warn(`[place] live push SKIPPED — node=${nodeId} door=${typeof g.__compiled_world_set_live_pieces}`);
     return false;
   }
+  const tPushStart = nowMs();
   // Semantic wall collision (req_4473): engine-derived oriented collide-only
   // rows (r < 0) ride the same instance stream as piece boxes.
   const pieceRows = pieceInstanceRows(pieces);
@@ -315,6 +316,10 @@ export function pushLiveWorld(
     }
   }
   pushLiveMaterialRegions(pieces, authoredPieces);
+  const pushMs = nowMs() - tPushStart;
+  // Quiet when fast; one line per slow push so a laggy placement attributes
+  // here instead of to an opaque jsTick (V27: per-placement, never per-frame).
+  if (pushMs > 20) console.warn(`[place] live world push took ${pushMs.toFixed(1)}ms (${pieces.length} piece(s))`);
   return true;
 }
 
@@ -382,6 +387,7 @@ export function pushResidentMeshes(
   builtinFloraSpeciesIds?: readonly string[],
 ): boolean {
   if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
+  const t0 = nowMs();
   const meshes: ResidentMesh[] = [];
   let painted = 0;
   let skins = 0;
@@ -458,7 +464,11 @@ export function pushResidentMeshes(
   ));
   meshes.push(...liveFacadeResidentMeshes()); // graffiti facade quads (req_3057)
   meshes.push(...liveArchitectureResidentMeshes()); // semantic wall bands (req_4473)
-  g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
-  console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId}`);
+  const tCook = nowMs();
+  const lump = encodeResidentMeshes(meshes);
+  const tEncode = nowMs();
+  g.__compiled_world_set_resident_meshes(nodeId, lump);
+  const tPush = nowMs();
+  console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId} | cook=${(tCook - t0).toFixed(1)}ms encode=${(tEncode - tCook).toFixed(1)}ms (${(lump.length / 1024 / 1024).toFixed(1)}MB) push=${(tPush - tEncode).toFixed(1)}ms`);
   return true;
 }
