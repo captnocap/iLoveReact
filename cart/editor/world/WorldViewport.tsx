@@ -943,6 +943,15 @@ export default function WorldViewport(props: {
       residentPublishedRef.current = { nodeId, demand: residentDemand, architecture: props.architecture };
       return true;
     };
+    // Republish to an ALREADY-LIVE catalog in this same tick (req_4711): the
+    // ref push above already carries the new content-hash wall keys this commit
+    // minted, and the loader applies pending catalog + pending refs together
+    // before its next frame — so a same-tick push swaps atomically. Deferring
+    // it even one tick leaves every arch:* key unresolvable in between, and the
+    // whole map's walls flash out and back on each placement. The delayed start
+    // below remains the boot path only (first cook, loader node not up yet).
+    const liveNodeId = Number(loaderRef.current?.id ?? 0);
+    if (liveNodeId && residentPublishedRef.current?.nodeId === liveNodeId && push()) return;
     let tries = 0;
     let retry: any = null;
     const start = setTimeout(() => {
