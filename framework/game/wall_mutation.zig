@@ -194,6 +194,14 @@ pub fn openingSlots(
     while (row <= maximum_row) : (row += 1) {
         var column = minimum_column;
         while (column <= maximum_column) : (column += 1) {
+            // req_4720: straddling anchors never enumerate — the ghost snaps
+            // to flush or clear, the same legality insertOpening enforces.
+            if (openingStraddlesJunction(
+                source,
+                edge,
+                column + footprint.min_column,
+                column + footprint.max_column_exclusive,
+            )) continue;
             const proposed = OpeningPlacement{
                 .kind = openingKind(kit).?,
                 .kit_id = kit.catalog_id,
@@ -536,6 +544,15 @@ fn openingPlacementRejection(
             "the measured opening footprint does not fit inside the wall surface",
         );
     }
+    if (openingStraddlesJunction(source, edge, minimum_column, maximum_column)) {
+        return try ownedRejection(
+            allocator,
+            command,
+            .opening_junction_straddle,
+            &.{ edge.id, placement.kit_id },
+            "the opening straddles a junction — sit flush against the corner or clear of it",
+        );
+    }
     if (openingCollisionCode(entries, edge, placement, excluded_opening_id)) |code| {
         const detail = switch (code) {
             .opening_occupied_collision => "the opening occupied mask intersects another opening",
@@ -587,6 +604,45 @@ const WorldCell = struct {
     column_u: i64,
     row_u: i64,
 };
+
+/// The columns of THIS edge occupied by other walls' bodies at one of its end
+/// vertices (req_4720): each other incident edge intrudes half its thickness
+/// past the shared centerline vertex, rounded up to whole cells. 0 at a lone
+/// endpoint — no junction, no cavity.
+fn junctionOccupiedSpanU(
+    source: *const types.ArchitectureSource,
+    edge: *const types.WallEdge,
+    vertex_id: []const u8,
+) types.Unit {
+    var span: types.Unit = 0;
+    for (source.walls.edges) |*other| {
+        if (std.mem.eql(u8, other.id, edge.id)) continue;
+        if (!std.mem.eql(u8, other.start_vertex_id, vertex_id) and
+            !std.mem.eql(u8, other.end_vertex_id, vertex_id)) continue;
+        const half = @divTrunc(other.thickness_u + 1, 2);
+        if (half > span) span = half;
+    }
+    return span;
+}
+
+/// req_4720 (the corner window's black slit): an opening whose footprint edge
+/// lands strictly INSIDE a junction's occupied span cuts a cavity into the
+/// neighbour wall's hollow body — the seal law only covers FLUSH openings
+/// (req_4528), and clear placements never expose the corner. Flush or clear;
+/// never straddling.
+fn openingStraddlesJunction(
+    source: *const types.ArchitectureSource,
+    edge: *const types.WallEdge,
+    left_u: i64,
+    right_u: i64,
+) bool {
+    const start_span: i64 = junctionOccupiedSpanU(source, edge, edge.start_vertex_id);
+    if (left_u > 0 and left_u < start_span) return true;
+    const length: i64 = completeEdgeLengthUnits(source, edge);
+    const end_span: i64 = junctionOccupiedSpanU(source, edge, edge.end_vertex_id);
+    if (right_u < length and right_u > length - end_span) return true;
+    return false;
+}
 
 fn openingCollisionCode(
     entries: []const catalog.CatalogEntry,

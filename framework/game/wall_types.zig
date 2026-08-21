@@ -554,6 +554,11 @@ pub const ArchitectureRejectionCode = enum(u16) {
     split_intersects_surface_child,
     topology_degenerate,
     limit_exceeded,
+    /// req_4720: the opening's footprint edge lands strictly INSIDE another
+    /// incident wall's body span at a junction — flush against the shared
+    /// vertex is sealed (req_4528), clear of the corner is free, but a
+    /// straddling cut opens a cavity into the neighbour's interior.
+    opening_junction_straddle,
 };
 
 pub const RecordRef = struct {

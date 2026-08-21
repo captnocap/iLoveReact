@@ -174,6 +174,7 @@ pub const MutationRejectionTag = enum(u16) {
     split_intersects_surface_child = 17,
     topology_degenerate = 18,
     limit_exceeded = 19,
+    opening_junction_straddle = 20,
 };
 
 pub const Header = struct {

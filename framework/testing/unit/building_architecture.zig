@@ -2849,6 +2849,90 @@ fn countOpeningSurfaceRole(
     return count;
 }
 
+test "openings never straddle a junction: flush or clear, and slots skip the corner span (req_4720)" {
+    // Corner: wall A (0,0)->(64,0), wall B (0,0)->(0,64), both 4u thick — B's
+    // body intrudes 2u into A past the shared vertex. A window whose footprint
+    // edge lands strictly inside that span cuts a cavity into B's hollow body
+    // (the corner black slit): flush (left 0) is sealed by req_4528, clear
+    // (left >= 2) never exposes the corner, and the straddle in between is
+    // refused — as a missing slot pre-click and a typed rejection on insert.
+    const window = geometryOpeningKit("kit:corner-window", .window, -8, 8, 8, 24, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), window };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("a", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("b", 1, 0, 0, 0, 64, null, null));
+
+    var slots = try mutation.openingSlots(testing.allocator, &source, &entries, "a:e:0", "kit:corner-window");
+    defer slots.deinit(testing.allocator);
+    var flush_anchor = false;
+    var clear_anchor = false;
+    for (slots.values) |slot| {
+        const left = slot.column_u - 8;
+        try testing.expect(left == 0 or left >= 2); // never inside B's 2u span
+        if (left == 0) flush_anchor = true;
+        if (left == 2) clear_anchor = true;
+    }
+    try testing.expect(flush_anchor);
+    try testing.expect(clear_anchor);
+
+    var result = try mutation.applyCommand(testing.allocator, &source, &entries, .{
+        .command_id = "straddle",
+        .expected_revision = 2,
+        .operation = .{ .insert_opening = .{
+            .edge_id = "a:e:0",
+            .opening = .{
+                .opening_id = "straddle:o:0",
+                .kind = .window,
+                .kit_id = "kit:corner-window",
+                .column_u = 9,
+                .row_u = 0,
+                .facing_side = .a,
+                .hinge = .none,
+            },
+        } },
+    });
+    defer result.deinit(testing.allocator);
+    switch (result) {
+        .receipt => return error.TestUnexpectedResult,
+        .rejection => |rejection| try testing.expectEqual(
+            architecture.types.ArchitectureRejectionCode.opening_junction_straddle,
+            rejection.code,
+        ),
+    }
+}
+
+test "flush floating window at a junction restores the neighbour's end face across its rows (req_4720)" {
+    // Same corner as the door seal test, but the opening is a WINDOW floating
+    // mid-wall (rows 8..24): the seal must span exactly the window's rows —
+    // the cover below the sill and above the header stays intact (no end band
+    // there), so the corner cavity is closed top to bottom.
+    const window = geometryOpeningKit("kit:junction-window", .window, -8, 8, 8, 24, .none);
+    var entries = [_]architecture.CatalogEntry{ validWallStyle(), window };
+    var source = try emptyOwnedArchitectureSource(testing.allocator);
+    defer source.deinit(testing.allocator);
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("a", 0, 0, 0, 64, 0, null, null));
+    try applyExpectedDraw(testing.allocator, &source, &entries, drawWallCommand("b", 1, 0, 0, 0, 64, null, null));
+    try installGeometryOpenings(testing.allocator, &source, "a:e:0", &.{.{
+        .id = "corner-window",
+        .kind = .window,
+        .kit_id = "kit:junction-window",
+        .column_u = 8,
+        .row_u = 0,
+    }});
+    var bundle = try buildExpectedGeometry(testing.allocator, &source, &entries);
+    defer bundle.deinit(testing.allocator);
+    var junction_bands: usize = 0;
+    for (bundle.surfaces) |surface| {
+        if (!std.mem.eql(u8, surface.edge_id, "b:e:0") or surface.role != .end) continue;
+        if (surface.column_start_u != 0) continue;
+        junction_bands += 1;
+        try testing.expectEqual(@as(architecture.Unit, 8), surface.row_bottom_u);
+        try testing.expectEqual(@as(architecture.Unit, 24), surface.row_top_u);
+    }
+    try testing.expectEqual(@as(usize, 1), junction_bands);
+}
+
 test "flush door at a junction restores the neighbour's end face across the void (req_4528)" {
     // Wall A: (0,0)->(64,0). Wall B: (0,0)->(0,64). Door on A flush at the
     // shared vertex (footprint -10..10, column 10 -> left_u 0). A's body used
