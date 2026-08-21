@@ -550,12 +550,16 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
       ],
     },
     cmd('open-map'), cmd('open-file-explorer'), cmd('find-import-source'), cmd('import-model-file'), cmd('save-snapshot'),
-    // Export → Build Piece → <kind>. Nested so Export can grow other targets later.
+    // Export → one destination per child, each named for the SYSTEM that
+    // consumes it (req_4725: three near-synonymous "export" homes and twin
+    // door lanes exported models into the wrong system). Doors & Windows is
+    // the build palette's own category name — the kits land under exactly
+    // that label when placed.
     {
       kind: 'sub', id: 'Export', label: 'Export', icon: 'Upload', scope: 'model', children: [
-        { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
-        { kind: 'sub', id: 'Export Wall Opening', label: 'Wall Opening', icon: 'DoorOpen', scope: 'model', children: EXPORT_WALL_OPENING_COMMANDS.map((c) => cmd(c.id)) },
         { kind: 'sub', id: 'Export Prop', label: 'Prop', icon: 'Armchair', scope: 'model', children: EXPORT_PROP_COMMANDS.map((c) => cmd(c.id)) },
+        { kind: 'sub', id: 'Export Wall Opening', label: 'Doors & Windows', icon: 'DoorOpen', scope: 'model', children: EXPORT_WALL_OPENING_COMMANDS.map((c) => cmd(c.id)) },
+        { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
         { kind: 'sub', id: 'Export Flora', label: 'Flora', icon: 'Sprout', scope: 'model', children: EXPORT_FLORA_COMMANDS.map((c) => cmd(c.id)) },
         cmd('export-character'),
       ],

@@ -10,10 +10,26 @@ import {
   ARCHITECTURE_UNITS_PER_METER,
   type ArchitectureCatalogEntry,
   type ArchitectureFootprint,
+  type ArchitectureSource,
   type WallCell,
   type WallOpeningKind,
   type WallProfile,
 } from './architecture';
+
+/** How many placed openings in the source reference this catalog id (req_4725).
+ * An export that would RETIRE the id (re-export under a different kind mints a
+ * new one, or another lane replaces the declaration wholesale) while this is
+ * nonzero orphans those placements and bricks every wall verb with
+ * unknown_opening_kit — the exact incident this law exists to refuse. */
+export function placedOpeningsReferencing(source: ArchitectureSource, catalogId: string): number {
+  let count = 0;
+  for (const edge of source.walls.edges) {
+    for (const opening of edge.openings) {
+      if (opening.kitId === catalogId) count += 1;
+    }
+  }
+  return count;
+}
 
 /** Everything the viewport needs from the armed kit — projected once at tool
  * arm from the installed catalog entry, never re-read per frame. */

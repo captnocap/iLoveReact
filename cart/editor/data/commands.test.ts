@@ -303,15 +303,20 @@ test('New Mesh exposes every semantic build starter under one nested menu', () =
   assert(!COMMANDS.some((command) => command.id === 'new-model-player'), 'removed Player / NPC creation command remains registered');
 });
 
-test('Export Build Piece exposes explicit door-wall meanings without a door tile', () => {
+test('Export Build Piece carries base kinds only — doors live in ONE export home (req_4725)', () => {
   const exportMenu = menuNodes('File').find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export');
   const build = exportMenu?.children.find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export Build Piece');
   assert(!!build, 'File menu lost Export Build Piece');
   const commandIds = build!.children.filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
   const expected = BUILD_PIECE_EXPORT_TARGETS.map((target) => `export-build-piece-${target.id}`);
   assert(commandIds.join('|') === expected.join('|'), `build export menu drifted: ${commandIds.join(', ')}`);
-  assert(commandIds.includes('export-build-piece-door-wall'), 'Door Wall export is missing');
-  assert(!commandIds.includes('export-build-piece-door'), 'the unrelated door tile leaked into mesh export');
+  // The twin door lanes are RETIRED: doors and garage doors export through
+  // Doors & Windows (the opening-kit lane) and nowhere else — two menu homes
+  // for one meaning is how a kit lands in the wrong system.
+  assert(!commandIds.includes('export-build-piece-door-wall'), 'the retired Door Wall duplicate returned');
+  assert(!commandIds.includes('export-build-piece-garage-door-wall'), 'the retired Garage Door Wall duplicate returned');
+  const openings = exportMenu?.children.find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export Wall Opening');
+  assert(!!openings && openings.label === 'Doors & Windows', 'the opening-kit export must wear the palette vocabulary');
 });
 
 test('Export Prop exposes gameplay roles for intersections and transit stops', () => {

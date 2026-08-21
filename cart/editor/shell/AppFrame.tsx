@@ -129,7 +129,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
 import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand, setEdgeDimensionsCommand } from '../world/architectureCommand';
-import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, openingLatticeFill, snapOpeningSlot } from '../world/openingTools';
+import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, openingLatticeFill, placedOpeningsReferencing, snapOpeningSlot } from '../world/openingTools';
 import { architectureHost } from '../world/architectureHost';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
@@ -4517,6 +4517,25 @@ export default function AppFrame() {
         return;
       }
       const modelId = authoredModelIdForPackage(pkg.id);
+      // Identity guard (req_4724/req_4725): the catalog id ENCODES the kind, so
+      // re-exporting under a different kind retires the current id — and every
+      // placed opening referencing it would dangle, failing the whole source
+      // with unknown_opening_kit (no walls render, nothing draws). Refuse while
+      // placements reference it; same-kind re-export keeps the id and stays
+      // the normal update flow.
+      const priorKit = pkg.placeable?.as === 'architecture-kit' ? pkg.placeable : null;
+      if (priorKit && priorKit.semanticKind !== target.kind) {
+        const placed = placedOpeningsReferencing(state.architecture, priorKit.install.catalogId);
+        if (placed > 0) {
+          setState((prev) => ({
+            ...prev,
+            openMenu: null,
+            actionMenu: 'File',
+            status: `Export refused: "${pkg.name}" is installed as ${String(priorKit.semanticKind)} (${priorKit.install.catalogId}) and ${placed} placed opening(s) reference it — re-export as the same kind, or delete those placements first.`,
+          }));
+          return;
+        }
+      }
       // Door-family kinds keep the named-part contract: the Outliner names
       // WHICH geometry swings before any declaration is written, exactly like
       // the legacy Door Wall compiler — a coincidental name never promotes.
@@ -4626,6 +4645,23 @@ export default function AppFrame() {
         return;
       }
       const modelId = authoredModelIdForPackage(pkg.id);
+      // Identity guard (req_4725): these lanes REPLACE the manifest's placeable
+      // wholesale — exporting an installed opening kit as a prop/piece/flora
+      // retires its catalog id and orphans every placed opening referencing it
+      // (the unknown_opening_kit brick). Refuse while placements reference it.
+      const priorKit = pkg.placeable?.as === 'architecture-kit' ? pkg.placeable : null;
+      if (priorKit) {
+        const placed = placedOpeningsReferencing(state.architecture, priorKit.install.catalogId);
+        if (placed > 0) {
+          setState((prev) => ({
+            ...prev,
+            openMenu: null,
+            actionMenu: 'File',
+            status: `Export refused: "${pkg.name}" is an installed ${String(priorKit.semanticKind)} kit (${priorKit.install.catalogId}) and ${placed} placed opening(s) reference it — delete those placements first, or keep exporting it under Doors & Windows.`,
+          }));
+          return;
+        }
+      }
       // Export implies save (req_2753): journal the resident HOST mesh into the package
       // first (mesh/doc.blob + parts.json + base.blob), so the geometry captured below —
       // and every future boot — resolves the mesh YOU SEE, never the parts' primitive
