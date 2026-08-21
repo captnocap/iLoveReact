@@ -19,6 +19,7 @@ const state_mod = @import("../state/dirty.zig");
 const build_options = @import("build_options");
 const USE_V8 = if (@hasDecl(build_options, "use_v8")) build_options.use_v8 else false;
 const js_vm = @import("../v8_runtime.zig");
+const input_echo = @import("input_echo.zig");
 
 pub const MAX_INPUTS = 128;
 // Large editor surfaces like sweatshop need materially more than 4 KiB or the
@@ -40,6 +41,10 @@ pub const InputState = struct {
     last_synced_len: u32 = 0,
     last_synced_buf: [BUF_SIZE]u8 = [_]u8{0} ** BUF_SIZE,
     last_synced_valid: bool = false,
+    // Texts dispatched via onChange whose controlled-value echoes are still
+    // in flight — syncValue must never rewrite the buffer from one of these
+    // (req_4713 fast-typing shuffle). See primitive/input_echo.zig.
+    echo_ring: input_echo.EchoRing = .{},
     // Props forwarded from the node side
     editable: bool = true,
     secure: bool = false,
@@ -173,6 +178,11 @@ pub fn focus(id: u8) void {
     }
     if (focused_id) |prev| {
         if (prev < MAX_INPUTS) {
+            // Focus boundary: the blurred input can't type further, so any
+            // still-in-flight echo may safely re-apply as authored — and
+            // dropping the history keeps a batched-away intermediate text
+            // from false-acking an equal cart-authored value much later.
+            inputs[prev].echo_ring.reset();
             if (on_blur_callbacks[prev]) |cb| cb(callback_contexts[prev]);
         }
     }
@@ -186,6 +196,7 @@ pub fn unfocus() void {
     if (focused_id) |prev| {
         focused_id = null;
         if (prev < MAX_INPUTS) {
+            inputs[prev].echo_ring.reset();
             if (on_blur_callbacks[prev]) |cb| cb(callback_contexts[prev]);
         }
         return;
@@ -453,6 +464,17 @@ fn trimToCodepoints(bytes: []const u8, max_cp: u32) []const u8 {
     return bytes[0..i];
 }
 
+/// Every onChange dispatch flows through here so the input remembers what
+/// text it told JS about. The controlled-value echo of that dispatch lands
+/// one or more paint frames later (reconciler commits drain at the next
+/// frame), and syncValue uses the ring to tell a self-echo — which must not
+/// disturb the buffer or caret — from a cart-authored value.
+fn fireChange(id: u8) void {
+    const inp = &inputs[id];
+    inp.echo_ring.noteDispatched(inp.buf[0..inp.len]);
+    if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+}
+
 fn dispatchInputChange(id: u8) void {
     // V8 carts receive input change through the per-slot callback installed by
     // v8_app.zig, which can translate slot -> React node id before dispatch.
@@ -497,7 +519,7 @@ pub fn handleTextInput(text: [*:0]const u8) void {
             }
             cursor_blink = 0;
             cursor_visible = true;
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
             if (changed) dispatchInputChange(id);
             return;
         }
@@ -508,7 +530,7 @@ pub fn handleTextInput(text: [*:0]const u8) void {
     if (insertBytes(inp, bytes)) {
         cursor_blink = 0;
         cursor_visible = true;
-        if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+        fireChange(id);
         dispatchInputChange(id);
     }
 }
@@ -587,7 +609,7 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             cursor_blink = 0;
             cursor_visible = true;
             if (inp.len != prev_len) {
-                if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+                fireChange(id);
             }
             return true;
         }
@@ -613,7 +635,7 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
             cursor_blink = 0;
             cursor_visible = true;
             if (inp.len != prev_len) {
-                if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+                fireChange(id);
             }
             return true;
         }
@@ -662,7 +684,7 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
         cursor_blink = 0;
         cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
         }
         return true;
     }
@@ -683,7 +705,7 @@ pub fn handleKey(sym: c_int, mods: u16) bool {
         cursor_blink = 0;
         cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
         }
         return true;
     }
@@ -753,7 +775,7 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
                 _ = c.SDL_SetClipboardText(@ptrCast(&clip_buf));
                 pushUndo(id, inp);
                 _ = deleteSelection(inp);
-                if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+                fireChange(id);
             }
         }
         return true;
@@ -786,7 +808,7 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
                 cursor_blink = 0;
                 cursor_visible = true;
                 if (inp.len != prev_len) {
-                    if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+                    fireChange(id);
                 }
             }
         }
@@ -798,14 +820,14 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
         if (!inp.editable) return true;
         const did = if (shift) doRedo(id, inp) else doUndo(id, inp);
         if (did) {
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
         }
         return true;
     }
     if (sym == c.SDLK_Y) {
         if (!inp.editable) return true;
         if (doRedo(id, inp)) {
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
         }
         return true;
     }
@@ -830,7 +852,7 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
         cursor_blink = 0;
         cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
         }
         return true;
     }
@@ -856,7 +878,7 @@ pub fn handleCtrlKey(sym: c_int, mods: u16) bool {
         cursor_blink = 0;
         cursor_visible = true;
         if (inp.len != prev_len) {
-            if (on_change_callbacks[id]) |cb| cb(callback_contexts[id]);
+            fireChange(id);
         }
         return true;
     }
@@ -927,7 +949,33 @@ pub fn syncValue(id: u8, text: []const u8) void {
         return;
     }
 
+    // Value already equals the live buffer — the round trip converged.
+    // Adopt it as the baseline and drop the in-flight history; rewriting
+    // would only re-run the cursor clamp for nothing.
+    if (new_len == inp.len and std.mem.eql(u8, inp.buf[0..inp.len], text[0..new_len])) {
+        inp.echo_ring.reset();
+        @memcpy(inp.last_synced_buf[0..new_len], text[0..new_len]);
+        inp.last_synced_len = new_len;
+        inp.last_synced_valid = true;
+        return;
+    }
+
+    // A text this input itself dispatched, coming back around as the cart's
+    // controlled-value echo. By the time it lands the user may have typed
+    // further keystrokes; rewriting the buffer from it would resurrect old
+    // text and drag the caret backwards — the req_4713 fast-typing shuffle
+    // ("industrial" → "inustriald"). Take it as the new sync baseline and
+    // leave the live buffer and caret alone.
+    if (inp.echo_ring.classify(text[0..new_len]) == .echo) {
+        @memcpy(inp.last_synced_buf[0..new_len], text[0..new_len]);
+        inp.last_synced_len = new_len;
+        inp.last_synced_valid = true;
+        return;
+    }
+
     // Real change from the cart side — rewrite buffer, keep cursor clamped.
+    // (classify() already cleared the ring: commits apply in order, so no
+    // earlier dispatch can legitimately echo after a cart-authored value.)
     @memcpy(inp.buf[0..new_len], text[0..new_len]);
     inp.len = new_len;
     if (inp.cursor > new_len) inp.cursor = new_len;

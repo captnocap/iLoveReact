@@ -1593,6 +1593,25 @@ pub fn build(b: *std.Build) void {
     const slider_math_test_step = b.step("test-slider-math", "Run the slider math unit tests");
     slider_math_test_step.dependOn(&run_slider_math_test.step);
 
+    // ── TextInput controlled-value echo-ring unit tests (req_4713) ──
+    const input_echo_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/input_echo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    input_echo_test_mod.addImport("input_echo", b.createModule(.{
+        .root_source_file = b.path("framework/primitive/input_echo.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    const input_echo_test = b.addTest(.{
+        .name = "input-echo-test",
+        .root_module = input_echo_test_mod,
+    });
+    const run_input_echo_test = b.addRunArtifact(input_echo_test);
+    const input_echo_test_step = b.step("test-input-echo", "Run the TextInput echo-ring unit tests");
+    input_echo_test_step.dependOn(&run_input_echo_test.step);
+
     // ── system memory telemetry unit tests ──────────────────────────
     const system_memory_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/system_memory.zig"),
