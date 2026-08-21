@@ -1677,6 +1677,13 @@ const cloneCutFace = (face: EditMeshFace): EditMeshFace => ({
   uv: face.uv?.map((p) => [p[0], p[1]] as V2),
 });
 
+// A mid-walk triangle passes the loop ring through only when the crossing keeps
+// at least this much of the incoming rung's travel direction. Below it the
+// crossing is essentially sideways, where the reference's corner-dive to the
+// opposed vertex IS the straight continuation. Parity twin of the native walk's
+// TRI_PASS_MIN_ALIGNMENT in framework/gpu/indexed_edit_mesh.zig.
+const TRI_PASS_MIN_ALIGNMENT = 0.1;
+
 /** The js-bench-editor/Blockbench loop walk, expressed against EditMesh's real
  * vertex ids and ordered face loops. `offset` is a distance along the selected
  * side edge. A quad continues through its opposite edge; boundaries close the
@@ -1734,7 +1741,7 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
     centers.set(key, id);
     return id;
   };
-  const neighbor = (current: number, edge: [number, number]): number | undefined => {
+  const neighbor = (current: number, edge: [number, number], ignoreProcessed = false): number | undefined => {
     // Parity with the native walk (req_3435): the loop continues only across a REAL
     // shared edge. Containment alone also matches faces holding both verts
     // diagonally, and splitting along a diagonal rebuilds the loop as a bow-tie.
@@ -1752,7 +1759,7 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
     // edge; the true manifold neighbor is whatever remains.
     const sameVertexSet = (a: number[], b: number[]): boolean => a.length === b.length && a.every((v) => b.includes(v));
     for (let fi = 0; fi < faces.length; fi += 1) {
-      if (fi === current || processed.has(fi) || faces[fi].loop.length < 3) continue;
+      if (fi === current || (!ignoreProcessed && processed.has(fi)) || faces[fi].loop.length < 3) continue;
       if (!hasEdge(faces[fi].loop)) continue;
       if (sameVertexSet(faces[fi].loop, faces[current].loop)) continue;
       let sandwiched = false;
@@ -1771,7 +1778,123 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
     : offsetRatio;
   const lerpUV = (a: V2, b: V2, t: number): V2 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 
-  const splitFace = (faceIndex: number, sideInput: [number, number], doubleSide: boolean, cutNo: number): boolean => {
+  // Triangle pass-through (req_4728–req_4730): the reference walk terminates at
+  // every triangle, which kills the ring on chamfered solids where a triangle
+  // sits mid-loop. Blender crosses it — entry point to exit point, one triangle
+  // + one quad — and the ring survives. A crossing that would turn essentially
+  // sideways, or a first rung with no surface neighbor behind either candidate
+  // exit edge, declines and falls back to the reference terminal split. Parity
+  // twin of the native walk in framework/gpu/indexed_edit_mesh.zig.
+  const tryTrianglePassThrough = (
+    faceIndex: number,
+    side: [number, number],
+    opposed: number,
+    doubleSide: boolean,
+    cutNo: number,
+    ratio: number,
+    prevDir: V3,
+  ): boolean => {
+    const travelLength = Math.hypot(prevDir[0], prevDir[1], prevDir[2]);
+    if (travelLength <= 1e-9) return false;
+    const travel: V3 = [prevDir[0] / travelLength, prevDir[1] / travelLength, prevDir[2] / travelLength];
+    const source = faces[faceIndex];
+    const side0Position = verts[side[0]];
+    const entrySpan = sub(verts[side[1]], side0Position);
+    const entrySpanLength = Math.hypot(entrySpan[0], entrySpan[1], entrySpan[2]);
+    if (entrySpanLength <= 1e-9) return false;
+    const entryVertex = centerVertex(side, ratio);
+    const entryPosition = verts[entryVertex];
+    const entryOffset = sub(entryPosition, side0Position);
+    // The station's real parameter from side[0]: a cache-hit vertex minted by the
+    // neighbor may sit at the complementary phase of `ratio`.
+    const entryParameter = Math.max(0, Math.min(1, Math.hypot(entryOffset[0], entryOffset[1], entryOffset[2]) / entrySpanLength));
+    let bestIsolated: number | null = null;
+    let bestParameter = 0;
+    let bestAlignment = TRI_PASS_MIN_ALIGNMENT;
+    for (const isolatedCandidate of side) {
+      const isolatedParameter = isolatedCandidate === side[0] ? entryParameter : 1 - entryParameter;
+      const cornerPosition = verts[isolatedCandidate];
+      const opposedPosition = verts[opposed];
+      const exitSpan = sub(opposedPosition, cornerPosition);
+      if (Math.hypot(exitSpan[0], exitSpan[1], exitSpan[2]) <= 1e-9) continue;
+      const exitPosition: V3 = [
+        cornerPosition[0] + exitSpan[0] * isolatedParameter,
+        cornerPosition[1] + exitSpan[1] * isolatedParameter,
+        cornerPosition[2] + exitSpan[2] * isolatedParameter,
+      ];
+      const crossing = sub(exitPosition, entryPosition);
+      const crossingLength = Math.hypot(crossing[0], crossing[1], crossing[2]);
+      if (crossingLength <= 1e-9) continue;
+      const alignment = dot([crossing[0] / crossingLength, crossing[1] / crossingLength, crossing[2] / crossingLength], travel);
+      if (alignment <= bestAlignment) continue;
+      // The first rung only re-routes when the ring has somewhere to go; an
+      // end-of-strip triangle keeps the reference terminal split.
+      if (cutNo === 0 && neighbor(faceIndex, [isolatedCandidate, opposed], true) == null) continue;
+      bestAlignment = alignment;
+      bestIsolated = isolatedCandidate;
+      bestParameter = isolatedParameter;
+    }
+    if (bestIsolated == null) return false;
+    // Orient the exit edge so `lerp(edge[0], edge[1], ratio)` reproduces the
+    // wanted station — the native repositionCutVertices re-derives every cut
+    // vertex from its stored ordered edge with the raw comb ratio, and the port
+    // must mint the identical position.
+    const exitEdge: [number, number] = Math.abs(bestParameter - ratio) <= Math.abs(bestParameter - (1 - ratio))
+      ? [bestIsolated, opposed]
+      : [opposed, bestIsolated];
+    const exitVertex = centerVertex(exitEdge, ratio);
+    const exitPosition = verts[exitVertex];
+    const entryUV = lerpUV(uvAt(source, side[0]), uvAt(source, side[1]), entryParameter);
+    const exitUV = lerpUV(uvAt(source, bestIsolated), uvAt(source, opposed), bestParameter);
+    // Insert both stations into the parent loop in walk order, then split along
+    // the entry→exit chord; deriving both pieces from the parent's own cyclic
+    // order keeps the winding correct for either arrival orientation of `side`.
+    const ringLoop: number[] = [];
+    const ringUVs: V2[] = [];
+    for (let corner = 0; corner < source.loop.length; corner += 1) {
+      const vertexId = source.loop[corner];
+      const nextId = source.loop[(corner + 1) % source.loop.length];
+      ringLoop.push(vertexId);
+      ringUVs.push(uvAt(source, vertexId));
+      const onEntry = (vertexId === side[0] && nextId === side[1]) || (vertexId === side[1] && nextId === side[0]);
+      const onExit = (vertexId === bestIsolated && nextId === opposed) || (vertexId === opposed && nextId === bestIsolated);
+      if (onEntry) { ringLoop.push(entryVertex); ringUVs.push(entryUV); }
+      else if (onExit) { ringLoop.push(exitVertex); ringUVs.push(exitUV); }
+    }
+    if (ringLoop.length !== 5) return false;
+    const entryAt = ringLoop.indexOf(entryVertex);
+    const exitAt = ringLoop.indexOf(exitVertex);
+    const firstLength = ((exitAt + 5 - entryAt) % 5) + 1;
+    const firstLoop: number[] = [];
+    const firstUVs: V2[] = [];
+    for (let i = 0; i < firstLength; i += 1) { firstLoop.push(ringLoop[(entryAt + i) % 5]); firstUVs.push(ringUVs[(entryAt + i) % 5]); }
+    const secondLoop: number[] = [];
+    const secondUVs: V2[] = [];
+    for (let i = 0; i < 7 - firstLength; i += 1) { secondLoop.push(ringLoop[(exitAt + i) % 5]); secondUVs.push(ringUVs[(exitAt + i) % 5]); }
+    // faceIndex keeps the piece holding side[0] — the same convention the quad
+    // split follows, so the comb recursion below lands in it.
+    const firstHoldsSide0 = firstLoop.includes(side[0]);
+    faces[faceIndex] = {
+      ...source,
+      loop: firstHoldsSide0 ? firstLoop : secondLoop,
+      uv: firstHoldsSide0 ? firstUVs : secondUVs,
+    };
+    faces.push({
+      ...source,
+      loop: firstHoldsSide0 ? secondLoop : firstLoop,
+      uv: firstHoldsSide0 ? secondUVs : firstUVs,
+    });
+
+    if (cutNo + 1 < cutCount) splitFace(faceIndex, [entryVertex, side[0]], doubleSide, cutNo + 1, prevDir);
+    if (cutNo !== 0) return true;
+    const next = neighbor(faceIndex, [bestIsolated, opposed]);
+    if (next != null) {
+      splitFace(next, [bestIsolated, opposed], faces[next].loop.length === 4, 0, sub(exitPosition, entryPosition));
+    }
+    return true;
+  };
+
+  const splitFace = (faceIndex: number, sideInput: [number, number], doubleSide: boolean, cutNo: number, prevDir?: V3): boolean => {
     const source = faces[faceIndex];
     if (!source || source.loop.length < 2) return false;
     processed.add(faceIndex);
@@ -1803,18 +1926,20 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
         uv: [uvAt(source, side[1]), sideUV, oppositeUV, uvAt(source, opposite[1])],
       });
 
-      if (cutNo + 1 < cutCount) splitFace(faceIndex, [centerSide, side[0]], doubleSide, cutNo + 1);
+      if (cutNo + 1 < cutCount) splitFace(faceIndex, [centerSide, side[0]], doubleSide, cutNo + 1, prevDir);
       if (cutNo !== 0) return true;
+      const rungForward = sub(verts[centerOpposite], verts[centerSide]);
       const next = neighbor(faceIndex, opposite);
-      if (next != null) splitFace(next, opposite, faces[next].loop.length === 4, 0);
+      if (next != null) splitFace(next, opposite, faces[next].loop.length === 4, 0, rungForward);
       if (doubleSide) {
         const previous = neighbor(faceIndex, side);
         if (previous != null) {
+          const rungBackward: V3 = [-rungForward[0], -rungForward[1], -rungForward[2]];
           const previousOpposite = faces[previous].loop.filter((vi) => !side.includes(vi));
           if (previousOpposite.length === 2) {
-            splitFace(previous, previousOpposite as [number, number], faces[previous].loop.length === 4, 0);
+            splitFace(previous, previousOpposite as [number, number], faces[previous].loop.length === 4, 0, rungBackward);
           } else if (previousOpposite.length === 1) {
-            splitFace(previous, side, false, 0);
+            splitFace(previous, side, false, 0, rungBackward);
           }
         }
       }
@@ -1824,6 +1949,8 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
     if (source.loop.length === 3) {
       const opposed = source.loop.find((vi) => !side.includes(vi));
       if (opposed == null) return false;
+
+      if (prevDir && tryTrianglePassThrough(faceIndex, side, opposed, doubleSide, cutNo, ratio, prevDir)) return true;
 
       if (options.direction > 2) {
         const opposite: [number, number] = [side[options.direction % side.length], opposed];
@@ -1853,15 +1980,16 @@ export function loopCutFromFace(m: EditMesh, options: LoopCutOptions): EditMesh 
             faces[fi].uv?.reverse();
           }
         }
-        if (cutNo + 1 < cutCount) splitFace(faceIndex, [centerSide, otherQuad], doubleSide, cutNo + 1);
+        if (cutNo + 1 < cutCount) splitFace(faceIndex, [centerSide, otherQuad], doubleSide, cutNo + 1, prevDir);
         if (cutNo !== 0) return true;
+        const rungForward = sub(verts[centerOpposite], verts[centerSide]);
         const next = neighbor(faceIndex, opposite);
-        if (next != null) splitFace(next, opposite, faces[next].loop.length === 4, 0);
+        if (next != null) splitFace(next, opposite, faces[next].loop.length === 4, 0, rungForward);
         if (doubleSide) {
           const previous = neighbor(faceIndex, side);
           if (previous != null) {
             const previousOpposite = faces[previous].loop.filter((vi) => !side.includes(vi));
-            if (previousOpposite.length === 2) splitFace(previous, previousOpposite as [number, number], faces[previous].loop.length === 4, 0);
+            if (previousOpposite.length === 2) splitFace(previous, previousOpposite as [number, number], faces[previous].loop.length === 4, 0, [-rungForward[0], -rungForward[1], -rungForward[2]]);
           }
         }
         return true;

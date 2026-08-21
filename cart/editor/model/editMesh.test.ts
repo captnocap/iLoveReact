@@ -149,19 +149,20 @@ test('loop cut follows the closed tapered quad ring by vertex identity', () => {
   for (const face of cut.faces) assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `cut emitted a crossed/degenerate face: ${face.loop.join(',')}`);
 });
 
-test('the cylinder primitive has reference fan caps that loop cut can enter', () => {
+test('a side-belt loop cut circulates the closed cylinder ring (n-gon caps, req_3763)', () => {
   const segments = 16;
   const source = cylinder(1, 2, segments);
-  assert(source.verts.length === segments * 2 + 2, `cylinder is missing its cap centers: ${source.verts.length}`);
-  assert(source.faces.length === segments * 3, `cylinder does not have side quads plus two cap fans: ${source.faces.length}`);
-  assert(source.faces.slice(segments).every((face) => face.loop.length === 3), 'a cylinder cap remained an n-gon');
+  assert(source.verts.length === segments * 2, `cylinder should have two rings only: ${source.verts.length}`);
+  assert(source.faces.length === segments + 2, `cylinder should have side quads plus two n-gon caps: ${source.faces.length}`);
+  assert(source.faces.slice(segments).every((face) => face.loop.length === segments), 'a cylinder cap must be ONE authored n-gon (req_3763)');
 
-  // direction 1 enters the top and bottom rim edges. The reference walk splits
-  // those terminal fan triangles and stops at their existing center vertices.
-  const cut = loopCutFromFace(source, { face: 0, direction: 1, cuts: 1, offset: Math.sin(Math.PI / segments) });
-  assert(cut.faces.length === source.faces.length + 3, `side + two cap triangles should each split once, got ${cut.faces.length}`);
-  assert(cut.verts.length === source.verts.length + 2, `shared top/bottom rim cuts should mint two vertices, got ${cut.verts.length}`);
-  for (const face of cut.faces) assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `cap traversal emitted a degenerate face: ${face.loop.join(',')}`);
+  // direction 0 crosses the vertical side edges: the belt circulates every side
+  // quad once and closes; the authored n-gon caps stay untouched.
+  const cut = loopCutFromFace(source, { face: 0, direction: 0, cuts: 1, offset: 1 });
+  assert(cut.faces.length === segments * 2 + 2, `every side quad should split once, got ${cut.faces.length}`);
+  assert(cut.verts.length === segments * 3, `the belt should mint one vertex per side edge, got ${cut.verts.length}`);
+  assert(cut.faces.filter((face) => face.loop.length === segments).length === 2, 'a cap was subdivided by the side belt');
+  for (const face of cut.faces) assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `belt traversal emitted a degenerate face: ${face.loop.join(',')}`);
 });
 
 test('a terminal triangle is split and traversal stops there', () => {
@@ -172,6 +173,24 @@ test('a terminal triangle is split and traversal stops there', () => {
   const cut = loopCutFromFace(mesh, { face: 0, direction: 0, cuts: 1, offset: 0.5 });
   assert(cut.faces.length === 4, `quad + terminal tri should become four faces, got ${cut.faces.length}`);
   assert(cut.verts.length === 7, `the shared terminal edge should reuse its cut vertex, got ${cut.verts.length - mesh.verts.length}`);
+});
+
+test('a mid-ring triangle passes the loop through to the far quad (req_4728 chamfer)', () => {
+  // Quad A — triangle B — quad C, the chamfered-solid shape. The reference walk
+  // terminated inside B with a corner-dive to its apex; the pass-through crosses
+  // B at the ring station and keeps walking into C.
+  const mesh: EditMesh = {
+    verts: [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0], [4, 0, 0], [6, 0, 0], [6, 2, 0]],
+    faces: [{ loop: [0, 1, 2, 3] }, { loop: [2, 1, 4] }, { loop: [2, 4, 5, 6] }],
+  };
+  const cut = loopCutFromFace(mesh, { face: 0, direction: 1, cuts: 1, offset: 1 });
+  assert(cut.faces.length === 6, `quad+tri+quad should become six faces, got ${cut.faces.length}`);
+  assert(cut.verts.length === 11, `the ring should mint four stations, got ${cut.verts.length}`);
+  assert(cut.verts.some((v) => Math.hypot(v[0] - 3, v[1] - 1, v[2]) < 1e-6), 'missing the pass-through exit station at (3,1)');
+  for (const face of cut.faces) {
+    assert(face.loop.length === 3 || face.loop.length === 4, `pass-through emitted an n-gon: ${face.loop.length}`);
+    assert(faceNormalMagnitude(cut, face.loop) > 1e-6, `pass-through emitted a degenerate face: ${face.loop.join(',')}`);
+  }
 });
 
 test('a boundary is a successful partial ring, never a plane-style full slice', () => {
