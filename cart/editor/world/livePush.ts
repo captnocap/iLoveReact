@@ -404,21 +404,42 @@ function pushLiveMaterialRegions(pieces: readonly PlacedPiece[], authoredPieces?
 
 let lastRegionBindSignature = '';
 
-/** Keep the authored meshes RESIDENT so their placements can draw (req_2577).
- *  Returns false while the loader node / door isn't up yet — callers retry. */
-export function pushResidentMeshes(
-  nodeId: number,
-  authoredPieces: readonly AuthoredBuildPiece[],
-  floraSpecies: readonly AuthoredFloraSpecies[] = [],
-  builtinFloraSpeciesIds?: readonly string[],
-): boolean {
-  if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
-  const t0 = nowMs();
+/** One authored piece's cooked resident meshes: the base mesh + every paint
+ *  skin, plus the painted/skin tallies for the catalog log line. */
+type CookedResident = {
+  /** The package object the cook read — a replaced package record means the
+   *  model/paint on disk moved, so the cache entry is stale. */
+  pkg: ModelPackage | null;
+  meshes: ResidentMesh[];
+  painted: number;
+  skins: number;
+};
+
+/** Per-piece cook cache (req_4726): with 45 referenced meshes the full cook —
+ *  package reads, base64 atlas decodes, paint binding, collision + door
+ *  compile — measured ~1030ms of the ~1.1s a single WALL placement cost
+ *  (req_4715), because wall meshes share the catalog lump and force a full
+ *  re-push. The cooked meshes are pure functions of the piece object and its
+ *  package record, so those two identities ARE the freshness contract: every
+ *  flow that changes a model (export, save, paint compile) replaces one of
+ *  them and misses; a wall edit replaces neither and hits. Keyed weakly so
+ *  dead pieces drop with their demand set. */
+const cookedResidentByPiece = new WeakMap<AuthoredBuildPiece, CookedResident>();
+
+function cookAuthoredResident(ap: AuthoredBuildPiece): CookedResident {
+  const pkg = modelPackageById(ap.pkgId);
+  const cached = cookedResidentByPiece.get(ap);
+  if (cached && cached.pkg === pkg) return cached;
+  const cooked = cookAuthoredResidentFresh(ap, pkg);
+  cookedResidentByPiece.set(ap, cooked);
+  return cooked;
+}
+
+function cookAuthoredResidentFresh(ap: AuthoredBuildPiece, pkg: ModelPackage | null): CookedResident {
   const meshes: ResidentMesh[] = [];
   let painted = 0;
   let skins = 0;
-  for (const ap of [...authoredPieces, ...customFloraResidentAdapters(floraSpecies)]) {
-    const pkg = modelPackageById(ap.pkgId);
+  {
     const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
     const currentGeometry = authoredMeshData(ap.modelId, ap.pkgId);
     // An explicit paint-atlas compile rewrites only UV copies and keeps every
@@ -491,6 +512,32 @@ export function pushResidentMeshes(
       }
     }
   }
+  return { pkg, meshes, painted, skins };
+}
+
+/** Keep the authored meshes RESIDENT so their placements can draw (req_2577).
+ *  Returns false while the loader node / door isn't up yet — callers retry. */
+export function pushResidentMeshes(
+  nodeId: number,
+  authoredPieces: readonly AuthoredBuildPiece[],
+  floraSpecies: readonly AuthoredFloraSpecies[] = [],
+  builtinFloraSpeciesIds?: readonly string[],
+): boolean {
+  if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
+  const t0 = nowMs();
+  const meshes: ResidentMesh[] = [];
+  let painted = 0;
+  let skins = 0;
+  let cookedFresh = 0;
+  const pieces = [...authoredPieces, ...customFloraResidentAdapters(floraSpecies)];
+  for (const ap of pieces) {
+    const before = cookedResidentByPiece.get(ap);
+    const cooked = cookAuthoredResident(ap);
+    if (cooked !== before) cookedFresh += 1;
+    meshes.push(...cooked.meshes);
+    painted += cooked.painted;
+    skins += cooked.skins;
+  }
   meshes.push(...builtinSurfaceFloraResidentMeshes(
     builtinFloraSpeciesIds ? new Set(builtinFloraSpeciesIds) : undefined,
   ));
@@ -501,6 +548,6 @@ export function pushResidentMeshes(
   const tEncode = nowMs();
   g.__compiled_world_set_resident_meshes(nodeId, lump);
   const tPush = nowMs();
-  console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId} | cook=${(tCook - t0).toFixed(1)}ms encode=${(tEncode - tCook).toFixed(1)}ms (${(lump.length / 1024 / 1024).toFixed(1)}MB) push=${(tPush - tEncode).toFixed(1)}ms`);
+  console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId} | cook=${(tCook - t0).toFixed(1)}ms (${cookedFresh}/${pieces.length} fresh) encode=${(tEncode - tCook).toFixed(1)}ms (${(lump.length / 1024 / 1024).toFixed(1)}MB) push=${(tPush - tEncode).toFixed(1)}ms`);
   return true;
 }

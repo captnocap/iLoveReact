@@ -427,16 +427,28 @@ function hexRgb(hex: string): [number, number, number] {
   return [parseInt(raw.slice(0, 2), 16) / 255, parseInt(raw.slice(2, 4), 16) / 255, parseInt(raw.slice(4, 6), 16) / 255];
 }
 
-/** Custom species reuse the established authored resident compiler/paint path. */
+/** Custom species reuse the established authored resident compiler/paint path.
+ *  Adapter identity is stable per species OBJECT (req_4726): the resident cook
+ *  cache is keyed weakly on the adapter, so minting a fresh one per call would
+ *  re-cook every species on every catalog push. An edited species is a new
+ *  object → a new adapter → a fresh cook, exactly like authored pieces. */
+const floraAdapterBySpecies = new WeakMap<AuthoredFloraSpecies, AuthoredBuildPiece>();
+
 export function customFloraResidentAdapters(species: readonly AuthoredFloraSpecies[]): AuthoredBuildPiece[] {
-  return species.map((entry) => ({
-    id: surfaceFloraResidentKey(entry.id),
-    modelId: entry.modelId,
-    pkgId: entry.pkgId,
-    label: entry.label,
-    kind: 'prop',
-    hex: entry.hex,
-  }));
+  return species.map((entry) => {
+    const cached = floraAdapterBySpecies.get(entry);
+    if (cached) return cached;
+    const adapter: AuthoredBuildPiece = {
+      id: surfaceFloraResidentKey(entry.id),
+      modelId: entry.modelId,
+      pkgId: entry.pkgId,
+      label: entry.label,
+      kind: 'prop',
+      hex: entry.hex,
+    };
+    floraAdapterBySpecies.set(entry, adapter);
+    return adapter;
+  });
 }
 
 function hash32(value: number): number {
