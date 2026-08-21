@@ -26,6 +26,21 @@ export type ArchitectureApplyResult =
   | { status: 'applied'; source: ArchitectureSource; receipt: MutationReceipt }
   | { status: 'rejected'; reason: string };
 
+/** The in-flight wall-edit mark (req_4726): stamped when the engine accepts a
+ * command, taken by the WorldViewport catalog push — the END of the placement
+ * pipeline (mutate → bake → refs → catalog) — which publishes the BuildDock
+ * AVG/P95 sample. Date.now() on purpose: performance.now() is shimmed to the
+ * frozen per-tick clock and reads 0 across any intra-tick span. One slot is
+ * enough — wall commands are single-gesture and the same-tick push consumes
+ * the mark before the next gesture can land. */
+let architectureEditMark: { verb: string; startedAtMs: number } | null = null;
+
+export function takeArchitectureEditMark(): { verb: string; startedAtMs: number } | null {
+  const mark = architectureEditMark;
+  architectureEditMark = null;
+  return mark;
+}
+
 /** Apply one semantic command. Success adopts the engine's returned source;
  * any engine rejection surfaces its reason and changes nothing. */
 export function applyArchitectureCommand(
@@ -33,10 +48,13 @@ export function applyArchitectureCommand(
   command: ArchitectureCommand,
   host: ArchitectureMutationHost = architectureHost,
 ): ArchitectureApplyResult {
+  const startedAtMs = Date.now();
   try {
     const mutation = host.mutate(source, command);
+    architectureEditMark = { verb: command.kind, startedAtMs };
     return { status: 'applied', source: mutation.source, receipt: mutation.receipt };
   } catch (error) {
+    architectureEditMark = null;
     return { status: 'rejected', reason: error instanceof Error ? error.message : String(error) };
   }
 }

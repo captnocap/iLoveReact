@@ -40,6 +40,8 @@ import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
 import { snapWallPoint, wallPointerRelease, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
 import { setLiveArchitecture } from './architectureBake';
+import { takeArchitectureEditMark } from './architectureCommand';
+import { dispatchEdit } from '../data/editorEvents';
 import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
 import { architectureHost } from './architectureHost';
 import { openingEdgeRefusal, openingGhostCorners, openingWorldPose, snapOpeningSlot, type OpeningKitArm } from './openingTools';
@@ -940,7 +942,28 @@ export default function WorldViewport(props: {
         residentDemand.floraSpecies,
         residentDemand.builtinFloraSpeciesIds,
       )) return false;
+      const architectureChanged = prior !== null && prior.architecture !== props.architecture;
       residentPublishedRef.current = { nodeId, demand: residentDemand, architecture: props.architecture };
+      // The BuildDock AVG/P95 sample (req_4726): a wall command's REAL cost ends
+      // here — engine mutate through bake, refs, and this catalog push. The
+      // command boundary stamped the mark at accept time; publishing the span
+      // as an edit receipt is what moves the dock strip off 0.0 for wall work.
+      if (architectureChanged) {
+        const mark = takeArchitectureEditMark();
+        if (mark) {
+          const editMs = Math.max(0, Date.now() - mark.startedAtMs);
+          dispatchEdit({
+            id: `arch-${props.architecture.revision}`,
+            verb: 'wall',
+            target: mark.verb,
+            meta: `${props.architecture.walls.edges.length} edge(s) live`,
+            undoable: true,
+            editMs,
+            emptyMs: editMs,
+            richMs: editMs,
+          });
+        }
+      }
       return true;
     };
     // Republish to an ALREADY-LIVE catalog in this same tick (req_4711): the
