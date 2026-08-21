@@ -39,6 +39,11 @@ export type AuthoredBuildPiece = {
   hex: string;
   /** Named face roles authored in the model Rig panel, in resident slot order. */
   textureSlots?: ModelTextureSlot[];
+  /** Opening kits only (RULED req_4719): per-axis affine map that stretches the
+   *  model's mount face onto its own lattice footprint — the wall cuts whole
+   *  16ths-of-a-meter cells, so the kit scales to fill them exactly (the same
+   *  move a placed prop's scale dial makes, baked per kit). Meters. */
+  latticeFill?: { scaleX: number; offsetX: number; scaleY: number; offsetY: number };
 };
 
 let AUTHORED: AuthoredBuildPiece[] = [];

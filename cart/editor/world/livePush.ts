@@ -92,6 +92,32 @@ function paintedFormIsCurrent(dir: string): boolean {
   }
 }
 
+/** Stretch a resident's mount face onto its lattice footprint (RULED req_4719):
+ *  the wall cuts whole lattice cells, so an opening kit authored between
+ *  subdivisions scales to fill its own footprint exactly — the prop-scale idea
+ *  baked per kit. Positions map per-axis (x/y affine, depth untouched, the
+ *  model origin stays the mount pivot); normals renormalize under the inverse
+ *  scale so lighting stays honest. */
+function latticeFillVertices(
+  source: Float32Array,
+  fill: { scaleX: number; offsetX: number; scaleY: number; offsetY: number },
+): Float32Array {
+  const out = new Float32Array(source.length);
+  out.set(source);
+  for (let at = 0; at + 7 < out.length; at += 8) {
+    out[at] = out[at]! * fill.scaleX + fill.offsetX;
+    out[at + 1] = out[at + 1]! * fill.scaleY + fill.offsetY;
+    const nx = out[at + 3]! / fill.scaleX;
+    const ny = out[at + 4]! / fill.scaleY;
+    const nz = out[at + 5]!;
+    const length = Math.hypot(nx, ny, nz) || 1;
+    out[at + 3] = nx / length;
+    out[at + 4] = ny / length;
+    out[at + 5] = nz / length;
+  }
+  return out;
+}
+
 /** Apply the semantic export declaration to one visual vertex form. Door meshes
  *  compile into body-first + a trailing named leaf slot; ordinary pieces pass
  *  through untouched. A broken door contract is rejected loudly, never flattened
@@ -421,13 +447,18 @@ export function pushResidentMeshes(
       ? groundRebase(paintedForm.vertices)
       : null;
     const paintedVertices = bound ?? displayedForm ?? (currentGeometry ? null : paintedForm?.vertices ?? null);
-    const verts = paintedVertices ?? currentGeometry;
+    // Lattice fill (RULED req_4719) stretches every form of an opening kit —
+    // base, painted, and the door compile downstream — onto its footprint.
+    const fill = ap.latticeFill ?? null;
+    const rawVerts = paintedVertices ?? currentGeometry;
+    const verts = rawVerts && fill ? latticeFillVertices(rawVerts, fill) : rawVerts;
     if (verts && verts.length >= 8) {
       if (paintedVertices && paintedForm) painted += 1;
+      const rawCollision = displayedForm && currentGeometry ? currentGeometry : undefined;
       const resident = residentMeshFor(
         ap, pkg, ap.id, verts,
         paintedVertices ? paintedForm?.png : undefined,
-        displayedForm && currentGeometry ? currentGeometry : undefined,
+        rawCollision && fill ? latticeFillVertices(rawCollision, fill) : rawCollision,
       );
       if (resident) meshes.push(resident);
     } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
@@ -445,13 +476,14 @@ export function pushResidentMeshes(
           ? { vertices: compiledVertices, png: compiledPng }
           : readPaintedForm(dir, `paints/paint_${skin.id}.blob`, `paints/paint_${skin.id}.png`);
         if (!form) continue;
-        const skinVertices = currentGeometry
+        const boundSkinVertices = currentGeometry
           ? bindPaintSkinToCurrentMesh(currentGeometry, form.vertices)
           : form.vertices;
-        if (!skinVertices) {
+        if (!boundSkinVertices) {
           console.warn(`[authored] paint skin '${skin.id}' no longer fits '${ap.modelId}' — load + save the painting against the current topology`);
           continue;
         }
+        const skinVertices = ap.latticeFill ? latticeFillVertices(boundSkinVertices, ap.latticeFill) : boundSkinVertices;
         const resident = residentMeshFor(ap, pkg, skinnedPieceId(ap.id, skin.id), skinVertices, form.png);
         if (!resident) continue;
         meshes.push(resident);

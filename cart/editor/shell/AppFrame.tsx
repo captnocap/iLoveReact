@@ -129,7 +129,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
 import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand, setEdgeDimensionsCommand } from '../world/architectureCommand';
-import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, snapOpeningSlot } from '../world/openingTools';
+import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, openingLatticeFill, snapOpeningSlot } from '../world/openingTools';
 import { architectureHost } from '../world/architectureHost';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
 import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
@@ -5238,6 +5238,11 @@ export default function AppFrame() {
         continue;
       }
       const kind = entry.semanticKind;
+      // Lattice fill (RULED req_4719): the resident stretches onto the kit's
+      // own footprint so the mounted model meets the wall's whole-cell cut
+      // with no sliver gap. Identity (lattice-exact kits like door_001) stays
+      // absent, so their residents are byte-identical to before.
+      const fill = openingLatticeFill(entry);
       pieces.push({
         id: `opening:${entry.catalogId}`,
         modelId: authoredModelIdForPackage(pkg.id),
@@ -5247,6 +5252,7 @@ export default function AppFrame() {
         hex: pkg.color ?? '#8a93c0',
         ...(kind === 'door' || kind === 'slidingDoor' ? { edit: 'door' as const }
           : kind === 'garageDoor' ? { edit: 'garageDoor' as const } : {}),
+        ...(fill ? { latticeFill: fill } : {}),
       });
     }
     return pieces;

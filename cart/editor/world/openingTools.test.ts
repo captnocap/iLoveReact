@@ -5,6 +5,7 @@ import {
   openingCatalogIdOf,
   openingEdgeRefusal,
   openingGhostCorners,
+  openingLatticeFill,
   openingPaletteGroups,
   openingPaletteId,
   snapOpeningSlot,
@@ -59,6 +60,35 @@ function doorEntry(overrides: Partial<ArchitectureCatalogEntry> = {}): Architect
 }
 
 const KIT: OpeningKitArm = armedOpeningKitFromEntries([doorEntry()], 'door')!;
+
+test('lattice fill stretches a between-subdivisions kit onto its footprint (RULED req_4719)', () => {
+  // window_003's real shape: mount face ±8.17u wide, 7.82..22.68u tall →
+  // footprint -9..9 × 7..23. The wall cuts those whole cells; the fill must
+  // map the mount extremes EXACTLY onto them (meters) or slivers show.
+  const fractional = doorEntry({
+    catalogId: 'build:wall:opening:window:window-003',
+    semanticKind: 'window',
+    measurement: {
+      sourceBoundsU: { minXU: -8.17, minYU: 7.82, minZU: -0.8, maxXU: 8.17, maxYU: 22.68, maxZU: 0.8 },
+      mountBoundsU: { minU: -8.17, minV: 7.82, maxU: 8.17, maxV: 22.68 },
+      footprint: { minColumn: -9, minRow: 7, maxColumnExclusive: 9, maxRowExclusive: 23 },
+      clearanceMask: [],
+      pivotU: { xU: 0, yU: 0, zU: 0 },
+    },
+  });
+  const fill = openingLatticeFill(fractional)!;
+  assert(fill !== null, 'fractional kit gets a fill');
+  const u = 16;
+  const mapX = (xU: number) => (xU / u) * fill.scaleX + fill.offsetX;
+  const mapY = (yU: number) => (yU / u) * fill.scaleY + fill.offsetY;
+  assert(Math.abs(mapX(-8.17) - (-9 / u)) < 1e-9, `left edge lands on the cut (${mapX(-8.17)})`);
+  assert(Math.abs(mapX(8.17) - (9 / u)) < 1e-9, 'right edge lands on the cut');
+  assert(Math.abs(mapY(7.82) - (7 / u)) < 1e-9, 'sill lands on the cut');
+  assert(Math.abs(mapY(22.68) - (23 / u)) < 1e-9, 'header lands on the cut');
+  // door_001 measures lattice-exact — identity fill is ABSENT, its resident
+  // stays byte-identical (why doors never gapped in the first place).
+  assert(openingLatticeFill(doorEntry()) === null, 'lattice-exact kit needs no fill');
+});
 
 test('the armed kit projects from the first installed entry of its kind', () => {
   assert(KIT && KIT.catalogId === 'build:wall:opening:door:door-001', 'door kit arms');

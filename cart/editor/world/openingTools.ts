@@ -39,6 +39,31 @@ function kitArmFromEntry(entry: ArchitectureCatalogEntry): OpeningKitArm | null 
   };
 }
 
+/** Lattice fill (RULED req_4719: "they scale on the same sub divided grid
+ * that walls already have"): the wall cuts whole lattice cells (the kit's
+ * outward-rounded footprint), so a kit authored between subdivisions left a
+ * sliver of open cut on every side it didn't reach (req_4718's gaps — doors
+ * never gapped only because door_001 measures to exact units). The cure is
+ * the prop-scale idea baked per kit: a per-axis affine map, in METERS, that
+ * stretches the model's mount face onto its own footprint exactly. Depth is
+ * deliberately untouched — housing depth stays authored (req_4491). Null for
+ * a kit already lattice-exact (identity would be noise) or unmeasurable. */
+export function openingLatticeFill(entry: ArchitectureCatalogEntry): { scaleX: number; offsetX: number; scaleY: number; offsetY: number } | null {
+  const mount = entry.measurement.mountBoundsU;
+  const footprint = entry.measurement.footprint;
+  if (!mount || !footprint) return null;
+  const spanU = mount.maxU - mount.minU;
+  const spanV = mount.maxV - mount.minV;
+  if (!(spanU > 0) || !(spanV > 0)) return null;
+  const scaleX = (footprint.maxColumnExclusive - footprint.minColumn) / spanU;
+  const scaleY = (footprint.maxRowExclusive - footprint.minRow) / spanV;
+  const offsetX = (footprint.minColumn - mount.minU * scaleX) / ARCHITECTURE_UNITS_PER_METER;
+  const offsetY = (footprint.minRow - mount.minV * scaleY) / ARCHITECTURE_UNITS_PER_METER;
+  const identity = Math.abs(scaleX - 1) < 1e-6 && Math.abs(scaleY - 1) < 1e-6
+    && Math.abs(offsetX) < 1e-6 && Math.abs(offsetY) < 1e-6;
+  return identity ? null : { scaleX, offsetX, scaleY, offsetY };
+}
+
 /** The palette tile id for an installed opening kit — the Doors/Windows
  * categories arm THROUGH the palette (req_4513: "the door is cutting into
  * the wall"), never through tool keys. */
