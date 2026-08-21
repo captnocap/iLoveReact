@@ -3740,7 +3740,7 @@ pub const Mesh = struct {
             .propagate = true,
         };
         defer context.deinit();
-        return try splitFace(&context, start_face, start_edge, face.vertices.items.len == 4 or direction > 2, 0, null);
+        return try splitFace(&context, start_face, start_edge, face.vertices.items.len == 4 or direction > 2, 0, null, null);
     }
 
     pub fn loopCutFromEdge(mesh: *Mesh, a: Vec3, b: Vec3, part: ?u32, cuts: u32, offset_fraction: f32) !bool {
@@ -3781,7 +3781,7 @@ pub const Mesh = struct {
             .propagate = true,
         };
         defer context.deinit();
-        return try splitFace(&context, face_id, start_edge, face.vertices.items.len == 4, 0, null);
+        return try splitFace(&context, face_id, start_edge, face.vertices.items.len == 4, 0, null, null);
     }
 
     fn cutSideAlignedToWorld(mesh: *const Mesh, face: *const Face, world_direction_raw: Vec3) ?[2]u32 {
@@ -3837,12 +3837,18 @@ pub const Mesh = struct {
             const face = &mesh.faces.items[face_id];
             if (!face.alive or face.vertices.items.len < 2) continue;
             const side = cutSideAlignedToWorld(mesh, face, world_direction) orelse continue;
-            changed = (try splitFace(&context, face_id, side, false, 0, null)) or changed;
+            changed = (try splitFace(&context, face_id, side, false, 0, null, null)) or changed;
         }
         return changed;
     }
 
-    fn splitFace(context: *CutContext, face_id: u32, side_raw: [2]u32, double_side: bool, cut_no: u32, prev_dir: ?Vec3) !bool {
+    /// `march_anchor` is the ring-phase carrier (req_4732): the endpoint of the
+    /// handed side edge that lies on the SEED side[0]'s side of the ring. The
+    /// canonical side ordering below is a winding artifact of each face's loop, so
+    /// station minting and comb marching orient against the anchor, never against
+    /// side[0] alone — otherwise a triangle crossing (or an adverse winding) flips
+    /// the comb onto the wrong rail mid-ring. null = this face IS the seed.
+    fn splitFace(context: *CutContext, face_id: u32, side_raw: [2]u32, double_side: bool, cut_no: u32, prev_dir: ?Vec3, march_anchor: ?u32) !bool {
         if (face_id >= context.mesh.faces.items.len) return false;
         const face_len = context.mesh.faces.items[face_id].vertices.items.len;
         if (!context.mesh.faces.items[face_id].alive or face_len < 2) return false;
@@ -3853,6 +3859,7 @@ pub const Mesh = struct {
         const side1_index = indexOf(context.mesh.faces.items[face_id].vertices.items, side[1]) orelse return false;
         const side_diff: isize = @as(isize, @intCast(side0_index)) - @as(isize, @intCast(side1_index));
         if (side_diff == -1 or side_diff > 2) std.mem.swap(u32, &side[0], &side[1]);
+        const march0 = if (march_anchor) |anchor| anchor == side[0] else true;
 
         if (face_len == 4) {
             var opposite: [2]u32 = undefined;
@@ -3869,12 +3876,17 @@ pub const Mesh = struct {
             if (opposite_diff == 1 or opposite_diff < -2) std.mem.swap(u32, &opposite[0], &opposite[1]);
 
             const ratio = context.ratioForSide(side, cut_no);
-            const center_side = try context.centerVertex(side, ratio, cut_no);
-            const center_opposite = try context.centerVertex(opposite, ratio, cut_no);
+            // Stations mint on the march orientation, not the canonical one: a face
+            // whose winding canonicalizes side[0] onto the ring's far rail would
+            // otherwise place its (fresh) stations at the complementary parameter.
+            const side_station: [2]u32 = if (march0) side else .{ side[1], side[0] };
+            const opposite_station: [2]u32 = if (march0) opposite else .{ opposite[1], opposite[0] };
+            const center_side = try context.centerVertex(side_station, ratio, cut_no);
+            const center_opposite = try context.centerVertex(opposite_station, ratio, cut_no);
 
             const old = &context.mesh.faces.items[face_id];
-            const side_uv = lerp2(uvFor(old, side[0]), uvFor(old, side[1]), ratio);
-            const opposite_uv = lerp2(uvFor(old, opposite[0]), uvFor(old, opposite[1]), ratio);
+            const side_uv = lerp2(uvFor(old, side_station[0]), uvFor(old, side_station[1]), ratio);
+            const opposite_uv = lerp2(uvFor(old, opposite_station[0]), uvFor(old, opposite_station[1]), ratio);
             const new_face = try context.mesh.makeSplitFace(old, &.{ side[1], center_side, center_opposite, opposite[1] }, &.{ uvFor(old, side[1]), side_uv, opposite_uv, uvFor(old, opposite[1]) });
             const new_face_id = new_face.id;
             // Blockbench stores this array as an unordered vertex set and its
@@ -3896,26 +3908,32 @@ pub const Mesh = struct {
                     const p_side0 = context.mesh.vertices.items[side[0]].position;
                     const p_side1 = context.mesh.vertices.items[side[1]].position;
                     if (dot3(p_side0, world_direction) >= dot3(p_side1, world_direction)) {
-                        _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1, prev_dir);
+                        _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1, prev_dir, null);
                     } else {
-                        _ = try splitFace(context, new_face_id, .{ center_side, side[1] }, double_side, cut_no + 1, prev_dir);
+                        _ = try splitFace(context, new_face_id, .{ center_side, side[1] }, double_side, cut_no + 1, prev_dir, null);
                     }
+                } else if (march0) {
+                    _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1, prev_dir, side[0]);
                 } else {
-                    _ = try splitFace(context, face_id, .{ center_side, side[0] }, double_side, cut_no + 1, prev_dir);
+                    // The march rail is side[1]'s: the remaining comb belongs in the
+                    // appended child, stacking toward side[1].
+                    _ = try splitFace(context, new_face_id, .{ center_side, side[1] }, double_side, cut_no + 1, prev_dir, side[1]);
                 }
             }
             if (cut_no != 0 or !context.propagate) return true;
 
-            const rung_forward = sub3(
-                context.mesh.vertices.items[center_opposite].position,
-                context.mesh.vertices.items[center_side].position,
-            );
+            // Travel from edge MIDPOINTS, not stations: station positions move with
+            // the cuts count and offset, and a near-tied triangle crossing decided
+            // from them flips between cuts=1 and cuts=2 (req_4732).
+            const rung_forward = sub3(edgeMidpoint(context.mesh, opposite), edgeMidpoint(context.mesh, side));
             if (findNeighbor(context.mesh, &context.processed, face_id, opposite)) |next_face| {
-                _ = try splitFace(context, next_face, opposite, context.mesh.faces.items[next_face].vertices.items.len == 4, 0, rung_forward);
+                const forward_anchor = if (march0) opposite[0] else opposite[1];
+                _ = try splitFace(context, next_face, opposite, context.mesh.faces.items[next_face].vertices.items.len == 4, 0, rung_forward, forward_anchor);
             }
             if (double_side) {
                 if (findNeighbor(context.mesh, &context.processed, face_id, side)) |previous_face| {
                     const rung_backward = mul3(rung_forward, -1.0);
+                    const shared_march = if (march0) side[0] else side[1];
                     const previous = &context.mesh.faces.items[previous_face];
                     var previous_opposite: [2]u32 = undefined;
                     var count: usize = 0;
@@ -3925,13 +3943,22 @@ pub const Mesh = struct {
                         count += 1;
                     }
                     if (count == 2) {
-                        _ = try splitFace(context, previous_face, previous_opposite, previous.vertices.items.len == 4, 0, rung_backward);
+                        // The backward quad is entered through its FAR edge; the
+                        // march-side endpoint of that edge is the one adjacent (in the
+                        // previous loop) to the shared edge's march-side endpoint.
+                        var previous_anchor: ?u32 = null;
+                        for (previous.vertices.items, 0..) |vertex_id, corner| {
+                            const next_id = previous.vertices.items[(corner + 1) % previous.vertices.items.len];
+                            const other = if (vertex_id == shared_march) next_id else if (next_id == shared_march) vertex_id else continue;
+                            if (other == previous_opposite[0] or other == previous_opposite[1]) previous_anchor = other;
+                        }
+                        _ = try splitFace(context, previous_face, previous_opposite, previous.vertices.items.len == 4, 0, rung_backward, previous_anchor);
                     } else if (count == 1) {
-                        _ = try splitFace(context, previous_face, side, false, 0, rung_backward);
+                        _ = try splitFace(context, previous_face, side, false, 0, rung_backward, shared_march);
                     } else if (previous.vertices.items.len > 4) {
                         // Legacy ReactJIT cylinder cap. The reference primitive would
                         // present a terminal triangle on this side of the seed too.
-                        _ = try splitFace(context, previous_face, side, false, 0, rung_backward);
+                        _ = try splitFace(context, previous_face, side, false, 0, rung_backward, shared_march);
                     }
                 }
             }
@@ -3963,33 +3990,43 @@ pub const Mesh = struct {
                 const side0_position = context.mesh.vertices.items[side[0]].position;
                 const entry_span_length = length3(sub3(context.mesh.vertices.items[side[1]].position, side0_position));
                 if (entry_span_length <= IMPORT_WELD_EPS) break :passthrough;
-                const entry_vertex = try context.centerVertex(side, ratio, cut_no);
+                const entry_station: [2]u32 = if (march0) side else .{ side[1], side[0] };
+                const entry_vertex = try context.centerVertex(entry_station, ratio, cut_no);
                 const entry_position = context.mesh.vertices.items[entry_vertex].position;
                 // The station's real parameter from side[0]: a cache-hit vertex minted
                 // by the neighbor may sit at the complementary phase of `ratio`.
                 const entry_parameter = std.math.clamp(length3(sub3(entry_position, side0_position)) / entry_span_length, 0.0, 1.0);
                 var no_processed: std.AutoHashMapUnmanaged(u32, void) = .empty;
                 var best_isolated: ?u32 = null;
-                var best_parameter: f32 = 0;
                 var best_alignment: f32 = TRI_PASS_MIN_ALIGNMENT;
-                for ([2]u32{ side[0], side[1] }) |isolated_candidate| {
-                    const isolated_parameter = if (isolated_candidate == side[0]) entry_parameter else 1.0 - entry_parameter;
-                    const corner_position = context.mesh.vertices.items[isolated_candidate].position;
-                    const opposed_position = context.mesh.vertices.items[opposed_vertex].position;
-                    if (length3(sub3(opposed_position, corner_position)) <= IMPORT_WELD_EPS) continue;
-                    const exit_position = lerp3(corner_position, opposed_position, isolated_parameter);
-                    const crossing = sub3(exit_position, entry_position);
-                    const crossing_length = length3(crossing);
-                    if (crossing_length <= IMPORT_WELD_EPS) continue;
-                    const alignment = dot3(mul3(crossing, 1.0 / crossing_length), travel);
-                    if (alignment <= best_alignment) continue;
-                    // The first rung only re-routes when the ring has somewhere to go.
-                    if (cut_no == 0 and findNeighbor(context.mesh, &no_processed, face_id, .{ isolated_candidate, opposed_vertex }) == null) continue;
-                    best_alignment = alignment;
-                    best_isolated = isolated_candidate;
-                    best_parameter = isolated_parameter;
+                if (cut_no > 0) {
+                    // Comb rungs never re-decide: they stack toward the march corner
+                    // rung 0 chose, pinching in parallel. Re-scoring here is what
+                    // minted rungs on the ring's own chord (req_4732's slivers).
+                    best_isolated = if (march0) side[0] else side[1];
+                } else {
+                    const entry_midpoint = edgeMidpoint(context.mesh, side);
+                    for ([2]u32{ side[0], side[1] }) |isolated_candidate| {
+                        const corner_position = context.mesh.vertices.items[isolated_candidate].position;
+                        const opposed_position = context.mesh.vertices.items[opposed_vertex].position;
+                        if (length3(sub3(opposed_position, corner_position)) <= IMPORT_WELD_EPS) continue;
+                        // Score from edge midpoints, not stations: stations move with
+                        // the cuts count and offset, and a decision made from them
+                        // gives cuts=1 and cuts=2 different rings (req_4732).
+                        const crossing = sub3(edgeMidpoint(context.mesh, .{ isolated_candidate, opposed_vertex }), entry_midpoint);
+                        const crossing_length = length3(crossing);
+                        if (crossing_length <= IMPORT_WELD_EPS) continue;
+                        const alignment = dot3(mul3(crossing, 1.0 / crossing_length), travel);
+                        if (alignment <= best_alignment) continue;
+                        // The first rung only re-routes when the ring has somewhere to go.
+                        if (findNeighbor(context.mesh, &no_processed, face_id, .{ isolated_candidate, opposed_vertex }) == null) continue;
+                        best_alignment = alignment;
+                        best_isolated = isolated_candidate;
+                    }
                 }
                 const isolated = best_isolated orelse break :passthrough;
+                if (length3(sub3(context.mesh.vertices.items[opposed_vertex].position, context.mesh.vertices.items[isolated].position)) <= IMPORT_WELD_EPS) break :passthrough;
+                const best_parameter = if (isolated == side[0]) entry_parameter else 1.0 - entry_parameter;
                 // Orient the exit edge so `lerp(edge[0], edge[1], ratio)` reproduces the
                 // wanted station — repositionCutVertices re-derives every cut vertex
                 // from its stored ordered edge with the raw comb ratio.
@@ -3998,7 +4035,6 @@ pub const Mesh = struct {
                 else
                     .{ opposed_vertex, isolated };
                 const exit_vertex = try context.centerVertex(exit_edge, ratio, cut_no);
-                const exit_position = context.mesh.vertices.items[exit_vertex].position;
 
                 const old = &context.mesh.faces.items[face_id];
                 const entry_uv = lerp2(uvFor(old, side[0]), uvFor(old, side[1]), entry_parameter);
@@ -4052,15 +4088,25 @@ pub const Mesh = struct {
                 const appended_vertices = if (first_holds_side0) second_vertices[0..second_len] else first_vertices[0..first_len];
                 const appended_uvs = if (first_holds_side0) second_uvs[0..second_len] else first_uvs[0..first_len];
                 const appended = try context.mesh.makeSplitFace(old, appended_vertices, appended_uvs);
+                const appended_id = appended.id;
                 try context.mesh.replaceFaceLoop(face_id, retained_vertices, retained_uvs);
                 try context.mesh.faces.append(context.mesh.allocator, appended);
 
                 if (cut_no + 1 < context.cuts) {
-                    _ = try splitFace(context, face_id, .{ entry_vertex, side[0] }, double_side, cut_no + 1, prev_dir);
+                    // Comb continues in the piece holding the march corner, stacking
+                    // toward it (the retained piece keeps side[0]).
+                    const march_corner = if (march0) side[0] else side[1];
+                    const comb_face = if (march_corner == side[0]) face_id else appended_id;
+                    _ = try splitFace(context, comb_face, .{ entry_vertex, march_corner }, double_side, cut_no + 1, prev_dir, march_corner);
                 }
                 if (cut_no != 0 or !context.propagate) return true;
                 if (findNeighbor(context.mesh, &context.processed, face_id, .{ isolated, opposed_vertex })) |next_face| {
-                    _ = try splitFace(context, next_face, .{ isolated, opposed_vertex }, context.mesh.faces.items[next_face].vertices.items.len == 4, 0, sub3(exit_position, entry_position));
+                    // The march-side endpoint of the exit edge: the isolated corner
+                    // when it sits on the ring's march side, otherwise the opposed
+                    // vertex (which then continues the march rail).
+                    const exit_anchor = if ((isolated == side[0]) == march0) isolated else opposed_vertex;
+                    const exit_travel = sub3(edgeMidpoint(context.mesh, .{ isolated, opposed_vertex }), edgeMidpoint(context.mesh, side));
+                    _ = try splitFace(context, next_face, .{ isolated, opposed_vertex }, context.mesh.faces.items[next_face].vertices.items.len == 4, 0, exit_travel, exit_anchor);
                 }
                 return true;
             }
@@ -4087,7 +4133,7 @@ pub const Mesh = struct {
                 if (dot3(faceNormal(context.mesh, &context.mesh.faces.items[face_id]), old_normal) < 0) context.mesh.reverseFace(face_id);
 
                 if (cut_no + 1 < context.cuts) {
-                    _ = try splitFace(context, face_id, .{ center_side, other_quad }, double_side, cut_no + 1, prev_dir);
+                    _ = try splitFace(context, face_id, .{ center_side, other_quad }, double_side, cut_no + 1, prev_dir, null);
                 }
                 if (cut_no != 0 or !context.propagate) return true;
                 const rung_forward = sub3(
@@ -4095,7 +4141,7 @@ pub const Mesh = struct {
                     context.mesh.vertices.items[center_side].position,
                 );
                 if (findNeighbor(context.mesh, &context.processed, face_id, opposite)) |next_face| {
-                    _ = try splitFace(context, next_face, opposite, context.mesh.faces.items[next_face].vertices.items.len == 4, 0, rung_forward);
+                    _ = try splitFace(context, next_face, opposite, context.mesh.faces.items[next_face].vertices.items.len == 4, 0, rung_forward, null);
                 }
                 if (double_side) {
                     if (findNeighbor(context.mesh, &context.processed, face_id, side)) |previous_face| {
@@ -4107,7 +4153,7 @@ pub const Mesh = struct {
                             if (count < 2) previous_opposite[count] = vertex_id;
                             count += 1;
                         }
-                        if (count == 2) _ = try splitFace(context, previous_face, previous_opposite, previous.vertices.items.len == 4, 0, mul3(rung_forward, -1.0));
+                        if (count == 2) _ = try splitFace(context, previous_face, previous_opposite, previous.vertices.items.len == 4, 0, mul3(rung_forward, -1.0), null);
                     }
                 }
                 return true;
@@ -4134,7 +4180,7 @@ pub const Mesh = struct {
         // arbitrary imported n-gons keep the reference's normal stop behavior.
         if (face_len > 4) {
             if (try context.mesh.promoteLegacyFanCap(face_id, side)) |cap_triangle| {
-                return splitFace(context, cap_triangle, side, false, cut_no, prev_dir);
+                return splitFace(context, cap_triangle, side, false, cut_no, prev_dir, march_anchor);
             }
         }
         return false;
@@ -4418,6 +4464,10 @@ pub const Mesh = struct {
         std.mem.reverse(u32, mesh.faces.items[face_id].vertices.items);
         std.mem.reverse(Vec2, mesh.faces.items[face_id].uvs.items);
         mesh.faces.items[face_id].source_tessellation_valid = false;
+    }
+
+    fn edgeMidpoint(mesh: *const Mesh, edge: [2]u32) Vec3 {
+        return mul3(add3(mesh.vertices.items[edge[0]].position, mesh.vertices.items[edge[1]].position), 0.5);
     }
 
     fn findNeighbor(mesh: *const Mesh, processed: *const std.AutoHashMapUnmanaged(u32, void), current_face: u32, edge: [2]u32) ?u32 {
@@ -7140,6 +7190,73 @@ test "indexed loop cut splits a terminal triangle then stops like the reference"
     defer lowered.deinit();
     // Quad 2→4 tris, terminal triangle 1→2 tris.
     try std.testing.expectEqual(@as(u32, 6), lowered.tri_count);
+}
+
+test "chamfered cube loop cut is coherent across cuts counts (req_4732)" {
+    // A cube with its 4 top edges + 4 vertical edges beveled — the user's shape.
+    // Each top corner is a symmetric triangle joining two top strips and one
+    // vertical strip; the crossing decision there must not depend on the cuts
+    // count, comb rungs must stack parallel to rung 0 (never onto the ring's own
+    // chord), and the ring must stay phase-symmetric across the crossing.
+    const allocator = std.testing.allocator;
+    const c = [8]Vec3{
+        .{ -0.5, -0.5, -0.5 }, .{ 0.5, -0.5, -0.5 }, .{ 0.5, -0.5, 0.5 }, .{ -0.5, -0.5, 0.5 },
+        .{ -0.5, 0.5, -0.5 },  .{ 0.5, 0.5, -0.5 },  .{ 0.5, 0.5, 0.5 },  .{ -0.5, 0.5, 0.5 },
+    };
+    const quad_ids = [6][4]u32{
+        .{ 4, 7, 6, 5 }, .{ 0, 1, 2, 3 }, .{ 0, 4, 5, 1 },
+        .{ 3, 2, 6, 7 }, .{ 0, 3, 7, 4 }, .{ 1, 5, 6, 2 },
+    };
+    var quads: [6][4]Vec3 = undefined;
+    for (quad_ids, 0..) |quad, i| {
+        for (quad, 0..) |corner, k| quads[i][k] = c[corner];
+    }
+    inline for ([3]u32{ 1, 2, 3 }) |cuts| {
+        const fixture = try makeQuadStripSoup(allocator, quads[0..]);
+        defer allocator.free(fixture.verts);
+        defer allocator.free(fixture.groups);
+        var mesh = try Mesh.fromSoup(allocator, fixture.verts, 12, fixture.groups, null);
+        defer mesh.deinit();
+        const selected_edges = [8][2]Vec3{
+            .{ c[4], c[5] }, .{ c[5], c[6] }, .{ c[6], c[7] }, .{ c[7], c[4] },
+            .{ c[0], c[4] }, .{ c[1], c[5] }, .{ c[2], c[6] }, .{ c[3], c[7] },
+        };
+        var edges: [selected_edges.len][2]u32 = undefined;
+        try std.testing.expect(mesh.resolveBevelEdges(selected_edges[0..], NO_PART, edges[0..]) != null);
+        try std.testing.expect(try mesh.bevelEdges(edges[0..], BevelTuning.default_width_m));
+
+        // Lengthwise cut along the top-front strip, seeded at its +X end edge.
+        try std.testing.expect(try mesh.loopCutFromEdge(.{ 0.375, 0.5, -0.375 }, .{ 0.375, 0.375, -0.5 }, null, cuts, 0.2));
+
+        var corner_exit_stations: u32 = 0;
+        const exit_a = Vec3{ 0.375, 0.375, -0.5 };
+        const exit_b = Vec3{ 0.5, 0.375, -0.375 };
+        for (mesh.vertices.items) |vertex| {
+            const origin = vertex.cut_origin orelse continue;
+            // Comb rungs never land on the ring's own chord: a station's origin
+            // edge keeps at least one original (non-cut) endpoint.
+            const first_minted = mesh.vertices.items[origin.edge[0]].cut_origin != null;
+            const second_minted = mesh.vertices.items[origin.edge[1]].cut_origin != null;
+            try std.testing.expect(!(first_minted and second_minted));
+            // The ring stays x-symmetric through both corner crossings.
+            var mirrored = false;
+            for (mesh.vertices.items) |other| {
+                if (other.cut_origin == null) continue;
+                if (@abs(other.position[0] + vertex.position[0]) < 0.0001 and
+                    @abs(other.position[1] - vertex.position[1]) < 0.0001 and
+                    @abs(other.position[2] - vertex.position[2]) < 0.0001) mirrored = true;
+            }
+            try std.testing.expect(mirrored);
+            // Count stations on the +X corner triangle's chosen exit segment.
+            const span = sub3(exit_b, exit_a);
+            const offset = sub3(vertex.position, exit_a);
+            const t = dot3(offset, span) / dot3(span, span);
+            if (t > 0.0001 and t < 0.9999 and length3(sub3(offset, mul3(span, t))) < 0.0001) corner_exit_stations += 1;
+        }
+        // The crossing exits onto the SAME edge for every cuts count, and every
+        // comb rung follows it there.
+        try std.testing.expectEqual(cuts, corner_exit_stations);
+    }
 }
 
 test "loop cut passes through a mid-ring triangle and reaches the far quad" {

@@ -193,6 +193,40 @@ test('a mid-ring triangle passes the loop through to the far quad (req_4728 cham
   }
 });
 
+test('an off-center ring keeps one level through a triangle crossing (req_4732 phase)', () => {
+  // Same quad—tri—quad shape, cut at 25% from the top rail. Every station must
+  // sit at the SAME height — before the march-anchor fix the far quad minted its
+  // fresh station at the complementary parameter (y=0.5 instead of y=1.5),
+  // because its loop winding canonicalized the side ordering onto the far rail.
+  const mesh: EditMesh = {
+    verts: [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0], [4, 0, 0], [6, 0, 0], [6, 2, 0]],
+    faces: [{ loop: [0, 1, 2, 3] }, { loop: [2, 1, 4] }, { loop: [2, 4, 5, 6] }],
+  };
+  const cut = loopCutFromFace(mesh, { face: 0, direction: 1, cuts: 1, offset: 0.5 });
+  const stations = cut.verts.slice(mesh.verts.length);
+  assert(stations.length === 4, `the ring should mint four stations, got ${stations.length}`);
+  for (const v of stations) assert(Math.abs(v[1] - 1.5) < 1e-6, `station drifted off the ring level: (${v.join(',')})`);
+});
+
+test('comb rungs stay phase-matched across a triangle crossing (req_4732 comb)', () => {
+  // cuts=2 through the same shape: the far quad's rung heights must equal the
+  // seed quad's rung heights — and no rung may be minted between two minted
+  // stations (the chord-sliver failure).
+  const mesh: EditMesh = {
+    verts: [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0], [4, 0, 0], [6, 0, 0], [6, 2, 0]],
+    faces: [{ loop: [0, 1, 2, 3] }, { loop: [2, 1, 4] }, { loop: [2, 4, 5, 6] }],
+  };
+  const cut = loopCutFromFace(mesh, { face: 0, direction: 1, cuts: 2, offset: 0.5 });
+  const stations = cut.verts.slice(mesh.verts.length);
+  const heightsAt = (x: number) => stations.filter((v) => Math.abs(v[0] - x) < 1e-6).map((v) => v[1]).sort((a, b) => a - b);
+  const seedSide = heightsAt(0);
+  const farSide = heightsAt(6);
+  assert(seedSide.length === 2 && farSide.length === 2, `each rail edge should carry two rungs, got ${seedSide.length}/${farSide.length}`);
+  for (let i = 0; i < 2; i += 1) {
+    assert(Math.abs(seedSide[i] - farSide[i]) < 1e-6, `comb phase flipped across the triangle: seed y=${seedSide[i]} vs far y=${farSide[i]}`);
+  }
+});
+
 test('a boundary is a successful partial ring, never a plane-style full slice', () => {
   const mesh: EditMesh = {
     verts: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [2, 0, 0], [2, 1, 0]],
