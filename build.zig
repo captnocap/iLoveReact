@@ -1802,12 +1802,37 @@ pub fn build(b: *std.Build) void {
     mesh_import_test_step.dependOn(&run_mesh_import_test.step);
 
     // ── model paint (raycast + per-face atlas) unit tests — headless, no GPU ───
+    // model_paint is also compiled as a focused module by the offline RJMD codec.
+    // Name its upward diagnostic imports once here so every focused consumer uses
+    // the same complete graph instead of maintaining private build-exe arguments.
+    const model_paint_sqlite_mod = b.createModule(.{
+        .root_source_file = b.path("framework/storage/sqlite.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const model_paint_event_bus_mod = b.createModule(.{
+        .root_source_file = b.path("framework/diag/event_bus.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_paint_event_bus_mod.addImport("../storage/sqlite.zig", model_paint_sqlite_mod);
+    const model_paint_log_mod = b.createModule(.{
+        .root_source_file = b.path("framework/diag/log.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_paint_log_mod.addImport("event_bus.zig", model_paint_event_bus_mod);
     const model_paint_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/model_paint.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    model_paint_test_mod.addImport("../diag/log.zig", model_paint_log_mod);
+    model_paint_test_mod.addImport("../diag/event_bus.zig", model_paint_event_bus_mod);
     const model_paint_carry_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/model_paint.zig"),
         .target = target,
@@ -3063,26 +3088,6 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     model_blob_meshdoc_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
-    const model_blob_sqlite_mod = b.createModule(.{
-        .root_source_file = b.path("framework/storage/sqlite.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    const model_blob_event_bus_mod = b.createModule(.{
-        .root_source_file = b.path("framework/diag/event_bus.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    model_blob_event_bus_mod.addImport("../storage/sqlite.zig", model_blob_sqlite_mod);
-    const model_blob_log_mod = b.createModule(.{
-        .root_source_file = b.path("framework/diag/log.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    model_blob_log_mod.addImport("event_bus.zig", model_blob_event_bus_mod);
     const model_blob_mesh_edit_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
         .target = target,
@@ -3094,8 +3099,8 @@ pub fn build(b: *std.Build) void {
     // the production format owner twice in one executable.
     model_blob_mesh_edit_mod.addImport("meshdoc_format.zig", model_blob_meshdoc_mod);
     model_blob_mesh_edit_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
-    model_blob_mesh_edit_mod.addImport("../diag/log.zig", model_blob_log_mod);
-    model_blob_mesh_edit_mod.addImport("../diag/event_bus.zig", model_blob_event_bus_mod);
+    model_blob_mesh_edit_mod.addImport("../diag/log.zig", model_paint_log_mod);
+    model_blob_mesh_edit_mod.addImport("../diag/event_bus.zig", model_paint_event_bus_mod);
     const model_blob_codec_mod = b.createModule(.{
         .root_source_file = b.path("framework/tools/model_blob_codec.zig"),
         .target = target,
@@ -3105,6 +3110,14 @@ pub fn build(b: *std.Build) void {
     model_blob_codec_mod.addImport("meshdoc", model_blob_meshdoc_mod);
     model_blob_codec_mod.addImport("mesh_edit", model_blob_mesh_edit_mod);
     model_blob_codec_mod.addImport("skin_binding", skin_binding_mod_t);
+    const model_blob_codec = b.addExecutable(.{
+        .name = "model-blob-codec",
+        .root_module = model_blob_codec_mod,
+    });
+    const run_model_blob_codec = b.addRunArtifact(model_blob_codec);
+    if (b.args) |args| run_model_blob_codec.addArgs(args);
+    b.step("model-blob-codec", "Run the canonical native RJMD reader/writer")
+        .dependOn(&run_model_blob_codec.step);
     const model_blob_codec_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/model_blob_codec.zig"),
         .target = target,

@@ -3,33 +3,5 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-SOURCE="$ROOT/framework/tools/model_blob_codec.zig"
-MESHDOC="$ROOT/framework/gpu/meshdoc_format.zig"
-EDGE_SEMANTICS="$ROOT/framework/gpu/mesh_edge_semantics.zig"
-MESH_EDIT="$ROOT/framework/gpu/mesh_edit.zig"
-MODEL_SOURCE="$ROOT/framework/gpu/model_source.zig"
-MODEL_PAINT="$ROOT/framework/gpu/model_paint.zig"
-PAINT_ISLANDS="$ROOT/framework/gpu/paint_islands.zig"
-SKIN_BINDING="$ROOT/framework/skeleton/skin_binding.zig"
-OUTPUT="$ROOT/zig-out/tools/model-blob-codec"
-
-if [[ ! -x "$OUTPUT" || "$SOURCE" -nt "$OUTPUT" || "$MESHDOC" -nt "$OUTPUT" || "$EDGE_SEMANTICS" -nt "$OUTPUT" \
-      || "$MESH_EDIT" -nt "$OUTPUT" || "$MODEL_SOURCE" -nt "$OUTPUT" || "$MODEL_PAINT" -nt "$OUTPUT" \
-      || "$PAINT_ISLANDS" -nt "$OUTPUT" || "$SKIN_BINDING" -nt "$OUTPUT" ]]; then
-  mkdir -p -- "$(dirname "$OUTPUT")"
-  "$ROOT/tools/zig/zig" build-exe -OReleaseFast -lc \
-    --dep meshdoc=meshdoc_format.zig \
-    --dep mesh_edit \
-    --dep skin_binding \
-    "-Mroot=$SOURCE" \
-    --dep mesh_edge_semantics.zig \
-    "-Mmeshdoc_format.zig=$MESHDOC" \
-    --dep meshdoc_format.zig \
-    --dep mesh_edge_semantics.zig \
-    "-Mmesh_edit=$MESH_EDIT" \
-    "-Mskin_binding=$SKIN_BINDING" \
-    "-Mmesh_edge_semantics.zig=$EDGE_SEMANTICS" \
-    "-femit-bin=$OUTPUT"
-fi
-
-exec "$OUTPUT" "$@"
+cd -- "$ROOT"
+exec "$ROOT/tools/zig/zig" build model-blob-codec -Doptimize=ReleaseFast -- "$@"
