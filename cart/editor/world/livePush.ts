@@ -128,19 +128,25 @@ function residentMeshFor(
         return null;
       }
     }
-    // Studio glass on an UNTEXTURED model (req_4707: "the glass doesnt do
-    // glass"): with no atlas there is no alpha to carry the glass, so the
-    // doc's trailing glass run becomes its own wire slot and the host routes
-    // it through the transparent pass — the exact mechanism flat glass doors
-    // already use. Textured models keep the atlas-alpha route; the split only
-    // applies when the render geometry IS the doc geometry (same vertex order).
+    // Studio glass (req_4707/req_4714: "the glass doesnt do glass" / the
+    // industrial window's opaque panes): the doc's trailing glass run becomes
+    // its own wire slot and the host routes it through the transparent pass —
+    // the exact mechanism flat glass doors already use. This applies to
+    // TEXTURED models too: a saved atlas is not a reliable glass carrier
+    // (industrial_double_window's package holds zero translucent texels while
+    // its doc names every pane), so the doc run is the authority and the host
+    // falls back to the flat glass alpha when the atlas carries no
+    // translucency. The split only applies when the render geometry IS the
+    // doc geometry (same vertex order); a decimated displayed form keeps the
+    // plain route — its glass boundary is unknowable.
     const glassFirstVertex = doc?.glassFirstVertex ?? null;
     const vertexCount = vertices.length / 8;
-    if (!png && glassFirstVertex !== null && glassFirstVertex > 0 && glassFirstVertex < vertexCount
+    if (glassFirstVertex !== null && glassFirstVertex > 0 && glassFirstVertex < vertexCount
       && doc && doc.vertices.length === vertices.length) {
       return {
         key,
         vertices,
+        png,
         slots: [
           { start: 0, count: glassFirstVertex },
           { start: glassFirstVertex, count: vertexCount - glassFirstVertex },

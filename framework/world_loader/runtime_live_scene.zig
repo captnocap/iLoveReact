@@ -276,8 +276,14 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
         // overlay wins at equal depth, and the transparent glass shell then
         // blends over the lava exactly as the studio draws it.
         const slot_routed = textured_alpha_route and override == null and !scene3d.regionsBoundForKey(key);
+        // req_4714: texel alpha is authoritative only when the atlas actually
+        // CARRIES translucency. A painted model whose saved atlas is fully
+        // opaque (the industrial window: doc names every pane, package holds
+        // zero translucent texels) gets the flat glass alpha instead — the
+        // doc's glass run is the durable truth, never the atlas.
+        const texel_alpha_authoritative = (mesh.tex_rgba != null and mesh.texture_has_translucency) or override != null;
         const slot_alpha = if (live_door_glass)
-            (if (mesh.tex_rgba != null or override != null) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
+            (if (texel_alpha_authoritative) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
         else if (slot_routed)
             LIVE_TEXTURED_ALPHA_ROUTE_ALPHA
         else

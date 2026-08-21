@@ -591,8 +591,11 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
                 // with the same flat-glass alpha + tint the live path applies —
                 // an untextured window's panes have no atlas alpha to carry them.
                 const glass_run = mesh.door == null and mesh.glass_slot_plus_one > 0 and si + 1 >= @as(usize, mesh.glass_slot_plus_one);
+                // req_4714: texel alpha is authoritative only when the atlas
+                // actually carries translucency; a fully-opaque saved atlas on
+                // a glassy model falls back to the flat glass alpha.
                 const slot_alpha: ?f32 = if (glass_run)
-                    (if (mesh.tex_rgba != null) m_state.LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else m_state.LIVE_DOOR_FLAT_GLASS_ALPHA)
+                    (if (mesh.tex_rgba != null and mesh.texture_has_translucency) m_state.LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else m_state.LIVE_DOOR_FLAT_GLASS_ALPHA)
                 else
                     null;
                 try appendMeshPropNode(self, mesh, inst, key, slot.start, slot.count, material_ref, slot_alpha, null);
