@@ -56,6 +56,9 @@ export default function WorldEditorSurface(props: {
   // from AppFrame (was this component's own useState). Placements/picks report up.
   pieces: readonly PlacedPiece[];
   selectedIds: readonly string[];
+  /** The outliner-selected painted-flora patch (req_4737) — drawn as a ground
+   *  ring in the same cyan selection vocabulary as pieces and walls. */
+  selectedFloraPatchId: string | null;
   armedPieceId: string | null;
   armedYawDegrees: number;
   authoredPieces: readonly AuthoredBuildPiece[];
@@ -129,6 +132,7 @@ export default function WorldEditorSurface(props: {
         armed={armed}
         tool={tool}
         selectedIds={props.selectedIds}
+        selectedFloraPatch={props.worldFlora.find((patch) => patch.id === props.selectedFloraPatchId) ?? null}
         onSelect={props.onSelect}
         onPieceContext={props.onPieceContext}
         onPaintFaces={props.onPaintFaces}

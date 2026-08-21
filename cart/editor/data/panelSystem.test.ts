@@ -25,8 +25,8 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-test('model browse context exposes one Asset Explorer and focus tools', () => {
-  assert(leftPanelsFor('model').map((button) => button.id).join(',') === 'assets', 'model left rail duplicated the Asset Explorer');
+test('model browse context exposes Asset Explorer, global Queue, and focus tools', () => {
+  assert(leftPanelsFor('model').map((button) => button.id).join(',') === 'assets,animation-queue', 'model left rail lost its global queue peer');
   assert(rightPanelsFor('model').map((button) => button.id).join(',') === 'inspector,paint,names,rig,recovery', 'model right rail drifted');
   const recovery = rightPanelsFor('model').find((button) => button.id === 'recovery');
   assert(recovery?.label === 'Recovery' && recovery.icon === 'DatabaseBackup', 'Recovery pane has no rail presentation');
@@ -39,36 +39,60 @@ test('category shortcuts never reappear as duplicate library rail panes', () => 
   }
 });
 
+test('animation owns Sources/Queue/Assets and Generate/Scene Context/Review gutters', () => {
+  const left = leftPanelsFor('animation');
+  const right = rightPanelsFor('animation');
+  assert(left.map((button) => button.id).join(',') === 'animation-sources,animation-queue,assets', 'animation left gutter drifted');
+  assert(left.map((button) => button.label).join(',') === 'Sources,Queue,Assets', 'animation left labels drifted');
+  assert(left.map((button) => button.renderer).join(',') === 'animation-sources,animation-queue-manager,library', 'animation left panes lack explicit renderers');
+  assert(right.map((button) => button.id).join(',') === 'animation-generate,animation-scene-context,animation-review', 'animation right gutter drifted');
+  assert(right.map((button) => button.label).join(',') === 'Generate,Scene Context,Review', 'animation right labels drifted');
+  assert(right.map((button) => button.renderer).join(',') === 'animation-generate,animation-scene-context,animation-review', 'animation right panes lack explicit renderers');
+  assert(normalizeLeftPanelId('animation-capture') === 'animation-sources', 'retired Capture pane did not migrate to Sources');
+  assert(normalizeLeftPanelId('animation-queue') === 'animation-queue', 'Queue pane did not survive hot reload');
+  assert(normalizeRightPanelId('animation-generate') === 'animation-generate', 'Generate pane did not survive hot reload');
+  assert(normalizeRightPanelId('animation-scene-context') === 'animation-scene-context', 'Scene Context pane did not survive hot reload');
+  assert(normalizeRightPanelId('animation-review') === 'animation-review', 'Review pane did not survive hot reload');
+});
+
 test('paint is one peer pane and the Asset Explorer remains reachable', () => {
   const modelPaint = leftPanelsFor('model', true);
   const facadePaint = leftPanelsFor('facade', true);
-  assert(modelPaint.map((button) => button.id).join(',') === 'paint,assets', 'model paint panes drifted');
-  assert(facadePaint.map((button) => button.id).join(',') === 'paint,assets', 'facade paint panes drifted');
-  assert(modelPaint.map((button) => button.renderer).join(',') === 'paint,library', 'paint pane renderers are not explicit');
+  assert(modelPaint.map((button) => button.id).join(',') === 'paint,assets,animation-queue', 'model paint panes drifted');
+  assert(facadePaint.map((button) => button.id).join(',') === 'paint,assets,animation-queue', 'facade paint panes drifted');
+  assert(modelPaint.map((button) => button.renderer).join(',') === 'paint,library,animation-queue', 'paint pane renderers are not explicit');
   assert(leftPanelsFor('world', true)[0]!.id === 'assets', 'unsupported world paint context replaced its library');
 });
 
 test('non-model documents never advertise unimplemented right panes', () => {
-  for (const kind of ['world', 'material', 'playtest', 'animation', 'facade'] as const) {
+  for (const kind of ['material', 'playtest', 'facade'] as const) {
     assert(rightPanelsFor(kind).map((button) => button.id).join(',') === 'inspector', `${kind} advertised a dead focus pane`);
   }
+  // The world document's rail is Focus + the global outliner (req_4737).
+  assert(rightPanelsFor('world').map((button) => button.id).join(',') === 'inspector,outliner', 'world right rail drifted');
+  const outliner = rightPanelsFor('world').find((button) => button.id === 'outliner');
+  assert(outliner?.renderer === 'world-outliner', 'the world outliner pane renderer is not explicit');
+  assert(normalizeRightPanelId('outliner') === 'outliner', 'Outliner pane did not survive hot reload');
+  assert(resolvedPanelId(rightPanelsFor('model'), 'outliner') === 'inspector', 'world outliner pane escaped the world-only renderer');
 });
 
-test('a Lab document mounts the Stack and the Lab inspector on the rails', () => {
+test('a Lab document mounts Layers and the Lab inspector on the rails', () => {
   const left = leftPanelsFor('material', false, true);
-  assert(left.map((button) => button.id).join(',') === 'lab-stack,assets', 'lab left rail drifted');
-  assert(left[0]!.renderer === 'lab-stack', 'the Stack pane renderer is not explicit');
+  assert(left.map((button) => button.id).join(',') === 'lab-stack,assets,animation-queue', 'lab left rail drifted');
+  assert(left[0]!.renderer === 'lab-stack', 'the Layers pane renderer is not explicit');
+  assert(left[0]!.label === 'Layers', 'the Lab rail still exposes its internal Stack name');
   assert(rightPanelsFor('material', true).map((button) => button.id).join(',') === 'lab', 'lab right rail drifted — the world-tile Focus panel must NOT be in the Lab set');
   assert(rightPanelsFor('material').map((button) => button.id).join(',') === 'inspector', 'non-recipe material document lost its Focus panel');
   assert(resolvedPanelId(rightPanelsFor('material', true), 'inspector') === 'lab', 'lab right rail did not auto-select from a world pane id');
   assert(resolvedPanelId(rightPanelsFor('world'), 'lab') === 'inspector', 'lab pane escaped the material-only renderer');
-  assert(normalizeLeftPanelId('lab-stack') === 'lab-stack', 'Stack pane did not survive hot reload');
+  assert(normalizeLeftPanelId('lab-stack') === 'lab-stack', 'Layers pane did not survive hot reload');
   assert(normalizeRightPanelId('lab') === 'lab', 'Lab pane did not survive hot reload');
 });
 
-test('World Bible owns one explicit index pane and no generic world inspector', () => {
+test('World Bible retains its index plus the global Queue and no generic inspector', () => {
   const left = leftPanelsFor('knowledge');
-  assert(left.length === 1 && left[0]!.id === 'world-bible' && left[0]!.renderer === 'world-bible', 'knowledge fell into the world asset browser');
+  assert(left.map((button) => button.id).join(',') === 'world-bible,animation-queue', 'knowledge lost its index or global queue');
+  assert(left[0]!.renderer === 'world-bible' && left[1]!.renderer === 'animation-queue', 'knowledge advertised an unrendered pane');
   assert(rightPanelsFor('knowledge').length === 0, 'knowledge advertised the world-object inspector');
 });
 

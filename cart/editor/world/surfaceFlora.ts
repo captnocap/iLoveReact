@@ -462,10 +462,27 @@ function unit(seed: number): number {
   return (hash32(seed) >>> 8) / 0x1000000;
 }
 
-function instanceCount(lane: FloraLane, density: number, seed: number): number {
+export function instanceCount(lane: FloraLane, density: number, seed: number): number {
   const exact = SURFACE_FLORA_TUNING.maxInstancesPerDab[lane] * clampDensity(density);
   const whole = Math.floor(exact);
   return whole + (unit(seed ^ 0x6d2b79f5) < exact - whole ? 1 : 0);
+}
+
+/** The exact plants one ground patch scatters — the same derivation the
+ * renderer draws, so an outliner row and a rendered tree can never disagree. */
+export function worldFloraPatchInstances(patch: WorldFloraPatch, lane: FloraLane): Vec3[] {
+  const points: Vec3[] = [];
+  const count = instanceCount(lane, patch.density, patch.seed);
+  for (let index = 0; index < count; index += 1) {
+    const angle = unit(patch.seed ^ Math.imul(index + 1, 0x9e3779b9)) * Math.PI * 2;
+    const radius = Math.sqrt(unit(patch.seed ^ Math.imul(index + 1, 0x85ebca6b))) * patch.radiusM;
+    points.push({
+      x: patch.x + Math.cos(angle) * radius,
+      y: patch.y + SURFACE_FLORA_TUNING.surfaceOffsetM,
+      z: patch.z + Math.sin(angle) * radius,
+    });
+  }
+  return points;
 }
 
 function localTriangle(vertices: Float32Array, triangle: number): [Vec3, Vec3, Vec3] | null {
@@ -532,11 +549,9 @@ export function surfaceFloraMeshRefs(
   for (const patch of worldFlora) {
     const lane = floraLaneForSpeciesId(patch.speciesId, authoredSpecies);
     if (!lane) continue;
-    const count = instanceCount(lane, patch.density, patch.seed);
-    for (let index = 0; index < count; index += 1) {
-      const angle = unit(patch.seed ^ Math.imul(index + 1, 0x9e3779b9)) * Math.PI * 2;
-      const radius = Math.sqrt(unit(patch.seed ^ Math.imul(index + 1, 0x85ebca6b))) * patch.radiusM;
-      append(patch.speciesId, { x: patch.x + Math.cos(angle) * radius, y: patch.y + SURFACE_FLORA_TUNING.surfaceOffsetM, z: patch.z + Math.sin(angle) * radius }, patch.seed ^ index);
+    const points = worldFloraPatchInstances(patch, lane);
+    for (let index = 0; index < points.length; index += 1) {
+      append(patch.speciesId, points[index]!, patch.seed ^ index);
     }
   }
   return refs;

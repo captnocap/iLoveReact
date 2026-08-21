@@ -95,7 +95,7 @@ export function bootAuthoredFloraSpecies(): AuthoredFloraSpecies[] {
 // hot-reload reset so the toolbar highlight always matches a clean viewer. A fresh palette
 // per call (defaultPalette()) keeps the recents ring from being shared across resets.
 export function defaultModelTool(): ModelToolSnapshot {
-  return { selMode: 0, gizmoTool: 0, paint: false, pathPlane: false, pathEdges: false, focus: false, wire: false, measurements: false, playerScale: false, xray: false, persistentAdditive: false, camLock: false, camSaved: false, retopoGhostVisible: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
+  return { selMode: 0, gizmoTool: 0, paint: false, pathPlane: false, pathEdges: false, curvePull: false, surfaceSlide: false, focus: false, wire: false, measurements: false, playerScale: false, xray: false, persistentAdditive: false, camLock: false, camSaved: false, retopoGhostVisible: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
 }
 
 type InitialWorldArchitecture = { architecture?: unknown };
@@ -239,6 +239,7 @@ export function initialState(worldSave: InitialWorldArchitecture | null = null):
     activeWorldViewId: null,
     worldViewRecallNonce: 0,
     selectedPieceId: null,
+    selectedFloraPatchId: null,
     // NOTHING is armed at boot. A default here made the world Focus panel
     // describe a "Concrete Floor" the user never chose, and hid PieceBody's
     // real empty state behind a constant (req_4435). The Build bar arms.

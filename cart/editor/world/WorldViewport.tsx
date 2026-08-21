@@ -202,6 +202,9 @@ export default function WorldViewport(props: {
   tool: WorldTool;
   /** every selected placed piece; the last clicked id remains primary upstream. */
   selectedIds: readonly string[];
+  /** The outliner-selected painted-flora patch (req_4737) — its ground radius
+   *  draws in the same cyan selection vocabulary as pieces and walls. */
+  selectedFloraPatch: WorldFloraPatch | null;
   /** Report a click hit. Ctrl toggles one piece; Shift-click selects the full
    * touching component, while Shift-drag remains camera pan. */
   onSelect: (id: string | null, intent: PieceSelectionIntent) => void;
@@ -2094,6 +2097,28 @@ export default function WorldViewport(props: {
         );
       }
     }
+  }
+  // Selected flora patch (req_4737): its authored ground radius as a projected
+  // ring — the patch is the selectable unit, its plants are derived scatter.
+  if (props.tool !== 'place' && props.selectedFloraPatch) {
+    const patch = props.selectedFloraPatch;
+    const RING_POINTS = 24;
+    let prior: { x: number; y: number } | null = null;
+    let first: { x: number; y: number } | null = null;
+    for (let index = 0; index < RING_POINTS; index += 1) {
+      const angle = (index / RING_POINTS) * Math.PI * 2;
+      const point = stage.project(
+        patch.x + Math.cos(angle) * patch.radiusM,
+        patch.y,
+        patch.z + Math.sin(angle) * patch.radiusM,
+        rect,
+      );
+      if (!point) { prior = null; continue; }
+      if (!first) first = point;
+      if (prior) selectedSegs.push(prior.x, prior.y, point.x, point.y);
+      prior = point;
+    }
+    if (prior && first) selectedSegs.push(prior.x, prior.y, first.x, first.y);
   }
   // ── The selection gizmo (req_3367): studio handles over the selected prop.
   // Drawn at the drag preview mid-gesture so the handles ride the transform.

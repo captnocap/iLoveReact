@@ -160,7 +160,7 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // save picker, 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-edit confirmation. Mirrored up
 // through ModelToolSnapshot so the shell's central gate can see the session.
 export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; persistentAdditive: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; surfaceSlide: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; persistentAdditive: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 /** Shared studio-paint controls while a flat facade document is active. The
  *  durable painting lives on Facade.layers; this is session/view state only. */
 export type FacadePaintState = { brush: Brush; tool: BrushTool; detail: number };
@@ -178,6 +178,7 @@ export type ModelToolApi = {
   pathPlane: () => void;
   pathEdges: () => void;
   curvePull: () => void;
+  surfaceSlide: () => void;
   focus: () => void;
   wire: () => void;
   /** Exact model / focused-scope / active-selection dimensions overlay. */
@@ -727,6 +728,10 @@ export type EditorState = {
   /** Additive world selection. `selectedPieceId` remains the primary/focused
    *  member for the existing Inspector and edit commands. */
   selectedPieceIds: string[];
+  /** The world outliner's selected painted-flora patch (req_4737). One world
+   *  selection at a time: picking a piece or wall clears this and vice versa.
+   *  Session-only — never persisted, never journaled. */
+  selectedFloraPatchId: string | null;
   armedPieceId: string | null;
   /** The opening kit (catalogId) armed by a Doors/Windows palette tile —
    * the Place Door/Window tool's ghost measures with it (req_4513). */

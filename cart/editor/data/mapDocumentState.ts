@@ -25,6 +25,7 @@ export type MapAuthoringSlices = Pick<EditorState,
   | 'selectedObjectId'
   | 'selectedPieceId'
   | 'selectedPieceIds'
+  | 'selectedFloraPatchId'
   | 'armedStamp'
   | 'armedPieceId'
   | 'armedYawDegrees'
@@ -96,6 +97,7 @@ export function mapAuthoringSlicesFor(
     selectedObjectId: save.objects.find((object) => !object.hidden)?.id ?? 'obj-tile',
     selectedPieceId: null,
     selectedPieceIds: [],
+    selectedFloraPatchId: null,
     armedStamp: null,
     // Nothing is armed until the user arms something. Opening a map does not
     // decide what they are about to build (req_4435).

@@ -262,6 +262,7 @@ export default function Stage(props: {
           activeCommandId={props.state.activeCommandId}
           pieces={props.state.worldPieces}
           selectedIds={props.state.selectedPieceIds}
+          selectedFloraPatchId={props.state.selectedFloraPatchId}
           armedPieceId={props.state.armedPieceId}
           armedYawDegrees={props.state.armedYawDegrees}
           authoredPieces={props.state.authoredBuildPieces}

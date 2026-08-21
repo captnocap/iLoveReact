@@ -1,6 +1,6 @@
 // SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the contextual focus
 // body + its persistent pane rail. The active rail button folds the body away.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, Row, ScrollView } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
@@ -31,6 +31,7 @@ import ModelPaintVariants from '../library/ModelPaintVariants';
 import NamesPanel from './NamesPanel';
 import type { ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
+import WorldOutliner, { type WorldOutlinerHandlers } from '../stage/WorldOutliner';
 import BlobExplorerSurface, {
   type BlobExplorerSurfaceProps,
 } from '../stage/BlobExplorerSurface';
@@ -44,7 +45,6 @@ import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSe
 import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
 import { ModelIdentityHeader, PartSection, SelectionSection, ShapeSection } from './ModelFocusSections';
 import LabInspectorPanel from './LabInspectorPanel';
-import { AnimationGenerateInspector } from '../animation/AnimationSidePanels';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -422,6 +422,7 @@ function unavailableBlobExplorerProps(modelId: string): BlobExplorerSurfaceProps
 
 export default function Inspector(props: {
   state: EditorState;
+  animationPanel?: ReactNode;
   /** The selected world object / material, or NULL when the user has selected
    *  nothing. Panels render their designed empty state on null; they never
    *  invent a subject (req_4435). */
@@ -467,6 +468,9 @@ export default function Inspector(props: {
   onBrowseMaterials: () => void;
   // Saved camera views (req_4168) — the world surface's VIEWS card.
   worldViews: WorldViewHandlers;
+  // The world outliner pane's selection/locate verbs (req_4737) — every one
+  // lands in the SAME selection state the viewport renders.
+  worldOutliner: WorldOutlinerHandlers;
   // The Material Lab document's inspector (req_4406): recipe null = not a Lab
   // document (single-material fallback keeps the ordinary Focus panel).
   lab: {
@@ -635,7 +639,7 @@ export default function Inspector(props: {
   if (activeDocument?.kind === 'animation') {
     return (
       <C.HW_RightPanel>
-        <AnimationGenerateInspector />
+        {props.animationPanel}
         <FocusRail documentKind={documentKind} labActive={false} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>
     );
@@ -690,6 +694,37 @@ export default function Inspector(props: {
             />
             <GcStressSection />
           </C.HW_InspectorBody>
+        </C.HW_Inspector>
+        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
+      </C.HW_RightPanel>
+    );
+  }
+  // World OUTLINER pane (req_4737): everything placed on the map as one grouped
+  // tree, sharing the exact selection state the world Focus panel and viewport
+  // already render.
+  if (activeDocument?.kind === 'world' && activePane === 'outliner') {
+    return (
+      <C.HW_RightPanel>
+        <C.HW_Inspector>
+          <C.HW_PanelHead>
+            <C.HW_Kicker>WORLD · OUTLINER</C.HW_Kicker>
+            <C.HW_Spacer />
+            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
+              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+            </C.HW_PanelHeadButton>
+          </C.HW_PanelHead>
+          <C.HW_InspectorBodyFixed>
+            <WorldOutliner
+              architecture={props.state.architecture}
+              pieces={props.state.worldPieces}
+              worldFlora={props.state.worldFlora}
+              floraSpecies={props.state.authoredFloraSpecies}
+              selectedPieceIds={props.state.selectedPieceIds}
+              architectureSelection={props.state.architectureSelection}
+              selectedFloraPatchId={props.state.selectedFloraPatchId}
+              handlers={props.worldOutliner}
+            />
+          </C.HW_InspectorBodyFixed>
         </C.HW_Inspector>
         <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
       </C.HW_RightPanel>

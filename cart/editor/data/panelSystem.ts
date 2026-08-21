@@ -9,8 +9,25 @@
 // again collapses its adjacent panel; another button selects and opens it.
 import type { ContentFolderId, WorkspaceDocumentKind } from './types';
 
-export type LeftPanelId = 'assets' | 'paint' | 'lab-stack' | 'animation-capture' | 'world-bible';
-export type RightPanelId = 'inspector' | 'paint' | 'rig' | 'names' | 'recovery' | 'lab' | 'animation-generate';
+export type LeftPanelId =
+  | 'assets'
+  | 'paint'
+  | 'lab-stack'
+  | 'animation-capture' // persisted pre-Foundry id; normalized, never advertised
+  | 'animation-sources'
+  | 'animation-queue'
+  | 'world-bible';
+export type RightPanelId =
+  | 'inspector'
+  | 'outliner'
+  | 'paint'
+  | 'rig'
+  | 'names'
+  | 'recovery'
+  | 'lab'
+  | 'animation-generate'
+  | 'animation-scene-context'
+  | 'animation-review';
 
 export type PanelButton<Id extends string> = {
   id: Id;
@@ -20,42 +37,72 @@ export type PanelButton<Id extends string> = {
 
 export type LeftPanelButton =
   | (PanelButton<LeftPanelId> & { renderer: 'library' })
-  | (PanelButton<LeftPanelId> & { renderer: 'paint' | 'lab-stack' | 'animation-capture' | 'world-bible' });
+  | (PanelButton<LeftPanelId> & {
+      renderer:
+        | 'paint'
+        | 'lab-stack'
+        | 'animation-sources'
+        | 'animation-queue'
+        | 'animation-queue-manager'
+        | 'world-bible';
+    });
 
-export type RightPanelButton = PanelButton<RightPanelId>;
+export type RightPanelButton = PanelButton<RightPanelId> & {
+  renderer:
+    | 'inspector'
+    | 'world-outliner'
+    | 'paint'
+    | 'rig'
+    | 'names'
+    | 'recovery'
+    | 'lab'
+    | 'animation-generate'
+    | 'animation-scene-context'
+    | 'animation-review';
+};
 
-const ASSETS = { id: 'assets', label: 'All assets', icon: 'FolderTree', renderer: 'library' } as const;
+const ASSETS = { id: 'assets', label: 'Assets', icon: 'FolderTree', renderer: 'library' } as const;
 const PAINT = { id: 'paint', label: 'Paint', icon: 'Paintbrush', renderer: 'paint' } as const;
 // The Material Lab's Layers panel is a left-rail peer exactly like Paint (req_4406):
 // it joins while a Lab document (recipe-backed material) is focused.
 const LAB_STACK = { id: 'lab-stack', label: 'Layers', icon: 'Layers', renderer: 'lab-stack' } as const;
-const ANIMATION_CAPTURE = { id: 'animation-capture', label: 'Capture', icon: 'ScanLine', renderer: 'animation-capture' } as const;
+const ANIMATION_SOURCES = { id: 'animation-sources', label: 'Sources', icon: 'ScanLine', renderer: 'animation-sources' } as const;
+const GLOBAL_QUEUE = { id: 'animation-queue', label: 'Queue', icon: 'ListTodo', renderer: 'animation-queue' } as const;
+const ANIMATION_QUEUE = { ...GLOBAL_QUEUE, renderer: 'animation-queue-manager' } as const;
 const WORLD_BIBLE = { id: 'world-bible', label: 'World Bible index', icon: 'BookOpen', renderer: 'world-bible' } as const;
 
-const ASSET_LEFT = [ASSETS] as const;
-const PAINT_LEFT = [PAINT, ASSETS] as const;
-const LAB_LEFT = [LAB_STACK, ASSETS] as const;
-const ANIMATION_LEFT = [ANIMATION_CAPTURE, ASSETS] as const;
-const KNOWLEDGE_LEFT = [WORLD_BIBLE] as const;
+const ASSET_LEFT = [ASSETS, GLOBAL_QUEUE] as const;
+const PAINT_LEFT = [PAINT, ASSETS, GLOBAL_QUEUE] as const;
+const LAB_LEFT = [LAB_STACK, ASSETS, GLOBAL_QUEUE] as const;
+const ANIMATION_LEFT = [ANIMATION_SOURCES, ANIMATION_QUEUE, ASSETS] as const;
+const KNOWLEDGE_LEFT = [WORLD_BIBLE, GLOBAL_QUEUE] as const;
 
-const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal' } as const;
+const INSPECTOR = { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal', renderer: 'inspector' } as const;
 const MODEL_RIGHT = [
-  { id: 'inspector', label: 'Model', icon: 'SlidersHorizontal' },
-  { id: 'paint', label: 'Atlas', icon: 'Image' },
+  { id: 'inspector', label: 'Model', icon: 'SlidersHorizontal', renderer: 'inspector' },
+  { id: 'paint', label: 'Atlas', icon: 'Image', renderer: 'paint' },
   // The semantic region table earns its own pane beside the atlas (req_3884):
   // the whole list at once, each row selecting its faces on the model.
-  { id: 'names', label: 'Names', icon: 'Tag' },
-  { id: 'rig', label: 'Rig', icon: 'Bone' },
-  { id: 'recovery', label: 'Recovery', icon: 'DatabaseBackup' },
+  { id: 'names', label: 'Names', icon: 'Tag', renderer: 'names' },
+  { id: 'rig', label: 'Rig', icon: 'Bone', renderer: 'rig' },
+  { id: 'recovery', label: 'Recovery', icon: 'DatabaseBackup', renderer: 'recovery' },
 ] as const;
 const FOCUS_RIGHT = [INSPECTOR] as const;
+// The world document's rail (req_4737): the piece-aware Focus panel plus the
+// global outliner — everything placed on the map as one grouped tree.
+const WORLD_RIGHT = [
+  { id: 'inspector', label: 'Focus', icon: 'SlidersHorizontal', renderer: 'inspector' },
+  { id: 'outliner', label: 'Outliner', icon: 'ListTree', renderer: 'world-outliner' },
+] as const;
 // The Lab document's right rail is the Lab inspector — the world-tile Focus
 // panel is deliberately NOT in this set (req_4406): it returns with world focus.
 const LAB_RIGHT = [
-  { id: 'lab', label: 'Lab inspector', icon: 'FlaskConical' },
+  { id: 'lab', label: 'Lab inspector', icon: 'FlaskConical', renderer: 'lab' },
 ] as const;
 const ANIMATION_RIGHT = [
-  { id: 'animation-generate', label: 'Generate motion', icon: 'Sparkles' },
+  { id: 'animation-generate', label: 'Generate', icon: 'Sparkles', renderer: 'animation-generate' },
+  { id: 'animation-scene-context', label: 'Scene Context', icon: 'Armchair', renderer: 'animation-scene-context' },
+  { id: 'animation-review', label: 'Review', icon: 'GalleryHorizontalEnd', renderer: 'animation-review' },
 ] as const;
 
 export function leftPanelsFor(kind: WorkspaceDocumentKind, paintActive = false, labActive = false): readonly LeftPanelButton[] {
@@ -73,6 +120,7 @@ export function rightPanelsFor(kind: WorkspaceDocumentKind, labActive = false): 
   if (kind === 'model') return MODEL_RIGHT;
   if (labActive && kind === 'material') return LAB_RIGHT;
   if (kind === 'animation') return ANIMATION_RIGHT;
+  if (kind === 'world') return WORLD_RIGHT;
   return FOCUS_RIGHT;
 }
 
@@ -123,13 +171,15 @@ export function normalizeLeftPanelId(value: string): LeftPanelId {
   if (value === 'grid' || value === 'pieces' || value === 'actors' || value === 'data') return 'assets';
   if (value === 'world' || value === 'pipeline' || value === 'build' || value === 'models' || value === 'materials' || value === 'characters' || value === 'missions') return 'assets';
   if (value === 'tool-options' || value === 'ink') return 'paint';
-  return (['assets', 'paint', 'lab-stack', 'animation-capture', 'world-bible'] as const).includes(value as LeftPanelId)
+  if (value === 'animation-capture') return 'animation-sources';
+  return (['assets', 'paint', 'lab-stack', 'animation-sources', 'animation-queue', 'world-bible'] as const).includes(value as LeftPanelId)
     ? value as LeftPanelId
     : 'assets';
 }
 
 export function normalizeRightPanelId(value: string): RightPanelId {
-  return value === 'paint' || value === 'rig' || value === 'names' || value === 'recovery' || value === 'lab' || value === 'animation-generate'
+  return value === 'outliner' || value === 'paint' || value === 'rig' || value === 'names' || value === 'recovery' || value === 'lab'
+    || value === 'animation-generate' || value === 'animation-scene-context' || value === 'animation-review'
     ? value
     : 'inspector';
 }

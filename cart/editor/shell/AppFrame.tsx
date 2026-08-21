@@ -4314,6 +4314,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-path-plane') api.pathPlane();
         else if (commandId === 'mesh-path-edges') api.pathEdges();
         else if (commandId === 'mesh-curve-pull') api.curvePull();
+        else if (commandId === 'mesh-surface-slide') api.surfaceSlide();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-measurements') api.measurements();
@@ -5168,6 +5169,7 @@ export default function AppFrame() {
       architectureSelection: { kind: 'wallEdge', edgeId: hit.edgeId, side: hit.side },
       selectedPieceId: null,
       selectedPieceIds: [],
+      selectedFloraPatchId: null,
       status: 'selected wall — Del deletes it',
     }));
   };
@@ -5341,6 +5343,7 @@ export default function AppFrame() {
       architectureSelection: { kind: 'wallOpening', edgeId: hit.edgeId, openingId: hit.openingId },
       selectedPieceId: null,
       selectedPieceIds: [],
+      selectedFloraPatchId: null,
       status: 'selected opening — Del deletes it',
     }));
   };
@@ -5419,6 +5422,7 @@ export default function AppFrame() {
         selectedPieceId: null,
         selectedPieceIds: [],
         architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        selectedFloraPatchId: null,
         status: 'cleared world selection',
       };
       if (intent === 'toggle') {
@@ -5431,6 +5435,7 @@ export default function AppFrame() {
           selectedPieceId: wasSelected ? selectedPieceIds[selectedPieceIds.length - 1] ?? null : id,
           selectedPieceIds,
           architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+          selectedFloraPatchId: null,
           status: `${wasSelected ? 'removed' : 'added'} ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id} · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`,
         };
       }
@@ -5440,11 +5445,59 @@ export default function AppFrame() {
         selectedPieceId: id,
         selectedPieceIds,
         architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        selectedFloraPatchId: null,
         status: intent === 'connected'
           ? `selected touching component · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`
           : `selected ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id}`,
       };
     });
+  };
+
+  /** Outliner structure row (req_4737): select a detected touching component as
+   * one set — the same additive-selection state Shift-click builds. */
+  const selectPieceSet = (ids: readonly string[]) => {
+    if (ids.length === 0) return;
+    setState((prev) => ({
+      ...prev,
+      selectedPieceId: ids[ids.length - 1] ?? null,
+      selectedPieceIds: [...ids],
+      architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+      selectedFloraPatchId: null,
+      status: `selected structure · ${ids.length} piece${ids.length === 1 ? '' : 's'}`,
+    }));
+  };
+
+  /** Outliner flora row (req_4737): the PATCH is the authored, selectable unit —
+   * its plants are derived scatter. One world selection at a time. */
+  const selectFloraPatch = (id: string) => {
+    setState((prev) => {
+      const patch = prev.worldFlora.find((candidate) => candidate.id === id);
+      if (!patch) return { ...prev, status: 'that flora patch is no longer on the map' };
+      return {
+        ...prev,
+        selectedFloraPatchId: id,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        status: 'selected flora patch — its ground radius rings in the world',
+      };
+    });
+  };
+
+  /** Outliner Locate (req_4737): recenter the world camera on a row's entity,
+   * keeping the current orbit — the same recall channel session resume rides. */
+  const locateWorldEntity = (focus: { x: number; z: number; floor: number | null; label: string }) => {
+    const pose = liveIsoPose();
+    if (!pose) {
+      setState((prev) => ({ ...prev, status: 'move the camera once before jumping — no live world view yet' }));
+      return;
+    }
+    const floor = focus.floor ?? stateRef.current.floorIndex;
+    setSessionCameraRecall((previous) => ({
+      view: { id: 'outliner:locate', name: focus.label, ...worldViewPoseFrom(pose, floor), centerX: focus.x, centerZ: focus.z },
+      nonce: (previous?.nonce ?? 0) + 1,
+    }));
+    setState((prev) => ({ ...prev, floorIndex: floor, status: `jumped to ${focus.label}` }));
   };
 
   const paintWorldFlora = (samples: readonly FloraPaintSample[], brush: WorldFloraBrush) => {
@@ -11971,6 +12024,16 @@ export default function AppFrame() {
               onRecall: recallWorldViewById,
               onRename: renameWorldViewById,
               onRemove: removeWorldViewById,
+            }}
+            // WORLD OUTLINER (req_4737): every verb lands in the same selection
+            // state the viewport renders — two views over one selection.
+            worldOutliner={{
+              onSelectPiece: (id) => selectPiece(id),
+              onSelectPieces: selectPieceSet,
+              onSelectWall: (edgeId) => selectWallEdge({ edgeId, side: 'a' }),
+              onSelectOpening: (edgeId, openingId) => selectOpening({ edgeId, openingId }),
+              onSelectFloraPatch: selectFloraPatch,
+              onLocate: locateWorldEntity,
             }}
             lab={{
               recipe: activeLabRecipe(state),
