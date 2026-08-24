@@ -1,17 +1,22 @@
 import {
   armedOpeningKitById,
+  clampOpeningCell,
   openingWorldPose,
   armedOpeningKitFromEntries,
   openingCatalogIdOf,
   openingEdgeRefusal,
   openingGhostCorners,
+  openingGizmoFrame,
   openingLatticeFill,
   openingPaletteGroups,
   openingPaletteId,
+  openingRectCenter,
+  openingSideOfPoint,
   snapOpeningSlot,
+  type OpeningGizmoFrame,
   type OpeningKitArm,
 } from './openingTools';
-import type { ArchitectureCatalogEntry, WallCell } from './architecture';
+import type { ArchitectureCatalogEntry, ArchitectureSource, WallCell } from './architecture';
 
 let passed = 0;
 let failed = 0;
@@ -201,6 +206,71 @@ test('the palette is the kit picker: doors and windows group, ids round-trip, ex
   assert(armed && armed.label === 'window_001' && armed.minimumThicknessU === 2, 'exact-id arming picks THAT kit');
   assert(armedOpeningKitById([doorEntry()], 'build:wall:opening:door:gone') === null, 'a missing id arms nothing');
   assert(openingPaletteId('x') === 'opening:x', 'prefix law');
+});
+
+// ── Placed-opening gizmo laws (req_4738) ────────────────────────────────────
+
+/** One 4m wall along +X on floor 0 with a 1m-wide door at column 24u. */
+function gizmoSource(): ArchitectureSource {
+  return {
+    version: 1,
+    revision: 3,
+    walls: {
+      vertices: [
+        { id: 'v:0', floor: 0, xU: 0, zU: 0 },
+        { id: 'v:1', floor: 0, xU: 64, zU: 0 },
+      ],
+      edges: [{
+        id: 'e:0',
+        startVertexId: 'v:0',
+        endVertexId: 'v:1',
+        support: { kind: 'absolute', baseYU: 0 },
+        heightU: 48,
+        thicknessU: 4,
+        profile: 'full',
+        styleId: 'build:wall:style:basic',
+        sideA: { materialId: 'build:wall:style:basic' },
+        sideB: { materialId: 'build:wall:style:basic' },
+        openings: [{
+          id: 'o:0', kind: 'door', kitId: 'kit:door', columnU: 24, rowU: 0,
+          facingSide: 'a', hinge: 'start',
+        }],
+      }],
+      anchors: [],
+    },
+  };
+}
+
+const DOOR_FOOTPRINT = { minColumn: -8, maxColumnExclusive: 8, minRow: 0, maxRowExclusive: 32 };
+
+test('the gizmo frame resolves the selected opening on its wall (req_4738)', () => {
+  const frame = openingGizmoFrame(gizmoSource(), { 'kit:door': DOOR_FOOTPRINT }, 'e:0', 'o:0');
+  assert(frame, 'frame did not resolve');
+  assert(frame.dir.x === 1 && frame.dir.z === 0, 'along-wall direction drifted');
+  assert(frame.anchor.columnU === 24 && frame.anchor.rowU === 0, 'anchor cell drifted');
+  assert(frame.edgeLengthU === 64 && frame.edgeHeightU === 48, 'wall bounds drifted');
+  assert(frame.facingSide === 'a', 'facing side drifted');
+  const center = openingRectCenter(frame, frame.anchor);
+  // Column 24u + centered ±8u footprint → 24u = 1.5m along; rows 0..32 → 16u = 1m up.
+  assert(Math.abs(center.x - 1.5) < 1e-9 && Math.abs(center.y - 1) < 1e-9 && Math.abs(center.z) < 1e-9, `rect center drifted: (${center.x},${center.y},${center.z})`);
+  assert(openingGizmoFrame(gizmoSource(), {}, 'e:0', 'o:0') === null, 'an unmeasured kit must not grow a gizmo');
+  assert(openingGizmoFrame(gizmoSource(), { 'kit:door': DOOR_FOOTPRINT }, 'e:0', 'o:gone') === null, 'a deleted opening must not grow a gizmo');
+});
+
+test('the drag clamp keeps the footprint inside the wall face, on whole units (req_4738)', () => {
+  const frame = openingGizmoFrame(gizmoSource(), { 'kit:door': DOOR_FOOTPRINT }, 'e:0', 'o:0')!;
+  assert(clampOpeningCell(frame, 30.4, 0).columnU === 30, 'a candidate must round to whole lattice units');
+  assert(clampOpeningCell(frame, 500, 0).columnU === 56, 'the right clamp is length minus the footprint reach');
+  assert(clampOpeningCell(frame, -500, 0).columnU === 8, 'the left clamp holds the footprint at the start vertex');
+  assert(clampOpeningCell(frame, 24, 500).rowU === 16, 'the top clamp is height minus the footprint top');
+  assert(clampOpeningCell(frame, 24, -3).rowU === 0, 'the bottom clamp is the floor');
+});
+
+test('the ring flip law names the wall side under a world point (req_4738)', () => {
+  const frame = openingGizmoFrame(gizmoSource(), { 'kit:door': DOOR_FOOTPRINT }, 'e:0', 'o:0')!;
+  // Engine side law: side-a normal = (-dirZ, dirX) = (0, 1) for a +X wall.
+  assert(openingSideOfPoint(frame, { x: 1.5, z: 2 }) === 'a', '+Z of a +X wall is side a');
+  assert(openingSideOfPoint(frame, { x: 1.5, z: -2 }) === 'b', '-Z of a +X wall is side b');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

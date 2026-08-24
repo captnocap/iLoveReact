@@ -61,7 +61,7 @@ export function applyArchitectureCommand(
 
 /** Command ids are minted from the editor's monotonic seq so engine-derived
  * vertex/edge ids (`<commandId>:v:<n>`) stay unique per document. */
-export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening' | 'dimensions', seq: number): string {
+export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening' | 'move-opening' | 'flip-opening' | 'dimensions', seq: number): string {
   return `arch:${verb}:${seq}`;
 }
 
@@ -114,4 +114,35 @@ export function insertOpeningCommand(
 
 export function deleteOpeningCommand(commandId: string, expectedRevision: number, openingId: string): ArchitectureCommand {
   return { commandId, expectedRevision, kind: 'deleteOpening', openingId };
+}
+
+/** Slide a placed opening to a new anchor on ITS wall (req_4738): the gizmo's
+ * arm drags land here. The engine re-validates the footprint at the new cell —
+ * junction clearance, overlaps, wall bounds — and rejects with its reason. */
+export function moveOpeningCommand(commandId: string, expectedRevision: number, openingId: string, cell: WallCell): ArchitectureCommand {
+  return { commandId, expectedRevision, kind: 'moveOpening', openingId, columnU: cell.columnU, rowU: cell.rowU };
+}
+
+/** Turn a placed opening around (req_4738): the gizmo ring flips which side
+ * the kit mounts flush against — the whole record rides configureOpening with
+ * only facingSide changed, so kind/kit/anchor/hinge provably stay put. */
+export function flipOpeningFacingCommand(
+  commandId: string,
+  expectedRevision: number,
+  opening: { id: string; kind: WallOpeningKind; kitId: string; columnU: number; rowU: number; facingSide: WallSide; hinge: WallHinge },
+): ArchitectureCommand {
+  return {
+    commandId,
+    expectedRevision,
+    kind: 'configureOpening',
+    opening: {
+      openingId: opening.id,
+      kind: opening.kind,
+      kitId: opening.kitId,
+      columnU: opening.columnU,
+      rowU: opening.rowU,
+      facingSide: opening.facingSide === 'a' ? 'b' : 'a',
+      hinge: opening.hinge,
+    },
+  };
 }

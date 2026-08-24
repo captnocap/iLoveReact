@@ -44,7 +44,7 @@ import { takeArchitectureEditMark } from './architectureCommand';
 import { dispatchEdit } from '../data/editorEvents';
 import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
 import { architectureHost } from './architectureHost';
-import { openingEdgeRefusal, openingGhostCorners, openingWorldPose, snapOpeningSlot, type OpeningKitArm } from './openingTools';
+import { clampOpeningCell, openingEdgeRefusal, openingGhostCorners, openingGizmoFrame, openingRectCenter, openingSideOfPoint, openingWorldPose, snapOpeningSlot, type OpeningGizmoFrame, type OpeningKitArm } from './openingTools';
 import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 import type { PieceSelectionIntent } from './selection';
@@ -140,6 +140,42 @@ type GizmoAxisPx = { x: number; y: number; pxPerMeter: number } | null;
 function distToArmPx(px: number, py: number, ax: number, ay: number, dir: { x: number; y: number }, len: number): number {
   const t = Math.max(0, Math.min(len, (px - ax) * dir.x + (py - ay) * dir.y));
   return Math.hypot(px - (ax + dir.x * t), py - (ay + dir.y * t));
+}
+
+type GizmoLine = { color: string; segs: number[]; width: number };
+
+/** One gizmo arrow arm (shaft + chevron head) into the overlay line list —
+ *  shared by the prop gizmo and the placed-opening gizmo (req_4738) so every
+ *  handle on every surface reads as ONE vocabulary. */
+function pushGizmoArm(lines: GizmoLine[], anchor: { x: number; y: number }, axis: GizmoAxisPx, color: string, active: boolean): void {
+  if (!axis) return;
+  const tipX = anchor.x + axis.x * GIZMO_ARM_PX;
+  const tipY = anchor.y + axis.y * GIZMO_ARM_PX;
+  // Arrowhead chevron: two strokes swept back from the tip.
+  const perpX = -axis.y;
+  const perpY = axis.x;
+  lines.push({
+    color: active ? GIZMO_ACTIVE_COLOR : color,
+    width: 2.5,
+    segs: [
+      anchor.x, anchor.y, tipX, tipY,
+      tipX, tipY, tipX + (-axis.x * 0.8 + perpX * 0.55) * GIZMO_HEAD_PX, tipY + (-axis.y * 0.8 + perpY * 0.55) * GIZMO_HEAD_PX,
+      tipX, tipY, tipX + (-axis.x * 0.8 - perpX * 0.55) * GIZMO_HEAD_PX, tipY + (-axis.y * 0.8 - perpY * 0.55) * GIZMO_HEAD_PX,
+    ],
+  });
+}
+
+function pushGizmoRingCircle(lines: GizmoLine[], anchor: { x: number; y: number }, active: boolean): void {
+  const ring: number[] = [];
+  for (let i = 0; i < GIZMO_RING_SEGMENTS; i += 1) {
+    const a0 = (i / GIZMO_RING_SEGMENTS) * Math.PI * 2;
+    const a1 = ((i + 1) / GIZMO_RING_SEGMENTS) * Math.PI * 2;
+    ring.push(
+      anchor.x + Math.cos(a0) * GIZMO_RING_PX, anchor.y + Math.sin(a0) * GIZMO_RING_PX,
+      anchor.x + Math.cos(a1) * GIZMO_RING_PX, anchor.y + Math.sin(a1) * GIZMO_RING_PX,
+    );
+  }
+  lines.push({ color: active ? GIZMO_ACTIVE_COLOR : GIZMO_RING_COLOR, segs: ring, width: 1.6 });
 }
 
 const g: any = globalThis;
@@ -247,6 +283,12 @@ export default function WorldViewport(props: {
   onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: WallCell }) => boolean;
   /** A Select click that hit an opening's frame — selects the opening record. */
   onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
+  /** Gizmo arm release on the SELECTED opening (req_4738): slide it to the new
+   *  lattice cell through the engine's moveOpening — a reject leaves it put. */
+  onMoveOpening: (hit: { edgeId: string; openingId: string; cell: WallCell }) => void;
+  /** Gizmo ring release on the SELECTED opening (req_4738): turn it around —
+   *  the kit re-seats flush against the other face, a leaf swings the other way. */
+  onFlipOpening: (hit: { edgeId: string; openingId: string }) => void;
   /** Measured footprint per installed opening kit id — the selected-opening
    *  outline resolves its rectangle through this regardless of the armed tool. */
   openingFootprints: Readonly<Record<string, import('./architecture').ArchitectureFootprint>>;
@@ -312,6 +354,17 @@ export default function WorldViewport(props: {
     startDistPx: number;
     preview: PlacedPiece;
   } | null>(null);
+  // The placed-opening gizmo's in-flight anchor (req_4738) — the same local-
+  // preview law: the source mutates once, on release, via onMoveOpening.
+  const [openingGizmoPreview, setOpeningGizmoPreview] = useState<WallCell | null>(null);
+  const openingGizmoDragRef = useRef<{
+    frame: OpeningGizmoFrame;
+    handle: 'along' | 'up' | 'ring';
+    axis: GizmoAxisPx;
+    startMouse: { x: number; y: number };
+    previewCell: WallCell;
+    previewSide: 'a' | 'b';
+  } | null>(null);
   // Bumped on every camera move (zoom/rotate/pan) to force the overlays to RE-PROJECT. The
   // placement ghost re-renders for free via setSnap, but the selection box has no such trigger
   // when the tool isn't armed — without this it freezes at its last projection while the world
@@ -358,6 +411,14 @@ export default function WorldViewport(props: {
   onCutOpeningRef.current = props.onCutOpening;
   const onSelectOpeningRef = useRef(props.onSelectOpening);
   onSelectOpeningRef.current = props.onSelectOpening;
+  const onMoveOpeningRef = useRef(props.onMoveOpening);
+  onMoveOpeningRef.current = props.onMoveOpening;
+  const onFlipOpeningRef = useRef(props.onFlipOpening);
+  onFlipOpeningRef.current = props.onFlipOpening;
+  const architectureSelectionRef = useRef(props.architectureSelection);
+  architectureSelectionRef.current = props.architectureSelection;
+  const openingFootprintsRef = useRef(props.openingFootprints);
+  openingFootprintsRef.current = props.openingFootprints;
   const openingKitRef = useRef(props.openingKit);
   openingKitRef.current = props.openingKit;
   /** Set once trackOpeningCursor exists below — the arm effect seeds through it. */
@@ -583,6 +644,64 @@ export default function WorldViewport(props: {
     if (Math.hypot(wx, wz) < 0.05) return null;
     // The renderer's +Y yaw carries local +X to world (cos yaw, -sin yaw).
     return (Math.atan2(-wz, wx) * 180) / Math.PI;
+  }, [stage]);
+
+  // ── Placed-opening gizmo (req_4738): the same handle vocabulary over a
+  // selected door/window, constrained to its wall — one arm slides along the
+  // run, one lifts up the face, the ring flips facing. No hub: the cut is the
+  // kit's measured footprint, not a scalable prop.
+  const openingGizmoTarget = useCallback((): OpeningGizmoFrame | null => {
+    if (interactionLockedRef.current || toolRef.current !== 'select' || paintActiveRef.current) return null;
+    const selection = architectureSelectionRef.current;
+    if (selection.kind !== 'wallOpening') return null;
+    return openingGizmoFrame(architectureRef.current, openingFootprintsRef.current, selection.edgeId, selection.openingId);
+  }, []);
+
+  const openingGizmoScreen = useCallback((frame: OpeningGizmoFrame, cell: WallCell): { anchor: { x: number; y: number }; along: GizmoAxisPx; up: GizmoAxisPx } | null => {
+    const r = rectRef.current;
+    const center = openingRectCenter(frame, cell);
+    const anchor = stage.project(center.x, center.y, center.z, r);
+    if (!anchor) return null;
+    const axis = (dx: number, dy: number, dz: number): GizmoAxisPx => {
+      const tip = stage.project(center.x + dx, center.y + dy, center.z + dz, r);
+      if (!tip) return null;
+      const vx = tip.x - anchor.x;
+      const vy = tip.y - anchor.y;
+      const len = Math.hypot(vx, vy);
+      return len > 0.001 ? { x: vx / len, y: vy / len, pxPerMeter: len } : null;
+    };
+    return { anchor, along: axis(frame.dir.x, 0, frame.dir.z), up: axis(0, 1, 0) };
+  }, [stage]);
+
+  const openingGizmoHandleAt = useCallback((px: number, py: number): { frame: OpeningGizmoFrame; handle: 'along' | 'up' | 'ring'; axis: GizmoAxisPx } | null => {
+    const frame = openingGizmoTarget();
+    if (!frame) return null;
+    const screen = openingGizmoScreen(frame, frame.anchor);
+    if (!screen) return null;
+    let best: 'along' | 'up' | null = null;
+    let bestAxis: GizmoAxisPx = null;
+    let bestDist = GIZMO_HIT_PX;
+    const arms: ['along' | 'up', GizmoAxisPx][] = [['along', screen.along], ['up', screen.up]];
+    for (const [handle, axis] of arms) {
+      if (!axis) continue;
+      const d = distToArmPx(px, py, screen.anchor.x, screen.anchor.y, axis, GIZMO_ARM_PX + GIZMO_HEAD_PX);
+      if (d <= bestDist) { best = handle; bestAxis = axis; bestDist = d; }
+    }
+    if (best) return { frame, handle: best, axis: bestAxis };
+    const dist = Math.hypot(px - screen.anchor.x, py - screen.anchor.y);
+    return Math.abs(dist - GIZMO_RING_PX) <= GIZMO_RING_HIT_PX ? { frame, handle: 'ring', axis: null } : null;
+  }, [openingGizmoTarget, openingGizmoScreen]);
+
+  // Ring law: the cursor's WORLD point on the opening's mid-height plane names
+  // the side the kit should face — drag the ring toward the room the door
+  // should open into. Null near-parallel rays keep the last preview.
+  const openingCursorSideAt = useCallback((px: number, py: number, frame: OpeningGizmoFrame, cell: WallCell): 'a' | 'b' | null => {
+    const ray = stage.worldRay(px, py, rectRef.current);
+    if (!ray || Math.abs(ray.dir.y) < 1e-6) return null;
+    const center = openingRectCenter(frame, cell);
+    const t = (center.y - ray.origin.y) / ray.dir.y;
+    if (t <= 0) return null;
+    return openingSideOfPoint(frame, { x: ray.origin.x + ray.dir.x * t, z: ray.origin.z + ray.dir.z * t });
   }, [stage]);
 
   // The one placed-piece pick, from PANE-local coords: host raycast for catalog pieces,
@@ -1098,7 +1217,7 @@ export default function WorldViewport(props: {
   // rendered geometry. Null when the host is absent, nothing is drawn, or the
   // ray misses every wall face.
   const pickWallAt = useCallback((px: number, py: number): {
-    edgeId: string; side: 'a' | 'b'; kind: 'wallFace' | 'openingFrame';
+    edgeId: string; side: 'a' | 'b'; kind: 'wallFace' | 'openingFrame' | 'openingVoid';
     openingId?: string; columnU: number; rowU: number;
   } | null => {
     const source = architectureRef.current;
@@ -1501,6 +1620,22 @@ export default function WorldViewport(props: {
         dragRef.current = null;
         return;
       }
+      // Placed-opening gizmo grab (req_4738): same ownership law — a down on
+      // a handle owns the whole gesture and commits once on release.
+      const openingGrab = openingGizmoHandleAt(p.x, p.y);
+      if (openingGrab) {
+        openingGizmoDragRef.current = {
+          frame: openingGrab.frame,
+          handle: openingGrab.handle,
+          axis: openingGrab.axis,
+          startMouse: p,
+          previewCell: openingGrab.frame.anchor,
+          previewSide: openingGrab.frame.facingSide,
+        };
+        setOpeningGizmoPreview(openingGrab.frame.anchor);
+        dragRef.current = null;
+        return;
+      }
     }
     // Wall gizmo (req_4520): the HOST hit-tests the handles — a grab starts a
     // native measurement drag (tracked per frame with zero JS), a nudge steps
@@ -1560,7 +1695,7 @@ export default function WorldViewport(props: {
       flora: null,
     };
     if (paint) paintFaceAt(p.x, p.y, paint);
-  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt, floraSampleAt, gizmoHandleAt, gizmoTarget, gizmoScreen, gizmoWorldAngleAt, props.paintActive, wallDoor, syncWallParamsFromHost]);
+  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt, floraSampleAt, gizmoHandleAt, gizmoTarget, gizmoScreen, gizmoWorldAngleAt, openingGizmoHandleAt, props.paintActive, wallDoor, syncWallParamsFromHost]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);
@@ -1615,6 +1750,30 @@ export default function WorldViewport(props: {
         setGizmoPreview(next);
       }
       publishSnapMark(snapMark);
+      return;
+    }
+    // A live opening-gizmo drag (req_4738) owns the pointer the same way: map
+    // travel along the grabbed arm into lattice units, clamp the footprint to
+    // the wall face, preview locally; the ring tracks which side the cursor is
+    // on. The engine rules once, at release.
+    const od = openingGizmoDragRef.current;
+    if (od) {
+      if (od.handle === 'ring') {
+        od.previewSide = openingCursorSideAt(p.x, p.y, od.frame, od.previewCell) ?? od.previewSide;
+        return;
+      }
+      if (!od.axis) return;
+      const alongPx = (p.x - od.startMouse.x) * od.axis.x + (p.y - od.startMouse.y) * od.axis.y;
+      const deltaU = (alongPx / od.axis.pxPerMeter) * ARCHITECTURE_UNITS_PER_METER;
+      const next = clampOpeningCell(
+        od.frame,
+        od.frame.anchor.columnU + (od.handle === 'along' ? deltaU : 0),
+        od.frame.anchor.rowU + (od.handle === 'up' ? deltaU : 0),
+      );
+      if (next.columnU !== od.previewCell.columnU || next.rowU !== od.previewCell.rowU) {
+        od.previewCell = next;
+        setOpeningGizmoPreview(next);
+      }
       return;
     }
     const d = dragRef.current;
@@ -1708,16 +1867,18 @@ export default function WorldViewport(props: {
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
     trackOpeningCursor(p.x, p.y);
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackOpeningCursor]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, gizmoWorldAngleAt, openingCursorSideAt, applyMoveVertexSnap, publishSnapMark, props.floor, paintFaceAt, floraSampleAt, trackOpeningCursor]);
 
   const onUp = useCallback((e: any) => {
     if (interactionLockedRef.current) {
       dragRef.current = null;
       gizmoDragRef.current = null;
+      openingGizmoDragRef.current = null;
       wallGizmoNativeRef.current = false;
       runRef.current = null;
       setMovePreview(null);
       setGizmoPreview(null);
+      setOpeningGizmoPreview(null);
       setRun(null);
       publishSnapMark(null);
       return;
@@ -1746,6 +1907,25 @@ export default function WorldViewport(props: {
       const changed = done.x !== gd.piece.x || done.y !== gd.piece.y || done.z !== gd.piece.z
         || done.yawDegrees !== gd.piece.yawDegrees || (done.scale ?? 1) !== (gd.piece.scale ?? 1);
       if (changed) props.onMove(gd.piece.id, done);
+      return;
+    }
+    // Opening-gizmo release (req_4738): commit the previewed cell through the
+    // engine's moveOpening, or the ring's side through configureOpening — one
+    // undoable world edit either way, nothing on a no-op release.
+    const od = openingGizmoDragRef.current;
+    if (od) {
+      openingGizmoDragRef.current = null;
+      setOpeningGizmoPreview(null);
+      dragRef.current = null;
+      if (od.handle === 'ring') {
+        if (od.previewSide !== od.frame.facingSide) {
+          onFlipOpeningRef.current({ edgeId: od.frame.edgeId, openingId: od.frame.openingId });
+        }
+        return;
+      }
+      if (od.previewCell.columnU !== od.frame.anchor.columnU || od.previewCell.rowU !== od.frame.anchor.rowU) {
+        onMoveOpeningRef.current({ edgeId: od.frame.edgeId, openingId: od.frame.openingId, cell: od.previewCell });
+      }
       return;
     }
     const d = dragRef.current;
@@ -1889,9 +2069,10 @@ export default function WorldViewport(props: {
       // are the finer, denser targets.
       if (!pieceId && tool === 'select' && d.selectionIntent === 'replace') {
         const wallHit = pickWallAt(d.x0, d.y0);
-        // An opening's frame selects the OPENING record (req_4503); a plain
-        // face keeps selecting the wall edge.
-        if (wallHit?.kind === 'openingFrame' && wallHit.openingId) {
+        // An opening's frame OR its body (req_4738 — the void proxy covering
+        // the cut, where the mounted door/window visibly stands) selects the
+        // OPENING record (req_4503); a plain face keeps selecting the wall.
+        if ((wallHit?.kind === 'openingFrame' || wallHit?.kind === 'openingVoid') && wallHit.openingId) {
           onSelectOpeningRef.current({ edgeId: wallHit.edgeId, openingId: wallHit.openingId });
           return;
         }
@@ -2056,11 +2237,13 @@ export default function WorldViewport(props: {
     const kitFootprint = opening ? props.openingFootprints[opening.kitId] ?? null : null;
     if (edge && opening && startVertex && endVertex && edge.support.kind === 'absolute') {
       const footprint = kitFootprint ?? { minColumn: 0, minRow: 0, maxColumnExclusive: 1, maxRowExclusive: 1 };
+      // Mid-gizmo-drag the outline rides the previewed cell (req_4738), so the
+      // rectangle is the drag ghost — the source stays put until release.
       const corners = openingGhostCorners(
         { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER },
         { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER },
         edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
-        { columnU: opening.columnU, rowU: opening.rowU },
+        openingGizmoPreview ?? { columnU: opening.columnU, rowU: opening.rowU },
         footprint,
       );
       const projected = corners?.map((corner) => stage.project(corner.x, corner.y, corner.z, rect)) ?? null;
@@ -2122,43 +2305,17 @@ export default function WorldViewport(props: {
   }
   // ── The selection gizmo (req_3367): studio handles over the selected prop.
   // Drawn at the drag preview mid-gesture so the handles ride the transform.
-  const gizmoLines: { color: string; segs: number[]; width: number }[] = [];
+  const gizmoLines: GizmoLine[] = [];
   {
     const target = gizmoTarget();
     const at = target ? (gizmoPreview ?? target) : null;
     const screen = at ? gizmoScreen(at) : null;
     if (screen) {
       const active = gizmoDragRef.current?.handle ?? null;
-      const arm = (axis: GizmoAxisPx, color: string, handle: GizmoHandle) => {
-        if (!axis) return;
-        const tipX = screen.anchor.x + axis.x * GIZMO_ARM_PX;
-        const tipY = screen.anchor.y + axis.y * GIZMO_ARM_PX;
-        // Arrowhead chevron: two strokes swept back from the tip.
-        const perpX = -axis.y;
-        const perpY = axis.x;
-        gizmoLines.push({
-          color: active === handle ? GIZMO_ACTIVE_COLOR : color,
-          width: 2.5,
-          segs: [
-            screen.anchor.x, screen.anchor.y, tipX, tipY,
-            tipX, tipY, tipX + (-axis.x * 0.8 + perpX * 0.55) * GIZMO_HEAD_PX, tipY + (-axis.y * 0.8 + perpY * 0.55) * GIZMO_HEAD_PX,
-            tipX, tipY, tipX + (-axis.x * 0.8 - perpX * 0.55) * GIZMO_HEAD_PX, tipY + (-axis.y * 0.8 - perpY * 0.55) * GIZMO_HEAD_PX,
-          ],
-        });
-      };
-      arm(screen.x, GIZMO_X_COLOR, 'x');
-      arm(screen.y, GIZMO_Y_COLOR, 'y');
-      arm(screen.z, GIZMO_Z_COLOR, 'z');
-      const ring: number[] = [];
-      for (let i = 0; i < GIZMO_RING_SEGMENTS; i += 1) {
-        const a0 = (i / GIZMO_RING_SEGMENTS) * Math.PI * 2;
-        const a1 = ((i + 1) / GIZMO_RING_SEGMENTS) * Math.PI * 2;
-        ring.push(
-          screen.anchor.x + Math.cos(a0) * GIZMO_RING_PX, screen.anchor.y + Math.sin(a0) * GIZMO_RING_PX,
-          screen.anchor.x + Math.cos(a1) * GIZMO_RING_PX, screen.anchor.y + Math.sin(a1) * GIZMO_RING_PX,
-        );
-      }
-      gizmoLines.push({ color: active === 'ring' ? GIZMO_ACTIVE_COLOR : GIZMO_RING_COLOR, segs: ring, width: 1.6 });
+      pushGizmoArm(gizmoLines, screen.anchor, screen.x, GIZMO_X_COLOR, active === 'x');
+      pushGizmoArm(gizmoLines, screen.anchor, screen.y, GIZMO_Y_COLOR, active === 'y');
+      pushGizmoArm(gizmoLines, screen.anchor, screen.z, GIZMO_Z_COLOR, active === 'z');
+      pushGizmoRingCircle(gizmoLines, screen.anchor, active === 'ring');
       // The scale hub: the studio's SOLID square (thick stroke reads as fill).
       const h = GIZMO_HUB_PX;
       const ax = screen.anchor.x;
@@ -2173,6 +2330,22 @@ export default function WorldViewport(props: {
           ax - h, ay + h, ax - h, ay - h,
         ],
       });
+    }
+  }
+  // ── The placed-opening gizmo (req_4738): the same handles on a selected
+  // door/window — the red arm slides it along its wall, the green arm lifts it
+  // on the face, the ring flips which side it faces. No hub: the cut is the
+  // kit's measured footprint, not a scalable prop. Rides the drag preview so
+  // the handles travel with the outlined rectangle.
+  {
+    const frame = openingGizmoTarget();
+    const cell = frame ? (openingGizmoPreview ?? frame.anchor) : null;
+    const screen = frame && cell ? openingGizmoScreen(frame, cell) : null;
+    if (screen) {
+      const active = openingGizmoDragRef.current?.handle ?? null;
+      pushGizmoArm(gizmoLines, screen.anchor, screen.along, GIZMO_X_COLOR, active === 'along');
+      pushGizmoArm(gizmoLines, screen.anchor, screen.up, GIZMO_Y_COLOR, active === 'up');
+      pushGizmoRingCircle(gizmoLines, screen.anchor, active === 'ring');
     }
   }
   // Vertex-snap lock marker (req_3378): a gold diamond on the vertex the drag

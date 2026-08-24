@@ -128,7 +128,7 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
-import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, insertOpeningCommand, setEdgeDimensionsCommand } from '../world/architectureCommand';
+import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, flipOpeningFacingCommand, insertOpeningCommand, moveOpeningCommand, setEdgeDimensionsCommand } from '../world/architectureCommand';
 import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, openingLatticeFill, placedOpeningsReferencing, snapOpeningSlot } from '../world/openingTools';
 import { architectureHost } from '../world/architectureHost';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
@@ -5336,7 +5336,7 @@ export default function AppFrame() {
     return true;
   };
 
-  /** A Select click resolved to an opening's frame (req_4503). */
+  /** A Select click resolved to an opening's frame or body (req_4503/req_4738). */
   const selectOpening = (hit: { edgeId: string; openingId: string }) => {
     setState((prev) => ({
       ...prev,
@@ -5344,8 +5344,56 @@ export default function AppFrame() {
       selectedPieceId: null,
       selectedPieceIds: [],
       selectedFloraPatchId: null,
-      status: 'selected opening — Del deletes it',
+      status: 'selected opening — drag the arms to slide it, ring flips facing, Del deletes',
     }));
+  };
+
+  /** Opening-gizmo arm release (req_4738): slide the opening to its new cell
+   *  through the engine — junction clearance, overlaps, and wall bounds are
+   *  the engine's ruling; a reject leaves the record where it stood. */
+  const moveOpening = (hit: { edgeId: string; openingId: string; cell: WallCell }) => {
+    const current = stateRef.current;
+    const command = moveOpeningCommand(architectureCommandId('move-opening', current.seq), current.architecture.revision, hit.openingId, hit.cell);
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED opening move ${hit.openingId} → (${hit.cell.columnU}u,${hit.cell.rowU}u): ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `move opening rejected: ${result.reason}` }));
+      return;
+    }
+    console.warn(`[wall] opening ${hit.openingId} moved to (${hit.cell.columnU}u,${hit.cell.rowU}u)`);
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      seq: prev.seq + 1,
+      status: 'Opening moved — Ctrl+Z undoes',
+    }, 'Move opening'));
+  };
+
+  /** Opening-gizmo ring release (req_4738): turn the opening around — the kit
+   *  re-seats flush with the other face and a door leaf swings the other way. */
+  const flipOpening = (hit: { edgeId: string; openingId: string }) => {
+    const current = stateRef.current;
+    const edge = current.architecture.walls.edges.find((candidate) => candidate.id === hit.edgeId);
+    const opening = edge?.openings.find((candidate) => candidate.id === hit.openingId);
+    if (!opening) return;
+    const command = flipOpeningFacingCommand(architectureCommandId('flip-opening', current.seq), current.architecture.revision, {
+      id: opening.id, kind: opening.kind, kitId: opening.kitId,
+      columnU: opening.columnU, rowU: opening.rowU, facingSide: opening.facingSide, hinge: opening.hinge,
+    });
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED opening flip ${hit.openingId}: ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `flip opening rejected: ${result.reason}` }));
+      return;
+    }
+    const turned = opening.facingSide === 'a' ? 'b' : 'a';
+    console.warn(`[wall] opening ${hit.openingId} flipped to face side ${turned}`);
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      seq: prev.seq + 1,
+      status: 'Opening flipped — Ctrl+Z undoes',
+    }, 'Flip opening'));
   };
 
   /** Delete the selected opening through the engine — the wall heals to a
@@ -11931,6 +11979,8 @@ export default function AppFrame() {
             openingKit={armedOpeningKit}
             onCutOpening={cutOpening}
             onSelectOpening={selectOpening}
+            onMoveOpening={moveOpening}
+            onFlipOpening={flipOpening}
             openingFootprints={openingFootprints}
             openingDepthsU={openingDepthsU}
             openingKitPieces={openingKitPieces}

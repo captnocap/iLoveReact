@@ -953,7 +953,7 @@ export type ArchitectureCommand = { commandId: string; expectedRevision: number 
   | { kind: 'insertOpening'; edgeId: string; opening: ConfigureOpeningInput }
   | { kind: 'moveOpening'; openingId: string; columnU: number; rowU: number }
   | { kind: 'deleteOpening'; openingId: string }
-  | ({ kind: 'configureOpening' } & ConfigureOpeningInput)
+  | { kind: 'configureOpening'; opening: ConfigureOpeningInput }
   | { kind: 'attachAnchor'; edgeId: string; side: WallSide; columnU: number; rowU: number; targetPieceId: string }
   | { kind: 'detachAnchor'; anchorId: string }
   | { kind: 'stampPrefab'; canonicalPrefabBytes: Uint8Array }
@@ -1047,7 +1047,7 @@ function encodeCommand(command: ArchitectureCommand, strings: StringTableBuilder
     case 'insertOpening': putString(view, 16, strings, command.edgeId); putConfigureOpening(view, 0, strings, 24, command.opening); break;
     case 'moveOpening': putString(view, 16, strings, command.openingId); view.setFloat64(64, command.columnU, true); view.setFloat64(72, command.rowU, true); break;
     case 'deleteOpening': putString(view, 16, strings, command.openingId); break;
-    case 'configureOpening': putConfigureOpening(view, 0, strings, 16, command); break;
+    case 'configureOpening': putConfigureOpening(view, 0, strings, 16, command.opening); break;
     case 'attachAnchor':
       putString(view, 16, strings, command.edgeId); putString(view, 24, strings, command.targetPieceId);
       view.setFloat64(64, command.columnU, true); view.setFloat64(72, command.rowU, true); view.setUint32(128, SIDE_TAG[command.side], true); break;
@@ -1096,7 +1096,7 @@ export type MutationReceipt = {
 };
 export type ArchitectureMutation = { source: ArchitectureSource; receipt: MutationReceipt };
 export type ArchitectureRay = { originMeters: readonly [number, number, number]; direction: readonly [number, number, number]; maximumDistanceMeters: number };
-export type ArchitectureRayHit = null | { kind: 'wallFace' | 'openingFrame'; edgeId: string; openingId?: string; side: WallSide; columnU: number; rowU: number; distanceMeters: number; pointMeters: [number, number, number]; normal: [number, number, number] };
+export type ArchitectureRayHit = null | { kind: 'wallFace' | 'openingFrame' | 'openingVoid'; edgeId: string; openingId?: string; side: WallSide; columnU: number; rowU: number; distanceMeters: number; pointMeters: [number, number, number]; normal: [number, number, number] };
 export type ArchitectureScaleMetadata = { unitsPerMeter: number; subdivisions: { x: number; y: number; z: number }; tileMeters: number; sourceVersion: number; packetVersion: number };
 
 function decodeMutation(packet: DecodedArchitecturePacket): ArchitectureMutation {
@@ -1176,7 +1176,7 @@ export const architectureHost = Object.freeze({
     if (hitView.getUint8(0) === 0) return null;
     if (hitView.getUint8(0) !== 1) return fail('ray result has an invalid hit flag');
     return {
-      kind: (['wallFace', 'openingFrame'] as const)[hitView.getUint8(1)] ?? fail('ray result has an invalid kind'),
+      kind: (['wallFace', 'openingFrame', 'openingVoid'] as const)[hitView.getUint8(1)] ?? fail('ray result has an invalid kind'),
       edgeId: readString(result, hit.bytes, 12),
       openingId: readString(result, hit.bytes, 20) || undefined,
       side: (['a', 'b'] as const)[hitView.getUint8(2)] ?? fail('ray result has an invalid side'),

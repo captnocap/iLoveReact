@@ -3911,7 +3911,9 @@ test "raycast hits both directed sides of one wall" {
     try testing.expectEqual(architecture.types.WallSide.b, side_b.hit.?.side);
 }
 
-test "raycast misses the true void inside a door opening" {
+test "raycast reports the opening body inside a door cut (req_4738)" {
+    // The mounted kit fills the cut visually (req_4487), so a click through
+    // the hole belongs to the OPENING — it used to sail through and miss.
     const door = geometryOpeningKit("kit:ray-door", .door, -8, 8, 0, 32, .walk);
     var entries = [_]architecture.CatalogEntry{ validWallStyle(), door };
     var source = try emptyOwnedArchitectureSource(testing.allocator);
@@ -3926,7 +3928,9 @@ test "raycast misses the true void inside a door opening" {
     }});
     var result = try architectureRaycast(&source, &entries, .{ 2, 1, 2 }, .{ 0, 0, -1 });
     defer result.deinit(testing.allocator);
-    try testing.expect(result.hit == null);
+    try testing.expectEqual(architecture.RaycastHitKind.opening_void, result.hit.?.kind);
+    try testing.expectEqualStrings("ray-door", result.hit.?.opening_id.?);
+    try testing.expectEqualStrings("ray-void:e:0", result.hit.?.edge_id);
 }
 
 test "raycast hits a measured opening jamb from inside the void" {

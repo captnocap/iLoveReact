@@ -55,7 +55,7 @@ pub const RaycastRequest = struct {
     maximum_distance_meters: f64,
 };
 
-pub const RaycastHitKind = enum(u8) { wall_face, opening_frame };
+pub const RaycastHitKind = enum(u8) { wall_face, opening_frame, opening_void };
 
 pub const RaycastHit = struct {
     kind: RaycastHitKind,
@@ -179,8 +179,12 @@ pub fn raycast(
     var bundle = try compile(allocator, source, entries, .{ .targets = &selected_targets });
     defer bundle.deinit(allocator);
     var nearest: ?RayCandidate = null;
+    // The opening_void proxy — the centerline quad spanning the whole cut —
+    // COUNTS: the mounted kit (leaf, glazing, frame body) is what the eye sees
+    // there (req_4487), and skipping it made a click on a placed door/window
+    // sail through the hole and miss (req_4738). Real surfaces still win by
+    // distance — an outer wall face is nearer than the centerline from outside.
     for (bundle.wall.pick_proxies) |*proxy| {
-        if (proxy.kind == .opening_void) continue;
         const candidate = intersectPickProxy(request.origin_meters, direction, request.maximum_distance_meters, proxy) orelse continue;
         if (nearest == null or candidate.distance_meters < nearest.?.distance_meters) nearest = candidate;
     }
@@ -194,7 +198,7 @@ pub fn raycast(
         .kind = switch (candidate.proxy.kind) {
             .wall_face => .wall_face,
             .opening_frame => .opening_frame,
-            .opening_void => unreachable,
+            .opening_void => .opening_void,
         },
         .edge_id = edge_id,
         .opening_id = opening_id,

@@ -2,6 +2,8 @@ import {
   applyArchitectureCommand,
   architectureCommandId,
   deleteEdgeCommand,
+  flipOpeningFacingCommand,
+  moveOpeningCommand,
   type ArchitectureMutationHost,
 } from './architectureCommand';
 import { emptyArchitectureSource, type ArchitectureSource } from './architecture';
@@ -87,6 +89,32 @@ test('command ids are minted from the editor seq', () => {
   assert(architectureCommandId('delete-edge', 7) === 'arch:delete-edge:7', 'delete command id drifted');
   const command = deleteEdgeCommand('arch:delete-edge:7', 3, 'edge:0');
   assert(command.kind === 'deleteEdge' && command.expectedRevision === 3 && command.edgeId === 'edge:0', 'delete command shape drifted');
+});
+
+test('the opening gizmo verbs build their exact engine commands (req_4738)', () => {
+  const move = moveOpeningCommand('arch:move-opening:9', 5, 'wall:e:0:o:0', { columnU: 24, rowU: 4 });
+  assert(move.kind === 'moveOpening' && move.expectedRevision === 5, 'move command envelope drifted');
+  assert(move.kind === 'moveOpening' && move.openingId === 'wall:e:0:o:0' && move.columnU === 24 && move.rowU === 4, 'move command cell drifted');
+  const flip = flipOpeningFacingCommand('arch:flip-opening:9', 5, {
+    id: 'wall:e:0:o:0', kind: 'door', kitId: 'build:wall:opening:door:door-001',
+    columnU: 24, rowU: 0, facingSide: 'a', hinge: 'start',
+  });
+  assert(flip.kind === 'configureOpening', 'flip must ride configureOpening');
+  assert(flip.kind === 'configureOpening' && flip.opening.facingSide === 'b', 'flip did not turn side a to b');
+  const flipBack = flipOpeningFacingCommand('arch:flip-opening:10', 6, {
+    id: 'wall:e:0:o:0', kind: 'door', kitId: 'build:wall:opening:door:door-001',
+    columnU: 24, rowU: 0, facingSide: 'b', hinge: 'end',
+  });
+  assert(flipBack.kind === 'configureOpening' && flipBack.opening.facingSide === 'a', 'flip did not turn side b to a');
+  assert(flip.kind === 'configureOpening'
+    && flip.opening.openingId === 'wall:e:0:o:0'
+    && flip.opening.kind === 'door'
+    && flip.opening.kitId === 'build:wall:opening:door:door-001'
+    && flip.opening.columnU === 24
+    && flip.opening.rowU === 0
+    && flip.opening.hinge === 'start', 'flip must carry the whole record unchanged except facing');
+  assert(architectureCommandId('move-opening', 9) === 'arch:move-opening:9', 'move command id drifted');
+  assert(architectureCommandId('flip-opening', 9) === 'arch:flip-opening:9', 'flip command id drifted');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

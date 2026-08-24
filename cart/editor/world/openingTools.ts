@@ -253,6 +253,100 @@ export function openingEdgeRefusal(
   return null;
 }
 
+// ── Placed-opening gizmo laws (req_4738): the prop gizmo brought to a door or
+// window standing in a wall. The opening lives on the wall's lattice, so its
+// gizmo is the CONSTRAINED cousin of the prop's — slide along the wall, lift
+// on it, flip which side it faces. Everything here is pure geometry over the
+// persisted source; the viewport projects, the engine keeps final say.
+
+export type OpeningGizmoFrame = {
+  edgeId: string;
+  openingId: string;
+  start: { xM: number; zM: number };
+  end: { xM: number; zM: number };
+  baseYM: number;
+  /** Unit vector along the wall, start → end. */
+  dir: { x: number; z: number };
+  anchor: WallCell;
+  footprint: ArchitectureFootprint;
+  edgeLengthU: number;
+  edgeHeightU: number;
+  facingSide: 'a' | 'b';
+};
+
+/** Resolve the selected opening into everything its gizmo needs — or null when
+ * the record is gone, the wall is degenerate, or the kit is unmeasured. */
+export function openingGizmoFrame(
+  source: ArchitectureSource,
+  footprints: Readonly<Record<string, ArchitectureFootprint>>,
+  edgeId: string,
+  openingId: string,
+): OpeningGizmoFrame | null {
+  const edge = source.walls.edges.find((candidate) => candidate.id === edgeId);
+  const opening = edge?.openings.find((candidate) => candidate.id === openingId);
+  if (!edge || !opening || edge.support.kind !== 'absolute') return null;
+  const startVertex = source.walls.vertices.find((vertex) => vertex.id === edge.startVertexId);
+  const endVertex = source.walls.vertices.find((vertex) => vertex.id === edge.endVertexId);
+  const footprint = footprints[opening.kitId];
+  if (!startVertex || !endVertex || !footprint) return null;
+  const start = { xM: startVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: startVertex.zU / ARCHITECTURE_UNITS_PER_METER };
+  const end = { xM: endVertex.xU / ARCHITECTURE_UNITS_PER_METER, zM: endVertex.zU / ARCHITECTURE_UNITS_PER_METER };
+  const dxU = endVertex.xU - startVertex.xU;
+  const dzU = endVertex.zU - startVertex.zU;
+  const lengthU = Math.hypot(dxU, dzU);
+  if (!(lengthU > 0)) return null;
+  return {
+    edgeId: edge.id,
+    openingId: opening.id,
+    start,
+    end,
+    baseYM: edge.support.baseYU / ARCHITECTURE_UNITS_PER_METER,
+    dir: { x: dxU / lengthU, z: dzU / lengthU },
+    anchor: { columnU: opening.columnU, rowU: opening.rowU },
+    footprint,
+    edgeLengthU: lengthU,
+    edgeHeightU: edge.heightU,
+    facingSide: opening.facingSide,
+  };
+}
+
+/** The world center of the cut rectangle at a candidate anchor — where the
+ * gizmo stands, and where its handles measure from. */
+export function openingRectCenter(frame: OpeningGizmoFrame, cell: WallCell): { x: number; y: number; z: number } {
+  const centerColumnU = cell.columnU + (frame.footprint.minColumn + frame.footprint.maxColumnExclusive) / 2;
+  const centerRowU = cell.rowU + (frame.footprint.minRow + frame.footprint.maxRowExclusive) / 2;
+  const alongM = centerColumnU / ARCHITECTURE_UNITS_PER_METER;
+  return {
+    x: frame.start.xM + frame.dir.x * alongM,
+    y: frame.baseYM + centerRowU / ARCHITECTURE_UNITS_PER_METER,
+    z: frame.start.zM + frame.dir.z * alongM,
+  };
+}
+
+/** A candidate anchor clamped to whole lattice units with the footprint held
+ * inside the wall face — the drag can never preview an out-of-wall cut. The
+ * engine still rules on junction clearance and overlaps at commit. */
+export function clampOpeningCell(frame: OpeningGizmoFrame, columnU: number, rowU: number): WallCell {
+  const minColumn = -frame.footprint.minColumn;
+  const maxColumn = frame.edgeLengthU - frame.footprint.maxColumnExclusive;
+  const minRow = -frame.footprint.minRow;
+  const maxRow = frame.edgeHeightU - frame.footprint.maxRowExclusive;
+  const clamp = (value: number, low: number, high: number): number =>
+    high < low ? low : Math.min(high, Math.max(low, value));
+  return {
+    columnU: Math.round(clamp(columnU, minColumn, maxColumn)),
+    rowU: Math.round(clamp(rowU, minRow, maxRow)),
+  };
+}
+
+/** Which side of the wall a world point stands on — the ring drag's flip law.
+ * Engine side law (wall_geometry.zig): side-a normal = (-dirZ, dirX). */
+export function openingSideOfPoint(frame: OpeningGizmoFrame, point: { x: number; z: number }): 'a' | 'b' {
+  const toPointX = point.x - frame.start.xM;
+  const toPointZ = point.z - frame.start.zM;
+  return (-frame.dir.z * toPointX + frame.dir.x * toPointZ) >= 0 ? 'a' : 'b';
+}
+
 export type OpeningGhostCorner = { x: number; y: number; z: number };
 
 /** The kit's cut rectangle on the wall face, in world meters — anchored at the

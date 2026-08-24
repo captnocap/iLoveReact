@@ -158,6 +158,9 @@ export default function Stage(props: {
   openingKit: import('../world/openingTools').OpeningKitArm | null;
   onCutOpening: (hit: { edgeId: string; side: 'a' | 'b'; slot: import('../world/architecture').WallCell }) => boolean;
   onSelectOpening: (hit: { edgeId: string; openingId: string }) => void;
+  /** Opening gizmo verbs (req_4738): slide the selected opening / flip its facing. */
+  onMoveOpening: (hit: { edgeId: string; openingId: string; cell: import('../world/architecture').WallCell }) => void;
+  onFlipOpening: (hit: { edgeId: string; openingId: string }) => void;
   openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
   openingDepthsU: Readonly<Record<string, number>>;
   /** Opening-kit resident adapters (req_4526) — mounted doors + the armed mesh ghost. */
@@ -284,6 +287,8 @@ export default function Stage(props: {
           openingKit={props.openingKit}
           onCutOpening={props.onCutOpening}
           onSelectOpening={props.onSelectOpening}
+          onMoveOpening={props.onMoveOpening}
+          onFlipOpening={props.onFlipOpening}
           openingFootprints={props.openingFootprints}
           openingDepthsU={props.openingDepthsU}
           openingKitPieces={props.openingKitPieces}
