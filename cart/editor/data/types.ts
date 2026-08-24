@@ -604,6 +604,9 @@ export type EditorState = {
   deviceTools: Record<'world' | 'model', { mouse: string | null; pen: string | null }>;
   // Graffiti facades on the active map (req_3057) — persisted with world.json.
   worldFacades: import('../world/facades').Facade[];
+  // Finishes over derived architecture (req_4739): floor-plate materials by
+  // room signature + opening paintings by opening id — persisted with world.json.
+  worldFinishes: import('../world/worldFinishes').WorldFinishes;
   facadePaint: FacadePaintState;
   // Place Sticker (req_3025): the armed stamp — an imported texture's spec id,
   // quarter turns clockwise, and a uniform multiplier of the sticker's meter size.

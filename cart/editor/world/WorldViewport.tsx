@@ -39,10 +39,11 @@ import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModif
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
 import { snapWallPoint, wallPointerRelease, type WallDrawCommit, type WallDrawGesture, type WallLatticePoint } from './wallTools';
-import { setLiveArchitecture } from './architectureBake';
+import { pickLiveFloorAt, setLiveArchitecture } from './architectureBake';
 import { takeArchitectureEditMark } from './architectureCommand';
 import { dispatchEdit } from '../data/editorEvents';
-import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
+import { ARCHITECTURE_UNITS_PER_METER, type ArchitectureContextTarget, type ArchitectureSelection, type ArchitectureSource, type WallCell } from './architecture';
+import type { WorldFinishes } from './worldFinishes';
 import { architectureHost } from './architectureHost';
 import { clampOpeningCell, openingEdgeRefusal, openingGhostCorners, openingGizmoFrame, openingRectCenter, openingSideOfPoint, openingWorldPose, snapOpeningSlot, type OpeningGizmoFrame, type OpeningKitArm } from './openingTools';
 import type { PieceMaterialTarget } from './pieceEditCommand';
@@ -298,6 +299,12 @@ export default function WorldViewport(props: {
   openingDepthsU: Readonly<Record<string, number>>;
   /** Opening-kit resident adapters (req_4526): armed + placed kits' models. */
   openingKitPieces: readonly AuthoredBuildPiece[];
+  /** Editor-owned finishes over derived architecture (req_4739): floor-plate
+   *  materials + opening paintings — the live bake wears them. */
+  worldFinishes: WorldFinishes;
+  /** A right-click resolved to the architecture (req_4739): wall face, opening
+   *  body/frame, or a derived floor plate — the owner opens the quick menu. */
+  onArchitectureContext: (target: ArchitectureContextTarget, x: number, y: number) => void;
   /** Commit a snapped preview after one Move-tool drag. */
   onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
@@ -419,6 +426,8 @@ export default function WorldViewport(props: {
   architectureSelectionRef.current = props.architectureSelection;
   const openingFootprintsRef = useRef(props.openingFootprints);
   openingFootprintsRef.current = props.openingFootprints;
+  const onArchitectureContextRef = useRef(props.onArchitectureContext);
+  onArchitectureContextRef.current = props.onArchitectureContext;
   const openingKitRef = useRef(props.openingKit);
   openingKitRef.current = props.openingKit;
   /** Set once trackOpeningCursor exists below — the arm effect seeds through it. */
@@ -995,7 +1004,7 @@ export default function WorldViewport(props: {
         && prior.architecture === props.architecture) return true;
       // Refresh the engine wall bake (identity-cached) so the push below reads
       // current wall meshes/colliders — child effects run before AppFrame's.
-      setLiveArchitecture(props.architecture, props.openingDepthsU);
+      setLiveArchitecture(props.architecture, props.openingDepthsU, props.worldFinishes);
       if (!pushLiveWorld(nodeId, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies)) return false;
       liveWorldPublishedRef.current = {
         nodeId,
@@ -1011,7 +1020,7 @@ export default function WorldViewport(props: {
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
     return () => clearInterval(t);
-  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.architecture, props.openingDepthsU]);
+  }, [props.active, props.pieces, props.authoredPieces, props.worldFlora, props.floraSpecies, props.architecture, props.openingDepthsU, props.worldFinishes]);
 
   const residentDemandCacheRef = useRef<{
     authoredSource: readonly AuthoredBuildPiece[];
@@ -1057,7 +1066,7 @@ export default function WorldViewport(props: {
       const nodeId = Number(loaderRef.current?.id ?? 0);
       const prior = residentPublishedRef.current;
       if (nodeId && prior?.nodeId === nodeId && prior.demand === residentDemand && prior.architecture === props.architecture) return true;
-      setLiveArchitecture(props.architecture, props.openingDepthsU);
+      setLiveArchitecture(props.architecture, props.openingDepthsU, props.worldFinishes);
       if (!pushResidentMeshes(
         nodeId,
         residentDemand.authoredPieces,
@@ -1107,7 +1116,7 @@ export default function WorldViewport(props: {
       clearTimeout(start);
       if (retry) clearInterval(retry);
     };
-  }, [props.active, residentDemand, props.architecture, props.openingDepthsU]);
+  }, [props.active, residentDemand, props.architecture, props.openingDepthsU, props.worldFinishes]);
 
   // Mesh GHOST: an authored piece previews as its real translucent mesh while
   // it is armed OR being moved OR mid-gizmo-drag (req_3367 — the drag preview
@@ -1218,7 +1227,7 @@ export default function WorldViewport(props: {
   // ray misses every wall face.
   const pickWallAt = useCallback((px: number, py: number): {
     edgeId: string; side: 'a' | 'b'; kind: 'wallFace' | 'openingFrame' | 'openingVoid';
-    openingId?: string; columnU: number; rowU: number;
+    openingId?: string; columnU: number; rowU: number; distanceMeters: number;
   } | null => {
     const source = architectureRef.current;
     if (!architectureHostLive() || source.walls.edges.length === 0) return null;
@@ -1233,6 +1242,7 @@ export default function WorldViewport(props: {
         edgeId: hit.edgeId, side: hit.side, kind: hit.kind,
         ...(hit.openingId ? { openingId: hit.openingId } : {}),
         columnU: hit.columnU, rowU: hit.rowU,
+        distanceMeters: hit.distanceMeters,
       } : null;
     } catch (error) {
       console.warn(`[wall] pick raycast failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -2111,12 +2121,31 @@ export default function WorldViewport(props: {
     if (interactionLockedRef.current) return;
     const p = local(e);
     const hit = pickFaceAt(p.x, p.y);
-    if (hit) onPieceContextRef.current(hit.id, Number(e?.x ?? 0), Number(e?.y ?? 0), hit.role);
-    else {
-      const id = pickPieceAt(p.x, p.y);
-      if (id) onPieceContextRef.current(id, Number(e?.x ?? 0), Number(e?.y ?? 0), null);
+    if (hit) { onPieceContextRef.current(hit.id, Number(e?.x ?? 0), Number(e?.y ?? 0), hit.role); return; }
+    const id = pickPieceAt(p.x, p.y);
+    if (id) { onPieceContextRef.current(id, Number(e?.x ?? 0), Number(e?.y ?? 0), null); return; }
+    // The architecture takes the miss (req_4739): pieces keep precedence (the
+    // finer, denser targets — the Select-click law); then the wall raycast and
+    // the derived floor plates compete by DISTANCE, so looking down over a low
+    // wall at a room still menus the floor you clicked. An opening's body or
+    // frame opens the OPENING menu; a plain face the wall menu, hit side
+    // targeted.
+    const wallHit = pickWallAt(p.x, p.y);
+    const ray = stage.worldRay(p.x, p.y, rectRef.current);
+    const floorHit = ray ? pickLiveFloorAt(ray.origin, ray.dir) : null;
+    const rayLength = ray ? Math.hypot(ray.dir.x, ray.dir.y, ray.dir.z) : 1;
+    const floorDistanceM = floorHit ? floorHit.t * rayLength : Infinity;
+    if (wallHit && wallHit.distanceMeters <= floorDistanceM) {
+      const target: ArchitectureContextTarget = wallHit.openingId && wallHit.kind !== 'wallFace'
+        ? { kind: 'wallOpening', edgeId: wallHit.edgeId, openingId: wallHit.openingId }
+        : { kind: 'wallEdge', edgeId: wallHit.edgeId, side: wallHit.side };
+      onArchitectureContextRef.current(target, Number(e?.x ?? 0), Number(e?.y ?? 0));
+      return;
     }
-  }, [local, pickFaceAt, pickPieceAt]);
+    if (floorHit) {
+      onArchitectureContextRef.current({ kind: 'floor', faceSignature: floorHit.faceSignature }, Number(e?.x ?? 0), Number(e?.y ?? 0));
+    }
+  }, [local, pickFaceAt, pickPieceAt, pickWallAt, stage]);
 
   const onScroll = useCallback((e: any) => {
     const dy = Number(e?.deltaY ?? 0);

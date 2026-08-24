@@ -19,6 +19,7 @@ import { initialState, defaultModelTool } from './initialState';
 import { setAuthoredPieces } from '../world/authoredRegistry';
 import { readWorldSave } from './worldStore';
 import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
+import { EMPTY_WORLD_FINISHES } from '../world/worldFinishes';
 import { loadGlobalsSave } from './globalsStore';
 import { loadColorLibrary } from './colorLibraryStore';
 import { starterPaletteSets } from './colorSpine';
@@ -105,6 +106,7 @@ export function loadPersistedState(): EditorState {
     base.worldFlora = world.worldFlora;
     base.worldPrefabs = world.prefabs;
     base.worldFacades = world.facades;
+    base.worldFinishes = world.finishes;
     base.worldViews = world.views;
     base.objects = world.objects;
     base.selectedObjectId = world.objects.find((object) => !object.hidden)?.id ?? 'obj-tile';
@@ -181,6 +183,7 @@ export function loadPersistedState(): EditorState {
     worldFlora: base.worldFlora,
     worldPrefabs: base.worldPrefabs,
     worldFacades: base.worldFacades,
+    worldFinishes: base.worldFinishes,
     worldViews: base.worldViews,
     activeWorldViewId: null,
     worldViewRecallNonce: 0,
@@ -259,6 +262,7 @@ export function persistState(state: EditorState): void {
     worldFlora: [],
     worldPrefabs: [],
     worldFacades: [],
+    worldFinishes: EMPTY_WORLD_FINISHES,
     worldViews: [],
     activeWorldViewId: null,
     worldViewRecallNonce: 0,

@@ -128,7 +128,9 @@ import { mapAuthoringSlicesFor, worldSnapshotInputFor } from '../data/mapDocumen
 // come from the installed measured style, undo rides WORLD_UNDO_KEYS.
 import { wallDrawCommand, type WallDrawCommit } from '../world/wallTools';
 import { wallOpeningExportTargetForCommand, wallOpeningKitPlaceable } from '../world/architectureKitExport';
-import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, flipOpeningFacingCommand, insertOpeningCommand, moveOpeningCommand, setEdgeDimensionsCommand } from '../world/architectureCommand';
+import { applyArchitectureCommand, architectureCommandId, deleteEdgeCommand, deleteOpeningCommand, flipOpeningFacingCommand, insertOpeningCommand, moveOpeningCommand, setEdgeDimensionsCommand, setSideFinishCommand } from '../world/architectureCommand';
+import { FloorContextMenu, OpeningContextMenu, WallEdgeContextMenu } from '../stage/ArchitectureContextMenu';
+import type { ArchitectureContextTarget, WallSide } from '../world/architecture';
 import { armedOpeningKitById, armedOpeningKitFromEntries, openingCatalogIdOf, openingLatticeFill, placedOpeningsReferencing, snapOpeningSlot } from '../world/openingTools';
 import { architectureHost } from '../world/architectureHost';
 import { emptyArchitectureSource, EMPTY_ARCHITECTURE_SELECTION, type ArchitectureFootprint, type WallCell } from '../world/architecture';
@@ -1838,6 +1840,29 @@ export default function AppFrame() {
     worldMenu.triggerProps.onRightClick({ x, y });
   });
 
+  // Architecture quick menu (req_4739): the wall/opening/floor cousin of the
+  // piece menu above. A right-click SELECTS the record (walls and openings
+  // share the selection lane, so Del keeps meaning delete) and opens the menu
+  // at the cursor; floors have no selection kind — the menu alone serves them.
+  const archMenu = useContextMenu();
+  const [archMenuTarget, setArchMenuTarget] = useState<ArchitectureContextTarget | null>(null);
+  const openArchitectureQuickMenu = guarded((target: ArchitectureContextTarget, x: number, y: number) => {
+    setArchMenuTarget(target);
+    if (target.kind === 'wallEdge') {
+      setState((prev) => ({
+        ...prev,
+        architectureSelection: { kind: 'wallEdge', edgeId: target.edgeId, side: target.side },
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        selectedFloraPatchId: null,
+        status: 'selected wall — Del deletes it',
+      }));
+    } else if (target.kind === 'wallOpening') {
+      selectOpening({ edgeId: target.edgeId, openingId: target.openingId });
+    }
+    archMenu.triggerProps.onRightClick({ x, y });
+  });
+
   // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
   // what you were looking at instead of snapping back to defaults.
   useEffect(() => {
@@ -1880,7 +1905,7 @@ export default function AppFrame() {
       enabled: persistenceSettings.autosave,
       delayMs: persistenceSettings.autosaveDelayMs,
     });
-  }, [state.activeMapStem, state.architecture, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+  }, [state.activeMapStem, state.architecture, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, state.worldFinishes, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
 
   // Facade quads follow the active map into every world view (req_3057) —
   // livePush reads this registry when it re-pushes resident meshes/refs.
@@ -5021,7 +5046,7 @@ export default function AppFrame() {
   // EditorState): map paint strokes and in-viewer mesh edits — mesh docs route to
   // the host mesh journal instead (meshUndoRedo below).
   const WORLD_UNDO_CAP = 32;
-  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId', 'architecture', 'architectureSelection'] as const;
+  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId', 'architecture', 'architectureSelection', 'worldFinishes'] as const;
   const recordWorldEdit = (
     prev: EditorState,
     next: EditorState,
@@ -5394,6 +5419,70 @@ export default function AppFrame() {
       seq: prev.seq + 1,
       status: 'Opening flipped — Ctrl+Z undoes',
     }, 'Flip opening'));
+  };
+
+  /** The recents bump every material assignment shares (req_4739 parity with
+   *  the piece transaction's recentMaterialIds law). */
+  const withRecentMaterial = (prev: EditorState, assetId: string | null): Partial<EditorState> => assetId ? {
+    recentMaterialIds: [assetId, ...prev.recentMaterialIds.filter((id) => id !== assetId)].slice(0, 10),
+    recentLibraryKeys: rememberRecentLibraryItem(prev.recentLibraryKeys ?? [], `asset:${assetId}`),
+  } : {};
+
+  /** Dress one side of a wall (req_4739): the finish rides the ENGINE source
+   *  (setSideFinish) so it persists with the walls and undoes with them.
+   *  null returns the side to the wall style's own look. */
+  const setWallSideMaterial = (edgeId: string, side: WallSide, assetId: string | null) => {
+    const current = stateRef.current;
+    const edge = current.architecture.walls.edges.find((candidate) => candidate.id === edgeId);
+    if (!edge) return;
+    const materialId = assetId ?? edge.styleId;
+    const command = setSideFinishCommand(architectureCommandId('side-finish', current.seq), current.architecture.revision, edgeId, side, materialId);
+    const result = applyArchitectureCommand(current.architecture, command);
+    if (result.status === 'rejected') {
+      console.warn(`[wall] engine REJECTED side finish ${edgeId}/${side} = '${materialId}': ${result.reason}`);
+      setState((prev) => ({ ...prev, status: `wall finish rejected: ${result.reason}` }));
+      return;
+    }
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      architecture: result.source,
+      seq: prev.seq + 1,
+      status: assetId ? `wall side ${side.toUpperCase()} dressed` : `wall side ${side.toUpperCase()} back to default`,
+      ...withRecentMaterial(prev, assetId),
+    }, 'Wall finish'));
+  };
+
+  /** Dress a derived floor plate (req_4739): floors own no source records
+   *  (RULED req_4482), so the finish is the editor's drape by room signature —
+   *  it rides the world save and the world undo journal. */
+  const setFloorFinish = (faceSignature: string, assetId: string | null) => {
+    setState((prev) => {
+      const floors: Record<string, string> = { ...prev.worldFinishes.floors };
+      if (assetId) floors[faceSignature] = assetId;
+      else delete floors[faceSignature];
+      return recordWorldEdit(prev, {
+        ...prev,
+        worldFinishes: { ...prev.worldFinishes, floors },
+        status: assetId ? 'floor dressed' : 'floor back to default',
+        ...withRecentMaterial(prev, assetId),
+      }, 'Floor finish');
+    });
+  };
+
+  /** Dress a placed opening in one of its kit's stored paintings (req_4739) —
+   *  instance wardrobe (the req_3443 law): the mount ref swaps to the kit's
+   *  `#p<skinId>` resident; null returns the base look. */
+  const setOpeningPainting = (openingId: string, skinId: string | null) => {
+    setState((prev) => {
+      const openings: Record<string, string> = { ...prev.worldFinishes.openings };
+      if (skinId) openings[openingId] = skinId;
+      else delete openings[openingId];
+      return recordWorldEdit(prev, {
+        ...prev,
+        worldFinishes: { ...prev.worldFinishes, openings },
+        status: skinId ? 'opening dressed in its painting' : 'opening back to the base look',
+      }, 'Opening painting');
+    });
   };
 
   /** Delete the selected opening through the engine — the wall heals to a
@@ -11647,6 +11736,32 @@ export default function AppFrame() {
     if (!pkg) return { skins: [], baseSkinId: null as string | null };
     return { skins: listPaintSkins(pkg), baseSkinId: basePaintingSkinId(pkg) };
   })();
+  // Architecture quick-menu payload (req_4739): resolved fresh while open so
+  // engine edits (finish writes, deletes) track live; a record that left the
+  // source drops the menu by construction.
+  const archQuick = (() => {
+    if (!archMenu.isOpen || !archMenuTarget) return null;
+    const materials = applyAssetOverrides(ASSETS, state.assetOverrides).filter((asset) => asset.tab === 'Skins').sort(rankAssets);
+    if (archMenuTarget.kind === 'wallEdge') {
+      const edge = state.architecture.walls.edges.find((candidate) => candidate.id === archMenuTarget.edgeId);
+      if (!edge) return null;
+      return { kind: 'wallEdge' as const, target: archMenuTarget, edge, materials };
+    }
+    if (archMenuTarget.kind === 'wallOpening') {
+      const edge = state.architecture.walls.edges.find((candidate) => candidate.id === archMenuTarget.edgeId);
+      const opening = edge?.openings.find((candidate) => candidate.id === archMenuTarget.openingId);
+      if (!edge || !opening) return null;
+      const entry = installedOpeningKits().find((kit) => kit.catalogId === opening.kitId);
+      const pkg = entry ? modelPackageById(entry.packageId) : null;
+      return {
+        kind: 'wallOpening' as const,
+        target: archMenuTarget,
+        label: entry?.label ?? opening.kind,
+        paintings: pkg ? listPaintSkins(pkg) : [],
+      };
+    }
+    return { kind: 'floor' as const, target: archMenuTarget, materials };
+  })();
 
   const closeHostWindow = () => (globalThis as any).__window_close?.();
   const saveDirtyWorkspaceForClose = (): boolean => {
@@ -11981,6 +12096,7 @@ export default function AppFrame() {
             onSelectOpening={selectOpening}
             onMoveOpening={moveOpening}
             onFlipOpening={flipOpening}
+            onArchitectureContext={openArchitectureQuickMenu}
             openingFootprints={openingFootprints}
             openingDepthsU={openingDepthsU}
             openingKitPieces={openingKitPieces}
@@ -12607,6 +12723,46 @@ export default function AppFrame() {
             onClose={worldMenu.close}
           />
         </worldMenu.ContextMenu>
+      ) : null}
+      {/* Architecture quick menu (req_4739) — walls, placed openings, derived
+          floors: the same late-root mount as the piece menu above. */}
+      {archQuick ? (
+        <archMenu.ContextMenu>
+          {archQuick.kind === 'wallEdge' ? (
+            <WallEdgeContextMenu
+              edgeLabel="Wall"
+              hitSide={archQuick.target.side}
+              sideMaterials={{
+                a: assetByIdOrNull(archQuick.edge.sideA.materialId, state.assetOverrides),
+                b: assetByIdOrNull(archQuick.edge.sideB.materialId, state.assetOverrides),
+              }}
+              materials={archQuick.materials}
+              recentIds={state.recentMaterialIds}
+              onAssignSide={(side, assetId) => setWallSideMaterial(archQuick.target.edgeId, side, assetId)}
+              onClearSide={(side) => setWallSideMaterial(archQuick.target.edgeId, side, null)}
+              onDelete={deleteSelectedWallEdge}
+              onClose={archMenu.close}
+            />
+          ) : archQuick.kind === 'wallOpening' ? (
+            <OpeningContextMenu
+              label={archQuick.label}
+              paintings={archQuick.paintings}
+              wornSkinId={state.worldFinishes.openings[archQuick.target.openingId] ?? null}
+              onSetPainting={(skinId) => setOpeningPainting(archQuick.target.openingId, skinId)}
+              onFlip={() => flipOpening({ edgeId: archQuick.target.edgeId, openingId: archQuick.target.openingId })}
+              onDelete={deleteSelectedOpening}
+              onClose={archMenu.close}
+            />
+          ) : (
+            <FloorContextMenu
+              wornAsset={assetByIdOrNull(state.worldFinishes.floors[archQuick.target.faceSignature] ?? null, state.assetOverrides)}
+              materials={archQuick.materials}
+              recentIds={state.recentMaterialIds}
+              onAssign={(assetId) => setFloorFinish(archQuick.target.faceSignature, assetId)}
+              onClear={() => setFloorFinish(archQuick.target.faceSignature, null)}
+            />
+          )}
+        </archMenu.ContextMenu>
       ) : null}
       </>
       )}

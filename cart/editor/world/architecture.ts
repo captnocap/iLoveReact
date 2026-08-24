@@ -190,6 +190,14 @@ export type ArchitectureSelection =
   | { kind: 'wallOpening'; edgeId: string; openingId: string }
   | { kind: 'wallAnchor'; anchorId: string };
 
+/** What a right-click on the architecture resolved to (req_4739) — the quick
+ * menu's target. Floors are derived plates keyed by room signature, so they
+ * appear here but never in ArchitectureSelection. */
+export type ArchitectureContextTarget =
+  | { kind: 'wallEdge'; edgeId: string; side: WallSide }
+  | { kind: 'wallOpening'; edgeId: string; openingId: string }
+  | { kind: 'floor'; faceSignature: string };
+
 export type ArchitectureToolState =
   | { kind: 'select' }
   | {

@@ -21,7 +21,7 @@ import { runtimeCompiledPaintAtlas } from '../data/paintAtlasCompiler';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING, resolveDoorHinge, resolveDoorLeafPart } from '../model/doorModel';
 import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
-import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes, nowMs } from './architectureBake';
+import { liveArchitectureCollideRows, liveArchitectureMaterials, liveArchitectureRefs, liveArchitectureResidentMeshes, nowMs } from './architectureBake';
 import { compileOutlinerCollision } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
 import { compileTextureSlotMesh } from '../model/modelTextureSlots';
@@ -284,6 +284,9 @@ export function pushLiveWorld(
   // presence so an older host without them still renders the flat geometry.
   const skin = pieceSkinBoxes(pieces);
   const liveMaterials = new Map<number, LiveMaterial>(skin.materials.map((material) => [material.hash, material]));
+  // Wall/floor finishes (req_4739): the architecture bake's resolved materials
+  // ride the same one-per-hash live-material push as piece face skins.
+  for (const material of liveArchitectureMaterials()) liveMaterials.set(material.hash, material);
   if (typeof g.__compiled_world_set_live_skin_boxes === 'function') {
     g.__compiled_world_set_live_skin_boxes(nodeId, skin.boxes);
   }

@@ -12,6 +12,10 @@ import { architectureHost } from './architectureHost';
 import { openingWorldPose } from './openingTools';
 import { architectureHostLive } from '../../../runtime/game/build';
 import type { MeshRef, ResidentMesh } from './meshProps';
+import { liveMaterialForId, type LiveMaterial } from './pieceSkins';
+import { skinnedPieceId } from './authoredRegistry';
+import { EMPTY_WORLD_FINISHES, type WorldFinishes } from './worldFinishes';
+import { pickFloorTriangleHit } from './floorPick';
 
 /** Wall-clock ms. NOT performance.now(): the runtime shims it to the host's
  * __jsTick timestamp, which is FROZEN for the whole tick — every intra-tick
@@ -353,31 +357,54 @@ function collideRows(source: ArchitectureSource, bands: readonly WallRenderBand[
   return rows;
 }
 
+/** The uv pairs of stride-8 interleaved vertices, as the standalone material-UV
+ * array a live-material slot samples (the loader substitutes these when a slot
+ * wears a "live-mat:<hash>" tile). Same pairs — the bands' meter-true UVs are
+ * exactly the tiling a physical material wants. */
+function materialUvsOf(vertices: Float32Array): Float32Array {
+  const count = vertices.length / 8;
+  const out = new Float32Array(count * 2);
+  for (let index = 0; index < count; index += 1) {
+    out[index * 2] = vertices[index * 8 + 6]!;
+    out[index * 2 + 1] = vertices[index * 8 + 7]!;
+  }
+  return out;
+}
+
 type LiveArchitecture = {
   source: ArchitectureSource | null;
   /** kitId → measured housing depth (u) — the req_4491 deep-set seat data. */
   openingDepthsU: Readonly<Record<string, number>>;
+  finishes: WorldFinishes;
   meshes: ResidentMesh[];
   refs: MeshRef[];
   collideRows: number[];
+  /** the decoded floor plates — the right-click floor pick reads these. */
+  floors: FloorTriangle[];
+  /** every resolved wall/floor finish material, for the live-material push. */
+  materials: LiveMaterial[];
 };
 
-let LIVE: LiveArchitecture = { source: null, openingDepthsU: {}, meshes: [], refs: [], collideRows: [] };
+let LIVE: LiveArchitecture = { source: null, openingDepthsU: {}, finishes: EMPTY_WORLD_FINISHES, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
 
 /** Compile the source through the engine and stage its live bake. Identity-cached
  * on the retained source object (and the kit-depth map — a live kit install may
  * re-seat mounted doors), so the viewport refreshes it cheaply right before
  * every push. Never throws: a compile/decode failure clears the stage and
  * reports loudly — a silent stale wall is worse than a missing one. */
-export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: Readonly<Record<string, number>>): void {
-  if (LIVE.source === source && LIVE.openingDepthsU === openingDepthsU) return;
+export function setLiveArchitecture(
+  source: ArchitectureSource,
+  openingDepthsU: Readonly<Record<string, number>>,
+  finishes: WorldFinishes = EMPTY_WORLD_FINISHES,
+): void {
+  if (LIVE.source === source && LIVE.openingDepthsU === openingDepthsU && LIVE.finishes === finishes) return;
   if (!architectureHostLive() || source.walls.edges.length === 0) {
     // req_4476 diagnostic: a capability-absent host silently rendering zero
     // walls is indistinguishable from every other blank — say it.
     if (source.walls.edges.length > 0) {
       console.warn(`[architecture] live bake SKIPPED — host capability absent; ${source.walls.edges.length} edge(s) will not render live`);
     }
-    LIVE = { source, openingDepthsU, meshes: [], refs: [], collideRows: [] };
+    LIVE = { source, openingDepthsU, finishes, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
     return;
   }
   try {
@@ -388,8 +415,28 @@ export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: 
     const bands = decodeWallRenderBands(bundle);
     const floors = decodeFloorTriangles(bundle);
     const tDecode = nowMs();
+    // Material resolution (req_4739): a band's materialId that names a REAL
+    // Skins-tab material (setSideFinish wrote an asset id) splits into its own
+    // live-material mesh; everything else keeps the flat role placeholder.
+    // Resolution is per distinct id, memoized across the bake.
+    const materialCache = new Map<string, LiveMaterial | null>();
+    const resolveFinish = (materialId: string): LiveMaterial | null => {
+      if (!materialCache.has(materialId)) materialCache.set(materialId, liveMaterialForId(materialId));
+      return materialCache.get(materialId) ?? null;
+    };
+    const materials = new Map<number, LiveMaterial>();
     const byRole = new Map<WallRenderBand['role'], WallRenderBand[]>();
+    const byRoleMaterial = new Map<string, { role: WallRenderBand['role']; material: LiveMaterial; bands: WallRenderBand[] }>();
     for (const band of bands) {
+      const material = resolveFinish(band.materialId);
+      if (material) {
+        materials.set(material.hash, material);
+        const groupKey = `${band.role}:${material.hash}`;
+        const group = byRoleMaterial.get(groupKey);
+        if (group) group.bands.push(band);
+        else byRoleMaterial.set(groupKey, { role: band.role, material, bands: [band] });
+        continue;
+      }
       const group = byRole.get(band.role);
       if (group) group.push(band);
       else byRole.set(band.role, [band]);
@@ -419,20 +466,47 @@ export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: 
       });
       refs.push({ key, x: 0, y: 0, z: 0, yaw: 0 });
     }
-    const floorsByRole = new Map<FloorTriangle['role'], FloorTriangle[]>();
-    for (const triangle of floors) {
-      const group = floorsByRole.get(triangle.role);
-      if (group) group.push(triangle);
-      else floorsByRole.set(triangle.role, [triangle]);
-    }
-    const floorFaces = new Set(floors.map(triangle => triangle.faceSignature));
-    for (const [role, group] of floorsByRole) {
-      // Same content-hash-keyed immutable-intern law as the wall meshes above.
-      const key = `arch:floor:${role}:s${sourceHash}`;
+    for (const { role, material, bands: group } of byRoleMaterial.values()) {
+      // A finished surface is ONE slot spanning the whole mesh whose ref wears
+      // the material hash — the exact per-slot override lane placed props use
+      // (runtime_live_scene): the slot samples the "live-mat:<hash>" tile
+      // through materialUvs, here the bands' meter-true UVs.
+      const vertices = bandVertices(group);
+      const key = `arch:wall:${role}:m${material.hash.toString(16)}:s${sourceHash}`;
       meshes.push({
         key,
-        vertices: floorVertices(group),
+        vertices,
+        materialUvs: materialUvsOf(vertices),
+        color: ROLE_COLORS[role],
+        slots: [{ start: 0, count: vertices.length / 8 }],
+        solid: false,
+      });
+      refs.push({ key, x: 0, y: 0, z: 0, yaw: 0, materials: [material.hash] });
+    }
+    // Derived floors (req_4482) wear their EDITOR-owned finish (req_4739): the
+    // per-room signature → asset map replaces the engine's placeholder id.
+    const floorsByRole = new Map<string, { role: FloorTriangle['role']; material: LiveMaterial | null; triangles: FloorTriangle[] }>();
+    for (const triangle of floors) {
+      const finishId = finishes.floors[triangle.faceSignature];
+      const material = finishId ? resolveFinish(finishId) : null;
+      if (material) materials.set(material.hash, material);
+      const groupKey = material ? `${triangle.role}:${material.hash}` : triangle.role;
+      const group = floorsByRole.get(groupKey);
+      if (group) group.triangles.push(triangle);
+      else floorsByRole.set(groupKey, { role: triangle.role, material, triangles: [triangle] });
+    }
+    const floorFaces = new Set(floors.map(triangle => triangle.faceSignature));
+    for (const { role, material, triangles: group } of floorsByRole.values()) {
+      // Same content-hash-keyed immutable-intern law as the wall meshes above.
+      const vertices = floorVertices(group);
+      const key = material
+        ? `arch:floor:${role}:m${material.hash.toString(16)}:s${sourceHash}`
+        : `arch:floor:${role}:s${sourceHash}`;
+      meshes.push({
+        key,
+        vertices,
         color: FLOOR_ROLE_COLORS[role],
+        ...(material ? { materialUvs: materialUvsOf(vertices), slots: [{ start: 0, count: vertices.length / 8 }] } : {}),
         // The walkable top carries exact triangle narrowphase; that path
         // requires solid (physics.zig gates on it) and demotes the mesh's
         // welded islands to camera-only rows. Bottom/rim stay draw-only.
@@ -440,7 +514,7 @@ export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: 
           ? { solid: true, collisionTriangles: floorCollisionTriangles(group) }
           : { solid: false }),
       });
-      refs.push({ key, x: 0, y: 0, z: 0, yaw: 0 });
+      refs.push({ key, x: 0, y: 0, z: 0, yaw: 0, ...(material ? { materials: [material.hash] } : {}) });
     }
     // Every placed opening MOUNTS its kit's model in the cut (req_4526 — "why
     // did we just cut out a piece of the wall but there is no door"): one ref
@@ -467,25 +541,31 @@ export function setLiveArchitecture(source: ArchitectureSource, openingDepthsU: 
           { wallThicknessU: edge.thicknessU, kitDepthU },
         );
         if (!pose) continue;
-        refs.push({ key: `opening:${opening.kitId}`, x: pose.x, y: pose.y, z: pose.z, yaw: pose.yawDegrees });
+        // Wardrobe (req_4739): a chosen stored painting swaps the mount to the
+        // kit's `opening:<kitId>#p<skinId>` resident — the same skin residents
+        // the demand lane already cooks for the kit's package. An id whose
+        // resident never cooked draws nothing; the cook path already says why.
+        const skinId = finishes.openings[opening.id];
+        const key = skinId ? skinnedPieceId(`opening:${opening.kitId}`, skinId) : `opening:${opening.kitId}`;
+        refs.push({ key, x: pose.x, y: pose.y, z: pose.z, yaw: pose.yawDegrees });
         mounted += 1;
       }
     }
     if (mounted) console.warn(`[architecture] ${mounted} opening kit model(s) mounted in their cuts`);
     const tMesh = nowMs();
-    LIVE = { source, openingDepthsU, meshes, refs, collideRows: collideRows(source, bands) };
+    LIVE = { source, openingDepthsU, finishes, meshes, refs, collideRows: collideRows(source, bands), floors, materials: [...materials.values()] };
     const tDone = nowMs();
     // One aggregate line per bake (V27: per-placement, never per-frame) so a
     // slow placement attributes to a phase instead of an opaque jsTick.
     console.warn(`[architecture] live bake: ${source.walls.edges.length} edge(s) → ${bands.length} band(s) + ${floors.length} floor tri(s) in ${floorFaces.size} room(s) → ${meshes.length} mesh(es), ${LIVE.collideRows.length / 12} collide row(s) | compile=${(tCompile - t0).toFixed(1)}ms decode=${(tDecode - tCompile).toFixed(1)}ms mesh=${(tMesh - tDecode).toFixed(1)}ms collide=${(tDone - tMesh).toFixed(1)}ms`);
   } catch (error) {
     console.error(`[architecture] live wall bake FAILED — walls not rendered: ${error instanceof Error ? error.message : String(error)}`);
-    LIVE = { source, openingDepthsU, meshes: [], refs: [], collideRows: [] };
+    LIVE = { source, openingDepthsU, finishes, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
   }
 }
 
 export function clearLiveArchitecture(): void {
-  LIVE = { source: null, openingDepthsU: {}, meshes: [], refs: [], collideRows: [] };
+  LIVE = { source: null, openingDepthsU: {}, finishes: EMPTY_WORLD_FINISHES, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
 }
 
 export function liveArchitectureResidentMeshes(): ResidentMesh[] {
@@ -498,4 +578,19 @@ export function liveArchitectureRefs(): MeshRef[] {
 
 export function liveArchitectureCollideRows(): number[] {
   return LIVE.collideRows;
+}
+
+/** Every resolved wall/floor finish material — pushed once per world push via
+ * __compiled_world_set_live_material alongside the placed pieces' skins. */
+export function liveArchitectureMaterials(): LiveMaterial[] {
+  return LIVE.materials;
+}
+
+/** The right-click floor pick (req_4739): nearest derived floor plate under the
+ * ray, from the SAME engine-emitted triangles the world renders. */
+export function pickLiveFloorAt(
+  origin: { x: number; y: number; z: number },
+  dir: { x: number; y: number; z: number },
+): { faceSignature: string; t: number } | null {
+  return pickFloorTriangleHit(origin, dir, LIVE.floors);
 }

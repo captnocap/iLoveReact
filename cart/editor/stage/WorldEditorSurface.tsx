@@ -91,6 +91,10 @@ export default function WorldEditorSurface(props: {
   /** Opening gizmo verbs (req_4738): slide the selected opening / flip its facing. */
   onMoveOpening: (hit: { edgeId: string; openingId: string; cell: import('../world/architecture').WallCell }) => void;
   onFlipOpening: (hit: { edgeId: string; openingId: string }) => void;
+  /** Architecture quick menu (req_4739): a right-click on a wall/opening/floor. */
+  onArchitectureContext: (target: import('../world/architecture').ArchitectureContextTarget, x: number, y: number) => void;
+  /** Editor-owned finishes over derived architecture (req_4739). */
+  worldFinishes: import('../world/worldFinishes').WorldFinishes;
   openingFootprints: Readonly<Record<string, import('../world/architecture').ArchitectureFootprint>>;
   openingDepthsU: Readonly<Record<string, number>>;
   /** Opening-kit resident adapters (req_4526) — mounted doors + the armed mesh ghost. */
@@ -153,6 +157,8 @@ export default function WorldEditorSurface(props: {
         onSelectOpening={props.onSelectOpening}
         onMoveOpening={props.onMoveOpening}
         onFlipOpening={props.onFlipOpening}
+        onArchitectureContext={props.onArchitectureContext}
+        worldFinishes={props.worldFinishes}
         openingFootprints={props.openingFootprints}
         openingDepthsU={props.openingDepthsU}
         openingKitPieces={props.openingKitPieces}

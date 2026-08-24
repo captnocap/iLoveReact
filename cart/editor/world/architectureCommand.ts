@@ -61,8 +61,22 @@ export function applyArchitectureCommand(
 
 /** Command ids are minted from the editor's monotonic seq so engine-derived
  * vertex/edge ids (`<commandId>:v:<n>`) stay unique per document. */
-export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening' | 'move-opening' | 'flip-opening' | 'dimensions', seq: number): string {
+export function architectureCommandId(verb: 'draw' | 'delete-edge' | 'opening' | 'delete-opening' | 'move-opening' | 'flip-opening' | 'dimensions' | 'side-finish', seq: number): string {
   return `arch:${verb}:${seq}`;
+}
+
+/** Dress ONE side of a placed wall (req_4739): the side's finish becomes the
+ * named material id — a Skins-tab asset id for a real material, or the edge's
+ * own style id to return to the default look. The engine stores it verbatim
+ * (side finishes are opaque strings) and the live bake resolves it. */
+export function setSideFinishCommand(
+  commandId: string,
+  expectedRevision: number,
+  edgeId: string,
+  side: WallSide,
+  materialId: string,
+): ArchitectureCommand {
+  return { commandId, expectedRevision, kind: 'setSideFinish', edgeId, side, materialId };
 }
 
 export function deleteEdgeCommand(commandId: string, expectedRevision: number, edgeId: string): ArchitectureCommand {

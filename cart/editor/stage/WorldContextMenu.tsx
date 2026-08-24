@@ -11,17 +11,14 @@
 //            to TARGET it; with a target set, picking a skin paints only that
 //            face. With NO target, picking a skin paints EVERY face — the
 //            shared face-painting law.
-//   RECENT — the live recently-used materials row (EditorState.recentMaterialIds).
-//   grid   — search ("search skins…") over the RANKED catalog, paged like the
-//            Ink panel (every tile is a live <Effect> thumb via AssetPreview,
-//            so the page size is the live-Effect budget). Footer: pager, honest
-//            count, and the "default" chip that clears the target back to the
-//            kind look (all faces when untargeted).
+//   picker — search / RECENT / paged grid / default chip, the shared
+//            MaterialPickGrid (req_4739 factored it out so walls and floors
+//            offer the identical surface).
 //
 // Rendered at the app ROOT via useContextMenu (window origin), exactly like
 // ModelContextMenu.
 import { useState } from 'react';
-import { Box, Pressable, TextInput } from '@reactjit/primitives';
+import { Box, Pressable } from '@reactjit/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import { commandById } from '../data/commands';
@@ -29,6 +26,7 @@ import { pieceSlotEntries } from '../world/pieceSlots';
 import { pieceLook, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import type { Asset } from '../data/types';
 import AssetPreview from '../library/AssetPreview';
+import MaterialPickGrid, { QUICK_EMPTY_SLOT_BG, QUICK_MENU_W, QUICK_TILE_H, QUICK_TILE_W, SectionHead } from './MaterialPickGrid';
 import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
 import { isAuthoredPiece, paintSkinIdOf } from '../world/authoredRegistry';
 import type { PaintSkin } from '../data/paintVariants';
@@ -47,41 +45,6 @@ const QUICK_VERBS: { id: string; label: string; keyHint: string; closes: boolean
   // Paint Facade (req_3062): the explicit selection opens as one canvas.
   { id: 'paint-facade', label: 'Paint Facade', keyHint: '', closes: true },
 ];
-
-const MENU_W = 240;
-// Tile geometry: 3 across inside MENU_W. Every mounted tile is a live <Effect>
-// thumbnail, so the PAGE is the live-Effect budget — the Ink panel's discipline.
-const TILE_W = 68;
-const TILE_H = 38;
-const PAGE_SIZE = 12;
-const RECENT_MAX = 4;
-const EMPTY_SLOT_BG = '#0a1118';
-const TILE_EDGE = '#00000055';
-
-function SectionHead({ children }: { children: string }) {
-  return (
-    <Box style={{ height: 18, flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingRight: 10 }}>
-      <C.HW_KeyText>{children}</C.HW_KeyText>
-    </Box>
-  );
-}
-
-// One skin tile: the material's real rendered preview + its name. `active` rings
-// the material the targeted face (or, untargeted, any face) currently wears.
-function SkinTile({ asset, active, onPick }: { asset: Asset; active: boolean; onPick: (id: string) => void }) {
-  return (
-    <Pressable tooltip={asset.name} onPress={() => onPick(asset.id)}>
-      <Box style={{ width: TILE_W, gap: 2 }}>
-        <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? accentFor('primary') : TILE_EDGE, backgroundColor: EMPTY_SLOT_BG, overflow: 'hidden' }}>
-          {/* live (uncached) previews — see AssetPreview's `live` doc (req_2743):
-              sharing the library's staticKeys from a popover crashed the GPU. */}
-          <AssetPreview asset={asset} live />
-        </Box>
-        <C.HW_KeyText numberOfLines={1} style={{ width: TILE_W, color: active ? accentFor('primary') : undefined }}>{asset.name}</C.HW_KeyText>
-      </Box>
-    </Pressable>
-  );
-}
 
 export default function WorldContextMenu({ piece, materials, recentIds, resolveMaterial, onAssignSlot, onClearSlot, paintings = [], basePaintingId = null, onSetPainting, onCommand, onClose }: {
   /** the LIVE selected piece from EditorState (yaw/slots update while the menu is open) */
@@ -109,8 +72,6 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
 }) {
   // The TARGETED face, or null = paint every face. Fresh per open (menu unmounts).
   const [targetRole, setTargetRole] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [page, setPage] = useState(0);
   const roleEntries = pieceSlotEntries(piece.pieceId);
   const roles = roleEntries.map((role) => role.id);
   const roleLabel = (id: string | null) => roleEntries.find((role) => role.id === id)?.label ?? id ?? 'all';
@@ -122,14 +83,6 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
     ? [...QUICK_VERBS, { id: WORLD_PIECE_SPIN_COMMAND_ID, label: spinning ? 'Stop Spin' : 'Spin', keyHint: '', closes: false }]
     : QUICK_VERBS;
 
-  const q = query.trim().toLowerCase();
-  const filtered = q ? materials.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : materials;
-  const maxPage = Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1);
-  const p = Math.min(page, maxPage);
-  const pageTiles = filtered.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE);
-  // Recents hide while searching — the grid IS the search result then.
-  const recentTiles = q ? [] : recentIds.map((id) => materials.find((m) => m.id === id)).filter((m): m is Asset => !!m).slice(0, RECENT_MAX);
-
   // What each face wears now (asset when resolvable — its real preview draws in
   // the chip; a non-asset shader binding falls back to its resolver colour).
   const wornAssetIds = new Set<string>();
@@ -138,13 +91,12 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
     if (ref && 'assetId' in ref) wornAssetIds.add(ref.assetId);
   }
   const targetRef = targetRole ? piece.slots?.[targetRole] : undefined;
-  const tileActive = (assetId: string): boolean =>
-    targetRole ? !!targetRef && 'assetId' in targetRef && targetRef.assetId === assetId : wornAssetIds.has(assetId);
-
-  const pick = (assetId: string) => onAssignSlot(piece.id, targetRole, assetId);
+  const activeIds = targetRole
+    ? new Set(targetRef && 'assetId' in targetRef ? [targetRef.assetId] : [])
+    : wornAssetIds;
 
   return (
-    <C.HW_StageContextMenu style={{ width: MENU_W }}>
+    <C.HW_StageContextMenu style={{ width: QUICK_MENU_W }}>
       {/* What the verbs apply to + live yaw (and spin, when on) readout. */}
       <Box style={{ height: 24, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 8 }}>
         <Icon name="Box" size={12} color={accentFor('textDim')} />
@@ -184,7 +136,7 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
               const pick = painting.id === basePaintingId ? null : painting.id;
               return (
                 <Pressable key={painting.id ?? 'current'} tooltip={tip} onPress={() => { if (!worn) onSetPainting(piece.id, pick); }}>
-                  <Box style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: worn ? 2 : 1, borderColor: worn ? accentFor('primary') : '#2a3442', backgroundColor: EMPTY_SLOT_BG }}>
+                  <Box style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: worn ? 2 : 1, borderColor: worn ? accentFor('primary') : '#2a3442', backgroundColor: QUICK_EMPTY_SLOT_BG }}>
                     <C.HW_KeyText style={{ color: worn ? accentFor('primary') : undefined }}>{painting.name}</C.HW_KeyText>
                   </Box>
                 </Pressable>
@@ -208,8 +160,8 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
               const tip = `${role.label} · now: ${bound ? bound.label : 'default'} · click to skin just this face`;
               return (
                 <Pressable key={role.id} tooltip={tip} onPress={() => setTargetRole((cur) => (cur === role.id ? null : role.id))}>
-                  <Box style={{ width: TILE_W, gap: 2 }}>
-                    <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? accentFor('primary') : '#2a3442', backgroundColor: bound && !wornAsset ? bound.color : EMPTY_SLOT_BG, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+                  <Box style={{ width: QUICK_TILE_W, gap: 2 }}>
+                    <Box style={{ width: QUICK_TILE_W, height: QUICK_TILE_H, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? accentFor('primary') : '#2a3442', backgroundColor: bound && !wornAsset ? bound.color : QUICK_EMPTY_SLOT_BG, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
                       {wornAsset ? <AssetPreview asset={wornAsset} live /> : !bound ? <C.HW_KeyText>default</C.HW_KeyText> : null}
                     </Box>
                     <C.HW_KeyText style={{ color: active ? accentFor('primary') : undefined }}>{role.label}</C.HW_KeyText>
@@ -219,49 +171,14 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
             })}
           </Box>
 
-          {/* Search — narrows the ranked catalog; paging resets with each keystroke. */}
-          <Box style={{ paddingLeft: 10, paddingRight: 10, paddingBottom: 4 }}>
-            <TextInput
-              text={query}
-              placeholder="search skins…"
-              onChangeText={(t: string) => { setQuery(t); setPage(0); }}
-              style={{ backgroundColor: EMPTY_SLOT_BG, borderWidth: 1, borderColor: q ? accentFor('primary') : '#2a3442', borderRadius: 3, paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, color: accentFor('textDim'), fontSize: 10 }}
-            />
-          </Box>
-
-          {recentTiles.length ? (
-            <>
-              <SectionHead>RECENT</SectionHead>
-              <Box style={{ flexDirection: 'row', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, flexWrap: 'wrap' }}>
-                {recentTiles.map((m) => <SkinTile key={m.id} asset={m} active={tileActive(m.id)} onPick={pick} />)}
-              </Box>
-            </>
-          ) : null}
-
-          <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4 }}>
-            {pageTiles.map((m) => <SkinTile key={m.id} asset={m} active={tileActive(m.id)} onPick={pick} />)}
-            {filtered.length === 0 ? <C.HW_KeyText>no skin by that name</C.HW_KeyText> : null}
-          </Box>
-
-          {/* Footer — pager + honest count + the default chip (clears the target,
-              or every face when untargeted). Mirrors the map texture picker. */}
-          <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4 }}>
-            <Pressable tooltip="previous page" onPress={() => setPage(Math.max(0, p - 1))} style={{ width: 22, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a3442' }}>
-              <Icon name="ChevronLeft" size={11} color={accentFor('textDim')} />
-            </Pressable>
-            <C.HW_KeyText>{`${filtered.length} materials · ${p + 1}/${maxPage + 1}`}</C.HW_KeyText>
-            <C.HW_Spacer />
-            <Pressable
-              tooltip={targetRole ? `reset ${targetRole} to the kind default` : 'reset every face to the kind default'}
-              onPress={() => onClearSlot(piece.id, targetRole)}
-              style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a3442' }}
-            >
-              <C.HW_KeyText>default</C.HW_KeyText>
-            </Pressable>
-            <Pressable tooltip="next page" onPress={() => setPage(Math.min(maxPage, p + 1))} style={{ width: 22, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a3442' }}>
-              <Icon name="ChevronRight" size={11} color={accentFor('textDim')} />
-            </Pressable>
-          </Box>
+          <MaterialPickGrid
+            materials={materials}
+            recentIds={recentIds}
+            activeIds={activeIds}
+            defaultTip={targetRole ? `reset ${targetRole} to the kind default` : 'reset every face to the kind default'}
+            onPick={(assetId) => onAssignSlot(piece.id, targetRole, assetId)}
+            onDefault={() => onClearSlot(piece.id, targetRole)}
+          />
         </>
       ) : null}
     </C.HW_StageContextMenu>

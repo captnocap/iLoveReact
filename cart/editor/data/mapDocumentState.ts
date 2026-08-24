@@ -21,6 +21,7 @@ export type MapAuthoringSlices = Pick<EditorState,
   | 'worldFlora'
   | 'worldPrefabs'
   | 'worldFacades'
+  | 'worldFinishes'
   | 'objects'
   | 'selectedObjectId'
   | 'selectedPieceId'
@@ -49,6 +50,7 @@ type WorldSnapshotState = Pick<EditorState,
   | 'objects'
   | 'mapPaint'
   | 'worldFacades'
+  | 'worldFinishes'
   | 'worldViews'
 >;
 
@@ -70,6 +72,7 @@ export function worldSnapshotInputFor(
     zones: overrides.zones ?? state.mapPaint.zones,
     facades: state.worldFacades,
     views: state.worldViews,
+    finishes: state.worldFinishes,
   };
 }
 
@@ -93,6 +96,7 @@ export function mapAuthoringSlicesFor(
     worldFlora: save.worldFlora.slice(),
     worldPrefabs: save.prefabs.slice(),
     worldFacades: save.facades.slice(),
+    worldFinishes: save.finishes,
     objects: save.objects.slice(),
     selectedObjectId: save.objects.find((object) => !object.hidden)?.id ?? 'obj-tile',
     selectedPieceId: null,

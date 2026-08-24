@@ -13,7 +13,7 @@
 import { pieceVisualShapes } from './pieceShapes';
 import type { MaterialRef, PlacedPiece, StickerPlacement } from './pieces';
 import { slotRefForBox } from './pieceSlots';
-import { assetById } from '../data/catalog';
+import { assetById, assetByIdOrNull } from '../data/catalog';
 import { stickerById } from '../data/stickerStore';
 import { shaderSpec } from '../textures/shaders';
 import { rotatePackedTexture } from '../textures/pixelTexture';
@@ -40,6 +40,19 @@ export function liveMaterialFor(ref: MaterialRef): LiveMaterial | null {
   const preview = asset.preview;
   if (!preview || preview.kind !== 'shader') return null;
   const hash = fnv1a(`${ref.assetId}:${preview.data.join(',')}`);
+  return { hash, wgsl: preview.shader, data: preview.data, opacity: 1 };
+}
+
+/** The STRICT id resolver (req_4739) — for material ids that are usually NOT
+ *  editor assets (a wall side's default finish is its style's catalog id, a
+ *  derived floor's is `floor:generated`). assetById's first-asset fallback
+ *  would dress every default wall in the alphabetically first material; here
+ *  an unknown id honestly resolves to nothing and the surface stays flat. */
+export function liveMaterialForId(assetId: string): LiveMaterial | null {
+  const asset = assetByIdOrNull(assetId);
+  const preview = asset?.preview;
+  if (!preview || preview.kind !== 'shader') return null;
+  const hash = fnv1a(`${assetId}:${preview.data.join(',')}`);
   return { hash, wgsl: preview.shader, data: preview.data, opacity: 1 };
 }
 

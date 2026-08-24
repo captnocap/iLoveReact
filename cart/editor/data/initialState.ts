@@ -9,6 +9,7 @@ import { activeMapDocumentStem, mapDocumentName } from './mapDocuments';
 import { defaultWorldGlobals } from './globals';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
 import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
+import { EMPTY_WORLD_FINISHES } from '../world/worldFinishes';
 import { authoredFloraIdFor, type AuthoredFloraSpecies } from '../world/floraSpecies';
 import {
   cloneArchitectureSource,
@@ -164,6 +165,7 @@ export function initialState(worldSave: InitialWorldArchitecture | null = null):
     deviceTools: { world: { mouse: null, pen: null }, model: { mouse: null, pen: null } },
     stickerArm: { textureId: null, rot: 0, scale: 1 },
     worldFacades: [],
+    worldFinishes: EMPTY_WORLD_FINISHES,
     facadePaint: { brush: { ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } }, tool: 'brush', detail: 256 },
     assetPage: 0,
     materialFocused: false,

@@ -28,6 +28,7 @@ import type { MapZoneDef } from '../stage/mapPaint';
 import type { WorldObject } from './types';
 import { validWorldPrefab, type WorldPrefab } from '../world/prefabs';
 import { validWorldView, validateUniqueViewIds, WORLD_VIEW_LIMITS, type WorldView } from '../world/worldViews';
+import { EMPTY_WORLD_FINISHES, validWorldFinishes, type WorldFinishes } from '../world/worldFinishes';
 import { SURFACE_FLORA_TUNING, type SurfaceFloraPatch, type WorldFloraPatch } from '../world/surfaceFlora';
 import {
   LEGACY_WORLD_FILE,
@@ -60,6 +61,9 @@ export type WorldSave = {
    *  nothing on another, and a 25×25-chunk map is exactly the one you come back
    *  to next week — so they persist with the document, not in a hot twig. */
   views: WorldView[];
+  /** Editor-owned finishes over derived architecture (req_4739): floor-plate
+   *  materials by room signature + opening paintings by opening id. */
+  finishes: WorldFinishes;
 };
 
 export type WorldLoadResult =
@@ -91,7 +95,8 @@ function sameWorldSnapshot(a: WorldSave | undefined, b: WorldSave): boolean {
     && a.objects === b.objects
     && a.zones === b.zones
     && a.facades === b.facades
-    && a.views === b.views;
+    && a.views === b.views
+    && a.finishes === b.finishes;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -289,6 +294,7 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     worldFlora?: unknown;
     views?: unknown;
     architecture?: unknown;
+    finishes?: unknown;
   };
   const legacy = raw.version === 1 && options.allowLegacyV1 === true;
   const priorV2 = raw.version === 2;
@@ -335,6 +341,7 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     zones: validatedArray(raw.zones, 'zones', validZone, true),
     facades: validatedArray(raw.facades ?? [], 'facades', validFacade, true),
     views,
+    finishes: validWorldFinishes(raw.finishes),
   };
 }
 
@@ -351,6 +358,7 @@ export function emptyWorldSave(stem: string, seq = 1): WorldSave {
     zones: [],
     facades: [],
     views: [],
+    finishes: EMPTY_WORLD_FINISHES,
   };
 }
 
@@ -431,6 +439,7 @@ export type WorldSnapshotInput = {
   zones: readonly MapZoneDef[];
   facades: readonly Facade[];
   views: readonly WorldView[];
+  finishes: WorldFinishes;
 };
 
 function snapshot(input: WorldSnapshotInput): WorldSave {
@@ -446,6 +455,7 @@ function snapshot(input: WorldSnapshotInput): WorldSave {
     zones: input.zones as MapZoneDef[],
     facades: input.facades as Facade[],
     views: input.views as WorldView[],
+    finishes: input.finishes,
   };
 }
 

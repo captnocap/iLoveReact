@@ -4,6 +4,7 @@ import {
   deleteEdgeCommand,
   flipOpeningFacingCommand,
   moveOpeningCommand,
+  setSideFinishCommand,
   type ArchitectureMutationHost,
 } from './architectureCommand';
 import { emptyArchitectureSource, type ArchitectureSource } from './architecture';
@@ -115,6 +116,13 @@ test('the opening gizmo verbs build their exact engine commands (req_4738)', () 
     && flip.opening.hinge === 'start', 'flip must carry the whole record unchanged except facing');
   assert(architectureCommandId('move-opening', 9) === 'arch:move-opening:9', 'move command id drifted');
   assert(architectureCommandId('flip-opening', 9) === 'arch:flip-opening:9', 'flip command id drifted');
+});
+
+test('the wall side-finish verb builds its exact engine command (req_4739)', () => {
+  const dress = setSideFinishCommand('arch:side-finish:3', 7, 'wall:e:0', 'b', 'shader:brick');
+  assert(dress.kind === 'setSideFinish' && dress.expectedRevision === 7, 'side-finish envelope drifted');
+  assert(dress.kind === 'setSideFinish' && dress.edgeId === 'wall:e:0' && dress.side === 'b' && dress.materialId === 'shader:brick', 'side-finish payload drifted');
+  assert(architectureCommandId('side-finish', 3) === 'arch:side-finish:3', 'side-finish command id drifted');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
