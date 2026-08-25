@@ -127,6 +127,20 @@ Same split as geometry vs. paint: **bytes in the package, meaning in the bluepri
 - **Framework gap (the real Stage 4/5 work):** `framework/audio/` has the DSP graph, sampler voices, per-track gain/pan — but **no world-space emitter**. Build the capability "attach loop/one-shot to a world entity; distance gain + pan follow the listener" (audio ↔ world_loader join). V30 already rules that the VIS lump serves audio occlusion — emitters v1 (distance/pan) now, occlusion plugs into VIS later.
 - **Prior art on disk/history:** `cart/app/daw/page.tsx` (live), `cart/drums5.tsx`, `cart/pocket_operator.tsx`; the standalone EarSketch-idiom cart was `cart/composer` (deleted in the DEMOLITION ORDER `d4c4b5030`, 2026-06-10; recoverable) — its sidecar-WAV-with-id-bindings and license layer are the direct precedents.
 
+### Blueprint composition over the attachment tree — the equip stack (req_4758)
+
+An entity at runtime is a **tree of models** — body, outfit, armor, boots, held weapon — each a package with its own blueprint. Every attached model's profiles become **providers** on the wearing entity; when the game fires an event (or reads a stat), resolution walks the attachment stack and the game's compiled policy decides ownership. The user's example: the player has a roll sound; equipped armor also declares `actor.roll`; the armor's clank takes over (or layers) while worn; unequip and the body sound is back. Nobody wrote code — the armor modeler dropped a WAV and named the event.
+
+The rule generalizes past audio: **an entity's effective blueprint = its attachment tree, merged by game policy, with provenance reported.** Armor stats (`grants: while equipped`) resolve through the same stack. Only three additions carry it:
+
+1. **Shared actor event vocabulary** in the tag registry — `actor.roll`, `actor.footstep`, `actor.land`, `actor.jump`, `voice.ambient.*`, `voice.alerted` — so a boots-modeler and a game agree on names without coordinating.
+2. **One advisory hint per audio event entry:** `"mode": "replace" | "layer" | "duck"` (armor replaces the roll sound, layers a clank over footsteps). Data, not policy.
+3. **Application report gains per-event provenance:** `actor.roll ← armor_heavy_01` — "why does my character sound like that" is queryable, never a mystery.
+
+**NPC ambient barks are the same shape:** a character package carries `voice.ambient.greeting`/`idle`/`alerted` clip pools with `chance`/`cooldownSec` as data — GTA ped chatter authored by dropping WAVs into the NPC's package. Firing is game-side; the V30 activation bubble scopes it for free (frozen NPCs are state rows — only NPCs in the bubble speak); per V22, voices ride the seeded OCCUPANT's package, so recasting a position recasts its voice.
+
+**Rigging dependency (why the payoff is cheap):** attachment = a model seated on a rig socket — the skeleton object model, prop rigs (grips/seats, `carRigBones()`), and the blueprint's `contactRig` scope already exist. The equip stack consumes the attachment tree the rigging lane is already building; it does not invent a parallel one.
+
 ### Consumption contract (host/game side)
 
 - Per-game **adapter registrations** live in each game's compiled cart; the framework/runtime provide only the mechanism. Template: `cart/hmsc-int/game/stats/bridges.ts` ("keep stats separable, bridge with thin maps").
