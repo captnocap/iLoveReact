@@ -19,6 +19,7 @@ Runtime state never enters a shared RJMD. Blueprint data never blocks rendering.
 1. **V28 clarification** (user, req_4745, verbatim intent): the "game is data, no per-game code" verdict targets **hot-loaded code riding in game data** — no map, prop, or model may carry a script into someone's game space. **Pre-compiled per-game carts are completely different and totally allowed.** A racing game is its own shipped cart with its own compiled sim + adapter code, built on the shared framework.
 2. **Threat model** (user, req_4746): the UE5 Steam-Workshop incident — RATs hidden inside complex Blueprints — is the exact failure being avoided. The safety property is **no interpreter in the loader**: blueprint data is parsed into typed values, structurally validated, and anything unrecognized is inert bytes that get preserved, never dispatched. No expression grammar, ever — even a "tiny sandboxed" one re-creates the Blueprint attack surface.
 3. **Draft new verdict — the blueprint layer** (for the user's sign-off at Stage 0): model documents may carry declarative, namespaced, **advisory** stat blueprints. Games may consume, remap, scale, or ignore them. Unknown namespaces are preserved verbatim on save (opaque carriage — stored, never interpreted, never even deserialized beyond JSON values). The model owns the blueprint; the game owns the simulation.
+4. **The output game is an IN-APP EXPORT** (user, req_4762, 2026-08-25, verbatim intent: "i want the game that is made with this to have its output game come from in-app compile, packaging and exporting into a binary. no separate react application that is authored to achieve any of it"): the shipped Fart Racer binary is produced by the **editor's own Compile → Package → Export flow** — V15 ("the game is not written as a separate cart; the tool emits it"), V19 (the Compile button / `rjit game bake` writes what the compiled route loads), and V28's ship path ("dropping off the javascript") applied to this game. **No separately authored React application exists anywhere in the output path.** This composes with the req_4745 clarification, it does not contradict it: per-game **compiled Zig** (`framework/games/custom/fart-racer/`) is the allowed pre-compiled shape; a per-game **authored JS/React app** is not. Any JS the shipped artifact still needs during the transition is **emitted by the exporter** from the authored world + game data, never hand-written. The live `/play`-style route remains the dynamic dev lane (V28's two paths); it is the testing environment, not the deliverable.
 
 ### Why (the three audiences)
 
@@ -197,6 +198,11 @@ Do **not** put the block in `manifest.json`: `packageToManifest` (`modelPackage.
 
 ### Game runtime facts the racing cart builds on
 
+*(req_4762 reframe: these facts describe the LIVE DEV LANE and the exporter's raw
+materials — not an authored second app. The shipped game is the editor's in-app export,
+§0 ruling 4; "a second cart" below reads as "the export-emitted entry", never a
+hand-written one.)*
+
 - `/play` is a route in the editor cart; the game itself is **one native host node**: `WorldLoader` (`cart/editor/play/CriminalCareersPlay.tsx:51-57`). `PlaytestSurface.tsx` + `world/livePush.ts` is the working "play the authored world, no bake" template.
 - **The map is nearly free for a second cart:** the host map engine is process-global; import `runtime/game/map.ts`, call `mapLoadFile('userdata/editor/maps/<stem>/painting.rmap')` and the editor-painted terrain/roads/flora come with it.
 - **Capability triggers are source-driven** (`sdk/dependency-registry.json` + `cli/registry/resolve.ts`) but `has-compiled-world` / `has-game-physics` / `has-game-camera` currently trigger on **cart-private files**. A new cart adds trigger entries for its own files — never cross-imports editor internals (req_2178 lesson).
@@ -318,21 +324,29 @@ Amend `DECISIONS.md` + `docs/game/_index/decisions.ts` in one commit: the V28 cl
 - Application report (console verb + seat-readable) wherever blueprints are consumed.
 - Wire the existing `StatsConfig` logged-and-dropped gap while in there (same disease, one-step fix).
 
-### Stage 4 — Fart Racer, the cart + its compiled sim (~2–3 agent-days; can start parallel to 2–3)
-- New sibling cart `cart/fart-racer/` mounting `WorldLoader`, loading the editor map via `runtime/game/map.ts`.
-- **Per-game compiled code home (user-approved, req_4753):** `framework/games/custom/fart-racer/` — the game's own Zig sim (gas tank, digestion, bowel pressure, collision damage model). This is the first instance of the V28-clarified shape: pre-compiled per-game logic, cleanly separated from shared framework capabilities.
-- Graduate `cart/hmsc-int/game/driving/` → `framework/game/driving.zig` (with its tests) — the **shared** vehicle capability every future driving game reuses; host door shaped like `CarTuning`; Fart Racer's adapter feeds it from `rj.profile.vehicle` — **the cart compiles mapping rules, never numbers**.
-- `sdk/dependency-registry.json` trigger entries for the fart-racer cart's own files.
+### Stage 4 — Fart Racer: the in-app export + its compiled sim (~2–3 agent-days; can start parallel to 2–3) — REWRITTEN per req_4762
+**The deliverable is a binary the EDITOR exports, not an authored cart** (§0 ruling 4).
+The stage has two lanes:
+
+*The export lane (the new capability):*
+- **In-app Compile → Package → Export**: an editor verb (File → Export Game, the V24 "Compile" mode's first real resident) that produces `zig-out/game/fart-racer` end-to-end: (1) **bake** the authored world — map, placed props, WorldMarkers/checkpoints, blueprints, game target file — into the platform game data (the V19 `rjit game bake` pattern, V29's bundle format as it lands); (2) **compile/link** the host with the shared driving capability + the per-game sim; (3) **package** with the same self-extracting machinery `rjit ship` already uses. The editor UI drives the pipeline through a host door; progress and outcome report in the SECTION H build dock/journal (`shell/BuildDock.tsx`) — the export is watchable in-app, not a detached terminal ritual.
+- **Any JS in the shipped artifact is exporter-EMITTED, never authored:** during the transition (while the runtime is V8-hosted) the exporter generates the bundle entry — a manifest-driven bootstrap that mounts `WorldLoader`, loads the baked map/data, and binds the compiled sim. No one writes `cart/fart-racer/*.tsx` by hand; the end state per V28 is no JS at all (baked data + Zig loader).
+- **The no-rebuild property survives export:** blueprints/map ride the packaged DATA. Editing a car doc and re-exporting repackages data only — the Zig compile re-runs only when engine capability changed. Tuning stays a document edit.
+- Build config/dependency triggers (`sdk/dependency-registry.json`) ride the **generated** entry — declared by the exporter, never hand-added for an authored cart.
+
+*The compiled-capability lane (unchanged):*
+- **Per-game compiled code home (user-approved, req_4753):** `framework/games/custom/fart-racer/` — the game's own Zig sim (gas tank, digestion, bowel pressure, collision damage model). This is the V28-clarified shape — pre-compiled per-game logic — and is exactly what req_4762 still permits: compiled Zig, not an authored React app.
+- Graduate `cart/hmsc-int/game/driving/` → `framework/game/driving.zig` (with its tests) — the **shared** vehicle capability every future driving game reuses; host door shaped like `CarTuning`; Fart Racer's adapter feeds it from `rj.profile.vehicle` — **compiled code carries mapping rules, never numbers**.
 - Junk Tripo cars land under `models/vehicles/`, statted through the Stage 2 door. Game-specific stats go in `com.captnocap.fartracer.*` — the editor preserves-and-ignores them (see §5).
 
 ### Stage 5 — Checkpoints, track, agent lanes, acceptance (~2 agent-days)
-- Checkpoints as V24 WorldMarkers: `WorldSave` slice + outliner section + `race.checkpoint` tags with order. Consumed JS-side in the racer first; a loader lump later if it earns it.
+- Checkpoints as V24 WorldMarkers: `WorldSave` slice + outliner section + `race.checkpoint` tags with order. Consumed in the live `/play` dev lane first (V28's dynamic path); the exported binary consumes them from the baked game data — a loader lump when it earns it.
 - Track = the road tool as-is; `samplePath` auto-places checkpoints along the committed centerline and measures lap distance.
 - Agent lanes, sequenced: track agent (road tool) → checkpoint agent (markers; validated geometrically: ordered closed loop, volumes intersect road) → stat-author agents in parallel (blueprint door + target file + **distribution-constrained brief** — batch-bias flattening is the known failure mode when one agent stats six cars).
-- Acceptance harness: run the driver bot N laps per car; assert lap-time ordering matches authored ratings. Plus the pin-the-contract test: edit a car doc's torque, reload, assert derived accel changed **with no rebuild**.
+- Acceptance harness: run the driver bot N laps per car **against the EXPORTED binary, headless** (the V19 law — the compiled game is the bar, `/play` is not); assert lap-time ordering matches authored ratings. Plus the pin-the-contract test: edit a car doc's torque, re-export, assert derived accel changed **with no Zig rebuild** (data repackage only).
 
 ### Resolved calls (req_4753, 2026-08-25)
-1. **Name: Fart Racer** — cart `cart/fart-racer/`, compiled sim `framework/games/custom/fart-racer/`, target file identity `fart-racer`.
+1. **Name: Fart Racer** — compiled sim `framework/games/custom/fart-racer/`, target file identity `fart-racer`, exported binary `zig-out/game/fart-racer`. *(Amended by req_4762: the original "cart `cart/fart-racer/`" is superseded — no hand-authored cart exists; the exporter emits the entry. The name stands.)*
 2. v1 scope depth: `document` + `object`; deeper scopes land with their first real consumer.
 3. Game target file home: `userdata/`, one file per game.
 
@@ -390,3 +404,4 @@ Eating is the only fuel source and the only thing that advances the lose-timer �
 - Anyone proposing an expression grammar "just for derived stats" → the answer is the ruled no (req_4746); curves and ratios as data.
 - A consumer reading blueprint values without emitting an application report → reject in review; silent adoption is how `overrides` died.
 - A profile revision that reinterprets an existing field, or makes a new spec authoritative over an old spec's meaning, without a major bump → reject (req_4760 laws); "it still validates" is exactly the failure, not a defense.
+- Anyone hand-authoring a per-game cart/React app as the game's output path — a `cart/fart-racer/*.tsx` written by a person or agent — → reject (req_4762, §0 ruling 4); the shipped game comes from the editor's in-app Compile → Package → Export, and any JS in the artifact is exporter-emitted. Per-game code that earns compilation is Zig under `framework/games/custom/`.
