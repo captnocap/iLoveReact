@@ -99,6 +99,34 @@ v1 ships `document` + `object`; the other scopes land with their first real cons
 
 Precedence rules are deterministic (USD-derived): explicit mass > density-derived; child scope > parent scope. Later: `rj.core.interaction`, `rj.profile.{combat,resource,equipment,progression,character}`.
 
+### Audio (`rj.core.audio`) — sounds travel with the model (req_4754–req_4757)
+
+Same split as geometry vs. paint: **bytes in the package, meaning in the blueprint.**
+
+- **WAV files are package files, never doc bytes:** `<pkg>/audio/<slug>.wav`; `audio` joins `MODEL_PACKAGE_SUBDIRS` (`modelPackage.ts:36`) beside `mesh/atlases/paints/shaders` — the same law as the paint atlas.
+- **The blueprint declares the association** — an event → clip map, pure data:
+
+```jsonc
+{ "scope": { "kind": "document" },
+  "profile": { "id": "rj.core.audio", "version": 1 },
+  "events": {
+    "weapon.fire":    { "clips": ["shot_1","shot_2"], "pick": "random", "gainDb": 0, "pitchVariance": 0.04 },
+    "vehicle.engine": { "kind": "loop", "clips": ["idle","mid","high"],
+                        "param": "vehicle.rpmNormalized",
+                        "blendCurve": [[0,0],[0.5,1],[1,2]], "pitchCurve": [[0,0.8],[1,1.6]] },
+    "impact.body":    { "clips": ["clank_1"] }
+  },
+  "clipMeta": { "shot_1": { "license": "CC0", "source": "freesound:412331" } } }
+```
+
+- **Event names are hierarchical tags, not callbacks.** The game fires `weapon.fire`; the profile answers "with what sound." Unfired events never touch their clips — the safe-ignore contract. Nothing in the asset says *when* — the stats/behavior boundary holds for audio too.
+- **Loops are parameter-driven via named params + data curves** (multi-sample engine banks as crossfade/pitch curves over `vehicle.rpmNormalized`). No expressions, per the ruled no.
+- **Composes with physics:** `surfaceType` keys the *receiving game's* footstep/impact banks; a model shipping its own impact voice adds `impact.*` events. Scopes work for free: door-creak on a `contactRig`, per-wheel skid on `semanticInstance`.
+- **Clip-level license/provenance** in `clipMeta` (the `cart/composer` lesson — `sources/license.ts`; samples are the most-ripped asset class).
+- **Threat model (user-ratified, req_4757):** a WAV is inert — no VM, no script; the only real vector is a **buggy decoder** (the Stagefright class: lying chunk sizes → out-of-bounds write). We control the one decoder (`decodeWavToMonoF32`, `framework/audio/api.zig:459`). **Load-bearing: builds are ReleaseFast, so Zig's automatic safety checks are OFF — the decoder must validate explicitly** (clamp chunk sizes against file length, PCM-only, cap rate/channels/duration/total decoded bytes). **WAV-only stays the rule** — MP3/OGG/FLAC each import a large third-party parser; adopting one later is a deliberate vetted decision, never a casual format addition. A master limiter caps the worst-audio-possible angle.
+- **Framework gap (the real Stage 4/5 work):** `framework/audio/` has the DSP graph, sampler voices, per-track gain/pan — but **no world-space emitter**. Build the capability "attach loop/one-shot to a world entity; distance gain + pan follow the listener" (audio ↔ world_loader join). V30 already rules that the VIS lump serves audio occlusion — emitters v1 (distance/pan) now, occlusion plugs into VIS later.
+- **Prior art on disk/history:** `cart/app/daw/page.tsx` (live), `cart/drums5.tsx`, `cart/pocket_operator.tsx`; the standalone EarSketch-idiom cart was `cart/composer` (deleted in the DEMOLITION ORDER `d4c4b5030`, 2026-06-10; recoverable) — its sidecar-WAV-with-id-bindings and license layer are the direct precedents.
+
 ### Consumption contract (host/game side)
 
 - Per-game **adapter registrations** live in each game's compiled cart; the framework/runtime provide only the mechanism. Template: `cart/hmsc-int/game/stats/bridges.ts` ("keep stats separable, bridge with thin maps").
@@ -156,7 +184,7 @@ Amend `DECISIONS.md` + `docs/game/_index/decisions.ts` in one commit: the V28 cl
 - `cart/editor/model/blueprintTable.ts`: types + `parseBlueprintTable`, modeled on `contactRig.ts`. Envelope + profiles + scoped stats + opaque extensions.
 - Zig structural validator beside `contact_rig.validateSemanticTableExtensions` — shape only, no interpretation.
 - Preservation guard + post-write readback coverage in `meshDoc.ts`.
-- Profiles v1 (typed parsers are the schema; spec text in this doc): `rj.physics.rigidBody`, `rj.physics.material`, `rj.core.item`, `rj.profile.vehicle`.
+- Profiles v1 (typed parsers are the schema; spec text in this doc): `rj.physics.rigidBody`, `rj.physics.material`, `rj.core.item`, `rj.profile.vehicle`, `rj.core.audio` (event→clip map; the `audio/` package subdir + WAV decoder hardening land with it — playback/emitters come later, Stage 4/5).
 - Scopes v1: `document` + `object`.
 
 ### Stage 2 — Authoring surfaces (~1–2 agent-days)
@@ -224,6 +252,8 @@ Eating is the only fuel source and the only thing that advances the lose-timer �
 **Track entities** (world data, not model docs): checkpoints + the **home** finish as V24 WorldMarkers; drive-thrus as placed props whose interaction the fart-racer sim consumes (window-side pass-through trigger).
 
 **Simulation state (never in any document):** tank level, bowel pressure, damage-now, digestion queue, race position, lap time. The whole game is the proof that the split holds: every tunable is a doc edit, every runtime value is the game's own.
+
+**Audio (via `rj.core.audio`):** car docs ship engine idle/rev loops (pitch off `vehicle.rpmNormalized`), skid, crash-clank, and the tank-fill sound; food docs ship their eat sound; the drive-thru prop ships its speaker squawk. All authored by dropping WAVs in the package and filling the event map — the world-space emitter capability (Stage 4/5 framework work) is what plays them in the race.
 
 ### Acceptance (extends Stage 5's harness)
 
