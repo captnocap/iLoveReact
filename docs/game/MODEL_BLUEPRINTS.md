@@ -99,6 +99,13 @@ v1 ships `document` + `object`; the other scopes land with their first real cons
 
 Precedence rules are deterministic (USD-derived): explicit mass > density-derived; child scope > parent scope. Later: `rj.core.interaction`, `rj.profile.{combat,resource,equipment,progression,character}`.
 
+### Profile versioning laws (req_4760)
+
+1. **Append-only evolution within a major version.** New specs get new IDs; existing fields never change meaning. The moment a revision *reinterprets* an existing field — `vehicle.torque` was crank torque, now it's wheel torque — backward portability silently breaks **while still validating**. That is what major bumps are for: `rj.profile.vehicle@2` is a different vocabulary, and an old game correctly reports "unsupported version" instead of misreading. Minor bump = additive = safe backward.
+2. **New specs must be refinements, not redistributions.** Safe: added detail on top (tire temp curves, per-gear ratios elaborating a top speed). Unsafe: splitting an existing value — top speed becomes derived from drag + power curve, authors stop filling the old field or fill it lazily, and an old game reads a stale value: the car is subtly miscalibrated, green all the way down. **A new spec may never become the authoritative source for something an old spec already expresses** — either the old field stays canonical and the new ones elaborate it, or you major-bump.
+
+Enforcement hooks: Studio export validation checks coherence when both a canonical field and its elaborating fields are present (declared top speed vs. curve-derived — disagreement is a warning at authoring time, where it's fixable); the application report's `defaulted`/`adopted` counts surface stale-canonical drift on the consuming side.
+
 ### Audio (`rj.core.audio`) — sounds travel with the model (req_4754–req_4757)
 
 Same split as geometry vs. paint: **bytes in the package, meaning in the blueprint.**
@@ -293,3 +300,4 @@ Eating is the only fuel source and the only thing that advances the lose-timer �
 - Validation-failure warnings spiking → tighten Studio export; never loosen parsers.
 - Anyone proposing an expression grammar "just for derived stats" → the answer is the ruled no (req_4746); curves and ratios as data.
 - A consumer reading blueprint values without emitting an application report → reject in review; silent adoption is how `overrides` died.
+- A profile revision that reinterprets an existing field, or makes a new spec authoritative over an old spec's meaning, without a major bump → reject (req_4760 laws); "it still validates" is exactly the failure, not a defense.
