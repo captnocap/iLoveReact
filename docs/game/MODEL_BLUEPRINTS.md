@@ -205,6 +205,95 @@ Do **not** put the block in `manifest.json`: `packageToManifest` (`modelPackage.
 - **Checkpoints have no substrate but ARE ruled:** V24 semantic overlays — the `WorldMarker` union with `trigger {bounds, event}` — is the authored shape; `cart/editor/design.ts:39-56` already names `marker`/`spawn`/`save`/`vehicleSpawn`/`parking` tile kinds with zero consumers. Implementation: new `WorldSave` slice beside `objects`/`zones` (`worldStore.ts:39-66`), new `WorldOutlinerSectionKey` + target variant (`world/worldOutliner.ts:38-63`).
 - **Track measurement primitive exists:** `transport.samplePath` (`framework/game/map/transport.zig:651`) — arc-length sampling along a committed path; `mapPathSnapshot()` (`runtime/game/map.ts:642`) exposes committed centerlines to TS.
 
+### The STATS pane — Stage 2's authoring UI, etched (req_4761, 2026-08-25)
+
+The user-facing surface reuses the Section G systems **in full**. No new field, row,
+section, popover, or picker primitives: everything below names an existing component and
+where it lives. A control this pane needs that the shared vocabulary lacks gets added to
+the vocabulary (`workspace.cls` / `inspector/EditCell.tsx`), never built pane-locally.
+
+**Placement — a new right-rail pane, not another MODEL FOCUS slice.** The model
+document's rail gains `{ id: 'stats', label: 'Stats', icon: 'Gauge', renderer: 'stats' }`
+in `MODEL_RIGHT` (`cart/editor/data/panelSystem.ts:81-89`), plus the `RightPanelId`
+union entry and `normalizeRightPanelId`. The renderer is one more `activePane` branch in
+`inspector/Inspector.tsx` beside `names` (`:943`), keeping `ModelIdentityHeader` and the
+default `REGIONS.focusPanel.width` — no bespoke region. Precedent: the NAMES pane
+(req_3884) — document-level authoring earns its own pane. Because the pane rides the
+model document, food items, drive-thru props, and vehicles all get the same surface for
+free — the ecosystem point needs zero extra UI.
+
+**Data flow — one lane, two callers.**
+
+- **Read:** `ModelFocusBridge` (published on `globalThis.__modelFocusBridge`,
+  `Inspector.tsx:53-60`) gains a `blueprint` snapshot + `refreshBlueprint()`, the exact
+  shape `semantics` already has — parsed by Stage 1's `parseBlueprintTable` from the
+  **resident host table**. The panel never keeps its own copy.
+- **Write:** every commit goes through the ONE Stage-1 host door that validates and
+  merges the `blueprint` key into the resident semantic table (the
+  `setSemanticTableJson` family, `framework/gpu/model_source.zig:350`, reached the way
+  the `__mesh_semantic_*` doors reach it) and marks the model dirty; ordinary Save
+  persists. The seat `blueprint` write action calls the **same door** — panel and agent
+  seat are two callers of one lane, never parallel stores. A TS-side-only edit is the
+  known silent-drop-at-save trap (§2 storage notes).
+- **Untouched panel = no blueprint.** The pane never writes an empty envelope; the first
+  real commit mints it (version, units, namespaces).
+
+**Body grammar — the reuse map:**
+
+| need | reuse |
+|---|---|
+| section frames | `C.HW_Section/SectionHead/AccentBar/SectionTitle/Tag`; an empty section collapses to one header line (req_4392 law) |
+| preset + target pickers | `PresetSection`'s `HW_Select*` family (`inspector/PresetSection.tsx`) |
+| numbers (SI, semantic absolute) | `CellRow` + `NumberCell` (`inspector/EditCell.tsx`) — click-to-type + drag-scrub, **commit-only** (stats have no mesh-preview lane); unit suffix as trailing dim text, the SHAPE-radius `u` pattern |
+| ratings [0,1] | `NumberCell` clamped 0–1, `scrubStep: 0.01` — the scrub is the slider affordance |
+| unset values | `AssignCell` dashed "assign…" — an unset stat invites, never reads as 0 |
+| authored vs default | overridden-bright / default-gold text + the always-reserved `ResetCol` (req_2626 II column grid) |
+| enums (bodyType, rarity, tags, audio mode) | the in-panel popover pattern (`LabInspectorPanel.tsx` blend/variant popovers): scrim + clamped column, one at a time — modal discipline req_2626 I |
+| read-only facts / report | `ReadOnlySection` / `HW_ReadRow` (reserved end column included) |
+| pinned footer | the Lab layout — scrolling middle, FACTS pinned to the bottom |
+
+**Pane layout (top → bottom):**
+
+1. Identity header (shared, unchanged).
+2. **PROFILES preset row** — `PresetSection`: Generic Prop / Physical Prop / Vehicle /
+   Custom, plus one `target: <game>` entry per game target file found in `userdata/`
+   (enumerated through the same host fs doors the editor data layer already uses,
+   `cart/editor/data/editorDataRoot.ts` family). Choosing a preset ADDS its profile
+   sections with every field **unset** — presets never fabricate numbers.
+3. **SCOPE row** — chip toggle: `DOCUMENT` (default) | `PART · <name>`. Object scope
+   binds to `modelActivePartId` — the existing outliner IS the object picker, no
+   parallel tree. Sections below render the active scope's attachments.
+4. **One section per declared profile** (RJ.PHYSICS.RIGIDBODY, RJ.CORE.ITEM,
+   RJ.PROFILE.VEHICLE, …): `CellRow` fields generated from the profile's Stage-1 typed
+   parser — **the parser is the form schema**; per-profile code contributes only labels,
+   units, and scrub steps. A portable-intent rating/ratio renders as a second cell in
+   its absolute value's row, never a separate section. A curve-typed field renders as
+   rows of (x, y) `NumberCell` pairs — data tables, honoring the ruled no-expressions.
+5. **RJ.CORE.AUDIO section** (lands with Stage 1's audio profile): one row per event —
+   tag name · clip chips (picked from `<pkg>/audio/*.wav` via the popover) · mode chip
+   (`replace`/`layer`/`duck`, req_4758). Event names come from the shared tag-registry
+   picker; free-typed names only under a vendor namespace.
+6. **EXTENSIONS** — one read-only row per vendor namespace: name · byte size ·
+   "preserved, never interpreted". Editable ONLY when the selected game target file
+   declares those fields (they then render as ordinary `CellRow`s with the target's
+   ranges); otherwise opaque, exactly as the loader treats them.
+7. **Pinned BLUEPRINT FACTS:** profiles · attachments · table bytes against the shared
+   1 MiB `MAX_SEMANTIC_TABLE_BYTES` budget · Stage-1 validator verdict · and, once
+   Stage 3 lands, the application report's adopted/defaulted/ignored counts read
+   through the same seat-readable report.
+
+**Target mode.** Selecting `target: <game>` renders exactly the fields that game's
+target file declares — id, range, rubric text as the row tooltip — plus an export-check
+row (consumable / missing fields). The modder never sees JSON (§1's game-target
+contract). Custom mode remains the raw superset.
+
+**Laws inherited as acceptance criteria, not polish:** control-grid column discipline
+(req_2626 II — fixed label column, one shared right edge, reserved reset column); every
+displayed value is editable, resettable, or jumps somewhere (req_0604/req_0621 — rows
+carry verbs); widths come from `REGIONS` constants, never per-control padding; popovers
+resolve before anything else opens (req_2626 I); UI verification is `rjit shot`, never
+desktop capture.
+
 ---
 
 ## 3. Build plan
@@ -220,9 +309,9 @@ Amend `DECISIONS.md` + `docs/game/_index/decisions.ts` in one commit: the V28 cl
 - Scopes v1: `document` + `object`.
 
 ### Stage 2 — Authoring surfaces (~1–2 agent-days)
-- Seat read (`package blueprint`) + seat write (separate claimed `blueprint` action through the host table).
-- Studio STATS panel in the model inspector: preset picker (Generic Prop / Physical Prop / Vehicle / Custom), common fields, custom add. Untouched panel = no blueprint.
-- Game target file format + "target: <game>" panel mode.
+- Seat read (`package blueprint`) + seat write (separate claimed `blueprint` action through the host table — the same Stage-1 write door the STATS pane commits through; one lane, two callers).
+- Studio STATS pane: **full UI spec etched in §2 ("The STATS pane", req_4761)** — a new `stats` right-rail pane on the model document reusing the Section G vocabulary in full (`PresetSection`, `EditCell` cells, Lab popovers, `ReadOnlySection`); no new field/row/section primitives. Untouched panel = no blueprint.
+- Game target file format + "target: <game>" panel mode (rendering contract also in the §2 spec).
 
 ### Stage 3 — Consumption mechanism (~1 agent-day)
 - Adapter registry mechanism in `runtime/game/` (mappings live per-game, in each cart) — `bridges.ts` pattern.
