@@ -127,6 +127,17 @@ Same split as geometry vs. paint: **bytes in the package, meaning in the bluepri
 - **Framework gap (the real Stage 4/5 work):** `framework/audio/` has the DSP graph, sampler voices, per-track gain/pan — but **no world-space emitter**. Build the capability "attach loop/one-shot to a world entity; distance gain + pan follow the listener" (audio ↔ world_loader join). V30 already rules that the VIS lump serves audio occlusion — emitters v1 (distance/pan) now, occlusion plugs into VIS later.
 - **Prior art on disk/history:** `cart/app/daw/page.tsx` (live), `cart/drums5.tsx`, `cart/pocket_operator.tsx`; the standalone EarSketch-idiom cart was `cart/composer` (deleted in the DEMOLITION ORDER `d4c4b5030`, 2026-06-10; recoverable) — its sidecar-WAV-with-id-bindings and license layer are the direct precedents.
 
+### Surface blending — excitation × voice (req_4759)
+
+Movement sounds blend with world materials in real time — not two clips layered, a *source shaped by a body*:
+
+- **Actor/equipment models ship excitations** (boot contact transient, tire roll loop, rain patter) — the ordinary `rj.core.audio` event map.
+- **Surfaces ship voices** — what the material does to sound: mud = lowpass + slow squelch envelope + wet tail; wood = bandpass resonance + short knock; stone = bright + tight reverb. Terrain voices live in the map/game material bank (`surface.material` is already a per-cell axis); placed-prop surfaces carry voices via the blueprint's **material scope**.
+- **The framework blends:** `footstep = excitation ⊗ surface voice`, keyed by the physics profile's `surfaceType` — the join key the spec already carries. The user's `boots.running.mud.mixer` decomposes to `(event: actor.footstep, excitation: boots, voice: mud)`; the mixer is a framework capability, never an asset.
+- **Combinatorial by construction:** one asphalt voice serves boots, tires, AND rain on asphalt — N excitations × M surfaces = N+M authored things, N×M distinct sounds. This is where the variety comes from.
+- **The experimental lane: impulse responses as material voices.** An IR is a short WAV (data, same threat model); convolving the excitation with the surface IR is the true physical blend. `framework/audio/dsp.zig` already has filters/envelopes/delay/reverb/samplers/graph routing — a convolution module is the one new DSP piece; v1 ships filter/envelope voices, IR convolution is the upgrade.
+- **Guardrail (no-interpreter law):** a surface voice is a **fixed-topology DSP chain with data knobs** (filter/envelope/wet-dry/IR ref/speed→blend curves) — never an asset-authored module graph. The framework defines the chain; data fills the knobs. A patchable graph from untrusted assets would be the audio Blueprint-VM mistake.
+
 ### Blueprint composition over the attachment tree — the equip stack (req_4758)
 
 An entity at runtime is a **tree of models** — body, outfit, armor, boots, held weapon — each a package with its own blueprint. Every attached model's profiles become **providers** on the wearing entity; when the game fires an event (or reads a stat), resolution walks the attachment stack and the game's compiled policy decides ownership. The user's example: the player has a roll sound; equipped armor also declares `actor.roll`; the armor's clank takes over (or layers) while worn; unequip and the body sound is back. Nobody wrote code — the armor modeler dropped a WAV and named the event.
