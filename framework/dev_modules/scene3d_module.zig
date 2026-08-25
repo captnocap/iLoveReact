@@ -181,6 +181,22 @@ fn meshPathPick(x: f32, y: f32, additive: bool) callconv(.c) i32 {
 fn meshSelectionCount() callconv(.c) u32 {
     return scene3d.meshEditSelectionCount();
 }
+/// req_4743: lend the cold host the live paint atlas so it can load a paintable
+/// texture directly. The slice stays module-owned; the caller copies inside the call.
+fn paintAtlasView(out: *abi.PaintAtlasViewV1) callconv(.c) bool {
+    const atlas = scene3d.paintAtlas() orelse {
+        out.* = .{};
+        return false;
+    };
+    out.* = .{
+        .pixels = atlas.rgba.ptr,
+        .len = atlas.rgba.len,
+        .w = atlas.w,
+        .h = atlas.h,
+        .detail = atlas.detail,
+    };
+    return true;
+}
 fn meshOutOfScopePartAt(x: f32, y: f32) callconv(.c) i32 {
     return scene3d.meshEditOutOfScopePartAt(x, y);
 }
@@ -771,6 +787,7 @@ var module_api = abi.Scene3dApiV1{
     .document_finalize = documentFinalize,
     .mesh_path_pick = meshPathPick,
     .mesh_selection_count = meshSelectionCount,
+    .paint_atlas_view = paintAtlasView,
 };
 
 pub fn descriptor() *const abi.ModuleHeaderV1 {

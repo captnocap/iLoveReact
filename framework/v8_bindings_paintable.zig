@@ -29,6 +29,15 @@
 //!     Replace texture contents with raw R8 bytes (length == w*h).
 //!     Used by SAM / flood-fill backends that produce CPU masks.
 //!
+//!   __paintable_load_model_atlas(id, w, h) -> 1 | 0
+//!     Load the LIVE model paint atlas straight into an RGBA paintable of
+//!     exactly w x h, host-side. The raster never crosses into JS: the UV
+//!     workspace used to base64 the whole atlas through __model_atlas_read
+//!     and hand the bytes back, which put a JS-side byte ceiling in front of
+//!     an atlas the painter itself was happy to build (req_4743 - "3085x3769
+//!     is too large to preview live" on a model the fit dial had just made).
+//!     Refusals are LOUD: 0 with a log line naming which half disagreed.
+//!
 //!   __paintable_readback(id) → Uint8Array | null
 //!     Synchronous (blocking) GPU→CPU copy. Call at save / export
 //!     boundaries only — NOT per frame.
@@ -37,6 +46,8 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const paintable = @import("gpu/paintable.zig");
+const scene3d_runtime = @import("dev_modules/scene3d_runtime.zig");
+const log = @import("diag/log.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -58,6 +69,10 @@ fn argF32(info: v8.FunctionCallbackInfo, idx: u32) ?f32 {
     const ctx = info.getIsolate().getCurrentContext();
     const v = info.getArg(idx).toF64(ctx) catch return null;
     return @floatCast(v);
+}
+
+fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), value));
 }
 
 /// Pull raw bytes out of a Uint8Array / Float32Array / any ArrayBufferView
@@ -257,6 +272,39 @@ fn paintUpload(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     paintable.queueUpload(id, bytes);
 }
 
+/// __paintable_load_model_atlas(id, w, h) -> 1 on queued, 0 on a named refusal.
+/// The live paint atlas already sits in host memory; queueUpload copies it into the
+/// paintable's op queue. w/h are the paintable's DECLARED dimensions (the caller knows
+/// them; the paintable itself may still be waiting on its reconciler CREATE, in which
+/// case the bytes park and flush on creation) - a disagreement with the live atlas means
+/// the caller is looking at a stale read, which is a refusal worth naming.
+fn paintLoadModelAtlas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 3) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const id = argStrAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer alloc.free(id);
+    const want_w = argU32(info, 1);
+    const want_h = argU32(info, 2);
+    const atlas = scene3d_runtime.paintAtlasView() orelse {
+        log.warn(.gpu, "[paintable] '{s}' asked for the live model atlas, but no paint target is resident.", .{id});
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (atlas.w != want_w or atlas.h != want_h) {
+        log.warn(.gpu, "[paintable] '{s}' expects a {d}x{d} atlas; the live one is {d}x{d} - refusing rather than tearing the preview.", .{ id, want_w, want_h, atlas.w, atlas.h });
+        setReturnNumber(info, 0);
+        return;
+    }
+    paintable.queueUpload(id, atlas.pixels);
+    setReturnNumber(info, 1);
+}
+
 fn paintReadback(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const iso = info.getIsolate();
@@ -331,5 +379,6 @@ pub fn registerPaintable(_: anytype) void {
     v8_runtime.registerHostFn("__paintable_clear", paintClear);
     v8_runtime.registerHostFn("__paintable_clear_rgba", paintClearRGBA);
     v8_runtime.registerHostFn("__paintable_upload", paintUpload);
+    v8_runtime.registerHostFn("__paintable_load_model_atlas", paintLoadModelAtlas);
     v8_runtime.registerHostFn("__paintable_readback", paintReadback);
 }

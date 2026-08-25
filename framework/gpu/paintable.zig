@@ -28,6 +28,7 @@ const std = @import("std");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const gpu_core = @import("gpu.zig");
+const log = @import("../diag/log.zig");
 
 const page_alloc = std.heap.page_allocator;
 
@@ -1007,7 +1008,12 @@ pub fn queueUpload(key: []const u8, bytes: []const u8) void {
         parkUpload(key, bytes);
         return;
     };
-    if (bytes.len != @as(usize, e.width) * @as(usize, e.height) * @as(usize, bpp(e))) {
+    const expected = @as(usize, e.width) * @as(usize, e.height) * @as(usize, bpp(e));
+    if (bytes.len != expected) {
+        // A size disagreement means the caller is holding a stale read of this
+        // texture. Dropping it silently leaves a blank surface with no reason
+        // attached; name both halves instead (req_4743).
+        log.warn(.gpu, "[paintable] upload to '{s}' is {d} bytes; the {d}x{d} texture takes {d} - dropped.", .{ key, bytes.len, e.width, e.height, expected });
         return;
     }
     const copy = page_alloc.alloc(u8, bytes.len) catch return;

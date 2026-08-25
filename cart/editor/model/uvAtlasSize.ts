@@ -2,10 +2,16 @@
 // The renderer and image codec perform the mutation; this module owns the
 // shared limits and the exact dry-run math shown by the inspector.
 
+// These MIRROR the host's paint-atlas law (framework/gpu/model_paint.zig:
+// MAX_ATLAS_DIM = 8192, the wgpu texture-dimension ceiling; ATLAS_BUDGET = 256 MiB).
+// They must not be tighter: a limit only this module believes in makes the editor
+// refuse a size the painter itself just built, which is exactly the 3085x3769
+// "too large" dead end (req_4743). The rest of the editor's texture surfaces
+// (uvTextureWorkspace, paintAtlasCompiler) already carry the same 256 MiB figure.
 export const UV_ATLAS_SIZE_TUNING = {
   minDimension: 1,
   maxDimension: 8192,
-  maxRgbaBytes: 32 * 1024 * 1024,
+  maxRgbaBytes: 256 * 1024 * 1024,
   scaleDigits: 4,
 } as const;
 

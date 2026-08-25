@@ -322,6 +322,13 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     };
   }, [bridge]);
   const texture = usePaintable({ id: `editor-live-uv-${uv.key}`, w: uv.w, h: uv.h });
+  // Pull the live paint atlas into the preview texture host-side (req_4743). The bytes
+  // go GPU-to-queue without ever becoming a JS array, so a 3085x3769 atlas costs this
+  // surface exactly what a 512x512 one does — the workspace can open whatever the
+  // painter can build. A refusal is logged host-side with both sizes named.
+  const loadLiveAtlas = () => {
+    if (uv.hasAtlas) texture.paint.loadModelAtlas(uv.w, uv.h);
+  };
   const initialRects = () => uv.islands.map((rect) => ({ ...rect }));
   const [rects, setRects] = useState<UvIslandRect[]>(initialRects);
   const rectsRef = useRef(rects);
@@ -552,7 +559,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     if (livePatchFocus && livePatchFocus.modelKey === uv.key) {
       workspaceDocRef.current = uv.workspace;
       setWorkspaceDoc(uv.workspace);
-      if (uv.rgba) texture.paint.upload(uv.rgba);
+      loadLiveAtlas();
       return;
     }
     if (livePatchFocus) {
@@ -573,7 +580,7 @@ export default function UvEditor(props: { uv: ModelFocusUv; bridge: ModelFocusBr
     setSelectedLayerId((current) => uv.workspace?.layers.some((layer) => layer.id === current)
       ? current
       : uv.workspace?.layers[uv.workspace.layers.length - 1]?.id ?? null);
-    if (uv.rgba) texture.paint.upload(uv.rgba);
+    loadLiveAtlas();
   }, [uv.key, uv.revision]);
 
   const synchronizedSelectionKey = uv.selectedIslands.join(',');

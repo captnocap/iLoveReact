@@ -37,7 +37,21 @@ test('invalid and explosive dimensions are refused before allocation', () => {
   assert(!planUvAtlasResize(817, 996, 0, 1152).ok, 'zero width reached the resize boundary');
   assert(!planUvAtlasResize(817, 996, 928.5, 1152).ok, 'fractional width reached the resize boundary');
   assert(!planUvAtlasResize(817, 996, UV_ATLAS_SIZE_TUNING.maxDimension + 1, 1).ok, 'GPU dimension ceiling was bypassed');
-  assert(!planUvAtlasResize(817, 996, UV_ATLAS_SIZE_TUNING.maxDimension, UV_ATLAS_SIZE_TUNING.maxDimension).ok, 'live RGBA budget was bypassed');
+});
+
+test('every atlas the host painter can build is a size this planner accepts', () => {
+  // req_4743: the fit dial handed the editor a 3085x3769 atlas and the UV workspace
+  // then refused to open it. The planner's limits mirror the host's paint-atlas law,
+  // so any frame the painter can produce plans cleanly here.
+  const reported = planUvAtlasResize(3085, 3769, 3085, 3769);
+  assert(reported.ok, `the reported atlas was refused: ${reported.ok ? '' : reported.error}`);
+  assert(reported.ok && reported.plan.targetRgbaBytes === 3085 * 3769 * 4, 'reported atlas byte math drifted');
+  const wholeFrame = planUvAtlasResize(3085, 3769, UV_ATLAS_SIZE_TUNING.maxDimension, UV_ATLAS_SIZE_TUNING.maxDimension);
+  assert(wholeFrame.ok, 'the host ceiling frame was refused by a tighter editor-only limit');
+  assert(
+    UV_ATLAS_SIZE_TUNING.maxDimension * UV_ATLAS_SIZE_TUNING.maxDimension * 4 <= UV_ATLAS_SIZE_TUNING.maxRgbaBytes,
+    'the byte budget is tighter than the dimension ceiling — some allowed size is unreachable',
+  );
 });
 
 log(`\n${passed} passed, ${failed} failed`);

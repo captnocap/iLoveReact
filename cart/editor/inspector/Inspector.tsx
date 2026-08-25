@@ -166,7 +166,7 @@ function UvSection({
           <Icon name="RefreshCw" size={10} color={accentFor('textDim')} />
         </C.HW_MiniVerb>
       </C.HW_SectionHead>
-      {uv && uv.rgba && bridge ? (
+      {uv && uv.hasAtlas && bridge ? (
         <UvEditor uv={uv} bridge={bridge} focused={workspace.focused} />
       ) : workspace.emptyState === 'workspace' ? (
         <C.HW_UvEmptyWorkspace>

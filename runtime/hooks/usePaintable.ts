@@ -103,6 +103,12 @@ export interface PaintableOps {
   /** Replace texture contents with raw bytes: R8 targets take w*h, RGBA targets
    *  take w*h*4. Used for masks and save-boundary CPU composites. */
   upload(bytes: Uint8Array): void;
+  /** Load the LIVE model paint atlas into this RGBA paintable, host-side. Pass the
+   *  dimensions this paintable was declared with; the host refuses (loudly, returning
+   *  false) if the live atlas is not exactly that size. The raster never enters JS,
+   *  so an atlas the painter can build is an atlas the surface can show — no
+   *  JS-side byte ceiling in front of a host-side capability (req_4743). */
+  loadModelAtlas(w: number, h: number): boolean;
   /** Block-and-readback to a CPU Uint8Array. Use at save / export
    *  boundaries only — not per frame. Returns null on failure. */
   readback(): Uint8Array | null;
@@ -154,6 +160,7 @@ function makeOps(id: string): PaintableOps {
     },
     clear(value) { callHost('__paintable_clear', undefined, id, value); },
     upload(bytes) { callHost('__paintable_upload', undefined, id, bytes); },
+    loadModelAtlas(w, h) { return callHost<number>('__paintable_load_model_atlas', 0, id, w, h) === 1; },
     readback() {
       const out = callHost<unknown>('__paintable_readback', null, id);
       return out instanceof Uint8Array ? out : null;

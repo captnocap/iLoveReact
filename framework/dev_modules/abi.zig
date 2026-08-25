@@ -401,6 +401,25 @@ pub const Scene3dApiV1 = extern struct {
     // the engine reads before claiming a ctrl+right-click for extrude-to-cursor.
     mesh_path_pick: *const fn (x: f32, y: f32, additive: bool) callconv(.c) i32,
     mesh_selection_count: *const fn () callconv(.c) u32,
+    // req_4743 (appended — struct_size gates compatibility): a BORROWED view of the
+    // live paint atlas. The paintable texture facility lives in the cold host while
+    // the atlas lives in this module, so the UV workspace could only bridge them by
+    // base64-ing the whole raster out through JS — which put a JS-side byte ceiling
+    // in front of an atlas the painter was happy to build. This hands the cold host
+    // the pixels directly; it copies them into the paintable's op queue before
+    // returning, so the module keeps ownership.
+    paint_atlas_view: *const fn (out: *PaintAtlasViewV1) callconv(.c) bool,
+};
+
+/// A borrowed window onto the module's live paint atlas (see `paint_atlas_view`).
+/// `pixels` is RGBA8, `len` == w * h * 4, and it is valid only for the duration of
+/// the call that produced it.
+pub const PaintAtlasViewV1 = extern struct {
+    pixels: ?[*]const u8 = null,
+    len: usize = 0,
+    w: u32 = 0,
+    h: u32 = 0,
+    detail: u32 = 0,
 };
 
 /// Capture's strict saved-character target must live in the same Game module

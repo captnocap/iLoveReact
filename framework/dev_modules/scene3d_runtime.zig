@@ -664,6 +664,28 @@ pub fn meshEditSelectionCount() u32 {
     return if (api()) |dispatch| dispatch.mesh_selection_count() else 0;
 }
 
+/// A borrowed view of the live paint atlas (req_4743). The paintable texture facility
+/// lives in the cold host and the atlas lives in the Scene3D module, so this is the
+/// ONE boundary the UV workspace's preview upload crosses — the raster never becomes
+/// a JS array. Valid only until the caller returns; copy what you keep.
+pub const PaintAtlasView = struct {
+    pixels: []const u8,
+    w: u32,
+    h: u32,
+    detail: u32,
+};
+pub fn paintAtlasView() ?PaintAtlasView {
+    if (!modular_core) {
+        const atlas = implementation.paintAtlas() orelse return null;
+        return .{ .pixels = atlas.rgba, .w = atlas.w, .h = atlas.h, .detail = atlas.detail };
+    }
+    const dispatch = api() orelse return null;
+    var view: abi.PaintAtlasViewV1 = .{};
+    if (!dispatch.paint_atlas_view(&view)) return null;
+    const pixels = view.pixels orelse return null;
+    return .{ .pixels = pixels[0..view.len], .w = view.w, .h = view.h, .detail = view.detail };
+}
+
 pub fn meshEditOutOfScopePartAt(x: f32, y: f32) i32 {
     if (!modular_core) return implementation.meshEditOutOfScopePartAt(x, y);
     return if (api()) |dispatch| dispatch.mesh_out_of_scope_part_at(x, y) else -1;

@@ -226,7 +226,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'extrude' | 'bevel' | 'loop-cut' | 'tris-to-quads' | 'paint-conflict' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; persistentAdditive: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; pathPlane: boolean; pathEdges: boolean; curvePull: boolean; surfaceSlide: boolean; focus: boolean; wire: boolean; measurements: boolean; playerScale: boolean; xray: boolean; persistentAdditive: boolean; camLock: boolean; camSaved: boolean; retopoGhostVisible: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -238,7 +238,11 @@ export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boo
 export type ModelFocusUv = {
   key: string;
   revision: number;
-  rgba: Uint8Array | null;
+  /** True when a live paint atlas of exactly w x h stands behind this panel. The
+   *  RASTER is never carried here: the UV surface loads it GPU-side through the
+   *  paintable's loadModelAtlas door, so the panel stays a few kilobytes of geometry
+   *  whatever the atlas measures (req_4743). */
+  hasAtlas: boolean;
   islands: UvIslandRect[];
   /** Exact coverage-compatible atlas regions that require independent paint. */
   footprints: number;
@@ -378,6 +382,7 @@ export type ModelToolApi = {
   pathPlane: () => void;
   pathEdges: () => void;
   curvePull: () => void;
+  surfaceSlide: () => void;
   focus: () => void;
   wire: () => void;
   measurements: () => void;
@@ -1204,6 +1209,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [pathPlaneMode, setPathPlaneMode] = useState(false);
   const [pathEdgesMode, setPathEdgesMode] = useState(false); // Pen Edges: wire-only pen commits
   const [curvePullMode, setCurvePullMode] = useState(false); // Curve Pull (req_4325): Move drags bend a selected vertex run
+  const [surfaceSlideMode, setSurfaceSlideMode] = useState(false); // Surface Slide (req_4731/req_4733): Move follows a frozen edge
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [retopoGhostVisible, setRetopoGhostVisible] = useState(false);
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
@@ -1227,6 +1233,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintMode(false);
     setPathPlaneMode(false);
     setPathEdgesMode(false);
+    setCurvePullMode(false);
+    setSurfaceSlideMode(false);
+    host.__mesh_curve_pull_arm?.(0);
+    host.__mesh_surface_slide_arm?.(0);
     setFocusMode(false);
     setSelMode(0);
     meshSetMode(0);
@@ -2111,9 +2121,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [uvPanel, setUvPanel] = useState<ModelFocusUv | null>(null);
   const [semanticRevision, setSemanticRevision] = useState(0);
   const uvRevisionRef = useRef(0);
-  const UV_PREVIEW_BYTE_CAP = UV_ATLAS_SIZE_TUNING.maxRgbaBytes; // reading a 100MB atlas into JS would stall the app
   // No atob/btoa in this runtime (they're Web APIs, not V8 builtins) — decode the atlas
-  // door's base64 by hand. ~1MB for a 512² atlas; one-shot per refresh, not per frame.
+  // door's base64 by hand. This is now a SAVE/EXPORT-boundary path only (the resize
+  // resampler); the UV preview loads the atlas GPU-side and never pays this (req_4743).
   const B64_REV = (() => {
     const rev = new Int8Array(128).fill(-1);
     const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -2157,11 +2167,23 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       return empty;
     }
   };
+  // The live atlas RASTER, decoded into JS. Heavy by construction (a 3085x3769 atlas is
+  // 46MB of RGBA) — call it only where the bytes themselves are the work, never to show
+  // the atlas. The UV surface uses the paintable door instead.
+  const readLiveAtlasRaster = (): { w: number; h: number; rgba: Uint8Array } | null => {
+    const j = host.__model_atlas_read?.(1);
+    if (typeof j !== 'string' || !j) return null;
+    let o: { w: number; h: number; data?: string };
+    try { o = JSON.parse(j); } catch { return null; }
+    if (!(o.w > 0) || !(o.h > 0) || typeof o.data !== 'string') return null;
+    const rgba = bytesFromB64(o.data);
+    return rgba && rgba.length >= o.w * o.h * 4 ? { w: o.w, h: o.h, rgba } : null;
+  };
   const buildUvPanel = () => {
     const fail = (w: number, h: number, d: number, note: string) => setUvPanel({
       key: `${model?.key ?? 'none'}-${w}x${h}`,
       revision: ++uvRevisionRef.current,
-      rgba: null,
+      hasAtlas: false,
       islands: [],
       intents: [],
       selectedIslands: [],
@@ -2175,25 +2197,24 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       atlasOriginY: 0,
       workspace: null,
     });
-    const j = host.__model_atlas_read?.();
+    // Geometry ONLY (includeData=0): island rects, group ids, triangles, corner verts.
+    // The pixels stay host-side and reach the surface through the paintable door, so the
+    // panel costs the same few kilobytes whether the atlas is 512² or 4096² — the size a
+    // fit the painter offers can no longer be a size the workspace refuses (req_4743).
+    const j = host.__model_atlas_read?.(0);
     if (typeof j !== 'string' || !j) {
       fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
       return;
     }
-    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; triangles?: number[]; cornerVertices?: number[]; data: string };
+    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; triangles?: number[]; cornerVertices?: number[] };
     try {
       o = JSON.parse(j);
     } catch {
       fail(0, 0, 0, 'atlas read returned malformed JSON');
       return;
     }
-    if (o.w * o.h * 4 > UV_PREVIEW_BYTE_CAP) {
-      fail(o.w, o.h, o.detail, `atlas is ${o.w}×${o.h} — too large to preview live`);
-      return;
-    }
-    const rgba = bytesFromB64(o.data);
-    if (!rgba || rgba.length < o.w * o.h * 4) {
-      fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
+    if (!(o.w > 0) || !(o.h > 0)) {
+      fail(o.w ?? 0, o.h ?? 0, o.detail ?? 0, 'the live atlas has no dimensions yet');
       return;
     }
     const selection = readUvSelection();
@@ -2236,7 +2257,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setUvPanel({
       key: `${model?.key ?? 'model'}-${o.w}x${o.h}-${atlasOriginX},${atlasOriginY}`,
       revision: ++uvRevisionRef.current,
-      rgba,
+      hasAtlas: true,
       islands,
       footprints,
       intents,
@@ -2549,8 +2570,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (!paintTarget || !resolvePackageDir(paintTarget.kind, paintTarget.id)) {
       return 'Resize refused — save the model package first.';
     }
-    const atlas = uvPanel;
-    if (!atlas?.rgba || atlas.rgba.length !== atlas.w * atlas.h * 4) {
+    // The resampler is the one caller that genuinely needs the bytes; read them here
+    // rather than making every UV panel refresh carry them (req_4743).
+    const atlas = readLiveAtlasRaster();
+    if (!atlas) {
       return 'Resize refused — the live UV atlas pixels are unavailable.';
     }
     const result = planUvAtlasResize(atlas.w, atlas.h, width, height);
@@ -3010,6 +3033,27 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const next = !active;
       host.__mesh_curve_pull_arm?.(next ? 1 : 0);
       if (next) {
+        host.__mesh_surface_slide_arm?.(0);
+        setSurfaceSlideMode(false);
+        setPaintMode(false);
+        setPathPlaneMode(false);
+        setPathEdgesMode(false);
+        if (selMode === 0) { setSelMode(1); meshSetMode(1); }
+        chooseGizmoTool(0);
+      }
+      return next;
+    });
+  };
+  // Surface Slide is the shape-preserving Move modifier: each selected logical
+  // vertex follows the best-aligned real edge captured at grab time.
+  const toggleSurfaceSlide = () => {
+    if (!model) return;
+    setSurfaceSlideMode((active) => {
+      const next = !active;
+      host.__mesh_surface_slide_arm?.(next ? 1 : 0);
+      if (next) {
+        host.__mesh_curve_pull_arm?.(0);
+        setCurvePullMode(false);
         setPaintMode(false);
         setPathPlaneMode(false);
         setPathEdgesMode(false);
@@ -3423,6 +3467,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     pathPlane: togglePathPlane,
     pathEdges: togglePathEdges,
     curvePull: toggleCurvePull,
+    surfaceSlide: toggleSurfaceSlide,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
     measurements: () => setMeasurements((v) => !v),
@@ -3789,7 +3834,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         return ok({
           pose: readPose(), locked: camLock, wire, xray, selectionMode: selMode,
           gizmoTool, mirrorMask, bookmarks: camMarks, paint: paintMode,
-          focusTool: focusMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode,
+          focusTool: focusMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode, surfaceSlide: surfaceSlideMode,
           selection: readSelInfo(),
           partRanges: livePartRanges,
           ownedFaces: livePartRanges?.reduce((sum, range) => sum + Number(host.__mesh_group_face_count?.(range.lo, range.hi) ?? 0), 0) ?? null,
@@ -4123,8 +4168,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = extrude ? 'extrude' : bv ? 'bevel' : lc ? 'loop-cut' : quadify ? 'tris-to-quads' : paintConflict ? 'paint-conflict' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, persistentAdditive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, curvePullMode, focusMode, wire, measurements, playerScale, xrayActive, persistentAdditive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, pathPlane: pathPlaneMode, pathEdges: pathEdgesMode, curvePull: curvePullMode, surfaceSlide: surfaceSlideMode, focus: focusMode, wire, measurements, playerScale, xray: xrayActive, persistentAdditive, camLock, camSaved: camMarks.length > 0, retopoGhostVisible, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim: false, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, pathPlaneMode, pathEdgesMode, curvePullMode, surfaceSlideMode, focusMode, wire, measurements, playerScale, xrayActive, persistentAdditive, camLock, camMarks.length, retopoGhostVisible, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -4794,15 +4839,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // file so tools/part-sync-parity can assert them (req_3763).
       const partSyncLines: string[] = [];
       const dumpAtlasPng = (path: string) => {
-        const j = host.__model_atlas_read?.();
-        if (typeof j !== 'string' || !j) { console.error('[meshops] atlas: no atlas'); return; }
+        const atlas = readLiveAtlasRaster();
+        if (!atlas) { console.error('[meshops] atlas: no atlas'); return; }
         try {
-          const o = JSON.parse(j) as { w: number; h: number; data: string };
-          const rgba = bytesFromB64(o.data);
-          const png = rgba ? host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}') : null;
+          const png = host.__imageops_encode_raw?.(atlas.rgba, atlas.w, atlas.h, '{"format":"png"}');
           if (png instanceof Uint8Array && host.__imageops_write_file?.(path, png) === true) {
-            console.error(`[meshops] atlas → ${path} (${o.w}x${o.h})`);
-          } else console.error('[meshops] atlas: decode/encode/write failed');
+            console.error(`[meshops] atlas → ${path} (${atlas.w}x${atlas.h})`);
+          } else console.error('[meshops] atlas: encode/write failed');
         } catch (e) { console.error(`[meshops] atlas threw: ${e}`); }
       };
       const runOp = (op: string) => {
