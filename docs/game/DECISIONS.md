@@ -953,11 +953,18 @@ game state outlives maps, a map lives only while you stand in it):
   play time. A fused standalone binary (today's `rjit ship`) remains a
   distribution option that bakes the data in — it is no longer the definition
   of "the compiled game". The compile unit becomes the RLE data (V29/V30).
-- **No per-game script seam ANYWHERE — behavior included.** Logic is engine
-  capability PARAMETERIZED BY DATA. Need a new capability the data can't yet
-  express? EXTEND THE ENGINE (the test-route → finalize-into-built-engine
-  loop above), never add a game-side script. This is the hard line the
-  earlier draft missed.
+- **No hot-loaded per-game script seam ANYWHERE — behavior included.** Logic
+  riding in a map, prop, model, or game-data bundle is forbidden: data may not
+  bring an interpreter or executable script into someone else's game space.
+  Need a new capability the data can't yet express? EXTEND THE ENGINE (the
+  test-route → finalize-into-built-engine loop above), never add code to the
+  loaded game data. **Clarification (2026-08-25, req_4745): pre-compiled
+  per-game code is a different layer and is allowed.** A racing game may ship
+  compiled simulation and adapter code on the shared framework; that code is
+  part of its reviewed binary, not executable content smuggled through an
+  asset. For editor-exported games (req_4762), game-specific compiled code is
+  Zig under `framework/games/custom/`; the editor emits and packages the game,
+  and no separately authored per-game React application is the output path.
 - **The second-mod test** governs every future boundary: could a different
   game (different setting, kinds, rules) be built from the editor + platform
   by authoring DIFFERENT DATA, without touching framework/ or forking hmsc?
@@ -1254,3 +1261,46 @@ The map-separation half of V30 is overruled. The user, verbatim (req_4525):
   AMENDED-by marker, and the oracle must surface the amendment loudly wherever
   the old ruling would have answered — an agent reading V30 must meet V34 in
   the same breath.
+
+**V35 — Model documents may carry declarative advisory blueprints; the model
+owns author intent and the game owns simulation (BLUP-0825). (Added
+2026-08-25 from req_4744–req_4762; wording ratified by the user's request to
+execute `MODEL_BLUEPRINTS.md`.)**
+
+An RJMD may carry a versioned, namespaced, declarative blueprint containing
+base values, physical properties, stat/profile attachments, templates,
+requirements, affordances, progression rules, audio event associations, and
+opaque vendor extensions. The blueprint is AUTHOR INTENT only. A receiving
+game may consume, remap, scale, report, or ignore it; the host always owns
+policy. Runtime state — current HP, earned XP, durability-now, ownership,
+random rolls, timers, fuel-now, damage-now — never enters the shared model.
+
+- **Advisory and safe by construction.** Nothing in a model document executes.
+  There is no expression grammar, callback, bytecode, embedded script, or
+  interpreter in the loader. Typed values are structurally validated. Unknown
+  namespaces are preserved verbatim as opaque JSON values and are never
+  dispatched. This directly rejects the Workshop RAT attack shape from
+  req_4746: complexity may live in trusted compiled game code, never in an
+  untrusted asset.
+- **Portable, namespaced, and additive.** Standard vocabulary lives under
+  `rj.core.*`, `rj.physics.*`, and `rj.profile.*`; author/game vocabulary lives
+  under reverse-DNS vendor namespaces. Profiles evolve append-only within a
+  major version. Reinterpreting an existing field or redistributing its
+  authority requires a new major profile id/version.
+- **The model owns the blueprint; the game owns the simulation.** Consumed
+  blueprint values seed a game's own state/aggregation pipeline; they are
+  never live simulation values. Every consumer emits an application report
+  (`adopted`, `normalized`, `ignored-by-policy`, `unknown-preserved`,
+  `defaulted`) so authored-but-unused data cannot disappear silently.
+- **Tuning is a document edit, never a code rebuild.** Modders and modelers
+  author stats through Studio/Agent Seat with zero asset-side code. Per-game
+  adapters are trusted compiled code and carry mapping rules, never the
+  authored numbers. The editor's Compile → Package → Export flow packages the
+  model/world blueprints as data; changing a stat repackages data without
+  recompiling Zig unless an engine capability itself changed.
+- **Units and scope are explicit.** Dimensional values declare SI units. v1
+  scopes are document and durable object id; semantic-region, instance,
+  material, and contact-rig scopes land with their first real consumers.
+
+The durable implementation and acceptance plan is
+`docs/game/MODEL_BLUEPRINTS.md`.
