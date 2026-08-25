@@ -47,7 +47,7 @@ Layer 3  Vendor extensions          com.<author>.<domain>.* — opaque, preserve
 "blueprint": {
   "version": 1,
   "units": { "length": "m", "mass": "kg", "time": "s", "angle": "rad" },   // mandatory for dimensional values
-  "namespaces": ["rj.core", "rj.physics", "rj.profile.vehicle", "com.captnocap.racing"],
+  "namespaces": ["rj.core", "rj.physics", "rj.profile.vehicle", "com.captnocap.fartracer"],
   "profiles": [ { "id": "rj.profile.vehicle", "version": 1 } ],
   "provenance": { "author": "…", "generator": "Studio", "license": "…", "intent": "mid-tier junker" },
   "stats": [ /* StatAttachment[] */ ],
@@ -169,11 +169,12 @@ Amend `DECISIONS.md` + `docs/game/_index/decisions.ts` in one commit: the V28 cl
 - Application report (console verb + seat-readable) wherever blueprints are consumed.
 - Wire the existing `StatsConfig` logged-and-dropped gap while in there (same disease, one-step fix).
 
-### Stage 4 — The racing cart (~2–3 agent-days; can start parallel to 2–3)
-- New sibling cart (name TBD) mounting `WorldLoader`, loading the editor map via `runtime/game/map.ts`.
-- `sdk/dependency-registry.json` trigger entries for the racer's own files.
-- Graduate `cart/hmsc-int/game/driving/` → `framework/game/driving.zig` (with its tests); host door shaped like `CarTuning`; the racer's adapter feeds it from `rj.profile.vehicle` — **the cart compiles mapping rules, never numbers**.
-- Junk Tripo cars land under `models/vehicles/`, statted through the Stage 2 door. Racer-only stats (gear ratios, tire wear) go in `com.captnocap.racing.*` — the editor preserves-and-ignores them.
+### Stage 4 — Fart Racer, the cart + its compiled sim (~2–3 agent-days; can start parallel to 2–3)
+- New sibling cart `cart/fart-racer/` mounting `WorldLoader`, loading the editor map via `runtime/game/map.ts`.
+- **Per-game compiled code home (user-approved, req_4753):** `framework/games/custom/fart-racer/` — the game's own Zig sim (gas tank, digestion, bowel pressure, collision damage model). This is the first instance of the V28-clarified shape: pre-compiled per-game logic, cleanly separated from shared framework capabilities.
+- Graduate `cart/hmsc-int/game/driving/` → `framework/game/driving.zig` (with its tests) — the **shared** vehicle capability every future driving game reuses; host door shaped like `CarTuning`; Fart Racer's adapter feeds it from `rj.profile.vehicle` — **the cart compiles mapping rules, never numbers**.
+- `sdk/dependency-registry.json` trigger entries for the fart-racer cart's own files.
+- Junk Tripo cars land under `models/vehicles/`, statted through the Stage 2 door. Game-specific stats go in `com.captnocap.fartracer.*` — the editor preserves-and-ignores them (see §5).
 
 ### Stage 5 — Checkpoints, track, agent lanes, acceptance (~2 agent-days)
 - Checkpoints as V24 WorldMarkers: `WorldSave` slice + outliner section + `race.checkpoint` tags with order. Consumed JS-side in the racer first; a loader lump later if it earns it.
@@ -181,14 +182,58 @@ Amend `DECISIONS.md` + `docs/game/_index/decisions.ts` in one commit: the V28 cl
 - Agent lanes, sequenced: track agent (road tool) → checkpoint agent (markers; validated geometrically: ordered closed loop, volumes intersect road) → stat-author agents in parallel (blueprint door + target file + **distribution-constrained brief** — batch-bias flattening is the known failure mode when one agent stats six cars).
 - Acceptance harness: run the driver bot N laps per car; assert lap-time ordering matches authored ratings. Plus the pin-the-contract test: edit a car doc's torque, reload, assert derived accel changed **with no rebuild**.
 
-### Open calls (user)
-1. Racing cart name (directory, binary, target-file identity).
-2. Confirm v1 scope depth (document + object; deeper scopes with first real consumer).
-3. Confirm game target file home (`userdata/`, one file per game).
+### Resolved calls (req_4753, 2026-08-25)
+1. **Name: Fart Racer** — cart `cart/fart-racer/`, compiled sim `framework/games/custom/fart-racer/`, target file identity `fart-racer`.
+2. v1 scope depth: `document` + `object`; deeper scopes land with their first real consumer.
+3. Game target file home: `userdata/`, one file per game.
 
 ---
 
-## 4. Tripwires
+## 4. Fart Racer — game design (USER ASK req_4753)
+
+The user's design, verbatim intent: cars are powered by natural gas the player produces — farting fills the tank. Refueling is eating: fast-food drive-thrus on the track provide an intermediary fill-up. Cars carry several related stats and take damage from collisions. **The racer has to make it home before he shits his pants.**
+
+### The loop (fuel and failure share a source)
+
+```
+throttle burns gas  →  tank empties  →  pass a drive-thru, eat
+       ↑                                        │
+  gas becomes                            digestion converts
+  thrust                                 food → gas over time
+       │                                        │
+       └──────── tank refills ←─────────────────┤
+                                                ▼
+                                  bowel pressure RISES with every meal
+                                                ▼
+                        pressure maxed before home = shit pants = LOSE
+                        cross home line with pants intact = WIN
+```
+
+Eating is the only fuel source and the only thing that advances the lose-timer — every fill-up is a bet on making it home. Collision damage compounds it: a wrecked tank leaks, forcing more meals.
+
+### Stat vocabulary (the blueprint/simulation split, taught by example)
+
+**Car documents** (models under `models/vehicles/`, statted via the seat door):
+- `rj.profile.vehicle` — mass, top-speed rating, accel rating, grip, handling (feeds the shared driving model).
+- `rj.core.item.durability.capacity` — collision hit points.
+- `com.captnocap.fartracer.*` — `tankCapacityL`, `burnRatePerSec` (at full throttle), `fillEfficiency` (how well digested gas reaches this tank), `leakRatePerDamage` (junkers leak when dinged).
+
+**Food documents** (drive-thru menu items are model packages too — the ecosystem point in miniature):
+- `com.captnocap.fartracer.*` — `gasYieldL`, `digestSeconds` (delay before yield becomes usable gas), `bowelLoad` (pressure added). A bean burrito: high yield, high load. A salad: near-zero both.
+
+**Track entities** (world data, not model docs): checkpoints + the **home** finish as V24 WorldMarkers; drive-thrus as placed props whose interaction the fart-racer sim consumes (window-side pass-through trigger).
+
+**Simulation state (never in any document):** tank level, bowel pressure, damage-now, digestion queue, race position, lap time. The whole game is the proof that the split holds: every tunable is a doc edit, every runtime value is the game's own.
+
+### Acceptance (extends Stage 5's harness)
+
+- Lap-time ordering matches authored vehicle ratings.
+- Edit a car doc's `tankCapacityL`, reload, assert range-before-empty changed — no rebuild.
+- Bot run with no drive-thru stops runs dry before home; bot that overeats shits its pants before home. Both ends of the loop provable headless.
+
+---
+
+## 5. Tripwires
 - Vendors shipping load-bearing data in extensions that core profiles should cover → extend the core catalog.
 - Validation-failure warnings spiking → tighten Studio export; never loosen parsers.
 - Anyone proposing an expression grammar "just for derived stats" → the answer is the ruled no (req_4746); curves and ratios as data.
