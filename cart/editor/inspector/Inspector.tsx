@@ -45,6 +45,7 @@ import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSe
 import { hasCharacterRigCapability } from '../skeleton/characterRigCapability';
 import { ModelIdentityHeader, PartSection, SelectionSection, ShapeSection } from './ModelFocusSections';
 import LabInspectorPanel from './LabInspectorPanel';
+import BlueprintStatsPanel from './BlueprintStatsPanel';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -445,6 +446,9 @@ export default function Inspector(props: {
   /** A real Remove happened: mint the capability that lets an emptied semantic
    *  table actually save (req_3898). */
   onSemanticRegionRemoved: () => void;
+  /** A dedicated Remove Blueprint action happened; ordinary Save may consume
+   * this one-shot capability, while silent loss remains blocked. */
+  onBlueprintRemoved: () => void;
   modelOnDisk: boolean;
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
@@ -501,87 +505,17 @@ export default function Inspector(props: {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
   const [uvWorkspaceFocused, setUvWorkspaceFocused] = useState(false);
-  const [uvPanelWidths, setUvPanelWidths] = useState({
-    panel: REGIONS.focusPanel.atlasWidth,
-    focus: REGIONS.focusPanel.atlasFocusWidth,
+  // Every focus-panel width that the user may drag, keyed by the shape it
+  // belongs to. The UV workspace carries two (its panel and its focus shape);
+  // MODEL · STATS carries one. They share one gesture so no pane can mint a
+  // private minimum (req_4772).
+  const panelResize = useFocusPanelResize({
+    uvPanel: REGIONS.focusPanel.atlasWidth,
+    uvFocus: REGIONS.focusPanel.atlasFocusWidth,
+    stats: REGIONS.focusPanel.statsWidth,
   });
-  const [uvPanelResizing, setUvPanelResizing] = useState(false);
-  const uvResizeGestureRef = useRef<null | { mode: 'panel' | 'focus'; startX: number; startWidth: number; viewportWidth: number }>(null);
-  const pendingUvWidthRef = useRef<null | { mode: 'panel' | 'focus'; width: number }>(null);
-  const uvResizeFramePendingRef = useRef(false);
-  const uvResizeGenerationRef = useRef(0);
-  const uvWidthMode = uvWorkspaceFocused ? 'focus' : 'panel';
-  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused, uvPanelWidths[uvWidthMode]);
-  const host = globalThis as any;
-  const pointerX = (event: any): number => {
-    const eventX = Number(event?.x);
-    if (Number.isFinite(eventX)) return eventX;
-    const hostX = Number(host.getMouseX?.());
-    return Number.isFinite(hostX) ? hostX : 0;
-  };
-  const applyUvPanelWidth = (mode: 'panel' | 'focus', width: number) => {
-    setUvPanelWidths((current) => current[mode] === width ? current : { ...current, [mode]: width });
-  };
-  const queueUvPanelWidth = (mode: 'panel' | 'focus', width: number) => {
-    pendingUvWidthRef.current = { mode, width };
-    if (uvResizeFramePendingRef.current) return;
-    uvResizeFramePendingRef.current = true;
-    const generation = uvResizeGenerationRef.current;
-    const schedule: (callback: () => void) => unknown = typeof host.requestAnimationFrame === 'function'
-      ? host.requestAnimationFrame.bind(host)
-      : (callback) => setTimeout(callback, REGIONS.focusPanel.resizePreviewIntervalMs);
-    schedule(() => {
-      if (generation !== uvResizeGenerationRef.current) return;
-      uvResizeFramePendingRef.current = false;
-      const pending = pendingUvWidthRef.current;
-      pendingUvWidthRef.current = null;
-      if (pending) applyUvPanelWidth(pending.mode, pending.width);
-    });
-  };
-  const beginUvPanelResize = (event: any) => {
-    const reportedViewportWidth = Number(host.__viewport_width?.());
-    const viewportWidth = Number.isFinite(reportedViewportWidth) && reportedViewportWidth > 0
-      ? reportedViewportWidth
-      : REGIONS.focusPanel.resizeMaxWidth + REGIONS.focusPanel.minimumOutsideWidth;
-    uvResizeGestureRef.current = {
-      mode: uvWidthMode,
-      startX: pointerX(event),
-      startWidth: uvWorkspace.panelWidth,
-      viewportWidth,
-    };
-    setUvPanelResizing(true);
-  };
-  const moveUvPanelResize = (event: any) => {
-    const gesture = uvResizeGestureRef.current;
-    if (!gesture) return;
-    queueUvPanelWidth(gesture.mode, uvPanelWidthFromDrag(
-      gesture.startWidth,
-      gesture.startX,
-      pointerX(event),
-      gesture.viewportWidth,
-    ));
-  };
-  const finishUvPanelResize = (event: any) => {
-    const gesture = uvResizeGestureRef.current;
-    uvResizeGestureRef.current = null;
-    uvResizeGenerationRef.current += 1;
-    uvResizeFramePendingRef.current = false;
-    pendingUvWidthRef.current = null;
-    if (gesture) {
-      applyUvPanelWidth(gesture.mode, uvPanelWidthFromDrag(
-        gesture.startWidth,
-        gesture.startX,
-        pointerX(event),
-        gesture.viewportWidth,
-      ));
-    }
-    setUvPanelResizing(false);
-  };
-  useEffect(() => () => {
-    uvResizeGenerationRef.current += 1;
-    uvResizeGestureRef.current = null;
-    pendingUvWidthRef.current = null;
-  }, []);
+  const uvWidthKey = uvWorkspaceFocused ? 'uvFocus' : 'uvPanel';
+  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused, panelResize.widths[uvWidthKey]);
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   // EFFECTIVE package (req_2620 S): session renames + dupes resolve here, so the
   // card shows the name the next save writes — never a stale synthesized one.
@@ -719,9 +653,11 @@ export default function Inspector(props: {
               pieces={props.state.worldPieces}
               worldFlora={props.state.worldFlora}
               floraSpecies={props.state.authoredFloraSpecies}
+              markers={props.state.worldMarkers}
               selectedPieceIds={props.state.selectedPieceIds}
               architectureSelection={props.state.architectureSelection}
               selectedFloraPatchId={props.state.selectedFloraPatchId}
+              selectedWorldMarkerId={props.state.selectedWorldMarkerId}
               handlers={props.worldOutliner}
             />
           </C.HW_InspectorBodyFixed>
@@ -804,26 +740,32 @@ export default function Inspector(props: {
     const uvExtraCount = activePart ? Math.max(0, selectedSet.filter((sid) => sid !== activePart.id).length) : 0;
     const paneTitle = activePane === 'paint' ? uvWorkspace.panelTitle
       : activePane === 'rig' ? (hasCharacterRig ? 'CHARACTER · RIG' : 'MODEL · RIG')
+        : activePane === 'stats' ? 'MODEL · STATS'
         : activePane === 'names' ? 'MODEL · NAMES'
           : activePane === 'recovery' ? 'MODEL · RECOVERY'
             : 'MODEL FOCUS';
+    // The panes whose content is a workspace, not a fact list, wear the drag
+    // grip. Everything else keeps the fixed prop-inspector width.
+    const resizableWidthKey = activePane === 'paint' ? uvWidthKey
+      : activePane === 'stats' ? 'stats' as const
+        : null;
     return (
       <C.HW_RightPanel style={{ width: activePane === 'paint'
         ? uvWorkspace.panelWidth
-        : activePane === 'rig' && hasCharacterRig
-          ? REGIONS.focusPanel.characterRigWidth
-          : activePane === 'recovery'
-            ? blobExplorer.widthPreset === 'wide'
-              ? REGIONS.focusPanel.blobWideWidth
-              : REGIONS.focusPanel.blobCompactWidth
-            : REGIONS.focusPanel.width }}>
-        {activePane === 'paint' ? (
+        : activePane === 'stats'
+          ? panelResize.widths.stats
+          : activePane === 'rig' && hasCharacterRig
+            ? REGIONS.focusPanel.characterRigWidth
+            : activePane === 'recovery'
+              ? blobExplorer.widthPreset === 'wide'
+                ? REGIONS.focusPanel.blobWideWidth
+                : REGIONS.focusPanel.blobCompactWidth
+              : REGIONS.focusPanel.width }}>
+        {resizableWidthKey ? (
           <C.HW_RightResizeGrip
-            tooltip="Drag to resize the UV workspace"
-            onMouseDown={beginUvPanelResize}
-            onMouseMove={moveUvPanelResize}
-            onMouseUp={finishUvPanelResize}
-            style={uvPanelResizing ? { backgroundColor: accentFor('segActiveBg') } : undefined}
+            tooltip={activePane === 'paint' ? 'Drag to resize the UV workspace' : 'Drag to resize the blueprint form'}
+            {...panelResize.grip(resizableWidthKey)}
+            style={panelResize.resizing ? { backgroundColor: accentFor('segActiveBg') } : undefined}
           >
             <C.HW_RightResizeLine />
           </C.HW_RightResizeGrip>
@@ -940,6 +882,14 @@ export default function Inspector(props: {
                 />
                 <ModelPaintVariants key={activeModel.id} model={activeModel} bridge={focusBridge} hidden={!uvWorkspace.showPaintVariants} />
               </>
+            ) : activePane === 'stats' ? (
+              <BlueprintStatsPanel
+                bridge={focusBridge}
+                model={activeModel}
+                activePart={activePart}
+                onStatus={props.onStatus}
+                onBlueprintRemoved={props.onBlueprintRemoved}
+              />
             ) : activePane === 'names' ? (
               <NamesPanel
                 semantics={focusBridge?.semantics ?? null}

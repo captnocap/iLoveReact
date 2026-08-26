@@ -22,25 +22,6 @@ export type UvWorkspaceLayout = Readonly<{
 
 const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
 
-/** Resolve the right-panel width from a left-edge drag. Moving left grows the
- * panel; moving right shrinks it. The live viewport bound always preserves a
- * useful amount of stage and rail space beside the UV workspace. */
-export function uvPanelWidthFromDrag(
-  startWidth: number,
-  startPointerX: number,
-  pointerX: number,
-  viewportWidth: number,
-): number {
-  const policy = REGIONS.focusPanel;
-  const liveMaximum = Math.max(
-    policy.resizeMinWidth,
-    Math.min(policy.resizeMaxWidth, Math.floor(viewportWidth) - policy.minimumOutsideWidth),
-  );
-  const requested = startWidth + startPointerX - pointerX;
-  const stepped = Math.round(requested / policy.resizeStep) * policy.resizeStep;
-  return clamp(stepped, policy.resizeMinWidth, liveMaximum);
-}
-
 /** One strict policy for the paint panel's two shapes. Focus mode spends its
  * entire body budget on UV authoring; leaving it restores every paint-panel
  * section without remounting the active model, atlas, or variant state. */

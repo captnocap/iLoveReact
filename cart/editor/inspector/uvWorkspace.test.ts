@@ -4,7 +4,8 @@
 import { REGIONS } from '../shell/regions';
 import '../workspace.cls';
 import { getClassifier, mergeClassifierProps } from '../../../runtime/classifier';
-import { UV_WORKSPACE_FLEX_STYLE, uvPanelWidthFromDrag, uvWorkspaceLayout } from './uvWorkspace';
+import { UV_WORKSPACE_FLEX_STYLE, uvWorkspaceLayout } from './uvWorkspace';
+import { focusPanelWidthFromDrag } from './focusPanelResize';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -38,8 +39,8 @@ assert(
 
 const authored = uvWorkspaceLayout(false, 812);
 assert(authored.panelWidth === 812, 'manual UV width was replaced by a hard-coded panel shape');
-assert(uvPanelWidthFromDrag(480, 1000, 800, 1920) === 680, 'dragging the left edge left did not grow the panel');
-assert(uvPanelWidthFromDrag(480, 1000, 1400, 1920) === REGIONS.focusPanel.resizeMinWidth, 'panel drag escaped its minimum width');
-assert(uvPanelWidthFromDrag(960, 1000, 0, 1280) === 720, 'panel drag failed to retain the minimum outside workspace');
+assert(focusPanelWidthFromDrag(480, 1000, 800, 1920) === 680, 'dragging the left edge left did not grow the panel');
+assert(focusPanelWidthFromDrag(480, 1000, 1400, 1920) === REGIONS.focusPanel.resizeMinWidth, 'panel drag escaped its minimum width');
+assert(focusPanelWidthFromDrag(960, 1000, 0, 1280) === 720, 'panel drag failed to retain the minimum outside workspace');
 
 console.log('PASS UV workspace layout policy');

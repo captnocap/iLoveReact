@@ -64,6 +64,13 @@ const FOCUS_PANEL_WIDTH = 326; // open focus body + rail (HW_RightPanel)
 const FOCUS_PANEL_CHARACTER_RIG_WIDTH = 720;
 const FOCUS_PANEL_BLOB_COMPACT_WIDTH = 420;
 const FOCUS_PANEL_BLOB_WIDE_WIDTH = 720;
+// The blueprint stats form is a control GRID, not a fact list: every row spends
+// the 82px label column, the reserved 18px reset column, and then one or two
+// select controls that carry authored names (an audio clip is "speaker squawk",
+// not a number). That does not fit the 326 prop-inspector default at any font
+// size, so STATS declares its own width and wears the same drag grip as the UV
+// workspace (req_4772).
+const FOCUS_PANEL_STATS_WIDTH = 480;
 const FOCUS_PANEL_ATLAS_WIDTH = 480; // Blockbench-scale UV workspace + rail
 const FOCUS_PANEL_ATLAS_FOCUS_WIDTH = 960; // dedicated dense-mesh UV workspace + rail
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
@@ -117,6 +124,7 @@ export const REGIONS = {
     blobCompactWidth: FOCUS_PANEL_BLOB_COMPACT_WIDTH,
     blobWideWidth: FOCUS_PANEL_BLOB_WIDE_WIDTH,
     blobCollapsedWidth: FOCUS_PANEL_BLOB_COLLAPSED_WIDTH,
+    statsWidth: FOCUS_PANEL_STATS_WIDTH,
     atlasWidth: FOCUS_PANEL_ATLAS_WIDTH,
     atlasFocusWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH,
     railWidth: FOCUS_RAIL_WIDTH,
@@ -128,11 +136,13 @@ export const REGIONS = {
     resizePreviewIntervalMs: FOCUS_PANEL_RESIZE_PREVIEW_INTERVAL_MS,
     bodyWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 285
     characterRigBodyWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 679
+    statsBodyWidth: FOCUS_PANEL_STATS_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 439
     atlasBodyWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     atlasFocusBodyWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     gutter: PANEL_GUTTER,
     innerWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 265
     characterRigInnerWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 659
+    statsInnerWidth: FOCUS_PANEL_STATS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 419
     atlasInnerWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
     atlasFocusInnerWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
   },

@@ -68,3 +68,23 @@ export function oneLine(fontSize: number, color: string, style: TextStyle = {}):
 export function oneLineColumn(fontSize: number, color: string, minWidth: number, style: TextStyle = {}) {
   return oneLine(fontSize, color, { flexShrink: 0, minWidth, ...style });
 }
+
+/**
+ * The OTHER half of the policy: a string that is prose, not a label. It wraps
+ * to as many lines as it needs, and `min-width: 0` is still required — a
+ * wrapping flex item that cannot be pulled below its longest WORD pushes its
+ * container wide instead of wrapping inside it.
+ *
+ * This exists so "no policy" is distinguishable from "wraps on purpose". Every
+ * Text classifier in an editor sheet comes from `oneLine`, `oneLineColumn` or
+ * this; a bare `{ type: 'Text', … }` is the bug re-entering, and
+ * `workspace.cls.test.ts` fails the sheet for it.
+ */
+export function wrapping(fontSize: number, color: string, style: TextStyle = {}): {
+  type: 'Text';
+  fontSize: number;
+  color: string;
+  style: TextStyle;
+} {
+  return { type: 'Text', fontSize, color, style: { flexShrink: 1, minWidth: 0, ...style } };
+}
