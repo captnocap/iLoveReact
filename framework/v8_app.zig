@@ -25,6 +25,13 @@ const IS_LIB = if (@hasDecl(build_options, "is_lib")) build_options.is_lib else 
 // of engine.run. C3 deletes v8_tui_app once this branch is proven.
 const HAS_GPU = if (@hasDecl(build_options, "has_gpu")) build_options.has_gpu else true;
 const HEADLESS = IS_LIB or !HAS_GPU;
+const has_fart_racer = @hasDecl(build_options, "has_fart_racer") and build_options.has_fart_racer;
+const fart_racer_acceptance = if (has_fart_racer) @import("games/custom/fart-racer/acceptance.zig") else struct {
+    pub fn requested(_: []const []const u8) bool {
+        return false;
+    }
+    pub fn run(_: std.Io, _: []const []const u8) !void {}
+};
 
 const layout = @import("layout.zig");
 const HostContext = @import("host_context.zig");
@@ -92,7 +99,7 @@ const panel_window = if (HEADLESS) struct {
         return false;
     }
 } else @import("gpu/panel_window.zig");
-const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("game/camera.zig") else struct {
+const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("dev_modules/game_runtime.zig") else struct {
     pub const Solved = struct {};
     pub fn activeNodeId() u32 {
         return 0;
@@ -109,10 +116,11 @@ const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_opt
         return;
     }
 };
-const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("world_loader.zig") else struct {
+const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("dev_modules/game_runtime.zig") else struct {
     pub fn unmount(_: std.Io, _: u32) void {}
 };
 const latches = @import("state/latches.zig");
+const hotstate = @import("state/hotstate.zig");
 // Pure string assembly (no GPU deps) — the ONE Effect shader assembler, shared
 // with the no-V8 material path (framework/gpu/effects.renderShaderToTexture).
 const effect_assemble = @import("gpu/effect_assemble.zig");
@@ -282,10 +290,63 @@ var g_node_id_by_input_slot: [input.MAX_INPUTS]u32 = [_]u32{0} ** input.MAX_INPU
 // context, reinit, and re-eval the new bundle. React state resets on reload
 // in phase 1; phase 2 will use LuaJIT hotstate atoms to preserve it.
 const DEV_MODE = if (@hasDecl(build_options, "dev_mode")) build_options.dev_mode else false;
+const DEV_NATIVE_MODULES = DEV_MODE and !HEADLESS and @hasDecl(build_options, "dev_native_modules") and build_options.dev_native_modules;
 const DEV_BUILD_ID = if (@hasDecl(build_options, "dev_build_id")) build_options.dev_build_id else "unknown";
 const CUSTOM_CHROME_MODE = if (@hasDecl(build_options, "custom_chrome")) build_options.custom_chrome else false;
 const BORDERLESS_MODE = DEV_MODE or CUSTOM_CHROME_MODE;
 const DEV_BUNDLE_PATH = if (@hasDecl(build_options, "dev_bundle_path")) build_options.dev_bundle_path else "bundle.js";
+const DEV_SCENE3D_PATH = if (@hasDecl(build_options, "dev_scene3d_path")) build_options.dev_scene3d_path else "";
+const DEV_SCENE3D_HASH = if (@hasDecl(build_options, "dev_scene3d_hash")) build_options.dev_scene3d_hash else "unknown";
+const DEV_GAME_PATH = if (@hasDecl(build_options, "dev_game_path")) build_options.dev_game_path else "";
+const DEV_GAME_HASH = if (@hasDecl(build_options, "dev_game_hash")) build_options.dev_game_hash else "unknown";
+
+fn devScene3dPath(host: *const HostContext) []const u8 {
+    return host.environ.get("RJIT_DEV_SCENE3D_PATH") orelse DEV_SCENE3D_PATH;
+}
+
+fn devScene3dHash(host: *const HostContext) []const u8 {
+    return host.environ.get("RJIT_DEV_SCENE3D_HASH") orelse DEV_SCENE3D_HASH;
+}
+
+fn devGamePath(host: *const HostContext) []const u8 {
+    return host.environ.get("RJIT_DEV_GAME_PATH") orelse DEV_GAME_PATH;
+}
+
+fn devGameHash(host: *const HostContext) []const u8 {
+    return host.environ.get("RJIT_DEV_GAME_HASH") orelse DEV_GAME_HASH;
+}
+
+const native_reload = if (DEV_NATIVE_MODULES) @import("dev_modules/reload_controller.zig") else struct {
+    pub const Result = enum {
+        none,
+        committed,
+        rejected,
+        restart_required,
+        pub fn label(self: @This()) []const u8 {
+            return @tagName(self);
+        }
+    };
+    pub const Controller = struct {
+        pub fn init(_: std.mem.Allocator) @This() {
+            return .{};
+        }
+        pub fn deinit(_: *@This()) void {}
+        pub fn ensureScene3d(_: *@This(), _: []const u8) Result {
+            return .none;
+        }
+        pub fn reloadScene3d(_: *@This(), _: []const u8) Result {
+            return .rejected;
+        }
+        pub fn ensureGame(_: *@This(), _: []const u8) Result {
+            return .none;
+        }
+        pub fn reloadGame(_: *@This(), _: []const u8) Result {
+            return .rejected;
+        }
+        pub fn registerBindings(_: *@This(), _: *HostContext) void {}
+    };
+};
+var g_native_reload = native_reload.Controller.init(std.heap.page_allocator);
 
 var g_dev_bundle_buf: []u8 = &.{};
 var g_last_bundle_mtime: i128 = 0;
@@ -294,6 +355,7 @@ const dev_reload_policy = @import("dev_reload_policy.zig");
 var g_dev_reload = dev_reload_policy.Controller{};
 var g_pending_push_tab: ?usize = null;
 var g_dev_reload_revision: u64 = 0;
+var g_dev_handoff_checked = false;
 
 pub fn devReloadSetPolicy(raw: u8) bool {
     if (!DEV_MODE) return false;
@@ -1792,6 +1854,18 @@ fn noteCommandWindowOwner(cmd: std.json.Value) void {
     }
 }
 
+fn syncWorldLoaderGameFile(node: *Node, replacement: []const u8) void {
+    if (node.world_loader_game_file) |current| {
+        if (std.mem.eql(u8, current, replacement)) {
+            g_alloc.free(replacement);
+            return;
+        }
+        g_alloc.free(current);
+    }
+    node.world_loader_game_file = replacement;
+    node.world_loader_source_status = .unknown;
+}
+
 fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
     if (props != .object) return;
     const is_input = node.input_id != null or (type_name != null and isInputType(type_name.?));
@@ -1885,13 +1959,15 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
         } else if (std.mem.eql(u8, k, "worldLoader")) {
             if (jsonBool(v)) |b| node.world_loader = b;
         } else if (std.mem.eql(u8, k, "gameFile")) {
-            if (dupJsonText(v)) |s| node.world_loader_game_file = s;
+            if (dupJsonText(v)) |s| syncWorldLoaderGameFile(node, s);
         } else if (std.mem.eql(u8, k, "storeDir")) {
             if (dupJsonText(v)) |s| node.world_loader_store_dir = s;
         } else if (std.mem.eql(u8, k, "worldLoaderGameFile")) {
-            if (dupJsonText(v)) |s| node.world_loader_game_file = s;
+            if (dupJsonText(v)) |s| syncWorldLoaderGameFile(node, s);
         } else if (std.mem.eql(u8, k, "worldLoaderStoreDir")) {
             if (dupJsonText(v)) |s| node.world_loader_store_dir = s;
+        } else if (std.mem.eql(u8, k, "previewStage")) {
+            if (jsonBool(v)) |b| node.world_loader_preview_stage = b;
         } else if (std.mem.eql(u8, k, "renderSuspended")) {
             if (jsonBool(v)) |b| node.render_suspended = b;
         } else if (std.mem.eql(u8, k, "staticSurface")) {
@@ -2109,6 +2185,10 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             // caches the retained vertex slice under this key; identical keys across
             // meshes share one upload + one buffer region.
             if (dupJsonText(v)) |s| node.scene3d_geom_key = s;
+        } else if (std.mem.eql(u8, k, "scene3dSkinGeomKey")) {
+            // Native-resident skinned geometry carries only its opaque key in
+            // the React tree. The GPU rig owner supplies vertices and palette.
+            if (dupJsonText(v)) |s| node.scene3d_skin_geom_key = s;
         } else if (std.mem.eql(u8, k, "scene3dGroundFormula")) {
             // Data-shape ground (GUIDING_LIGHT): WGSL the mesh runs per fragment
             // (gpu/3d.zig assembles + compiles it once) instead of sampling a baked
@@ -3608,6 +3688,7 @@ fn applyScheduledReload(host: *HostContext) void {
         g_pending_push_tab = null;
         if (idx >= g_tabs.items.len) return;
         g_active_tab = idx;
+        g_dev_ipc.setActiveTab(tabName(idx));
         evalActiveTab(host);
         std.log.info("[dev] applied pushed update for '{s}'", .{tabName(idx)});
         return;
@@ -3692,6 +3773,7 @@ fn upsertTab(name: []u8, bundle: []u8) !usize {
 fn switchToTab(host: *HostContext, idx: usize) void {
     if (idx >= g_tabs.items.len) return;
     g_active_tab = idx;
+    if (DEV_MODE) g_dev_ipc.setActiveTab(tabName(idx));
     evalActiveTab(host);
     std.log.info("[dev] active tab: '{s}'", .{tabName(idx)});
 }
@@ -3715,6 +3797,35 @@ fn processIncomingPushes(host: *HostContext) void {
             .notice => |notice| {
                 emitDevNotice(host, notice.json);
                 g_alloc.free(notice.json);
+            },
+            .native_reload => |native| {
+                const result = switch (native.tier) {
+                    .scene3d => g_native_reload.reloadScene3d(native.path),
+                    .game => g_native_reload.reloadGame(native.path),
+                };
+                g_dev_ipc.setNativeInfo(
+                    native.tier,
+                    native.hash,
+                    result.label(),
+                    result == .committed,
+                );
+                g_alloc.free(native.hash);
+                g_alloc.free(native.path);
+                if (result == .committed) {
+                    evalActiveTab(host);
+                    std.log.info("[dev-native] module reload committed", .{});
+                } else if (result == .restart_required) {
+                    std.log.warn("[dev-native] module requested exact-child restart", .{});
+                } else {
+                    std.log.warn("[dev-native] candidate rejected; active module preserved", .{});
+                }
+            },
+            .checkpoint => |request_id| {
+                // Unlike a bundle reload this does not tear down the V8
+                // context. It only forces the application's synchronous
+                // persistence edge before the supervisor snapshots hotstate.
+                _ = v8_runtime.evalScriptChecked(host, "if(typeof globalThis.__beforeDevReload==='function')globalThis.__beforeDevReload();");
+                g_dev_ipc.markCheckpointCompleted(request_id);
             },
         }
     }
@@ -3748,6 +3859,19 @@ fn emitDevNotice(host: *HostContext, json: []const u8) void {
 // ── init / tick ─────────────────────────────────────────────────
 
 fn appInit(host: *HostContext) void {
+    // Exact-child replacement is the only cold launch allowed to inherit the
+    // previous process's hot atoms. The supervisor supplies a unique one-shot
+    // file; ordinary launches have no environment key and remain clean.
+    if (DEV_MODE and !g_dev_handoff_checked) {
+        g_dev_handoff_checked = true;
+        if (host.environ.get("RJIT_DEV_HOTSTATE_HANDOFF")) |path| {
+            hotstate.restoreSnapshotFile(host.io, path) catch |err| {
+                std.log.err("[dev-native] hotstate handoff restore failed at {s}: {}", .{ path, err });
+            };
+            if (hotstate.count() > 0)
+                std.log.info("[dev-native] restored {d} hotstate atom(s) from exact-child handoff", .{hotstate.count()});
+        }
+    }
     // QJS VM is already initialized by engine before this is called (engine calls
     // v8_runtime.initVM() then evalScript(js_logic)). But we need __hostFlush
     // registered BEFORE evalScript runs. Engine order matters — see below.
@@ -3761,7 +3885,14 @@ fn appInit(host: *HostContext) void {
     // register only when the cart's bundle ordered them. See
     // framework/v8_ingredients.zig for the contract (one row + one
     // build option + one scripts/ship grep).
+    if (DEV_NATIVE_MODULES) {
+        const scene_result = g_native_reload.ensureScene3d(devScene3dPath(host));
+        if (scene_result != .committed) std.log.err("[dev-native] failed to load initial Scene3D module: {s}", .{scene_result.label()});
+        const game_result = g_native_reload.ensureGame(devGamePath(host));
+        if (game_result != .committed) std.log.err("[dev-native] failed to load initial Game module: {s}", .{game_result.label()});
+    }
     ingredients.registerAll(host);
+    if (DEV_NATIVE_MODULES) g_native_reload.registerBindings(host);
     // process.argv/env/cwd for GPU-host carts. TUI carts already register the
     // CLI surface before eval; shipped GUI carts need the same package-argument
     // contract without pulling in Node.
@@ -4136,8 +4267,13 @@ fn appShutdown(host: *HostContext) void {
         if (binding.title) |title| g_alloc.free(title);
     }
     g_window_by_node_id.clearRetainingCapacity();
+    ingredients.shutdownAll(host);
     localstore.deinit(host.io);
     fs_mod.deinit(host.io);
+    // The V8 context still owns callbacks whose instruction pointers live in
+    // the active native modules. Process shutdown needs no dlclose: the OS
+    // reclaims those mappings atomically after V8/engine teardown. Unloading
+    // here made graceful supervisor restarts jump through stale callbacks.
 }
 
 // ── Headless shell — TUI/ANSI main body ─────────────────────────────
@@ -4262,6 +4398,20 @@ fn runHeadless(host: *HostContext) !void {
 pub fn main(init: std.process.Init) !void {
     var host = HostContext.fromInit(init);
     if (IS_LIB) return;
+
+    // Exported-binary acceptance is an argument-selected native lane. It reads
+    // the packaged game.gamefile and exits before observability, V8, SDL, GPU,
+    // or window creation — the driver bot is genuinely headless.
+    const acceptance_argv = try host.args.toSlice(host.arena.allocator());
+    if (fart_racer_acceptance.requested(acceptance_argv)) {
+        // An acceptance gate that exits 1 with nothing on stderr is worse than
+        // no gate: the operator learns only that something is wrong. Name it.
+        fart_racer_acceptance.run(host.io, acceptance_argv) catch |err| {
+            std.debug.print("FART RACER HEADLESS FAIL — {s}\n", .{@errorName(err)});
+            return err;
+        };
+        return;
+    }
 
     // A dev host launched by `rjit dev` must not outlive its supervisor. The
     // supervisor's signal handlers only fire on a polite death; PR_SET_PDEATHSIG
@@ -4390,6 +4540,9 @@ pub fn main(init: std.process.Init) !void {
         // uses when it later frees them via upsertTab. Cross-allocator free is
         // UB — this caller caused the SIGSEGV on re-push (2026-04-19 fix).
         g_dev_ipc = dev_ipc.Server.init(g_alloc, DEV_BUILD_ID);
+        g_dev_ipc.setActiveTab("main");
+        if (DEV_NATIVE_MODULES) g_dev_ipc.setNativeInfo(.scene3d, devScene3dHash(&host), "committed", true);
+        if (DEV_NATIVE_MODULES) g_dev_ipc.setNativeInfo(.game, devGameHash(&host), "committed", true);
         g_dev_ipc.start(host.io);
 
         std.log.info("[dev] dev mode — watching {s} ({d} bytes), IPC @ {s}", .{ DEV_BUNDLE_PATH, g_dev_bundle_buf.len, dev_ipc.SOCKET_PATH });

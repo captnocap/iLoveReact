@@ -5,6 +5,10 @@ import { RACE_MARKER_TAGS, type WorldMarker } from '../world/worldMarkers';
 
 export const FART_RACER_WIRE_MAGIC = 0x31524746; // FGR1
 export const FART_RACER_WIRE_VERSION = 1;
+/** Slots in the fixed numeric prefix. Mirrors `games/custom/fart-racer/wire.zig`
+ *  NUMBER_COUNT; new numbers are APPENDED at the tail, never inserted, because
+ *  every slot is addressed by position. */
+export const FART_RACER_WIRE_NUMBER_COUNT = 78;
 
 export type BakedBlueprint = Readonly<{
   packageId: string;
@@ -53,8 +57,15 @@ export function encodeFartRacerLogic(
   markers: readonly unknown[],
   visualVehiclePackageId?: string | null,
 ): Uint8Array {
-  const vehicleEntry = blueprints.find((entry) =>
-    entry.blueprint.stats.some((attachment) => attachment.profile.id === 'rj.profile.vehicle')) ?? null;
+  // The car you DRIVE is the car you SEE. Taking the player's stats from
+  // "whichever vehicle blueprint the roster happened to list first" put the
+  // player behind a 1000-litre junker's tank while looking at a 26-litre
+  // coupe — the fuel loop the whole game turns on never bit.
+  const isVehicle = (entry: BakedBlueprint) =>
+    entry.blueprint.stats.some((attachment) => attachment.profile.id === 'rj.profile.vehicle');
+  const vehicleEntry = blueprints.find((entry) => entry.packageId === visualVehiclePackageId && isVehicle(entry))
+    ?? blueprints.find(isVehicle)
+    ?? null;
   const vehicleBlueprint = vehicleEntry?.blueprint ?? null;
   const vehicle = documentAttachment<VehicleAttachment>(vehicleBlueprint, 'rj.profile.vehicle');
   const item = documentAttachment<ItemAttachment>(vehicleBlueprint, 'rj.core.item');
@@ -113,6 +124,9 @@ export function encodeFartRacerLogic(
     blueprints,
     markers,
   }));
+  if (numbers.length !== FART_RACER_WIRE_NUMBER_COUNT) {
+    throw new Error(`Fart Racer logic wire wrote ${numbers.length} numbers; the decoder reads ${FART_RACER_WIRE_NUMBER_COUNT}`);
+  }
   const numericBytes = numbers.length * 4;
   const out = new Uint8Array(16 + numericBytes + catalog.byteLength);
   const view = new DataView(out.buffer);
