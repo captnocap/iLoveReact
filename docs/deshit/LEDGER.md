@@ -202,3 +202,18 @@
 **Regressions found:** None in the shipped work. During the round I damaged four classifier sheets with a `\s\s+` whitespace regex that ate newlines (285 deletions of pure line-joining); caught it in `git diff --stat` before it left the working tree, verified the damage was entirely mine and nothing else was pending in those files, and restored them. The lesson is the one already in the ledger: inspect the diff, not the exit code.
 
 **Stale sightings:** None new.
+
+## Round 14 — 2026-08-26
+**Trigger:** "if you click one of these you get a focus to input a value, if you click outside of there, one would reasonably expect it to unfocus, but it does not, infact, you can do this [three cells lit at once]"; "this is explaining what intersecting means. i think we know what it means"; "scope whole model. thanks thats really helpful when its always the full model"; "preserved, never interpreted... that means fucking nothing to me. what is the 49b?"; "you didnt change the 3 inner tabs. just removed all the button pasta. there is a dick load of empty space vertically there"; "the actual just LoreCallFailed that is happening while saying Lore Ready Ready Service Healthy HTTP 200"; "the 'vendor data' for opus using my car model is hilarious. also its entirely hidden from me like its top secret. everything should be shown, literally everything."
+
+**Findings:** 1 lie (focus never released), 1 lie (service reports READY while failing), 3 copy defects, 1 structure defect (tabs), 1 disclosure defect (hidden extension fields).
+
+**Passes run:** Cell focus ownership → `inspector/cellEditor.ts` owns which cell holds the caret; claiming it closes the previous, and the panel shell renders a click-catcher behind its content while one is open, so a press on empty space (which hits no input and no handler) releases it. Copy → geometry rows report `none`/`12 tris` with the meaning on hover; the UV scope row appears only when it has footprint/island counts to give; extension rows show every field. Structure → the three recovery tabs became collapsible sections of one document, SNAPSHOTS leading. Truth → `recoveryHealth` folds every failing subsystem into one verdict; service facts became labelled rows; all-zero count rows say "no snapshots yet" once; the server log elides per line with the full text on hover.
+
+**Rules minted:** A control's focus is owned by the APPLICATION, not by each control — a dropped blur becomes permanent state the moment nobody owns "which one has the caret". A row reports a value; what the value MEANS is a tooltip. A label whose value never changes is not a fact, it is decoration. Tabs make each subject responsible for filling the pane alone; when none of them can, they are sections. A status headline that reads one field cannot be trusted — fold every failure into the verdict or the pane will cheerfully report READY over a failing call. **Nothing in the user's own data is hidden from them**: "opaque" means the editor does not validate it, never that the editor will not show it.
+
+**Watchlist — THE CARET IS OWNED:** click a number cell, then click a second — confirm only the second is lit. Click empty panel space — confirm the cell releases. Open MODEL · RECOVERY and confirm one document with SNAPSHOTS open, no tab strip, no vertical void. With a blueprint carrying an extension, confirm every field and value renders under a section named for the namespace.
+
+**Regressions found:** None. `BlobExplorerSurface.test.ts` gained a case asserting the pane cannot call itself ready while pruning is failing.
+
+**Stale sightings:** None new.
