@@ -496,6 +496,39 @@ export function mapLoadFile(path: string): boolean {
   return loaded;
 }
 
+export type MapPrepareState = 'idle' | 'working' | 'ready' | 'failed';
+export type MapPrepareStatus = { state: MapPrepareState; id: number; chunks: number };
+
+const MAP_PREPARE_STATES: readonly MapPrepareState[] = ['idle', 'working', 'ready', 'failed'];
+
+/** Start reading, validating, and expanding an RMAP against detached native
+ * ownership. The active painting remains usable until mapCommitPrepared. */
+export function mapPrepareFile(path: string): number {
+  if (!hasHost('__map_prepare_file')) return 0;
+  const id = callHost<number>('__map_prepare_file', 0, path);
+  return Number.isFinite(id) && id > 0 ? Math.trunc(id) : 0;
+}
+
+export function mapPrepareStatus(id: number): MapPrepareStatus {
+  const buffer = callHost<ArrayBuffer | null>('__map_prepare_status', null, id);
+  if (!buffer) return { state: 'failed', id, chunks: 0 };
+  const out = new Float32Array(buffer);
+  const stateIndex = Math.trunc(out[0] ?? 3);
+  return {
+    state: MAP_PREPARE_STATES[stateIndex] ?? 'failed',
+    id: Math.trunc(out[1] ?? 0),
+    chunks: Math.trunc(out[2] ?? 0),
+  };
+}
+
+/** Atomically publish a completely prepared map. The expensive outgoing chunk
+ * destruction is returned to a worker after the pointer-table swap. */
+export function mapCommitPrepared(id: number, path: string): boolean {
+  const committed = callHost<number>('__map_commit_prepared', 0, id, path) === 1;
+  if (committed) publishMapTerrainChanged();
+  return committed;
+}
+
 /** Register the painting's micro-save target (req_2765): from here on every
  *  mutating gesture — stroke end, road commit/delete, binding edit, zone drop,
  *  chunk growth — rewrites this file atomically host-side. False on a binary
@@ -541,6 +574,13 @@ export type MapPathSnapshotPath = {
   points: readonly MapPathSnapshotPoint[];
 };
 export type MapPathSnapshot = { version: 1; paths: readonly MapPathSnapshotPath[] };
+export type MapPathSample = Readonly<{
+  pathId: number;
+  distanceM: number;
+  totalM: number;
+  point: Readonly<{ x: number; y: number; z: number }>;
+  tangent: Readonly<{ x: number; y: number; z: number }>;
+}>;
 
 export const MAP_PATH_SNAPSHOT_WIRE = {
   version: 1,
@@ -609,6 +649,23 @@ export function decodeMapPathSnapshot(raw: Float32Array): MapPathSnapshot | null
 export function mapPathSnapshot(): MapPathSnapshot | null {
   const buffer = callHost<ArrayBuffer | null>('__map_path_snapshot', null);
   return buffer ? decodeMapPathSnapshot(new Float32Array(buffer)) : null;
+}
+
+/** Native arc-length sample of the committed curved centerline. The marker
+ * authoring lane never reconstructs path geometry from snapshot control rows. */
+export function mapSamplePath(pathId: number, distanceM: number): MapPathSample | null {
+  if (!Number.isInteger(pathId) || pathId <= 0 || !Number.isFinite(distanceM)) return null;
+  const buffer = callHost<ArrayBuffer | null>('__map_path_sample', null, pathId, distanceM);
+  if (!buffer) return null;
+  const values = new Float32Array(buffer);
+  if (values.length !== 10 || values[0] !== 1 || values[1] !== pathId || ![...values].every(Number.isFinite)) return null;
+  return {
+    pathId,
+    distanceM: values[2]!,
+    totalM: values[3]!,
+    point: { x: values[4]!, y: values[5]!, z: values[6]! },
+    tangent: { x: values[7]!, y: values[8]!, z: values[9]! },
+  };
 }
 
 export function mapPathStats(): MapPathStats {
@@ -802,8 +859,34 @@ export function mapReadHeight(cx: number, cz: number): Float32Array | null {
   return ab ? new Float32Array(ab.slice(0)) : null;
 }
 
+/** Copy of a chunk's RENDERED floor mirror (121×121, row-major) — the exact
+ *  grid the ground pipeline draws and the physics heightfield table collides
+ *  against, produced by the native abs-max downsample. `mapReadHeight` is the
+ *  finer BRUSH field (241×241): it overflows the collider and dynamic-vertex
+ *  budgets and fails the shared terrain-grid contract, so anything that BAKES
+ *  terrain must read this door instead. */
+export function mapReadFloor(cx: number, cz: number): Float32Array | null {
+  const ab = callHost<ArrayBuffer | null>('__map_read_floor', null, cx, cz);
+  return ab ? new Float32Array(ab.slice(0)) : null;
+}
+
 export function mapReadWater(cx: number, cz: number): Float32Array | null {
   const ab = callHost<ArrayBuffer | null>('__map_read_water', null, cx, cz);
+  return ab ? new Float32Array(ab.slice(0)) : null;
+}
+
+/** The active map look's formula body. Compile pairs this once with each
+ * chunk's native D stream; neither road recipes nor material packing is
+ * reconstructed in TypeScript. */
+export function mapGroundFormula(): string | null {
+  const formula = callHost<string | null>('__map_ground_formula', null);
+  return typeof formula === 'string' && formula.length > 0 ? formula : null;
+}
+
+/** Exact formula-data stream for one chunk, including material references and
+ * analytic road ribbons. This is a compile/readback door, never a frame path. */
+export function mapReadGroundData(cx: number, cz: number): Float32Array | null {
+  const ab = callHost<ArrayBuffer | null>('__map_read_ground_data', null, cx, cz);
   return ab ? new Float32Array(ab.slice(0)) : null;
 }
 

@@ -646,6 +646,9 @@ pub const Traffic = struct {
 };
 
 pub const Scene = struct {
+    /// Borrow-free copy of the top-level game logic stream. Shared loaders
+    /// ignore it; a compiled custom game may decode its own strictly typed wire.
+    logic: []u8,
     width: u32,
     height: u32,
     tiles: []?u16,
@@ -719,6 +722,7 @@ pub const Scene = struct {
     flora: ?FloraCells,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
+        allocator.free(self.logic);
         allocator.free(self.tiles);
         allocator.free(self.instances);
         if (self.player_character) |character| character.deinit();
@@ -1136,7 +1140,7 @@ fn decodeWater(allocator: std.mem.Allocator, data: []const u8) Error!WaterBodies
     return .{ .color = color, .alpha = alpha, .wave_amp = wave_amp, .wave_len = wave_len, .wave_speed = wave_speed, .wave_dx = wave_dx, .wave_dz = wave_dz, .bodies = bodies };
 }
 
-fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]HeightfieldMesh {
+pub fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]HeightfieldMesh {
     if (data.len == 0) return try allocator.alloc(HeightfieldMesh, 0);
     if (data.len < 8) return Error.BadHeightfields;
     const version = std.mem.readInt(u32, data[0..4], .little);
@@ -1859,6 +1863,7 @@ fn readInstalledAsset(io: std.Io, allocator: std.mem.Allocator, file: gamefile.G
 /// optional null, and the environment uses its defaults.
 pub fn blankScene() Scene {
     return .{
+        .logic = &.{},
         .width = 0,
         .height = 0,
         .tiles = &.{},
@@ -1899,6 +1904,8 @@ pub fn construct(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, st
     // The gate: install + sha256-verify every asset, resolve every reference.
     // Nothing is constructed until the whole vocabulary checks out.
     try file.installAndValidate(io, allocator, store_dir);
+    const logic = try allocator.dupe(u8, file.logic.data);
+    errdefer allocator.free(logic);
 
     // The game-map stream's data is a nested RJMP map container; pull its tiles.
     const map_lumps = try mapfile.readLumps(allocator, file.map.data, null);
@@ -2065,6 +2072,7 @@ pub fn construct(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, st
 
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
+        .logic = logic,
         .width = grid.width,
         .height = grid.height,
         .tiles = grid.values,

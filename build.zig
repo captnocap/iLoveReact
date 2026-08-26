@@ -273,6 +273,11 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     architecture_wire_mod.addImport("building_architecture", building_architecture_mod);
+    const game_driving_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/driving.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const root_mod = b.createModule(.{
         .root_source_file = b.path(app_source),
@@ -284,6 +289,7 @@ pub fn build(b: *std.Build) void {
     root_mod.addImport("architecture_scale", architecture_scale_mod);
     root_mod.addImport("building_architecture", building_architecture_mod);
     root_mod.addImport("architecture_wire", architecture_wire_mod);
+    root_mod.addImport("game_driving", game_driving_mod);
     // The cart bundle rides in as a named module: v8_app.zig lives in
     // framework/ and @embedFile can't reach a file outside the module root,
     // absolute path or not — a module name resolves like @import and has no
@@ -759,6 +765,7 @@ pub fn build(b: *std.Build) void {
     const has_game_build = b.option(bool, "has-game-build", "Register __game_build_* bindings (framework/game: host-owned build placement — raycast/validate/catalog)") orelse false;
     const has_game_map = b.option(bool, "has-game-map", "Register __map_* bindings (framework/game/map: the map painter's chunk grid + brush stamps + stroke engine)") orelse false;
     const has_compiled_world = b.option(bool, "has-compiled-world", "Register WorldLoader host primitive + __compiled_world_* status bindings") orelse false;
+    const has_fart_racer = b.option(bool, "has-fart-racer", "Compile the Fart Racer driving/fuel simulation into WorldLoader") orelse false;
     const has_capture = b.option(bool, "has-capture", "Register __capture_frame binding (SELFSHOT-0606: the app screenshots its OWN rendered frame; desktop capture of the user's system is banned)") orelse false;
     // has_imageops hoisted earlier (next to its stb link block).
     // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
@@ -783,6 +790,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_game_build", has_game_build);
     options.addOption(bool, "has_game_map", has_game_map);
     options.addOption(bool, "has_compiled_world", has_compiled_world);
+    options.addOption(bool, "has_fart_racer", has_fart_racer);
     options.addOption(bool, "has_capture", has_capture);
     options.addOption(bool, "has_imageops", has_imageops);
     options.addOption(bool, "has_pg", has_pg or has_embed);
@@ -822,6 +830,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/game_build.flag", if (has_game_build) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_map.flag", if (has_game_map) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/compiled_world.flag", if (has_compiled_world) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/fart_racer.flag", if (has_fart_racer) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/capture.flag", if (has_capture) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/imageops.flag", if (has_imageops) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
@@ -1063,6 +1072,7 @@ pub fn build(b: *std.Build) void {
     game_module_mod.addImport("architecture_scale", architecture_scale_mod);
     game_module_mod.addImport("building_architecture", building_architecture_mod);
     game_module_mod.addImport("architecture_wire", architecture_wire_mod);
+    game_module_mod.addImport("game_driving", game_driving_mod);
     game_module_mod.addImport("wgpu", wgpu_headers_mod);
     game_module_mod.addImport("tls", tls_mod);
     game_module_mod.addImport("pg", pg_dep.module("pg"));
@@ -1372,6 +1382,24 @@ pub fn build(b: *std.Build) void {
     const run_spring_arm_test = b.addRunArtifact(spring_arm_test);
     const spring_arm_test_step = b.step("test-world-loader-spring-arm", "Run the spring-arm camera vs placed-prop collision tests");
     spring_arm_test_step.dependOn(&run_spring_arm_test.step);
+
+    // req_4768: a compiled world's terrain reaches the screen only at the
+    // RENDERED floor resolution. Off-resolution lumps decode cleanly and then
+    // vanish behind three silent native gates — the blue-void failure. Its own
+    // file is the test ROOT — inline tests in an imported module never run.
+    const terrain_lump_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world_terrain_lump_test_root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const terrain_lump_test = b.addTest(.{
+        .name = "world-terrain-lump-test",
+        .root_module = terrain_lump_test_mod,
+    });
+    const run_terrain_lump_test = b.addRunArtifact(terrain_lump_test);
+    const terrain_lump_test_step = b.step("test-world-terrain-lump", "Run the compiled-terrain lump resolution contract tests");
+    terrain_lump_test_step.dependOn(&run_terrain_lump_test.step);
 
     // ── Cooked-door swing collider tests ───────────────────────────
     // req_4538: the swinging leaf rides the ORIENTED collider lane — its old
@@ -2261,6 +2289,103 @@ pub fn build(b: *std.Build) void {
     const game_physics_test_step = b.step("test-game-physics", "Run the game physics/movement behavior tests");
     game_physics_test_step.dependOn(&run_game_physics_test.step);
 
+    const player_stats_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/player_stats.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const player_stats_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/player_stats.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    player_stats_test_mod.addImport("player_stats", player_stats_mod_for_tests);
+    const player_stats_test = b.addTest(.{
+        .name = "player-stats-test",
+        .root_module = player_stats_test_mod,
+    });
+    const run_player_stats_test = b.addRunArtifact(player_stats_test);
+    const player_stats_test_step = b.step("test-player-stats", "Run compiled player-stat state and application-report tests");
+    player_stats_test_step.dependOn(&run_player_stats_test.step);
+
+    const game_driving_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/game_driving.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    game_driving_test_mod.addImport("game_driving", game_driving_mod);
+    const game_driving_test = b.addTest(.{
+        .name = "game-driving-test",
+        .root_module = game_driving_test_mod,
+    });
+    const run_game_driving_test = b.addRunArtifact(game_driving_test);
+    const game_driving_test_step = b.step("test-game-driving", "Run compiled vehicle handling behavior tests");
+    game_driving_test_step.dependOn(&run_game_driving_test.step);
+
+    const fart_racer_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/games/custom/fart-racer/sim.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fart_racer_mod_for_tests.addImport("game_driving", game_driving_mod);
+    const fart_racer_vehicle_visual_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/games/custom/fart-racer/vehicle_visual.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const fart_racer_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/fart_racer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fart_racer_test_mod.addImport("game_driving", game_driving_mod);
+    fart_racer_test_mod.addImport("fart_racer", fart_racer_mod_for_tests);
+    fart_racer_test_mod.addImport("fart_racer_vehicle_visual", fart_racer_vehicle_visual_mod_for_tests);
+    const fart_racer_test = b.addTest(.{
+        .name = "fart-racer-test",
+        .root_module = fart_racer_test_mod,
+    });
+    const run_fart_racer_test = b.addRunArtifact(fart_racer_test);
+    const fart_racer_test_step = b.step("test-fart-racer", "Run the compiled Fart Racer blueprint and race-loop tests");
+    fart_racer_test_step.dependOn(&run_fart_racer_test.step);
+
+    const fart_racer_application_report_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/games/custom/fart-racer/application_report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fart_racer_application_report_test_mod.addImport("game_driving", game_driving_mod);
+    const fart_racer_application_report_test = b.addTest(.{
+        .name = "fart-racer-application-report-test",
+        .root_module = fart_racer_application_report_test_mod,
+    });
+    const run_fart_racer_application_report_test = b.addRunArtifact(fart_racer_application_report_test);
+    const fart_racer_application_report_test_step = b.step(
+        "test-fart-racer-application-report",
+        "Run Fart Racer native application-report tests",
+    );
+    fart_racer_application_report_test_step.dependOn(&run_fart_racer_application_report_test.step);
+
+    const fart_racer_wire_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/games/custom/fart-racer/wire.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fart_racer_wire_mod_for_tests.addImport("game_driving", game_driving_mod);
+    const fart_racer_wire_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/fart_racer_wire.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fart_racer_wire_test_mod.addImport("fart_racer_wire", fart_racer_wire_mod_for_tests);
+    const fart_racer_wire_test = b.addTest(.{
+        .name = "fart-racer-wire-test",
+        .root_module = fart_racer_wire_test_mod,
+    });
+    const run_fart_racer_wire_test = b.addRunArtifact(fart_racer_wire_test);
+    const fart_racer_wire_test_step = b.step("test-fart-racer-wire", "Run strict Fart Racer export-wire decoder tests");
+    fart_racer_wire_test_step.dependOn(&run_fart_racer_wire_test.step);
+
     // ── Semantic building architecture contract tests ──────────────
     // Pure allocator/math coverage follows the neighboring game-physics target:
     // no blocking capability is used, so no std.Io is manufactured or injected.
@@ -3081,6 +3206,41 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    const model_blueprint_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/model_blueprint.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const model_blueprint_test = b.addTest(.{
+        .name = "model-blueprint-test",
+        .root_module = model_blueprint_test_mod,
+    });
+    b.step("test-model-blueprint", "Run RJMD model-blueprint structural validator tests")
+        .dependOn(&b.addRunArtifact(model_blueprint_test).step);
+    const audio_wav_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_audio_wav.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const audio_wav_test = b.addTest(.{
+        .name = "audio-wav-test",
+        .root_module = audio_wav_test_mod,
+    });
+    b.step("test-audio-wav", "Run hostile WAV decoder boundary tests")
+        .dependOn(&b.addRunArtifact(audio_wav_test).step);
+    const audio_world_emitter_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/audio/world_emitters.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const audio_world_emitter_test = b.addTest(.{
+        .name = "audio-world-emitter-test",
+        .root_module = audio_world_emitter_test_mod,
+    });
+    b.step("test-audio-world-emitters", "Run native world-space audio ownership tests")
+        .dependOn(&b.addRunArtifact(audio_world_emitter_test).step);
     const model_blob_meshdoc_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/meshdoc_format.zig"),
         .target = target,
@@ -3088,6 +3248,19 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     model_blob_meshdoc_mod.addImport("mesh_edge_semantics.zig", model_blob_edge_semantics_mod);
+    const model_blueprint_rjmd_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/model_blueprint_rjmd.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    model_blueprint_rjmd_test_mod.addImport("meshdoc", model_blob_meshdoc_mod);
+    const model_blueprint_rjmd_test = b.addTest(.{
+        .name = "model-blueprint-rjmd-test",
+        .root_module = model_blueprint_rjmd_test_mod,
+    });
+    b.step("test-model-blueprint-rjmd", "Run native RJMD blueprint round-trip tests")
+        .dependOn(&b.addRunArtifact(model_blueprint_rjmd_test).step);
     const model_blob_mesh_edit_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
         .target = target,

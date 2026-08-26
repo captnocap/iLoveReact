@@ -25,8 +25,13 @@
 //!   __map_stroke_end() -> Float32 ArrayBuffer [samples, stamps, touched, waterDry]
 //!   __map_event_drain() -> Float32 ArrayBuffer [count, fixed event rows…]
 //!   __map_save_file(path) / __map_load_file(path) -> 0|1
+//!   __map_prepare_file(path) -> requestId
+//!   __map_prepare_status(requestId) -> Float32 ArrayBuffer [state,id,chunks]
+//!   __map_commit_prepared(requestId,path) -> 0|1
 //!   __map_inspect_file(path) -> Float32 ArrayBuffer [version, chunkCount]
 //!   __map_path_snapshot() -> Float32 ArrayBuffer [version, pathCount, path records...]
+//!   __map_path_sample(pathId, distanceM) -> Float32 ArrayBuffer
+//!       [version,pathId,distance,total,x,y,z,tangentX,tangentY,tangentZ]
 //!   __map_set_autosave_file(path) -> 0|1        — micro-save target (req_2765)
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
 //!   __map_height_at(worldX, worldZ) -> f64       — canonical terrain sample
@@ -34,6 +39,12 @@
 //!       — highest point on the loader's rendered/collider terrain mirror
 //!   __map_read_height(cx, cz) / __map_read_water(cx, cz)
 //!       -> Float32 ArrayBuffer of SAMPLE_CELLS (a copy; verification/readback)
+//!   __map_read_floor(cx, cz) -> Float32 ArrayBuffer of FLOOR_CELLS (121x121)
+//!       — the RENDERED floor mirror: what the ground pipeline draws and the
+//!         physics heightfields collide against. Compile/export reads this.
+//!   __map_ground_formula() -> string|null
+//!   __map_read_ground_data(cx, cz) -> Float32 ArrayBuffer|null
+//!       — exact native formula stream consumed by compiled heightfields
 //!   __map_read_cells(cx, cz, channel) -> Float32 ArrayBuffer of TILE_CELLS
 //!       channel: 0 tiles · 1 zones · 2 flora grass · 3 flora tree · 4 flora bush
 //!       · 5 materials · 6/7/8 flora density for grass/tree/bush
@@ -62,10 +73,17 @@
 
 const std = @import("std");
 const v8 = @import("v8");
-const v8_runtime = @import("v8_runtime.zig");
+const v8_runtime = @import("dev_modules/v8_runtime_api.zig");
 const chunks = @import("game/map/chunks.zig");
 const engine = @import("game/map/engine.zig");
+const prepare_slot = @import("game/map/prepare_slot.zig");
 const stamps = @import("game/map/stamps.zig");
+
+const MapPrepareState = prepare_slot.State;
+const MapPrepareJob = struct { id: u32, path: []u8 };
+var map_prepare_tasks: std.Io.Group = .init;
+var map_prepare_mutex: std.Io.Mutex = .init;
+var map_prepare: prepare_slot.Slot(engine.PreparedMap) = .{};
 
 // ── V8 arg / return helpers (same shapes as v8_bindings_game_build.zig) ───────
 
@@ -98,6 +116,10 @@ fn setReturnNull(info: v8.FunctionCallbackInfo) void {
 
 fn setReturnF64(info: v8.FunctionCallbackInfo, value: f64) void {
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), value));
+}
+
+fn setReturnString(info: v8.FunctionCallbackInfo, value: []const u8) void {
+    info.getReturnValue().set(v8.String.initUtf8(info.getIsolate(), value));
 }
 
 fn noopBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c) void {}
@@ -141,6 +163,12 @@ fn argChunkCoords(info: v8.FunctionCallbackInfo) ?[2]i32 {
 fn argBool(info: v8.FunctionCallbackInfo, idx: u32, default: bool) bool {
     const raw = argToF64(info, idx) orelse return default;
     return std.math.isFinite(raw) and raw != 0;
+}
+
+fn argRequestId(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
+    const raw = argToF64(info, idx) orelse return null;
+    if (!std.math.isFinite(raw) or raw < 1 or raw > prepare_slot.MAX_REQUEST_ID or @trunc(raw) != raw) return null;
+    return @intFromFloat(raw);
 }
 
 // ── world / chunk doors ───────────────────────────────────────────────────────
@@ -526,6 +554,7 @@ fn hostRoadStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // previewDistance, previewValid, authoringTool, level]. UI-rate diagnostics.
 var path_stats_out: [19]f32 = undefined;
 var path_snapshot_out: [engine.PATH_SNAPSHOT_MAX_FLOATS]f32 = undefined;
+var path_sample_out: [10]f32 = undefined;
 
 fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -567,6 +596,36 @@ fn hostPathSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         return;
     };
     setReturnF32Buffer(info, path_snapshot_out[0..written]);
+}
+
+fn hostPathSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw_path_id = argToF64(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const raw_distance = argToF64(info, 1) orelse 0;
+    if (!std.math.isFinite(raw_path_id) or raw_path_id <= 0 or raw_path_id > std.math.maxInt(u32) or !std.math.isFinite(raw_distance)) {
+        setReturnNull(info);
+        return;
+    }
+    const sample = engine.samplePathForSnapshot(@intFromFloat(@trunc(raw_path_id)), @floatCast(raw_distance)) orelse {
+        setReturnNull(info);
+        return;
+    };
+    path_sample_out = .{
+        1,
+        @floatFromInt(sample.path_id),
+        sample.distance_m,
+        sample.total_m,
+        sample.x,
+        sample.y,
+        sample.z,
+        sample.tangent_x,
+        sample.tangent_y,
+        sample.tangent_z,
+    };
+    setReturnF32Buffer(info, path_sample_out[0..]);
 }
 
 // Dedicated Map Paint history. Ctrl+Z routing stays cart-side, but the journal
@@ -708,22 +767,7 @@ fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path);
-    const buf = alloc.alloc(u8, engine.saveSize()) catch {
-        setReturnF64(info, 0);
-        return;
-    };
-    defer alloc.free(buf);
-    const n = engine.saveMap(buf);
-    if (n == 0) {
-        setReturnF64(info, 0);
-        return;
-    }
-    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(io, dir) catch {};
-    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = buf[0..n] }) catch {
-        setReturnF64(info, 0);
-        return;
-    };
-    setReturnF64(info, 1);
+    setReturnF64(info, if (engine.saveFile(io, path)) 1 else 0);
 }
 
 // __map_inspect_file(path) -> [version, chunkCount] — read only the bounded
@@ -792,7 +836,111 @@ fn hostLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(bytes);
-    setReturnF64(info, if (engine.loadMap(bytes)) 1 else 0);
+    const loaded = engine.loadMap(bytes);
+    if (loaded) engine.noteFileLoaded(path);
+    setReturnF64(info, if (loaded) 1 else 0);
+}
+
+fn publishMapPrepare(io: std.Io, id: u32, prepared: ?*engine.PreparedMap) void {
+    map_prepare_mutex.lockUncancelable(io);
+    const orphan = map_prepare.publish(id, prepared);
+    map_prepare_mutex.unlock(io);
+    if (orphan) |stale| stale.deinit();
+}
+
+fn mapPrepareWorker(io: std.Io, job: *MapPrepareJob) std.Io.Cancelable!void {
+    defer {
+        std.heap.c_allocator.free(job.path);
+        std.heap.c_allocator.destroy(job);
+    }
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, job.path, std.heap.c_allocator, .limited(MAX_MAP_FILE_BYTES)) catch {
+        publishMapPrepare(io, job.id, null);
+        return;
+    };
+    defer std.heap.c_allocator.free(bytes);
+    publishMapPrepare(io, job.id, engine.prepareMap(std.heap.c_allocator, bytes));
+}
+
+fn cleanupPreparedMap(prepared: *engine.PreparedMap) std.Io.Cancelable!void {
+    prepared.deinit();
+}
+
+// __map_prepare_file(path) -> request id. File IO, RLE expansion, validation,
+// and chunk allocation happen on a worker against detached ownership.
+fn hostPrepareFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const path = argStringAlloc(std.heap.c_allocator, info, 0) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    const job = std.heap.c_allocator.create(MapPrepareJob) catch {
+        std.heap.c_allocator.free(path);
+        setReturnF64(info, 0);
+        return;
+    };
+
+    map_prepare_mutex.lockUncancelable(host.io);
+    const begin = map_prepare.begin();
+    map_prepare_mutex.unlock(host.io);
+    if (begin.orphan) |orphan| {
+        map_prepare_tasks.concurrent(host.io, cleanupPreparedMap, .{orphan}) catch orphan.deinit();
+    }
+
+    job.* = .{ .id = begin.id, .path = path };
+    map_prepare_tasks.concurrent(host.io, mapPrepareWorker, .{ host.io, job }) catch {
+        publishMapPrepare(host.io, begin.id, null);
+        std.heap.c_allocator.free(path);
+        std.heap.c_allocator.destroy(job);
+        setReturnF64(info, 0);
+        return;
+    };
+    setReturnF64(info, begin.id);
+}
+
+var map_prepare_status_out: [3]f32 = undefined;
+
+// __map_prepare_status(id) -> [state, id, chunks].
+fn hostPrepareStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const io = v8_runtime.hostContext(info.getIsolate()).io;
+    const requested = argRequestId(info, 0) orelse 0;
+    map_prepare_mutex.lockUncancelable(io);
+    defer map_prepare_mutex.unlock(io);
+    const matches = requested != 0 and requested == map_prepare.id;
+    map_prepare_status_out[0] = @floatFromInt(@intFromEnum(if (matches) map_prepare.state else MapPrepareState.failed));
+    map_prepare_status_out[1] = @floatFromInt(map_prepare.id);
+    map_prepare_status_out[2] = if (matches and map_prepare.result != null) @floatFromInt(map_prepare.result.?.document.slots.count) else 0;
+    setReturnF32Buffer(info, map_prepare_status_out[0..]);
+}
+
+// __map_commit_prepared(id, path) -> 0|1. Publication swaps one fixed pointer table;
+// the outgoing document is destroyed on a cleanup worker.
+fn hostCommitPrepared(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const host = v8_runtime.hostContext(info.getIsolate());
+    const requested = argRequestId(info, 0) orelse 0;
+    const path = argStringAlloc(std.heap.c_allocator, info, 1) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(path);
+    map_prepare_mutex.lockUncancelable(host.io);
+    const prepared = map_prepare.takeReady(requested);
+    map_prepare_mutex.unlock(host.io);
+    if (prepared == null) {
+        setReturnF64(info, 0);
+        return;
+    }
+
+    const ok = engine.commitPreparedMap(prepared.?);
+    if (ok) {
+        engine.noteFileLoaded(path);
+        map_prepare_tasks.concurrent(host.io, cleanupPreparedMap, .{prepared.?}) catch prepared.?.deinit();
+    } else {
+        prepared.?.deinit();
+    }
+    setReturnF64(info, if (ok) 1 else 0);
 }
 
 // ── readback doors (verification / chrome, UI-rate only) ──────────────────────
@@ -837,7 +985,32 @@ fn hostRenderHeightMax(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 }
 
 var sample_scratch: [chunks.SAMPLE_CELLS]f32 = undefined;
+var floor_scratch: [engine.FLOOR_CELLS]f32 = undefined;
 var cell_scratch: [chunks.TILE_CELLS]f32 = undefined;
+var ground_data_scratch: [engine.MAX_GROUND_DATA_FLOATS]f32 = undefined;
+
+fn hostGroundFormula(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const formula = engine.groundFormula() orelse {
+        setReturnNull(info);
+        return;
+    };
+    setReturnString(info, formula);
+}
+
+fn hostReadGroundData(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argChunkCoords(info) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const chunk = chunks.chunkAt(at[0], at[1]) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const written = engine.encodeGroundData(chunk, ground_data_scratch[0..]);
+    setReturnF32Buffer(info, ground_data_scratch[0..written]);
+}
 
 fn hostReadHeight(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     readSampleField(info_c, .height);
@@ -863,6 +1036,28 @@ fn readSampleField(info_c: ?*const v8.c.FunctionCallbackInfo, which: enum { heig
     };
     @memcpy(sample_scratch[0..], src);
     setReturnF32Buffer(info, sample_scratch[0..]);
+}
+
+/// The chunk's RENDERED floor mirror — the 121x121 grid the ground pipeline
+/// draws and the physics heightfield table collides against, produced by the
+/// same abs-max downsample the live paint residency runs
+/// (engine.downsampleFloorHeights). The 241x241 sculpt field behind
+/// `__map_read_height` is the BRUSH resolution: it overflows both
+/// game_physics.HF_MAX_SAMPLES and the dynamic-vertex scratch, and fails
+/// terrain_grid.canAppend, so a compile that ships it renders and collides as
+/// nothing at all. Export paths must read THIS door.
+fn hostReadFloor(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argChunkCoords(info) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const chunk = chunks.chunkAt(at[0], at[1]) orelse {
+        setReturnNull(info);
+        return;
+    };
+    engine.downsampleFloorHeights(&chunk.height, floor_scratch[0..]);
+    setReturnF32Buffer(info, floor_scratch[0..]);
 }
 
 fn hostReadCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -930,6 +1125,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_path_control_delete", hostPathControlDelete);
     v8_runtime.registerHostFn("__map_path_stats", hostPathStats);
     v8_runtime.registerHostFn("__map_path_snapshot", hostPathSnapshot);
+    v8_runtime.registerHostFn("__map_path_sample", hostPathSample);
     v8_runtime.registerHostFn("__map_history", hostMapHistory);
     v8_runtime.registerHostFn("__map_undo", hostMapUndo);
     v8_runtime.registerHostFn("__map_redo", hostMapRedo);
@@ -937,6 +1133,9 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_inspect_file", hostInspectFile);
     v8_runtime.registerHostFn("__map_set_autosave_file", hostSetAutosaveFile);
     v8_runtime.registerHostFn("__map_load_file", hostLoadFile);
+    v8_runtime.registerHostFn("__map_prepare_file", hostPrepareFile);
+    v8_runtime.registerHostFn("__map_prepare_status", hostPrepareStatus);
+    v8_runtime.registerHostFn("__map_commit_prepared", hostCommitPrepared);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);
@@ -945,6 +1144,9 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_height_at", hostHeightAt);
     v8_runtime.registerHostFn("__map_render_height_max", hostRenderHeightMax);
     v8_runtime.registerHostFn("__map_read_height", hostReadHeight);
+    v8_runtime.registerHostFn("__map_read_floor", hostReadFloor);
     v8_runtime.registerHostFn("__map_read_water", hostReadWater);
+    v8_runtime.registerHostFn("__map_ground_formula", hostGroundFormula);
+    v8_runtime.registerHostFn("__map_read_ground_data", hostReadGroundData);
     v8_runtime.registerHostFn("__map_read_cells", hostReadCells);
 }

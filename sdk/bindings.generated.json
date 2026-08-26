@@ -97,6 +97,10 @@
           "zig": "hostMeshSemanticState"
         },
         {
+          "js": "__mesh_blueprint_set",
+          "zig": "hostMeshBlueprintSet"
+        },
+        {
           "js": "__mesh_semantics_restore_from_rjmd",
           "zig": "hostMeshSemanticsRestoreFromRjmd"
         },
@@ -239,6 +243,10 @@
         {
           "js": "__mesh_curve_pull_arm",
           "zig": "hostMeshCurvePullArm"
+        },
+        {
+          "js": "__mesh_surface_slide_arm",
+          "zig": "hostMeshSurfaceSlideArm"
         },
         {
           "js": "__mesh_gizmo_scale_by",
@@ -2970,6 +2978,26 @@
           "zig": "hostAudioGetPeakLevel"
         },
         {
+          "js": "__audioWorldAttach",
+          "zig": "hostAudioWorldAttach"
+        },
+        {
+          "js": "__audioWorldTrigger",
+          "zig": "hostAudioWorldTrigger"
+        },
+        {
+          "js": "__audioWorldTune",
+          "zig": "hostAudioWorldTune"
+        },
+        {
+          "js": "__audioWorldUpdateEntity",
+          "zig": "hostAudioWorldUpdateEntity"
+        },
+        {
+          "js": "__audioWorldDetach",
+          "zig": "hostAudioWorldDetach"
+        },
+        {
           "js": "__audio_init",
           "zig": "hostAudioInit"
         },
@@ -3228,6 +3256,26 @@
         {
           "js": "__audio_get_param_max",
           "zig": "hostAudioGetParamMax"
+        },
+        {
+          "js": "__audio_world_attach",
+          "zig": "hostAudioWorldAttach"
+        },
+        {
+          "js": "__audio_world_trigger",
+          "zig": "hostAudioWorldTrigger"
+        },
+        {
+          "js": "__audio_world_tune",
+          "zig": "hostAudioWorldTune"
+        },
+        {
+          "js": "__audio_world_update_entity",
+          "zig": "hostAudioWorldUpdateEntity"
+        },
+        {
+          "js": "__audio_world_detach",
+          "zig": "hostAudioWorldDetach"
         }
       ]
     },
@@ -3449,6 +3497,10 @@
         {
           "js": "__paintable_upload",
           "zig": "paintUpload"
+        },
+        {
+          "js": "__paintable_load_model_atlas",
+          "zig": "paintLoadModelAtlas"
         },
         {
           "js": "__paintable_readback",
@@ -3751,6 +3803,10 @@
           "zig": "hostPathSnapshot"
         },
         {
+          "js": "__map_path_sample",
+          "zig": "hostPathSample"
+        },
+        {
           "js": "__map_history",
           "zig": "hostMapHistory"
         },
@@ -3823,8 +3879,20 @@
           "zig": "hostReadHeight"
         },
         {
+          "js": "__map_read_floor",
+          "zig": "hostReadFloor"
+        },
+        {
           "js": "__map_read_water",
           "zig": "hostReadWater"
+        },
+        {
+          "js": "__map_ground_formula",
+          "zig": "hostGroundFormula"
+        },
+        {
+          "js": "__map_read_ground_data",
+          "zig": "hostReadGroundData"
         },
         {
           "js": "__map_read_cells",
@@ -4028,6 +4096,14 @@
         {
           "js": "__compiled_world_status",
           "zig": "hostStatus"
+        },
+        {
+          "js": "__compiled_world_application_report",
+          "zig": "hostApplicationReport"
+        },
+        {
+          "js": "__compiled_world_game_telemetry",
+          "zig": "hostGameTelemetry"
         },
         {
           "js": "__compiled_world_set_camera",

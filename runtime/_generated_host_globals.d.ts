@@ -25,6 +25,7 @@ declare global {
   function __mesh_semantic_name_primitive(...args: unknown[]): unknown;
   function __mesh_semantic_stamp_part_ranges(...args: unknown[]): unknown;
   function __mesh_semantic_state(...args: unknown[]): unknown;
+  function __mesh_blueprint_set(...args: unknown[]): unknown;
   function __mesh_semantics_restore_from_rjmd(...args: unknown[]): unknown;
   function __mesh_semantic_region_edit(...args: unknown[]): unknown;
   function __mesh_select_query(...args: unknown[]): unknown;
@@ -61,6 +62,7 @@ declare global {
   function __mesh_gizmo_tool(...args: unknown[]): unknown;
   function __mesh_gizmo_nudge(...args: unknown[]): unknown;
   function __mesh_curve_pull_arm(...args: unknown[]): unknown;
+  function __mesh_surface_slide_arm(...args: unknown[]): unknown;
   function __mesh_gizmo_scale_by(...args: unknown[]): unknown;
   function __mesh_align_loop(...args: unknown[]): unknown;
   function __mesh_circularize_loop(...args: unknown[]): unknown;
@@ -736,6 +738,11 @@ declare global {
   function __audioGetConnectionCount(...args: unknown[]): unknown;
   function __audioGetCallbackTime(...args: unknown[]): unknown;
   function __audioGetPeakLevel(...args: unknown[]): unknown;
+  function __audioWorldAttach(...args: unknown[]): unknown;
+  function __audioWorldTrigger(...args: unknown[]): unknown;
+  function __audioWorldTune(...args: unknown[]): unknown;
+  function __audioWorldUpdateEntity(...args: unknown[]): unknown;
+  function __audioWorldDetach(...args: unknown[]): unknown;
   function __audio_init(...args: unknown[]): unknown;
   function __audio_deinit(...args: unknown[]): unknown;
   function __audio_is_initialized(...args: unknown[]): unknown;
@@ -801,6 +808,11 @@ declare global {
   function __audio_get_module_type(...args: unknown[]): unknown;
   function __audio_get_param_min(...args: unknown[]): unknown;
   function __audio_get_param_max(...args: unknown[]): unknown;
+  function __audio_world_attach(...args: unknown[]): unknown;
+  function __audio_world_trigger(...args: unknown[]): unknown;
+  function __audio_world_tune(...args: unknown[]): unknown;
+  function __audio_world_update_entity(...args: unknown[]): unknown;
+  function __audio_world_detach(...args: unknown[]): unknown;
 
   // midi (framework/v8_bindings_midi.zig)
   function __midiStart(...args: unknown[]): unknown;
@@ -855,6 +867,7 @@ declare global {
   function __paintable_clear(...args: unknown[]): unknown;
   function __paintable_clear_rgba(...args: unknown[]): unknown;
   function __paintable_upload(...args: unknown[]): unknown;
+  function __paintable_load_model_atlas(...args: unknown[]): unknown;
   function __paintable_readback(...args: unknown[]): unknown;
 
   // physics_lab (framework/v8_bindings_physics_lab.zig)
@@ -929,6 +942,7 @@ declare global {
   function __map_path_control_delete(...args: unknown[]): unknown;
   function __map_path_stats(...args: unknown[]): unknown;
   function __map_path_snapshot(...args: unknown[]): unknown;
+  function __map_path_sample(...args: unknown[]): unknown;
   function __map_history(...args: unknown[]): unknown;
   function __map_undo(...args: unknown[]): unknown;
   function __map_redo(...args: unknown[]): unknown;
@@ -947,7 +961,10 @@ declare global {
   function __map_height_at(...args: unknown[]): unknown;
   function __map_render_height_max(...args: unknown[]): unknown;
   function __map_read_height(...args: unknown[]): unknown;
+  function __map_read_floor(...args: unknown[]): unknown;
   function __map_read_water(...args: unknown[]): unknown;
+  function __map_ground_formula(...args: unknown[]): unknown;
+  function __map_read_ground_data(...args: unknown[]): unknown;
   function __map_read_cells(...args: unknown[]): unknown;
 
   // game_pathing (framework/v8_bindings_game_pathing.zig)
@@ -998,6 +1015,8 @@ declare global {
   function __compiled_world_mount(...args: unknown[]): unknown;
   function __compiled_world_unmount(...args: unknown[]): unknown;
   function __compiled_world_status(...args: unknown[]): unknown;
+  function __compiled_world_application_report(...args: unknown[]): unknown;
+  function __compiled_world_game_telemetry(...args: unknown[]): unknown;
   function __compiled_world_set_camera(...args: unknown[]): unknown;
   function __compiled_world_clear_camera(...args: unknown[]): unknown;
   function __compiled_world_set_animation_trajectory(...args: unknown[]): unknown;
