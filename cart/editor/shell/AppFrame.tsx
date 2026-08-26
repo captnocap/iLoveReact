@@ -4120,7 +4120,7 @@ export default function AppFrame() {
         const blueprint = pkg ? meshSemanticBlueprint(packageMeshDoc(pkg)?.semanticTable) : null;
         return blueprint ? [{ packageId: authored.pkgId, pieceId: authored.id, blueprint }] : [];
       });
-      const assets = chooseFartRacerBaselineAssets(candidates);
+      const assets = chooseFartRacerBaselineAssets(candidates, loadFartRacerTarget().visualVehiclePackageId);
       const ratings = assets.vehicles.map((vehicle) => {
         const attachment = vehicle.blueprint.stats.find((row) =>
           row.profile.id === 'rj.profile.vehicle' && row.scope.kind === 'document');

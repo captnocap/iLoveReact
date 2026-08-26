@@ -9,7 +9,7 @@ import { resolvePackageDir } from '../data/modelPackageStore';
 import type { WorldSave } from '../data/worldStore';
 import { meshSemanticBlueprint } from '../model/meshSemantics';
 import { authoredPieceFor, isAuthoredPiece } from '../world/authoredRegistry';
-import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
+import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes, setLiveArchitecture } from '../world/architectureBake';
 import { pieceInstanceRows, pieceScaleOf, type PlacedPiece } from '../world/pieces';
 import { validateRaceMarkers } from '../world/worldMarkers';
 import { buildFartRacerAudioExport } from './fartRacerAudio';
@@ -125,6 +125,7 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
     const authored = authoredPieceFor(piece.pieceId);
     const pkg = authored ? modelPackageById(authored.pkgId) : null;
     const doc = pkg ? packageMeshDoc(pkg) : null;
+    const parts = pkg ? packageMeshDocParts(pkg) : null;
     if (!authored || !pkg || !doc?.vertices.length) continue;
     const scale = pieceScaleOf(piece);
     const key = `${authored.pkgId}@${scale}`;
@@ -135,7 +136,7 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
       index = meshes.length;
       meshIndex.set(key, index);
       const visualVehicle = authored.pkgId === visualVehiclePackageId;
-      const partitioned = visualVehicle ? partitionFartRacerVehicleMesh(doc) : null;
+      const partitioned = visualVehicle ? partitionFartRacerVehicleMesh(doc, parts) : null;
       meshes.push({
         key,
         vertices: scaledMesh(partitioned?.vertices ?? doc.vertices, scale),
@@ -181,7 +182,7 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
   const bounds = meshes.map((mesh) => meshBounds(mesh.vertices));
   let byteLength = 12;
   meshes.forEach((mesh, index) => {
-    byteLength += 4 + keys[index]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (mesh.png?.byteLength ?? 0) + 4 + mesh.slots.length * 8 + 4 + 4 + 24;
+    byteLength += 4 + keys[index]!.byteLength + 36 + mesh.vertices.byteLength + 4 + (mesh.png?.byteLength ?? 0) + 4 + mesh.slots.length * 8 + 4 + 4 + (mesh.collisionBox ? 24 : 0);
   });
   instances.forEach(({ mesh }) => { byteLength += 24 + meshes[mesh]!.slots.length * 4; });
   const out = new Uint8Array(byteLength);
@@ -213,8 +214,13 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
       at += 8;
     });
     view.setUint32(at, 0, true); at += 4; // door
-    view.setUint32(at, mesh.collisionBox ? 1 : 0, true); at += 4; // conservative collision box
-    bound.box.forEach((value, offset) => view.setFloat32(at + offset * 4, value, true)); at += 24;
+    // v7 authored collider boxes: a COUNT and then that many boxes. Writing a
+    // box behind a zero count desyncs every mesh after it (error.BadMeshProps).
+    view.setUint32(at, mesh.collisionBox ? 1 : 0, true); at += 4;
+    if (mesh.collisionBox) {
+      bound.box.forEach((value, offset) => view.setFloat32(at + offset * 4, value, true));
+      at += 24;
+    }
   });
   instances.forEach(({ mesh, x, y, z, yawDegrees }) => {
     view.setUint32(at, mesh, true);
@@ -229,15 +235,26 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
   return out;
 }
 
-function fartRacerVisualPackageId(pieces: readonly PlacedPiece[]): string | null {
+/** The placed package whose mesh is the car you SEE. The game target NAMES it;
+ *  falling back to "the first placed piece that happens to satisfy the schema"
+ *  makes the shipped car depend on placement order. */
+function fartRacerVisualPackageId(pieces: readonly PlacedPiece[], declared: string | null): string | null {
+  let fallback: string | null = null;
   for (const piece of pieces) {
     const authored = authoredPieceFor(piece.pieceId);
     const pkg = authored ? modelPackageById(authored.pkgId) : null;
     const doc = pkg ? packageMeshDoc(pkg) : null;
     const parts = pkg ? packageMeshDocParts(pkg) : null;
-    if (authored && isFartRacerVehicleVisual(doc, parts)) return authored.pkgId;
+    if (!authored || !isFartRacerVehicleVisual(doc, parts)) continue;
+    if (authored.pkgId === declared) return authored.pkgId;
+    fallback ??= authored.pkgId;
   }
-  return null;
+  if (declared) {
+    throw new Error(fallback
+      ? `the game target's visual vehicle ${declared} is not placed in this world; ${fallback} is`
+      : `the game target's visual vehicle ${declared} is not placed in this world, and nothing placed satisfies the vehicle schema`);
+  }
+  return fallback;
 }
 
 function collectBlueprints(pieces: readonly PlacedPiece[], rosterPackageIds: readonly string[]): BakedBlueprint[] {
@@ -257,7 +274,11 @@ function collectBlueprints(pieces: readonly PlacedPiece[], rosterPackageIds: rea
   return rows;
 }
 
-export function bakeFartRacerExportWithBlueprints(world: WorldSave, blueprints: readonly BakedBlueprint[]): GameCompileResult {
+export function bakeFartRacerExportWithBlueprints(
+  world: WorldSave,
+  blueprints: readonly BakedBlueprint[],
+  openingDepthsU: Readonly<Record<string, number>> = {},
+): GameCompileResult {
   const target = loadFartRacerTarget();
   const markerValidation = validateRaceMarkers(world.markers);
   if (!markerValidation.ok) throw new Error(`Fart Racer markers are not exportable: ${markerValidation.reason}`);
@@ -276,19 +297,23 @@ export function bakeFartRacerExportWithBlueprints(world: WorldSave, blueprints: 
     throw new Error('could not create Fart Racer export directories');
   }
   const pieceRows = pieceInstanceRows(world.pieces);
-  // The city only reaches the export through the LIVE architecture bake, which
-  // needs the world surface to have compiled it. Exporting a map whose walls
-  // never baked ships a world with no buildings and no wall colliders, and says
-  // nothing about it — refuse instead.
-  if (world.architecture.walls.edges.length > 0 && liveArchitectureResidentMeshes().length === 0) {
-    throw new Error(`the map's ${world.architecture.walls.edges.length} wall edge(s) have not been baked live — open the world surface before exporting`);
+  // Bake the SAVE's walls, not whatever the viewport happened to leave resident.
+  // The bake is identity-cached, so an already-current world costs nothing and a
+  // map exported without ever being looked at still ships its buildings. What
+  // must never happen is shipping wall colliders with no wall geometry — an
+  // invisible city you crash into — so a bake that produces nothing is fatal.
+  if (world.architecture.walls.edges.length > 0) {
+    setLiveArchitecture(world.architecture, openingDepthsU, world.finishes);
+    if (liveArchitectureResidentMeshes().length === 0) {
+      throw new Error(`the map's ${world.architecture.walls.edges.length} wall edge(s) produced no geometry — the architecture host capability is absent from this build`);
+    }
   }
   const architectureRows = new Float32Array(liveArchitectureCollideRows());
   const rows = new Float32Array(pieceRows.length + architectureRows.length);
   rows.set(pieceRows, 0);
   rows.set(architectureRows, pieceRows.length);
   const heightfields = encodeHeightfields(target.world.terrainColor, target.world.walkableSlopeDegrees);
-  const visualVehiclePackageId = fartRacerVisualPackageId(world.pieces);
+  const visualVehiclePackageId = fartRacerVisualPackageId(world.pieces, target.visualVehiclePackageId);
   const logic = encodeFartRacerLogic(target, blueprints, world.markers, visualVehiclePackageId);
   const audio = buildFartRacerAudioExport(blueprints, world.markers);
   if (!mkdir(`${FART_RACER_EXPORT_ROOT}/audio`)) throw new Error('could not create Fart Racer audio export directory');
@@ -373,7 +398,10 @@ export function bakeFartRacerExportWithBlueprints(world: WorldSave, blueprints: 
   };
 }
 
-export function bakeFartRacerExport(world: WorldSave): GameCompileResult {
+export function bakeFartRacerExport(
+  world: WorldSave,
+  openingDepthsU: Readonly<Record<string, number>> = {},
+): GameCompileResult {
   const target = loadFartRacerTarget();
-  return bakeFartRacerExportWithBlueprints(world, collectBlueprints(world.pieces, target.vehicleRosterPackageIds));
+  return bakeFartRacerExportWithBlueprints(world, collectBlueprints(world.pieces, target.vehicleRosterPackageIds), openingDepthsU);
 }

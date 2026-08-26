@@ -157,6 +157,7 @@ function completeFood(candidate: FartRacerBaselineCandidate): boolean {
  * final target-specific minimums remain enforced by the exporter. */
 export function chooseFartRacerBaselineAssets(
   candidates: readonly FartRacerBaselineCandidate[],
+  requiredVehiclePackageId: string | null = null,
 ): FartRacerBaselineAssets {
   const unique = new Map<string, FartRacerBaselineCandidate>();
   for (const candidate of candidates) {
@@ -169,12 +170,19 @@ export function chooseFartRacerBaselineAssets(
   const foods = ordered.filter(completeFood);
   if (foods.length < 1) throw new Error('needs one placeable food blueprint with gasYieldL, digestSeconds, and bowelLoad');
 
+  // The game target may NAME the car the player sees. That shell has to be on
+  // the grid for the exporter to bake its mesh, so it is not optional in the
+  // roster — the span optimizer chooses the other two around it.
+  if (requiredVehiclePackageId && !vehicles.some((row) => row.candidate.packageId === requiredVehiclePackageId)) {
+    throw new Error(`the required vehicle ${requiredVehiclePackageId} has no document-scoped rj.profile.vehicle blueprint`);
+  }
   let best: readonly [RatedVehicle, RatedVehicle, RatedVehicle] | null = null;
   let bestScore = -1;
   for (let first = 0; first < vehicles.length - 2; first += 1) {
     for (let second = first + 1; second < vehicles.length - 1; second += 1) {
       for (let third = second + 1; third < vehicles.length; third += 1) {
         const triple = [vehicles[first]!, vehicles[second]!, vehicles[third]!] as const;
+        if (requiredVehiclePackageId && !triple.some((row) => row.candidate.packageId === requiredVehiclePackageId)) continue;
         const speeds = triple.map((row) => row.topSpeedRating);
         const accelerations = triple.map((row) => row.accelerationRating);
         const score = Math.max(...speeds) - Math.min(...speeds)
