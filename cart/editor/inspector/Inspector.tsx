@@ -38,7 +38,8 @@ import BlobExplorerSurface, {
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
-import { UV_WORKSPACE_FLEX_STYLE, uvPanelWidthFromDrag, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
+import { UV_WORKSPACE_FLEX_STYLE, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
+import { useFocusPanelResize } from './focusPanelResize';
 import type { LightRig } from '../model/editMesh';
 import { blobViewportFaceSelection } from '../model/blobExplorerState';
 import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
