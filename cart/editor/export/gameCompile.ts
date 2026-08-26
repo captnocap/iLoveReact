@@ -9,7 +9,7 @@ import { resolvePackageDir } from '../data/modelPackageStore';
 import type { WorldSave } from '../data/worldStore';
 import { meshSemanticBlueprint } from '../model/meshSemantics';
 import { authoredPieceFor, isAuthoredPiece } from '../world/authoredRegistry';
-import { liveArchitectureCollideRows } from '../world/architectureBake';
+import { liveArchitectureCollideRows, liveArchitectureRefs, liveArchitectureResidentMeshes } from '../world/architectureBake';
 import { pieceInstanceRows, pieceScaleOf, type PlacedPiece } from '../world/pieces';
 import { validateRaceMarkers } from '../world/worldMarkers';
 import { buildFartRacerAudioExport } from './fartRacerAudio';
@@ -82,7 +82,13 @@ type MeshRow = Readonly<{
   png: Uint8Array | null;
   slots: readonly VehiclePartSlot[];
   solid: boolean;
+  /** Whether the mesh declares its own conservative collision box. The city's
+   *  wall meshes already collide through their oriented rows in the INSTANCES
+   *  lump; a second, city-sized box around all of them would brick the map. */
+  collisionBox: boolean;
 }>;
+
+type MeshInstanceRow = Readonly<{ mesh: number; x: number; y: number; z: number; yawDegrees: number }>;
 
 function scaledMesh(vertices: Float32Array, scale: number): Float32Array {
   if (scale === 1) return vertices;
@@ -113,7 +119,7 @@ function meshBounds(vertices: Float32Array): { radius: number; width: number; de
 function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePackageId: string | null): Uint8Array | null {
   const meshes: MeshRow[] = [];
   const meshIndex = new Map<string, number>();
-  const instances: { mesh: number; piece: PlacedPiece }[] = [];
+  const instances: MeshInstanceRow[] = [];
   for (const piece of pieces) {
     if (!isAuthoredPiece(piece.pieceId)) continue;
     const authored = authoredPieceFor(piece.pieceId);
@@ -137,10 +143,39 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
         png: atlas ? base64ToBytes(atlas) : null,
         slots: partitioned?.slots ?? [],
         solid: !visualVehicle,
+        collisionBox: true,
       });
     }
-    instances.push({ mesh: index, piece });
+    instances.push({ mesh: index, x: piece.x, y: piece.y, z: piece.z, yawDegrees: piece.yawDegrees });
   }
+
+  // The authored city. Its wall shells are architecture, not placed pieces, and
+  // the live bake already resolved them to world-space meshes — the same ones
+  // the editor draws. Without this the exported game inherits their colliders
+  // from the INSTANCES lump and renders nothing: invisible buildings you crash
+  // into. Collision stays with those rows; these meshes are look only.
+  const architecture = liveArchitectureResidentMeshes();
+  const architectureRefs = liveArchitectureRefs();
+  for (const ref of architectureRefs) {
+    const mesh = architecture.find((row) => row.key === ref.key);
+    if (!mesh?.vertices.length) continue;
+    let index = meshIndex.get(mesh.key);
+    if (index === undefined) {
+      index = meshes.length;
+      meshIndex.set(mesh.key, index);
+      meshes.push({
+        key: mesh.key,
+        vertices: mesh.vertices,
+        color: mesh.color ?? [0.74, 0.73, 0.7],
+        png: mesh.png ?? null,
+        slots: [],
+        solid: false,
+        collisionBox: false,
+      });
+    }
+    instances.push({ mesh: index, x: ref.x, y: ref.y, z: ref.z, yawDegrees: ref.yaw });
+  }
+
   if (meshes.length === 0) return null;
   const keys = meshes.map((mesh) => textBytes(mesh.key));
   const bounds = meshes.map((mesh) => meshBounds(mesh.vertices));
@@ -178,15 +213,15 @@ function encodeAuthoredMeshes(pieces: readonly PlacedPiece[], visualVehiclePacka
       at += 8;
     });
     view.setUint32(at, 0, true); at += 4; // door
-    view.setUint32(at, 1, true); at += 4; // conservative collision box
+    view.setUint32(at, mesh.collisionBox ? 1 : 0, true); at += 4; // conservative collision box
     bound.box.forEach((value, offset) => view.setFloat32(at + offset * 4, value, true)); at += 24;
   });
-  instances.forEach(({ mesh, piece }) => {
+  instances.forEach(({ mesh, x, y, z, yawDegrees }) => {
     view.setUint32(at, mesh, true);
-    view.setFloat32(at + 4, piece.x, true);
-    view.setFloat32(at + 8, piece.y, true);
-    view.setFloat32(at + 12, piece.z, true);
-    view.setFloat32(at + 16, piece.yawDegrees, true);
+    view.setFloat32(at + 4, x, true);
+    view.setFloat32(at + 8, y, true);
+    view.setFloat32(at + 12, z, true);
+    view.setFloat32(at + 16, yawDegrees, true);
     view.setUint32(at + 20, 0, true);
     at += 24;
     meshes[mesh]!.slots.forEach(() => { view.setUint32(at, 0, true); at += 4; });
@@ -241,6 +276,13 @@ export function bakeFartRacerExportWithBlueprints(world: WorldSave, blueprints: 
     throw new Error('could not create Fart Racer export directories');
   }
   const pieceRows = pieceInstanceRows(world.pieces);
+  // The city only reaches the export through the LIVE architecture bake, which
+  // needs the world surface to have compiled it. Exporting a map whose walls
+  // never baked ships a world with no buildings and no wall colliders, and says
+  // nothing about it — refuse instead.
+  if (world.architecture.walls.edges.length > 0 && liveArchitectureResidentMeshes().length === 0) {
+    throw new Error(`the map's ${world.architecture.walls.edges.length} wall edge(s) have not been baked live — open the world surface before exporting`);
+  }
   const architectureRows = new Float32Array(liveArchitectureCollideRows());
   const rows = new Float32Array(pieceRows.length + architectureRows.length);
   rows.set(pieceRows, 0);

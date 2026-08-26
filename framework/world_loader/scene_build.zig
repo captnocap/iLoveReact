@@ -23,6 +23,7 @@ const m_animation = @import("animation.zig");
 const m_streaming_support = @import("streaming_support.zig");
 const m_live_inputs = @import("live_inputs.zig");
 const m_paint_runtime = @import("paint_runtime.zig");
+const m_fart_racer = @import("fart_racer_runtime.zig");
 const runtime_live_scene = @import("runtime_live_scene.zig");
 const runtime_stream = @import("runtime_stream.zig");
 
@@ -275,6 +276,15 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
             }
         }
     }
+    // A race starts at its LINE. The generic spawn picks a box top out of the
+    // instance buffer, which on a map with a city in it is a rooftop nowhere
+    // near the track; the authored home marker is the only correct answer.
+    if (m_fart_racer.startPose(&self.fart_racer)) |start| {
+        spawn.x = start.x;
+        spawn.z = start.z;
+        spawn.y = sceneTerrainTopAt(self.scene.heightfields, start.x, start.z) orelse spawn.y;
+        log.print("[loader] fart-racer start line at ({d:.2},{d:.2}) facing {d:.1} deg\n", .{ start.x, start.z, start.yaw_radians * 180.0 / std.math.pi });
+    }
     // Painted terrain is HEIGHTFIELDS, not instance rows — chooseSpawn's
     // flat-box top can sit UNDER a painted hill, burying the player below
     // the surface where no collider can catch a body (req_0523: "falling
@@ -293,7 +303,7 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
         .x = spawn.x,
         .y = spawn.y,
         .z = spawn.z,
-        .yaw = authored_yaw,
+        .yaw = if (m_fart_racer.startPose(&self.fart_racer)) |start| start.yaw_radians else authored_yaw,
     };
     {
         // probe: every instance row whose footprint covers the spawn column
@@ -531,6 +541,43 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
         log.print("[loader] no bound player character staged — camera target only\n", .{});
     }
 
+    self.fart_racer_vehicle_first_child = self.kid_list.items.len;
+    if (self.scene.mesh_props) |mp| if (m_fart_racer.vehiclePackageId(&self.fart_racer)) |package_id| {
+        for (mp.meshes) |mesh| {
+            if (!std.mem.startsWith(u8, mesh.key, package_id) or mesh.key.len <= package_id.len or mesh.key[package_id.len] != '@') continue;
+            const vehicle_instance: constructor.MeshPropInstance = .{
+                .mesh = 0,
+                .x = self.player.x,
+                .y = self.player.y,
+                .z = self.player.z,
+                .yaw_degrees = self.player.yaw * 180.0 / std.math.pi,
+            };
+            if (mesh.slots.len == m_fart_racer.VEHICLE_PART_COUNT) {
+                for (mesh.slots, 0..) |slot, part_index| {
+                    const key = try std.fmt.allocPrint(self.allocator, "{s}:vehicle-part-{d}", .{ mesh.key, part_index });
+                    var key_transferred = false;
+                    errdefer if (!key_transferred) self.allocator.free(key);
+                    const centered = try runtime_live_scene.appendCenteredMeshPropPartNode(
+                        self,
+                        mesh,
+                        vehicle_instance,
+                        key,
+                        slot.start,
+                        slot.count,
+                    ) orelse continue;
+                    try self.player_geom_keys.append(self.allocator, key);
+                    key_transferred = true;
+                    self.fart_racer_vehicle_local_centers[part_index] = centered.center;
+                }
+                self.fart_racer_vehicle_has_part_schema = self.kid_list.items.len - self.fart_racer_vehicle_first_child == m_fart_racer.VEHICLE_PART_COUNT;
+            } else {
+                try appendMeshPropNode(self, mesh, vehicle_instance, mesh.key, 0, mesh.vertex_count, 0, null, null);
+            }
+            break;
+        }
+    };
+    self.fart_racer_vehicle_child_count = self.kid_list.items.len - self.fart_racer_vehicle_first_child;
+
     if (self.scene.mesh_props) |mp| {
         // req_1864: cooked-door instances, in mp.instances order, align 1:1 with
         // self.cooked_doors (the bake only flags a door mesh when its leaf slot has
@@ -539,6 +586,10 @@ pub fn build(self: anytype, io: std.Io, environ: *const std.process.Environ.Map)
         for (mp.instances) |inst| {
             const mesh_index: usize = @intCast(inst.mesh);
             const mesh = mp.meshes[mesh_index];
+            // The authored placement is the spawn/selection proxy for the
+            // native vehicle. Its retained semantic-part copy above is the one
+            // visible car; drawing this instance too would leave a duplicate.
+            if (m_fart_racer.isVehicleMesh(&self.fart_racer, mesh.key)) continue;
             var this_cooked_door: ?usize = null;
             if (mesh.door != null and cd_idx < self.cooked_doors.len) {
                 this_cooked_door = cd_idx;
