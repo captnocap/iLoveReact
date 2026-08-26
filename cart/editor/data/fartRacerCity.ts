@@ -17,6 +17,11 @@ import type { TerrainPad } from './fartRacerTerrain';
 export const BUILD_MODULE_M = 3;
 const STOREY_M = 3;
 const U = ARCHITECTURE_UNITS_PER_METER;
+/** The installed wall style every Gastown shell is built from. A style is a
+ *  MODEL PACKAGE declared `placeable.family: wall, role: style`; the native
+ *  compiler rejects an edge naming a style the catalog does not hold
+ *  (`unknown_wall_style`), so this is a real catalog id, not a label. */
+const WALL_STYLE_ID = 'build:wall:style:basic';
 
 export type BuildingBlock = Readonly<{
   id: string;
@@ -148,7 +153,7 @@ export function cityArchitecture(heightAt: (x: number, z: number) => number): Ar
         heightU: Math.round(block.floors * STOREY_M * U),
         thicknessU: Math.max(1, Math.round(block.thicknessM * U)),
         profile: 'full',
-        styleId: 'gastown.exterior',
+        styleId: WALL_STYLE_ID,
         sideA: { materialId: block.finish },
         sideB: { materialId: block.finish },
         openings: [],

@@ -7,6 +7,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { C } from '../workspace.cls';
 import { Box } from '../../../runtime/primitives';
 import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
+import { blueprintApplicationReport, type BlueprintApplicationQuery } from '../../../runtime/game/blueprintAdapters';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
 import { applicationCommandMenuRows } from './applicationCommandMenu';
@@ -32,7 +33,7 @@ import {
   saveCanonicalAnimationDocument,
   syncNativeAnimationTrajectoryPreview,
 } from '../animation/shellIntegration';
-import BuildDock from './BuildDock';
+import BuildDock, { type GameExportPhase, type GameExportProjection } from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
@@ -90,7 +91,8 @@ import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
 import { busOn } from '../../../runtime/hooks/useIFTTT';
 import { subscribe } from '../../../runtime/ffi';
 import type { EditorState, Command, Asset, HomeFilter, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
-import { NO_SEMANTIC_ID, parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
+import { NO_SEMANTIC_ID, meshSemanticBlueprint, parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
+import { blueprintTableByteLength, validateBlueprintTable } from '../model/blueprintTable';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
@@ -114,6 +116,7 @@ import {
 import { liveIsoPose } from '../world/WorldViewport';
 import { generateCoastalCity } from '../data/coastalCity';
 import { coastalCityWorldSave } from '../data/coastalCityDocument';
+import { chooseFartRacerBaselineAssets, fartRacerBaselineWorldSave } from '../data/fartRacerBaseline';
 import {
   createMapDocument,
   deleteMapDocument,
@@ -174,6 +177,7 @@ import {
   type GeneratedMapPaintingInstallation,
 } from '../stage/mapPaint';
 import { compileCoastalCityPainting } from '../stage/coastalCity';
+import { compileFartRacerBaselinePainting } from '../stage/fartRacerBaseline';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import MaterialPickerPopover from './MaterialPickerPopover';
 import { REGION_MATERIALS } from '../render3d/regionFormula';
@@ -281,6 +285,7 @@ import {
   WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
   WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
+  WORLD_PIECE_REPLACE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
   WORLD_PIECE_SKIN_COMMAND_ID,
   WORLD_PIECE_SPIN_COMMAND_ID,
@@ -380,7 +385,7 @@ import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarte
 import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, loadMaterializedPackages, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, packageMeshDocSha256, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
+import { acceptInstalledOrdinaryModelSaveStage, copyModelPackage, discardOrdinaryModelSaveStage, hasStoredModelPaint, installOrdinaryModelSaveStage, isMaterialized, loadMaterializedPackages, materializeCharacterSaveSnapshot, materializeModelPackage, materializeModelPackageAtDirectory, modelPaintLayoutIsStale, prepareOrdinaryModelSaveStage, readManifest, reclassifyModelPackage, removeModelPackage, resolvePackageDir, rollbackOrdinaryModelSaveStage, settleRenamedPackageDir, stageModelThumbnail, packageMeshDocSha256, updateManifestIdentity, updateManifestPlaceable, validateInstalledOrdinaryModelSaveStage, writeModelArtifactsAtDirectory, type ThumbnailStageResult } from '../data/modelPackageStore';
 import { roleNamerPlan, type RoleContractId } from '../data/roleNamer';
 import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
@@ -399,6 +404,8 @@ import { validateRecipe, type MaterialRecipe } from '../render3d/shaders/recipe'
 import { promoteRecipeSource } from '../render3d/shaders/catalogPromotion';
 import { MATERIALS as REGISTRY_MATERIALS } from '../render3d/shaders/_generated/registry';
 import { execAsync } from '../../../runtime/hooks/process';
+import { bakeFartRacerExport, FART_RACER_OUTPUT } from '../export/gameCompile';
+import { loadFartRacerTarget, validateVehicleRatingDistribution } from '../export/fartRacerTarget';
 import type { LabHandlers, LabRecipeEdit } from '../stage/MaterialLabSurface';
 
 // Material Lab undo entries (req_4395): whole-document snapshots — a recipe is
@@ -428,9 +435,17 @@ import { discardModelWorkingCopyState, upsertModelPackageProjection } from '../d
 import { projectModelIntoRecentLibrary } from '../data/recentModelLifecycle';
 import { applyDevReload, devReloadRevision, devReloadWaiting, installDevReloadCheckpoint, setDevReloadPolicy } from '../../../runtime/devReload';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
-import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
+import { mapChunkList, mapEventDrain, mapGetTileBindings, mapHostLive, mapPathSnapshot, mapPathStats, mapReadCells, mapRedo, mapSamplePath, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
+import { RACE_MARKER_TAGS, driveThruMarker, raceMarker, raceTrackPlan, validateRaceMarkerGeometry, validateRaceMarkers } from '../world/worldMarkers';
 import { buildCatalogIndex, validateBuildPlacement } from '../../../runtime/game/build';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
+
+/** The tile kinds the native road grammar stamps (framework/game/map/roads.zig
+ *  RoadCellKind). Counting them is how map-info answers "is there a road on
+ *  this map's ground, or only a path recipe that says there should be". */
+const ROAD_TILE_KINDS: ReadonlySet<string> = new Set([
+  'laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'median', 'sidewalk', 'junction', 'crosswalk',
+]);
 import { FLORA_KIND_DEFINITIONS, type FloraLane } from '../world/floraKinds';
 import { authoredFloraIdFor, type AuthoredFloraSpecies } from '../world/floraSpecies';
 import { applyFloraPaintSamples, type FloraPaintSample, type WorldFloraBrush } from '../world/surfaceFlora';
@@ -698,6 +713,8 @@ export default function AppFrame() {
   const pointerDeviceRef = useRef<'mouse' | 'pen'>(getPointerDevice());
   const lastToolByScopeRef = useRef<{ world: string | null; model: string | null }>({ world: null, model: null });
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
+  const [gameExport, setGameExport] = useState<GameExportProjection | null>(null);
+  const gameExportRunningRef = useRef(false);
   // A pending image import awaiting the pixel-vs-exact decision. Transient.
   const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
   // The Add From Library picker (append a saved model into the OPEN model as parts).
@@ -781,13 +798,16 @@ export default function AppFrame() {
   // so without this a deliberate clear left the document unsaveable. Only a real
   // Remove in the NAMES pane mints it; hydration and autosave never do.
   const authorizedSemanticClearRef = useRef(new Set<string>());
+  const authorizedBlueprintClearRef = useRef(new Set<string>());
   const partShrinkSaveOptions = (modelId: string, liveCount: number) => ({
     allowPartShrink: authorizedPartShrinkTargetRef.current.get(modelId) === liveCount,
     allowSemanticClear: authorizedSemanticClearRef.current.has(modelId),
+    allowBlueprintClear: authorizedBlueprintClearRef.current.has(modelId),
   });
   const consumeModelSaveAuthorizations = (modelId: string) => {
     authorizedPartShrinkTargetRef.current.delete(modelId);
     authorizedSemanticClearRef.current.delete(modelId);
+    authorizedBlueprintClearRef.current.delete(modelId);
   };
   const worldDurableRefs = useRef<{
     architecture: EditorState['architecture'];
@@ -1905,7 +1925,7 @@ export default function AppFrame() {
       enabled: persistenceSettings.autosave,
       delayMs: persistenceSettings.autosaveDelayMs,
     });
-  }, [state.activeMapStem, state.architecture, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.mapPaint.zones, state.worldFacades, state.worldFinishes, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+  }, [state.activeMapStem, state.architecture, state.worldPieces, state.worldFlora, state.worldPrefabs, state.objects, state.worldMarkers, state.mapPaint.zones, state.worldFacades, state.worldFinishes, state.worldViews, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
 
   // Facade quads follow the active map into every world view (req_3057) —
   // livePush reads this registry when it re-pushes resident meshes/refs.
@@ -3479,6 +3499,158 @@ export default function AppFrame() {
     return ok;
   };
 
+  const exportEventTime = () => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  };
+
+  const updateGameExport = (phase: GameExportPhase, message: string, output: string | null = null) => {
+    const event = { phase, message, at: exportEventTime() } as const;
+    setGameExport((previous) => ({
+      phase,
+      message,
+      output,
+      events: previous ? [...previous.events, event] : [event],
+    }));
+    setState((previous) => ({ ...previous, openMenu: null, actionMenu: 'File', status: `Fart Racer export · ${message}` }));
+  };
+
+  const exportFartRacerGame = async () => {
+    if (gameExportRunningRef.current) {
+      setState((previous) => ({ ...previous, openMenu: null, status: 'Fart Racer export is already running — follow it in the build dock' }));
+      return;
+    }
+    gameExportRunningRef.current = true;
+    setGameExport(null);
+    try {
+      updateGameExport('baking', 'saving and baking the authored world');
+      if (!saveWorldNowAll('Saved before game export')) throw new Error('world save did not complete');
+      const current = stateRef.current;
+      const loaded = readWorldSave(current.activeMapStem);
+      if (loaded.status !== 'ok') {
+        throw new Error(loaded.status === 'invalid' ? loaded.error : `saved world "${current.activeMapStem}" could not be read back`);
+      }
+      const baked = bakeFartRacerExport(loaded.save, openingDepthsU);
+      updateGameExport('compiling', `baked ${baked.instanceRows} instances, ${baked.terrainChunks} terrain chunks, and ${baked.blueprintPackages} blueprint packages; compiling/package export`);
+      const result = await execAsync(`tools/rjit game export --manifest ${baked.manifest}`);
+      const lastLine = result.stdout.trim().split('\n').filter(Boolean).at(-1) ?? '';
+      if (result.code !== 0) throw new Error(lastLine || `native export exited ${result.code}`);
+      updateGameExport('complete', lastLine || 'compiled and packaged successfully', FART_RACER_OUTPUT);
+    } catch (error) {
+      updateGameExport('failed', error instanceof Error ? error.message : String(error));
+    } finally {
+      gameExportRunningRef.current = false;
+    }
+  };
+
+  const placeRaceMarkerAtCursor = (tag: typeof RACE_MARKER_TAGS.checkpoint | typeof RACE_MARKER_TAGS.home) => {
+    setState((previous) => {
+      const checkpointOrder = previous.worldMarkers.filter((marker) => marker.trigger.event.tag === RACE_MARKER_TAGS.checkpoint).length;
+      const marker = raceMarker(
+        `marker-${previous.seq}`,
+        tag,
+        { x: previous.cursor.x, y: previous.cursor.y, z: previous.cursor.z },
+        tag === RACE_MARKER_TAGS.checkpoint ? checkpointOrder : undefined,
+      );
+      const retained = tag === RACE_MARKER_TAGS.home
+        ? previous.worldMarkers.filter((row) => row.trigger.event.tag !== RACE_MARKER_TAGS.home)
+        : previous.worldMarkers;
+      return recordWorldEdit(previous, {
+        ...previous,
+        worldMarkers: [...retained, marker],
+        selectedWorldMarkerId: marker.id,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        selectedFloraPatchId: null,
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        seq: previous.seq + 1,
+        openMenu: null,
+        status: `${marker.name} placed at cursor — persisted as ${marker.trigger.event.tag}`,
+      }, tag === RACE_MARKER_TAGS.home ? 'Set race home' : 'Add race checkpoint');
+    });
+  };
+
+  const autoPlaceRaceMarkers = () => {
+    const snapshot = mapPathSnapshot();
+    if (!snapshot) {
+      setState((previous) => ({ ...previous, openMenu: null, status: 'Race marker generation needs the native road map loaded' }));
+      return;
+    }
+    let selectedPlan: ReturnType<typeof raceTrackPlan> | null = null;
+    let lastReason = 'no committed road exists';
+    for (const path of [...snapshot.paths].reverse()) {
+      if (path.kind !== 'road') continue;
+      try {
+        selectedPlan = raceTrackPlan(path, mapSamplePath, `race-${stateRef.current.seq}-path-${path.id}`);
+        break;
+      } catch (error) {
+        lastReason = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (!selectedPlan) {
+      setState((previous) => ({ ...previous, openMenu: null, status: `Race marker generation refused: ${lastReason}` }));
+      return;
+    }
+    const plan = selectedPlan;
+    setState((previous) => {
+      const retained = previous.worldMarkers.filter((marker) =>
+        marker.trigger.event.tag !== RACE_MARKER_TAGS.home && marker.trigger.event.tag !== RACE_MARKER_TAGS.checkpoint);
+      return recordWorldEdit(previous, {
+        ...previous,
+        worldMarkers: [...retained, ...plan.markers],
+        selectedWorldMarkerId: plan.markers[0]?.id ?? null,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        selectedFloraPatchId: null,
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        seq: previous.seq + plan.markers.length,
+        openMenu: null,
+        status: `Race loop measured ${plan.lengthMeters.toFixed(1)}m — placed ${plan.markers.length - 1} ordered checkpoints + home on road ${plan.pathId}`,
+      }, 'Auto-place race checkpoints');
+    });
+  };
+
+  const placeRaceDriveThruFromSelection = () => {
+    const current = stateRef.current;
+    const selectedId = current.selectedPieceId ?? current.selectedPieceIds[0] ?? null;
+    const piece = selectedId ? current.worldPieces.find((candidate) => candidate.id === selectedId) ?? null : null;
+    const authored = piece ? authoredPieceFor(piece.pieceId) : null;
+    const pkg = authored ? modelPackageById(authored.pkgId) : null;
+    const blueprint = pkg ? meshSemanticBlueprint(packageMeshDoc(pkg)?.semanticTable) : null;
+    const extension = blueprint?.extensions['com.captnocap.fartracer'];
+    const food = extension && typeof extension === 'object' && !Array.isArray(extension)
+      ? extension as Record<string, unknown>
+      : null;
+    const fields = food ? [food.gasYieldL, food.digestSeconds, food.bowelLoad] : [];
+    if (!piece || !authored || !pkg || !food || fields.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+      setState((previous) => ({
+        ...previous,
+        openMenu: null,
+        status: 'Drive-Thru needs one selected authored package with finite non-negative gas yield, digest time, and bowel load',
+      }));
+      return;
+    }
+    setState((previous) => {
+      const marker = driveThruMarker(
+        `marker-${previous.seq}`,
+        { x: piece.x, y: piece.y, z: piece.z },
+        authored.pkgId,
+      );
+      return recordWorldEdit(previous, {
+        ...previous,
+        worldMarkers: [...previous.worldMarkers, marker],
+        selectedWorldMarkerId: marker.id,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        selectedFloraPatchId: null,
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        seq: previous.seq + 1,
+        openMenu: null,
+        status: `Drive-Thru placed from ${pkg.name} — compiled trigger resolves ${authored.pkgId}`,
+      }, 'Add race drive-thru');
+    });
+  };
+
   // Model documents deliberately have NO per-edit autosave (req_4344). A dirty
   // model commits only at real document boundaries: File → Save, doc switch,
   // doc close, and editor exit. Every one of those commits archives a Lore
@@ -3661,7 +3833,7 @@ export default function AppFrame() {
 
       const bindings = initialized?.bindings ?? activation.bindings;
       const contentSummary = initialized
-        ? `${initialized.chunks} chunks, ${initialized.roads} roads, ${initialized.rails} rail lines, ${target.pieces.length} floor anchors`
+        ? `${initialized.chunks} chunks, ${initialized.roads} roads, ${initialized.rails} rail lines, ${target.pieces.length} placed pieces`
         : activation.seeded
           ? 'clean seed chunk'
           : `${activation.chunks} chunks, ${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`;
@@ -3930,6 +4102,72 @@ export default function AppFrame() {
     );
   };
 
+  const createFartRacerMap = (
+    rawName: string,
+    currentTriangles: number | null = null,
+    discardOutgoing = false,
+  ) => {
+    if (!mapHostLive()) {
+      setState((prev) => ({ ...prev, status: 'Fart Racer generation unavailable — rebuild/run the editor with the game-map host enabled' }));
+      return;
+    }
+    let target: WorldSave;
+    let painting: ReturnType<typeof compileFartRacerBaselinePainting>;
+    let stem: string | null = null;
+    try {
+      const candidates = stateRef.current.authoredBuildPieces.flatMap((authored) => {
+        const pkg = modelPackageById(authored.pkgId);
+        const blueprint = pkg ? meshSemanticBlueprint(packageMeshDoc(pkg)?.semanticTable) : null;
+        return blueprint ? [{ packageId: authored.pkgId, pieceId: authored.id, blueprint }] : [];
+      });
+      const assets = chooseFartRacerBaselineAssets(candidates);
+      const ratings = assets.vehicles.map((vehicle) => {
+        const attachment = vehicle.blueprint.stats.find((row) =>
+          row.profile.id === 'rj.profile.vehicle' && row.scope.kind === 'document');
+        return {
+          id: vehicle.packageId,
+          topSpeedRating: Number(attachment?.topSpeedRating),
+          accelerationRating: Number(attachment?.accelerationRating),
+        };
+      });
+      const distribution = validateVehicleRatingDistribution(loadFartRacerTarget(), ratings);
+      if (!distribution.ok) throw new Error(distribution.reason ?? 'vehicle stat distribution is invalid');
+      painting = compileFartRacerBaselinePainting();
+      stem = createMapDocument(rawName);
+      target = fartRacerBaselineWorldSave(stem, state.seq, assets);
+    } catch (error) {
+      const cleanup = stem ? deleteMapDocument(stem, state.activeMapStem) : null;
+      setState((prev) => ({
+        ...prev,
+        status: `could not create Fart Racer baseline — ${(error as Error).message}; current map left untouched${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
+      }));
+      return;
+    }
+
+    void switchMapDocument(
+      stem,
+      target,
+      'created',
+      mapDocumentName(stem),
+      currentTriangles,
+      discardOutgoing,
+      discardOutgoing,
+      () => {
+        const installation = installGeneratedMapDocumentPainting(stem, target.zones, painting);
+        if (!installation.ok) return installation;
+        try {
+          const road = mapPathSnapshot()?.paths.find((path) => path.kind === 'road') ?? null;
+          if (!road) throw new Error('installed baseline has no committed road');
+          const race = raceTrackPlan(road, mapSamplePath, `fart-racer-road-${road.id}`);
+          target.markers = [...target.markers, ...race.markers];
+          return installation;
+        } catch (error) {
+          return { ok: false as const, error: `checkpoint construction failed (${(error as Error).message})` };
+        }
+      },
+    );
+  };
+
   const renameExistingMap = (stem: string, rawName: string, currentTriangles: number | null): boolean => {
     if (stem === state.activeMapStem && currentTriangles !== null) recordMapDocumentRenderStats(stem, currentTriangles);
     const result = renameMapDocument(stem, rawName);
@@ -4156,6 +4394,20 @@ export default function AppFrame() {
         return;
       }
     }
+    if (commandId === 'export-game') {
+      const current = stateRef.current;
+      const document = current.workspaceDocuments.find((candidate) => candidate.id === current.activeWorkspaceDocumentId);
+      if (document?.kind !== 'world') {
+        setState((previous) => ({ ...previous, openMenu: null, status: 'Export Game needs a world document in view' }));
+        return;
+      }
+      void exportFartRacerGame();
+      return;
+    }
+    if (commandId === 'add-race-checkpoint') { placeRaceMarkerAtCursor(RACE_MARKER_TAGS.checkpoint); return; }
+    if (commandId === 'set-race-home') { placeRaceMarkerAtCursor(RACE_MARKER_TAGS.home); return; }
+    if (commandId === 'add-race-drive-thru') { placeRaceDriveThruFromSelection(); return; }
+    if (commandId === 'auto-race-checkpoints') { autoPlaceRaceMarkers(); return; }
     if (commandId === 'new-map') {
       createNewMap('untitled');
       return;
@@ -5046,7 +5298,7 @@ export default function AppFrame() {
   // EditorState): map paint strokes and in-viewer mesh edits — mesh docs route to
   // the host mesh journal instead (meshUndoRedo below).
   const WORLD_UNDO_CAP = 32;
-  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId', 'architecture', 'architectureSelection', 'worldFinishes'] as const;
+  const WORLD_UNDO_KEYS = ['worldPieces', 'worldFlora', 'worldPrefabs', 'worldMarkers', 'objects', 'authoredBuildPieces', 'authoredFloraSpecies', 'selectedPieceId', 'selectedPieceIds', 'selectedWorldMarkerId', 'selectedObjectId', 'armedPieceId', 'architecture', 'architectureSelection', 'worldFinishes'] as const;
   const recordWorldEdit = (
     prev: EditorState,
     next: EditorState,
@@ -5560,6 +5812,7 @@ export default function AppFrame() {
         selectedPieceIds: [],
         architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
         selectedFloraPatchId: null,
+        selectedWorldMarkerId: null,
         status: 'cleared world selection',
       };
       if (intent === 'toggle') {
@@ -5573,6 +5826,7 @@ export default function AppFrame() {
           selectedPieceIds,
           architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
           selectedFloraPatchId: null,
+          selectedWorldMarkerId: null,
           status: `${wasSelected ? 'removed' : 'added'} ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id} · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`,
         };
       }
@@ -5583,6 +5837,7 @@ export default function AppFrame() {
         selectedPieceIds,
         architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
         selectedFloraPatchId: null,
+        selectedWorldMarkerId: null,
         status: intent === 'connected'
           ? `selected touching component · ${selectedPieceIds.length} piece${selectedPieceIds.length === 1 ? '' : 's'}`
           : `selected ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id}`,
@@ -5600,6 +5855,7 @@ export default function AppFrame() {
       selectedPieceIds: [...ids],
       architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
       selectedFloraPatchId: null,
+      selectedWorldMarkerId: null,
       status: `selected structure · ${ids.length} piece${ids.length === 1 ? '' : 's'}`,
     }));
   };
@@ -5616,7 +5872,24 @@ export default function AppFrame() {
         selectedPieceId: null,
         selectedPieceIds: [],
         architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        selectedWorldMarkerId: null,
         status: 'selected flora patch — its ground radius rings in the world',
+      };
+    });
+  };
+
+  const selectWorldMarker = (id: string) => {
+    setState((previous) => {
+      const marker = previous.worldMarkers.find((candidate) => candidate.id === id);
+      if (!marker) return { ...previous, status: 'that world marker is no longer on the map' };
+      return {
+        ...previous,
+        selectedWorldMarkerId: id,
+        selectedPieceId: null,
+        selectedPieceIds: [],
+        selectedFloraPatchId: null,
+        architectureSelection: EMPTY_ARCHITECTURE_SELECTION,
+        status: `selected ${marker.name} · ${marker.trigger.event.tag}`,
       };
     });
   };
@@ -7093,7 +7366,10 @@ export default function AppFrame() {
   useEffect(() => {
     const currentSeat = (): AgentSeat | null => (globalThis as any).__agentSeat ?? null;
     const refreshSeatUi = () => (globalThis as any).__agentSeatRefresh?.();
-    const bootstrap = { newPrimitive: seatNewPrimitive };
+    const bootstrap = {
+      newPrimitive: seatNewPrimitive,
+      shellAction: (action: string, args: Record<string, unknown>) => seatShellActionRef.current(action, args),
+    };
     const unsubscribe = subscribe('system:notification', (payload: any) => {
       if (payload?.kind !== 'agent-seat' || typeof payload?.replyPath !== 'string' ||
           !payload.replyPath.startsWith('/tmp/reactjit-seat-') || !payload.replyPath.endsWith('.json')) return;
@@ -8885,6 +9161,118 @@ export default function AppFrame() {
       return outcome.status === 'rejected' ? outcome.reason : null;
     };
     try {
+      if (action === 'world-piece-replace') {
+        if (background) return fail('world piece replacement changes the visible world document');
+        const document = live.workspaceDocuments.find((candidate) => candidate.id === live.activeWorkspaceDocumentId);
+        if (document?.kind !== 'world') return fail('world piece replacement needs a world document in view');
+        const pieceId = String(args.pieceId ?? '').trim();
+        const nextPieceId = String(args.nextPieceId ?? '').trim();
+        if (!pieceId || !nextPieceId) return fail('world-piece-replace needs pieceId and nextPieceId');
+        if (!live.worldPieces.some((piece) => piece.id === pieceId)) return fail(`world piece "${pieceId}" does not exist`);
+        if (!authoredPieceFor(nextPieceId)) return fail(`replacement asset "${nextPieceId}" is not a placeable authored model`);
+        const outcome = invokeApplicationCommand(WORLD_PIECE_REPLACE_COMMAND_ID, {
+          documentId: live.activeMapStem,
+          pieceId,
+          nextPieceId,
+        }, 'seat');
+        return outcome.status === 'rejected'
+          ? fail(outcome.reason)
+          : ok({ pieceId, nextPieceId });
+      }
+      if (action === 'fart-racer-export') {
+        if (background) return fail('Fart Racer export changes the visible world document');
+        const document = live.workspaceDocuments.find((candidate) => candidate.id === live.activeWorkspaceDocumentId);
+        if (document?.kind !== 'world') return fail('Fart Racer export needs a world document in view');
+        if (gameExportRunningRef.current) return fail('Fart Racer export is already running');
+        void exportFartRacerGame();
+        return ok({ state: 'started', stem: live.activeMapStem });
+      }
+      if (action === 'fart-racer-baseline') {
+        if (background) return fail('Fart Racer generation changes the visible world document');
+        const name = typeof args.name === 'string' && args.name.trim() ? args.name : 'Fart Racer Baseline';
+        createFartRacerMap(name, null, args.discardOutgoing === true);
+        return ok({ state: 'started', name });
+      }
+      if (action === 'map-delete') {
+        if (background) return fail('map deletion changes the visible world catalog');
+        const stem = String(args.stem ?? '').trim();
+        if (!stem) return fail('map-delete needs an exact inactive map stem');
+        const result = deleteMapDocument(stem, live.activeMapStem);
+        return result.ok ? ok({ stem, name: result.name }) : fail(result.error);
+      }
+      if (action === 'map-info') {
+        const stem = typeof args.stem === 'string' && args.stem.trim() ? args.stem : live.activeMapStem;
+        const loaded = readWorldSave(stem);
+        if (loaded.status !== 'ok') return fail(loaded.status === 'invalid' ? loaded.error : `map ${stem} has no world save`);
+        const saved = loaded.save;
+        const structural = validateRaceMarkers(saved.markers);
+        const road = stem === live.activeMapStem
+          ? mapPathSnapshot()?.paths.find((path) => path.kind === 'road') ?? null
+          : null;
+        const geometry = road ? validateRaceMarkerGeometry(saved.markers, road, mapSamplePath) : null;
+        return ok({
+          stem,
+          active: stem === live.activeMapStem,
+          seq: saved.seq,
+          pieces: saved.pieces.map((piece) => ({ id: piece.id, pieceId: piece.pieceId, x: piece.x, y: piece.y, z: piece.z, yawDegrees: piece.yawDegrees })),
+          markers: saved.markers.map((marker) => ({
+            id: marker.id,
+            tag: marker.trigger.event.tag,
+            order: marker.trigger.event.order ?? null,
+            sourceId: marker.trigger.event.sourceId ?? null,
+            sourcePath: marker.sourcePath ?? null,
+          })),
+          liveMarkers: stem === live.activeMapStem ? live.worldMarkers.map((marker) => ({
+            id: marker.id,
+            tag: marker.trigger.event.tag,
+            order: marker.trigger.event.order ?? null,
+            sourceId: marker.trigger.event.sourceId ?? null,
+            sourcePath: marker.sourcePath ?? null,
+          })) : null,
+          race: structural,
+          geometry,
+          nativeRoad: road ? { id: road.id, points: road.points.length, profile: road.profile } : null,
+          // Whether the committed road actually FITS the native planner. A
+          // truncated plan or ribbon renders as a road with holes in it, and
+          // nothing else in the pipeline says so.
+          nativePathStats: stem === live.activeMapStem ? mapPathStats() : null,
+          // And whether the road was actually STAMPED into the ground the
+          // compile reads. A road that planned but never reached the tile lane
+          // — or reached it and was then overwritten by a generated chunk — is
+          // invisible everywhere else in the pipeline: the path snapshot, the
+          // marker geometry, and the export all still report a healthy track.
+          roadCoverage: stem === live.activeMapStem ? (() => {
+            let roadCells = 0;
+            let chunksWithRoad = 0;
+            for (const { cx, cz } of mapChunkList().chunks) {
+              const cells = mapReadCells(cx, cz, 'tiles');
+              if (!cells) continue;
+              let here = 0;
+              for (const value of cells) if (ROAD_TILE_KINDS.has(TILE_KINDS[value] ?? '')) here += 1;
+              if (here > 0) { chunksWithRoad += 1; roadCells += here; }
+            }
+            return { roadCells, chunksWithRoad };
+          })() : null,
+        });
+      }
+      if (action === 'destination') {
+        if (background) return fail('destination changes the visible workspace');
+        const id = String(args.id ?? '');
+        if (!['home', 'world', 'model', 'material', 'motion', 'playtest', 'bible'].includes(id)) {
+          return fail(`unknown editor destination "${id}"`);
+        }
+        goToDestinationRef.current(id as DestinationId);
+        return ok({ id });
+      }
+      if (action === 'blueprint-report') {
+        const query: BlueprintApplicationQuery = {
+          ...(typeof args.consumerId === 'string' ? { consumerId: args.consumerId } : {}),
+          ...(typeof args.sourceId === 'string' ? { sourceId: args.sourceId } : {}),
+          ...(typeof args.profileId === 'string' ? { profileId: args.profileId } : {}),
+          ...(typeof args.disposition === 'string' ? { disposition: args.disposition as BlueprintApplicationQuery['disposition'] } : {}),
+        };
+        return ok(blueprintApplicationReport(query));
+      }
       if (action === 'editor-status') {
         const block = blockingNowRef.current(live);
         const activeDocument = live.workspaceDocuments.find((document) => document.id === live.activeWorkspaceDocumentId) ?? null;
@@ -8913,6 +9301,11 @@ export default function AppFrame() {
           modelDirty: modelId ? Boolean(live.modelDirty[modelId]) : null,
           paintLayoutStale: (globalThis as any).__model_paint_layout_stale?.() === 1,
           modelFocusShape: (globalThis as any).__modelFocusBridge?.shape ?? null,
+          gameExport: gameExport ? {
+            phase: gameExport.phase,
+            message: gameExport.message,
+            output: gameExport.output ?? null,
+          } : null,
         });
       }
       // Part-ownership truth (req_4189). The shell's Outliner rows and the host's
@@ -9180,6 +9573,30 @@ export default function AppFrame() {
         }
         return fail('Auto-Rig operation must be start, reroll, status, or accept');
       }
+      if (action === 'blueprint') {
+        if (background) return fail('blueprint authoring belongs to the visible resident model; open that model first');
+        if (!modelId || activeSessionModelIdRef.current !== modelId) return fail('blueprint authoring needs this model to own the resident native session');
+        const bridge = (globalThis as any).__modelFocusBridge as import('../stage/ModelView').ModelFocusBridge | undefined;
+        if (!bridge?.commitBlueprint) return fail('resident blueprint bridge is unavailable — rebuild or reopen the model document');
+        const operation = String(args.operation ?? 'write');
+        if (operation !== 'write' && operation !== 'replace' && operation !== 'remove') {
+          return fail('blueprint operation must be write, replace, or remove');
+        }
+        if (operation === 'remove') {
+          const result = bridge.commitBlueprint(null);
+          if (!result.ok) return fail(result.error ?? 'native blueprint removal refused');
+          authorizedBlueprintClearRef.current.add(modelId);
+          markModelDirty(modelId);
+          return ok({ model: modelId, operation: 'remove', readback: result.snapshot });
+        }
+        let canonical;
+        try { canonical = validateBlueprintTable(args.blueprint ?? args.value); }
+        catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+        const result = bridge.commitBlueprint(canonical);
+        if (!result.ok) return fail(result.error ?? 'native blueprint transaction refused');
+        markModelDirty(modelId);
+        return ok({ model: modelId, operation: 'write', blueprint: result.snapshot.blueprint, readback: result.snapshot });
+      }
       // A page of saved triangles is a lookup, not a dump: past this the reply stops
       // answering a question and becomes a transcript the agent has to re-parse.
       const PACKAGE_TRIANGLE_PAGE = 64;
@@ -9257,6 +9674,22 @@ export default function AppFrame() {
           formatVersion: doc.formatVersion ?? null,
           legacy: doc.formatVersion === undefined,
         };
+        if (operation === 'blueprint') {
+          const raw = savedTable?.blueprint;
+          const parsed = meshSemanticBlueprint(savedTable);
+          let error: string | null = null;
+          if (raw !== undefined && parsed === null) {
+            try { validateBlueprintTable(raw); }
+            catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+          }
+          return ok({
+            ...identity,
+            verdict: raw === undefined ? 'absent' : parsed ? 'valid' : 'invalid',
+            blueprint: parsed ?? (raw === undefined ? null : raw),
+            bytes: parsed ? blueprintTableByteLength(parsed) : raw === undefined ? 0 : new TextEncoder().encode(JSON.stringify(raw)).length,
+            error,
+          });
+        }
         if (operation === 'info') {
           const parts = packageMeshDocParts(pkg) ?? [];
           const storedSkeleton = readManifest(pkg.kind, pkg.id)?.skeleton;
@@ -9399,7 +9832,7 @@ export default function AppFrame() {
             ...compareMeshDocs(doc, otherDoc, Number.isFinite(Number(args.tolerance)) ? Number(args.tolerance) : undefined),
           });
         }
-        return fail(`unknown package operation "${operation}" — list, info, regions, ranges, triangles, diff, or compare`);
+        return fail(`unknown package operation "${operation}" — list, info, blueprint, regions, ranges, triangles, diff, or compare`);
       }
       if (action === 'model-open') {
         const requested = String(args.model ?? args.id ?? '').trim();
@@ -9565,6 +9998,25 @@ export default function AppFrame() {
         if (!id || !name) return fail('model id and name are required');
         renameModel(id, name);
         return ok({ id, name });
+      }
+      if (action === 'model-classify') {
+        const id = String(args.id ?? modelId ?? '');
+        const requestedKind = String(args.kind ?? '');
+        const kinds = new Set<ModelPackage['kind']>(['build', 'prop', 'character', 'vehicle']);
+        if (!id || !kinds.has(requestedKind as ModelPackage['kind'])) {
+          return fail('model id and kind (build, prop, character, or vehicle) are required');
+        }
+        const pkg = effectiveModelPackage(id, live.modelOverrides, live.modelDupes);
+        if (!pkg) return fail(`no model package "${id}"`);
+        const committed = reclassifyModelPackage(pkg.kind, id, requestedKind as ModelPackage['kind']);
+        if (!committed) return fail(`could not move "${pkg.name}" from ${pkg.kind} to ${requestedKind}`);
+        upsertSavedPackage(committed);
+        setState((previous) => ({
+          ...previous,
+          modelDupes: upsertModelPackageProjection(previous.modelDupes, committed),
+          status: `Classified "${committed.name}" as ${committed.kind}`,
+        }));
+        return ok({ id, from: pkg.kind, to: committed.kind, dir: resolvePackageDir(committed.kind, id) });
       }
       // Full resident mesh journal for the retopo corpus (req_4602): the follow
       // firehose only keeps delete→create-face pairs, so training-data capture
@@ -11895,7 +12347,7 @@ export default function AppFrame() {
       </RenderProbe>
       {playing ? (
         <C.HW_PlayBody>
-          <PlayRoute />
+          <PlayRoute fartRacerReady={gameExport?.phase === 'complete'} />
         </C.HW_PlayBody>
       ) : (
       <>
@@ -12152,6 +12604,10 @@ export default function AppFrame() {
               if (activeModelId) authorizedSemanticClearRef.current.add(activeModelId);
               markActiveModelDirty();
             }}
+            onBlueprintRemoved={() => {
+              if (activeModelId) authorizedBlueprintClearRef.current.add(activeModelId);
+              markActiveModelDirty();
+            }}
             onCollapse={() => setState((prev) => ({ ...prev, rightPanelCollapsed: true, status: 'focus panel collapsed' }))}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
@@ -12199,6 +12655,7 @@ export default function AppFrame() {
               onSelectWall: (edgeId) => selectWallEdge({ edgeId, side: 'a' }),
               onSelectOpening: (edgeId, openingId) => selectOpening({ edgeId, openingId }),
               onSelectFloraPatch: selectFloraPatch,
+              onSelectMarker: selectWorldMarker,
               onLocate: locateWorldEntity,
             }}
             lab={{
@@ -12346,6 +12803,8 @@ export default function AppFrame() {
             pending: animationProjection.batch.stats.pending,
             pressureSuspended: animationProjection.batch.pressureSuspended,
           }}
+          gameExport={gameExport}
+          onGameExport={() => setState((previous) => ({ ...previous, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: `opened Fart Racer export journal (${gameExport?.phase ?? 'idle'})` }))}
           onLore={() => setState((current) => {
             const document = current.workspaceDocuments.find((row) => row.id === current.activeWorkspaceDocumentId);
             return document?.kind === 'model'
@@ -12378,7 +12837,7 @@ export default function AppFrame() {
       ) : null}
       {state.buildDialogOpen ? (
         <RenderProbe id="Build Journal Dialog">
-          <BuildJournalDialog journal={journal} actions={journalActions} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
+          <BuildJournalDialog journal={journal} actions={journalActions} gameExport={gameExport} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
         </RenderProbe>
       ) : null}
       {preferencesOpen ? (
@@ -12568,6 +13027,7 @@ export default function AppFrame() {
             onOpen={openMapDocument}
             onNew={createNewMap}
             onGenerateCoastal={createCoastalMap}
+            onGenerateFartRacer={createFartRacerMap}
             onRename={renameExistingMap}
             onDelete={deleteExistingMap}
             onClose={closeMapDocuments}

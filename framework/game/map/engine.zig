@@ -236,6 +236,8 @@ pub fn reset() void {
     // that happened to be open before it. The caller must explicitly bind the
     // new document after seeding/loading it.
     g_autosave_len = 0;
+    g_persisted_len = 0;
+    g_persisted_clean = false;
     clearGeneratedInstallSession();
     clearMapHistory();
     chunks.clearAll();
@@ -1277,6 +1279,12 @@ pub const GROUND_MATERIAL_REF_STRIDE: i32 = 512;
 pub const GROUND_UNDERCOAT_REF_STRIDE: i32 = GROUND_MATERIAL_REF_STRIDE * 256;
 pub const GROUND_UNDERCOAT_TILE_LIMIT: i16 = 125;
 pub const GROUND_RIBBON_HEADER_FLOATS: usize = 1;
+/// Fixed upper bound for one chunk's formula-data stream. Host bindings use
+/// this for their borrowed return scratch; encodeGroundData reports the live
+/// prefix after applying the current palettes, bindings, and road ribbons.
+pub const MAX_GROUND_DATA_FLOATS: usize = 6 + MAX_PALETTE * 3 * 3 +
+    MAX_TILE_BINDINGS * BINDING_FLOATS + chunks.TILE_CELLS * 2 +
+    GROUND_RIBBON_HEADER_FLOATS + roads.MAX_RIBBON_SEGMENTS_PER_CHUNK * roads.RIBBON_SEGMENT_FLOATS;
 const GROUND_PACKED_REF_MAX: i32 = MAX_TILE_BINDINGS + 255 * GROUND_MATERIAL_REF_STRIDE +
     (@as(i32, GROUND_UNDERCOAT_TILE_LIMIT) + 2) * GROUND_UNDERCOAT_REF_STRIDE;
 comptime {
@@ -1501,6 +1509,53 @@ pub fn writePathSnapshot(out: []f32) ?usize {
     return cursor;
 }
 
+pub const PathSnapshotSample = struct {
+    path_id: u32,
+    distance_m: f32,
+    total_m: f32,
+    x: f32,
+    y: f32,
+    z: f32,
+    tangent_x: f32,
+    tangent_y: f32,
+    tangent_z: f32,
+};
+
+/// UI-rate gameplay sampling through the same curved native centerline used by
+/// trains and path controls. Coordinates use the editor/world origin, exactly
+/// like writePathSnapshot; callers never reconstruct curvature in JavaScript.
+pub fn samplePathForSnapshot(path_id: u32, distance_m: f32) ?PathSnapshotSample {
+    const path = transport.pathForId(path_id) orelse return null;
+    const sampled = transport.samplePath(path, distance_m) orelse return null;
+    const author_origin = chunks.CHUNK_METERS / 2;
+    return .{
+        .path_id = path_id,
+        .distance_m = std.math.clamp(if (std.math.isFinite(distance_m)) distance_m else 0, 0, transport.pathLength(path)),
+        .total_m = transport.pathLength(path),
+        .x = sampled.point.gx - author_origin,
+        .y = sampled.point.elevation_m,
+        .z = sampled.point.gz - author_origin,
+        .tangent_x = sampled.tangent.gx,
+        .tangent_y = sampled.tangent.elevation_m,
+        .tangent_z = sampled.tangent.gz,
+    };
+}
+
+test "snapshot path sampling shares curved transport geometry and editor origin" {
+    transport.clearAll();
+    defer transport.clearAll();
+    const origin = chunks.CHUNK_METERS / 2;
+    transport.beginDraft(.{ .road = .{} }, 0);
+    transport.addDraftPoint(.{ .gx = origin, .gz = origin });
+    transport.addDraftPoint(.{ .gx = origin + 20, .gz = origin });
+    const path_id = transport.commitDraft().?;
+    const sample = samplePathForSnapshot(path_id, 5).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 5), sample.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), sample.z, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 20), sample.total_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), sample.tangent_x, 0.001);
+}
+
 // ── roads: strokes compile to tile stamps with an UNDERCOAT ──────────────────
 // ROADSTROKE-0610 semantics (PaintCanvas:1143): a road is a recipe (centerline
 // + profile, roads.zig); stamping is DESTRUCTIVE into the chunk tile grids —
@@ -1588,8 +1643,14 @@ pub fn roadsRestamp() void {
 
     // 3. stamp, capturing the undercoat. Road cells wear the kind default
     // (hand-painted materials never bleed into the grammar's lanes).
+    var stamped: usize = 0;
+    var off_map: usize = 0;
     for (g_plan_cells[0..plan.count]) |pc| {
-        const cell = cellAtGlobal(pc.gx, pc.gz) orelse continue;
+        const cell = cellAtGlobal(pc.gx, pc.gz) orelse {
+            off_map += 1;
+            continue;
+        };
+        stamped += 1;
         g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), .{ cell.tile.*, cell.material.* }) catch {
             road_plan_truncated = true;
             continue;
@@ -1601,6 +1662,16 @@ pub fn roadsRestamp() void {
                 road_plan_truncated = true;
             };
         }
+    }
+    // A road that plans zero cells, or plans them onto chunks that do not
+    // exist, leaves the ground exactly as it was and says nothing — the map
+    // then renders a track with no road on it and every other readback still
+    // reports a healthy committed path. Say it here, where the truth is.
+    if (count > 0) {
+        std.debug.print(
+            "[map] road restamp: {d} stroke(s) -> {d} plan cell(s) -> {d} stamped, {d} outside the {d} resident chunk(s)\n",
+            .{ count, plan.count, stamped, off_map, chunks.chunkCount() },
+        );
     }
 }
 
@@ -2138,6 +2209,103 @@ pub fn loadMap(bytes: []const u8) bool {
     return loadMapInternal(bytes, true);
 }
 
+pub const PreparedMap = struct {
+    allocator: std.mem.Allocator,
+    document: *store.Prepared,
+    road_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty,
+    road_markings: std.AutoHashMapUnmanaged(u64, u8) = .empty,
+    road_plan_count: usize = 0,
+    road_plan_truncated: bool = false,
+
+    pub fn deinit(self: *PreparedMap) void {
+        const allocator = self.allocator;
+        self.document.deinit();
+        self.road_under.deinit(seen_alloc);
+        self.road_markings.deinit(seen_alloc);
+        allocator.destroy(self);
+    }
+};
+
+fn preparedCellAt(document: *store.Prepared, gx: i32, gz: i32) ?CellRef {
+    const cx = chunks.chunkOfGlobalTile(gx);
+    const cz = chunks.chunkOfGlobalTile(gz);
+    const chunk = document.slots.chunkAt(cx, cz) orelse return null;
+    const index = chunks.cellIndex(gx - cx * CHUNK_TILES, gz - cz * CHUNK_TILES) orelse return null;
+    return .{ .tile = &chunk.tiles[index], .material = &chunk.materials[index] };
+}
+
+pub fn prepareMap(allocator: std.mem.Allocator, bytes: []const u8) ?*PreparedMap {
+    const document = store.prepare(allocator, bytes) orelse return null;
+    const prepared = allocator.create(PreparedMap) catch {
+        document.deinit();
+        return null;
+    };
+    prepared.* = .{ .allocator = allocator, .document = document };
+    var keep = false;
+    defer if (!keep) prepared.deinit();
+
+    var road_strokes: [roads.MAX_STROKES]roads.RoadStroke = undefined;
+    var road_count: usize = 0;
+    for (document.paths[0..document.path_count]) |*path| {
+        const profile = switch (path.profile) {
+            .road => |profile| profile,
+            else => continue,
+        };
+        road_strokes[road_count] = .{
+            .id = path.id,
+            .points = path.points[0..path.point_count],
+            .profile = profile,
+            .curve_radius_m = path.curve_radius_m,
+        };
+        road_count += 1;
+    }
+
+    const plan_cells = allocator.alloc(roads.PlanCell, MAP_TUNING.max_road_plan_cells) catch return null;
+    defer allocator.free(plan_cells);
+    const plan = roads.planRoads(road_strokes[0..road_count], plan_cells);
+    prepared.road_plan_count = plan.count;
+    prepared.road_plan_truncated = plan.truncated;
+    for (plan_cells[0..plan.count]) |cell_plan| {
+        const cell = preparedCellAt(document, cell_plan.gx, cell_plan.gz) orelse continue;
+        const key = roadCellKey(cell_plan.gx, cell_plan.gz);
+        prepared.road_under.put(seen_alloc, key, .{ cell.tile.*, cell.material.* }) catch {
+            prepared.road_plan_truncated = true;
+            continue;
+        };
+        cell.tile.* = roads.kindIndex(cell_plan.kind);
+        cell.material.* = chunks.EMPTY_CELL;
+        if (cell_plan.markings != 0) {
+            prepared.road_markings.put(seen_alloc, key, cell_plan.markings) catch {
+                prepared.road_plan_truncated = true;
+            };
+        }
+    }
+    keep = true;
+    return prepared;
+}
+
+/// Publish a worker-decoded map. `prepared` takes ownership of the outgoing
+/// chunk table, allowing its expensive destruction to happen off the commit
+/// frame after this function returns.
+pub fn commitPreparedMap(prepared: *PreparedMap) bool {
+    clearMapHistory();
+    var binding_count: usize = 0;
+    const outgoing = store.commitPrepared(prepared.document, g_tile_bindings[0..], &binding_count) orelse return false;
+    prepared.document.slots = outgoing;
+    g_tile_binding_count = binding_count;
+    const outgoing_under = g_road_under;
+    const outgoing_markings = g_road_markings;
+    g_road_under = prepared.road_under;
+    g_road_markings = prepared.road_markings;
+    prepared.road_under = outgoing_under;
+    prepared.road_markings = outgoing_markings;
+    g_plan_cells_resident_high_water = @max(g_plan_cells_resident_high_water, prepared.road_plan_count);
+    road_plan_truncated = prepared.road_plan_truncated;
+    road_ribbon_truncated = false;
+    bumpMapRevision();
+    return true;
+}
+
 // ── autosave (SESSIONSAVE req_2765) ──────────────────────────────────────────
 // The painting micro-saves itself: with a path registered, every mutating
 // gesture (stroke end, road commit/delete, binding table edit, zone drop,
@@ -2145,8 +2313,13 @@ pub fn loadMap(bytes: []const u8) bool {
 // V20 contract — edits persist at every micro change, never only on a manual
 // Save. No path registered (tests, the compiled player) ⇒ never touches disk.
 
-var g_autosave_path_buf: [1024]u8 = undefined;
+const MAP_FILE_PATH_CAPACITY: usize = 1024;
+
+var g_autosave_path_buf: [MAP_FILE_PATH_CAPACITY]u8 = undefined;
 var g_autosave_len: usize = 0;
+var g_persisted_path_buf: [MAP_FILE_PATH_CAPACITY]u8 = undefined;
+var g_persisted_len: usize = 0;
+var g_persisted_clean = false;
 
 /// Register the file every subsequent mutation saves into. Empty disables.
 pub fn setAutosaveFile(path: []const u8) void {
@@ -2155,22 +2328,58 @@ pub fn setAutosaveFile(path: []const u8) void {
     g_autosave_len = n;
 }
 
-/// Serialize the painting and atomically replace the autosave file.
-/// No-op (false) when no path is registered or the world is empty.
-pub fn autosaveNow(io: std.Io) bool {
-    if (g_autosave_len == 0) return false;
-    const path = g_autosave_path_buf[0..g_autosave_len];
+fn noteFilePersisted(path: []const u8) void {
+    const n = @min(path.len, g_persisted_path_buf.len);
+    @memcpy(g_persisted_path_buf[0..n], path[0..n]);
+    g_persisted_len = n;
+    g_persisted_clean = n == path.len;
+}
+
+/// The named file already contains the active canonical painting. Loads and
+/// detached commits call this only after their complete replacement succeeds.
+pub fn noteFileLoaded(path: []const u8) void {
+    noteFilePersisted(path);
+}
+
+pub fn fileSaveNeeded(path: []const u8) bool {
+    return !g_persisted_clean or
+        path.len != g_persisted_len or
+        !std.mem.eql(u8, path, g_persisted_path_buf[0..g_persisted_len]);
+}
+
+/// Serialize once and atomically replace a named painting. A clean document is
+/// an O(path length) no-op, which removes the second full RMAP encode from map
+/// switching when micro-save already persisted the latest mutation.
+pub fn saveFile(io: std.Io, path: []const u8) bool {
+    if (!fileSaveNeeded(path)) {
+        std.Io.Dir.cwd().access(io, path, .{}) catch {
+            g_persisted_clean = false;
+        };
+        if (!fileSaveNeeded(path)) return true;
+    }
     const alloc = std.heap.page_allocator;
     const buf = alloc.alloc(u8, saveSize()) catch return false;
     defer alloc.free(buf);
     const n = saveMap(buf);
     if (n == 0) return false;
     if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(io, dir) catch {};
-    var tmp_buf: [g_autosave_path_buf.len + 4]u8 = undefined;
+    var tmp_buf: [MAP_FILE_PATH_CAPACITY + 4]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
     std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp, .data = buf[0..n] }) catch return false;
     std.Io.Dir.rename(.cwd(), tmp, .cwd(), path, io) catch return false;
+    noteFilePersisted(path);
     return true;
+}
+
+/// Serialize the painting and atomically replace the autosave file.
+/// No-op (false) when no path is registered or the world is empty.
+pub fn autosaveNow(io: std.Io) bool {
+    // Every caller invokes this after an authored mutation. Mark first so a
+    // disabled autosave still leaves the manual flush aware of pending work.
+    g_persisted_clean = false;
+    if (g_autosave_len == 0) return false;
+    const path = g_autosave_path_buf[0..g_autosave_len];
+    return saveFile(io, path);
 }
 
 // ── dirty bookkeeping ─────────────────────────────────────────────────────────
@@ -2196,6 +2405,53 @@ pub fn clearDirty() void {
 test "road planner budget is an explicit generated-city tuning value" {
     try std.testing.expectEqual(@as(usize, 1_048_576), MAP_TUNING.max_road_plan_cells);
     try std.testing.expect(MAP_TUNING.max_road_plan_cells > 262_144);
+}
+
+test "persisted file identity makes an unchanged switch flush constant-time" {
+    reset();
+    defer reset();
+    const path = "maps/example/painting.rmap";
+    try std.testing.expect(fileSaveNeeded(path));
+    noteFileLoaded(path);
+    try std.testing.expect(!fileSaveNeeded(path));
+    try std.testing.expect(fileSaveNeeded("maps/other/painting.rmap"));
+    _ = autosaveNow(std.testing.io);
+    try std.testing.expect(fileSaveNeeded(path));
+}
+
+test "detached map preparation derives roads before its bounded publish" {
+    reset();
+    defer reset();
+    const source = chunks.growChunk(0, 0).?;
+    const mid = chunks.cellIndex(60, 60).?;
+    source.tiles[mid] = 7;
+    roads.setKindIndices(.{ 10, 11, 12, 13, 14, 15, 16, 17 });
+    setRoadProfile(.{ .lanesF = 1, .lanesB = 1, .sidewalks = true });
+    setTool(.{ .channel = .road });
+    strokeBegin(std.testing.io, 0, -20);
+    _ = strokeEnd(std.testing.io);
+    strokeBegin(std.testing.io, 0, 20);
+    _ = strokeEnd(std.testing.io);
+    _ = roadCommit(std.testing.io).?;
+
+    const encoded = try std.testing.allocator.alloc(u8, saveSize());
+    defer std.testing.allocator.free(encoded);
+    const used = saveMap(encoded);
+    try std.testing.expect(used > 0);
+
+    reset();
+    const outgoing = chunks.growChunk(1, 0).?;
+    outgoing.tiles[0] = 4;
+    const prepared = prepareMap(std.testing.allocator, encoded[0..used]).?;
+    defer prepared.deinit();
+    try std.testing.expect(prepared.road_under.count() > 0);
+    try std.testing.expect(chunks.chunkAt(1, 0) != null);
+    try std.testing.expect(chunks.chunkAt(0, 0) == null);
+
+    try std.testing.expect(commitPreparedMap(prepared));
+    try std.testing.expect(chunks.chunkAt(1, 0) == null);
+    const stamped = chunks.chunkAt(0, 0).?.tiles[mid];
+    try std.testing.expect(stamped >= 10 and stamped <= 17);
 }
 
 test "heightAt bilinear-samples painted terrain, 0 off-chunk" {

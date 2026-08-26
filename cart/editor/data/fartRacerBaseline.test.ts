@@ -141,14 +141,30 @@ test('the road corridor is exactly the authored elevation; the land around it is
   assert(highest - lowest > 6, `the landscape is flat (${(highest - lowest).toFixed(1)} m of relief)`);
 });
 
+test('the whole circuit fits inside the painted chunks', () => {
+  const bounds = FART_RACER_BASELINE_TUNING.chunks;
+  const span = 120;
+  const minX = bounds.minX * span - span / 2;
+  const maxX = bounds.maxX * span + span / 2;
+  const minZ = bounds.minZ * span - span / 2;
+  const maxZ = bounds.maxZ * span + span / 2;
+  // A road is wider than its centreline, and its cells stamp into chunks that
+  // must exist or the ground under them is never painted.
+  const margin = 24;
+  for (const point of FART_RACER_BASELINE_TUNING.track.points) {
+    assert(point.x - margin > minX && point.x + margin < maxX, `track point x=${point.x} leaves the painted world [${minX}, ${maxX}]`);
+    assert(point.z - margin > minZ && point.z + margin < maxZ, `track point z=${point.z} leaves the painted world [${minZ}, ${maxZ}]`);
+  }
+});
+
 test('the lap is a real lap', () => {
   const lap = authoredLapLengthM();
   assert(lap > 1000 && lap < 2000, `authored lap length ${lap.toFixed(0)} m is not a circuit`);
 });
 
-test('the native stream is sixteen shaped chunks plus one closed road', () => {
+test('the native stream is twenty-five shaped chunks plus one closed road', () => {
   const stream = packFartRacerBaselinePainting(LEGEND);
-  assert(stream.chunkCount === 16 && stream.manifest.length === 34, '4x4 chunk manifest drifted');
+  assert(stream.chunkCount === 25 && stream.manifest.length === 52, '5x5 chunk manifest drifted');
   assert(stream.paths[0] === 1 && stream.paths[1] === 1 && stream.paths[2] === 0, 'road path header is malformed');
   const pointCount = stream.paths[9]!;
   assert(pointCount === FART_RACER_BASELINE_TUNING.track.points.length, 'path point count drifted');
@@ -160,9 +176,9 @@ test('the native stream is sixteen shaped chunks plus one closed road', () => {
   const first = stream.packChunk(0);
   assert(first.length === 2 + 241 * 241 * 2 + 120 * 120 * 5, 'native chunk stride drifted');
   assert(first[0] === 0 && first[1] === 0, 'first chunk coordinate is malformed');
-  const last = stream.packChunk(15);
+  const last = stream.packChunk(24);
   assert(first === last, 'stream retained one allocation per chunk');
-  assert(last[0] === 3 && last[1] === 3, 'last chunk coordinate is malformed');
+  assert(last[0] === 4 && last[1] === 4, 'last chunk coordinate is malformed');
 
   const heightStart = 2;
   const sampleCount = 241 * 241;
@@ -172,14 +188,14 @@ test('the native stream is sixteen shaped chunks plus one closed road', () => {
   const treeStart = grassStart + 120 * 120;
 
   // A shaped chunk, not a flat plate.
-  const chunk = stream.packChunk(5);
+  const chunk = stream.packChunk(6);
   let low = Infinity;
   let high = -Infinity;
   for (let i = heightStart; i < heightStart + sampleCount; i += 97) {
     low = Math.min(low, chunk[i]!);
     high = Math.max(high, chunk[i]!);
   }
-  assert(high - low > 2, `chunk 5 is flat (${(high - low).toFixed(2)} m)`);
+  assert(high - low > 2, `chunk 6 is flat (${(high - low).toFixed(2)} m)`);
 
   // Water is still flat and zones are still unpainted.
   assert(chunk[heightStart + sampleCount] === 0, 'water lane picked up terrain');

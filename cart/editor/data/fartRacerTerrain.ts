@@ -124,9 +124,10 @@ export function surfacePaintAt(
 
   // A building lot is paved and grows nothing.
   if (pad.weight > 0.55) return { tile: 3, grass: -1, tree: -1, bush: -1 };
-  // The road itself is drawn analytically by the road ribbon; the shoulder
-  // under it reads as asphalt so the verge does not flash green at the seam.
-  if (near.distanceM < 11) return { tile: 4, grass: -1, tree: -1, bush: -1 };
+  // The road itself is drawn analytically by the road ribbon, over whatever
+  // ground it crosses. Painting a second asphalt surface underneath it only
+  // fights the ribbon; the corridor keeps bare ground and grows nothing.
+  if (near.distanceM < 11) return BARE;
   if (pad.weight > 0.15) return BARE;
 
   const dry = height > TERRAIN_TUNING.drySlopeHeightM;

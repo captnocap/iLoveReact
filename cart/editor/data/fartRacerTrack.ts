@@ -38,7 +38,7 @@ export const TRACK_PROFILE = Object.freeze({
   sidewalks: true,
   tracks: 0,
   curveRadiusM: 24,
-  speedLimitKph: 140,
+  speedLimitKph: 130,
 });
 
 type Segment = Readonly<{

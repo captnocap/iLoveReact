@@ -19,6 +19,7 @@ import { driveThruMarker } from '../world/worldMarkers';
 import { TRACK_POINTS, TRACK_PROFILE, trackProximity } from './fartRacerTrack';
 import { surfacePaintAt, terrainHeightAt, type TerrainPad } from './fartRacerTerrain';
 import { cityArchitecture, cityPads, cityPieces } from './fartRacerCity';
+import { chunkOriginMeters } from '../export/heightfieldExport';
 
 export type FartRacerBaselineCandidate = Readonly<{
   packageId: string;
@@ -66,13 +67,14 @@ export const FART_RACER_BASELINE_TUNING = Object.freeze({
     pathKindRoad: 0,
     pathPointFloats: 3,
   }),
-  /** 4x4 chunks = a 480 m square. The circuit uses the middle of it and the
-   *  landscape runs out to the edges, so the horizon is never the map's end. */
+  /** 5x5 chunks. A chunk is centred on its index times 120 m, so 0..4 spans
+   *  world [-60, 540] on both axes — the circuit uses the middle of it and the
+   *  landscape runs out past it, so the horizon is never the map's edge. */
   chunks: Object.freeze({
     minX: 0,
-    maxX: 3,
+    maxX: 4,
     minZ: 0,
-    maxZ: 3,
+    maxZ: 4,
   }),
   track: Object.freeze({
     id: TRACK_PROFILE.id,
@@ -321,8 +323,12 @@ export function packFartRacerBaselinePainting(legend: FartRacerLegend): FartRace
         throw new Error(`Fart Racer chunk index ${index} is out of range`);
       }
       const { cx, cz } = chunks[index]!;
-      const originX = cx * chunkMeters;
-      const originZ = cz * chunkMeters;
+      // A chunk is CENTRED on its index times the span, so its low corner is
+      // half a span below. Laying cells out from cx*120 instead put this
+      // world's whole landscape 60 m away from the road, the markers, and the
+      // buildings that were placed in real world metres.
+      const originX = chunkOriginMeters(cx);
+      const originZ = chunkOriginMeters(cz);
       reusable[0] = cx;
       reusable[1] = cz;
       reusable.fill(0, waterStart, tileStart);

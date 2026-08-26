@@ -1,7 +1,7 @@
 // Export-boundary regression: compiled Fart Racer terrain must preserve the
 // map owner's formula and native road/material stream (HEIGHTFIELDS v3).
 
-import { encodeFormulaHeightfields, GROUND_CHUNK_METERS, GROUND_FLOOR_RES, GROUND_FLOOR_SAMPLES } from './heightfieldExport';
+import { chunkOriginMeters, encodeFormulaHeightfields, GROUND_CHUNK_METERS, GROUND_FLOOR_RES, GROUND_FLOOR_SAMPLES } from './heightfieldExport';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((value: string) => (globalThis as any).__writeStdout?.(`${value}\n`));
@@ -27,6 +27,12 @@ test('HEIGHTFIELDS v3 carries the native formula and chunk road stream', () => {
   assert(formulaLength === formula.length, 'formula length was not baked once');
   let cursor = 12 + formulaLength;
   assert(view.getUint32(cursor + 8, true) === ground.length, 'ground-data length was dropped');
+  // The record places the chunk by its CENTRE, and the native map centres chunk
+  // (cx, cz) on (cx*120, cz*120) — chunks.globalTile is floor(x + 120/2). The
+  // chunk index and its centre coincide; its LOW CORNER is 60 m lower.
+  assert(view.getFloat32(cursor + 16, true) === 2 * GROUND_CHUNK_METERS, 'chunk centre X is not the chunk index times the span');
+  assert(view.getFloat32(cursor + 20, true) === 3 * GROUND_CHUNK_METERS, 'chunk centre Z is not the chunk index times the span');
+  assert(chunkOriginMeters(2) === 2 * GROUND_CHUNK_METERS - GROUND_CHUNK_METERS / 2, 'chunk origin is not half a span below its centre');
   assert(view.getUint32(cursor, true) === GROUND_FLOOR_RES, 'grid cols left the rendered floor resolution');
   assert(view.getUint32(cursor + 4, true) === GROUND_FLOOR_RES, 'grid rows left the rendered floor resolution');
   assert(view.getFloat32(cursor + 16 + 5 * 4, true) === GROUND_CHUNK_METERS / (GROUND_FLOOR_RES - 1), 'cell size does not span the chunk at the rendered resolution');

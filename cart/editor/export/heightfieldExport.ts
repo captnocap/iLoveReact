@@ -18,6 +18,17 @@ export const GROUND_FLOOR_SAMPLES = GROUND_FLOOR_RES * GROUND_FLOOR_RES;
 /** Metres spanned by one authored map chunk (`map/chunks.zig` CHUNK_METERS). */
 export const GROUND_CHUNK_METERS = 120;
 
+/** World X (or Z) of the LOW corner of chunk index `c`.
+ *
+ *  The native map centres a chunk on its index times the chunk span:
+ *  `chunks.globalTile(x) = floor(x + CHUNK_METERS/2)`, and `localSampleF`
+ *  subtracts `cx*CHUNK_METERS - CHUNK_METERS/2`. Every generator that lays out
+ *  a chunk's cells or height samples must start from HERE, not from
+ *  `c * GROUND_CHUNK_METERS` — that is the chunk's middle. */
+export function chunkOriginMeters(c: number): number {
+  return c * GROUND_CHUNK_METERS - GROUND_CHUNK_METERS / 2;
+}
+
 export type FormulaHeightfield = Readonly<{
   cx: number;
   cz: number;
@@ -57,6 +68,11 @@ export function encodeFormulaHeightfields(
     view.setUint32(at + 8, field.groundData.length, true);
     view.setUint32(at + 12, 0, true);
     at += 16;
+    // The record's first two floats are the chunk's CENTRE — and the native map
+    // CENTRES chunk (cx, cz) on (cx*120, cz*120): `chunks.globalTile(x)` is
+    // `floor(x + CHUNK_METERS/2)`, so the chunk spans [cx*120 - 60, cx*120 + 60].
+    // The centre and the chunk index therefore coincide; anything that treats
+    // cx*120 as the chunk's low CORNER is half a chunk out.
     const values = [
       field.cx * GROUND_CHUNK_METERS,
       field.cz * GROUND_CHUNK_METERS,
