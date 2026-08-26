@@ -23,6 +23,7 @@ import { useRef, useState } from 'react';
 import { Box, Pressable, Row, Text, TextInput } from '@reactjit/runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { REGIONS } from '../shell/regions';
+import { useStackedRows } from './rowLayout';
 
 const CELL_HEIGHT = 20;
 /** Pointer travel below this is a click (edit); at or past it, a scrub. */
@@ -70,6 +71,9 @@ export function NumberCell(props: {
   overridden?: boolean;
   /** Value change per pixel of horizontal scrub travel. */
   scrubStep?: number;
+  /** Shared semantic bounds. Typing and scrub preview are both clamped. */
+  minimum?: number;
+  maximum?: number;
   format?: (value: number) => string;
   /** Fixed width; omit for an equal flex share of the row (xyz triples). */
   width?: number;
@@ -90,11 +94,15 @@ export function NumberCell(props: {
   const format = props.format ?? ((value: number) => fmtCellNumber(value));
   const scrubStep = props.scrubStep ?? 0.01;
   const flex = props.flex ?? !props.width;
+  const clamp = (value: number) => Math.max(
+    props.minimum ?? -Number.MAX_VALUE,
+    Math.min(props.maximum ?? Number.MAX_VALUE, value),
+  );
 
   const preview = (value: number) => {
     if (!props.onPreview) return;
     previewedRef.current = true;
-    props.onPreview(value, baseRef.current);
+    props.onPreview(clamp(value), baseRef.current);
   };
   const finishEdit = () => {
     setEditing(false);
@@ -105,7 +113,7 @@ export function NumberCell(props: {
     closedRef.current = true;
     finishEdit();
     if (value !== null && value !== baseRef.current) {
-      props.onCommit(value, baseRef.current);
+      props.onCommit(clamp(value), baseRef.current);
     } else if (previewedRef.current) {
       // Nothing to land — restore the mesh from any live preview.
       props.onCancel?.();
@@ -181,7 +189,7 @@ export function NumberCell(props: {
           closedRef.current = false;
           previewedRef.current = false;
         }
-        const value = active.startValue + travel * scrubStep;
+        const value = clamp(active.startValue + travel * scrubStep);
         setScrubPreview(value);
         preview(value);
       }}
@@ -193,7 +201,7 @@ export function NumberCell(props: {
           openEditor();
           return;
         }
-        commit(active.startValue + (pointerX(event) - active.startX) * scrubStep);
+        commit(clamp(active.startValue + (pointerX(event) - active.startX) * scrubStep));
       }}
     >
       <Text noWrap numberOfLines={1} style={{
@@ -256,7 +264,12 @@ export function ResetCol(props: { overridden: boolean; onReset: () => void; tool
   );
 }
 
-/** One grid row: 82px label · content · reserved reset column. */
+/** One grid row: 82px label · content · reserved reset column.
+ *
+ *  Below `ROW_STACK_BELOW_WIDTH` the row STACKS instead of squeezing: the label
+ *  takes its own line and wraps, and the controls take the row's full span
+ *  underneath, still ending on the reserved reset column so the panel keeps one
+ *  right edge in both modes (req_4774). */
 export function CellRow(props: {
   label: string;
   children: any;
@@ -264,13 +277,26 @@ export function CellRow(props: {
   onReset?: () => void;
   resetTooltip?: string;
 }) {
+  const stacked = useStackedRows();
+  const endColumn = props.onReset
+    ? <ResetCol overridden={props.overridden ?? false} onReset={props.onReset} tooltip={props.resetTooltip} />
+    : <Box style={{ width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn }} />;
+  if (stacked) {
+    return (
+      <C.HW_RowStacked>
+        <C.HW_FormLabelStacked>{props.label}</C.HW_FormLabelStacked>
+        <C.HW_RowStackedControls>
+          {props.children}
+          {endColumn}
+        </C.HW_RowStackedControls>
+      </C.HW_RowStacked>
+    );
+  }
   return (
-    <Row style={{ minHeight: REGIONS.grid.rowHeight + 3, alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, width: '100%' }}>
+    <Row style={{ minHeight: REGIONS.grid.rowHeight + 3, alignItems: 'center', gap: REGIONS.grid.columnGap, paddingLeft: REGIONS.grid.rowPaddingX, paddingRight: REGIONS.grid.rowPaddingX, width: '100%' }}>
       <C.HW_FormLabel>{props.label}</C.HW_FormLabel>
       {props.children}
-      {props.onReset
-        ? <ResetCol overridden={props.overridden ?? false} onReset={props.onReset} tooltip={props.resetTooltip} />
-        : <Box style={{ width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn }} />}
+      {endColumn}
     </Row>
   );
 }

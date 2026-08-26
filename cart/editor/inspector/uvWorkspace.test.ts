@@ -11,15 +11,16 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const panel = uvWorkspaceLayout(false);
-assert(panel.panelWidth === REGIONS.focusPanel.atlasWidth, 'normal paint mode lost the standard atlas width');
+const panel = uvWorkspaceLayout(false, REGIONS.focusPanel.width);
+assert(panel.panelWidth === REGIONS.focusPanel.width, 'normal paint mode did not wear the shared panel width');
 assert(panel.showIdentity && panel.showPaintVariants && panel.showScope, 'normal paint mode hid required panel content');
 assert(panel.toggleLabel === 'FOCUS', 'normal paint mode lost its explicit focus action');
 assert(panel.emptyState === 'row', 'normal paint mode spent its bounded panel on an empty atlas');
 
-const focus = uvWorkspaceLayout(true);
-assert(focus.panelWidth === REGIONS.focusPanel.atlasFocusWidth, 'UV focus mode did not claim the authored focus width');
-assert(focus.panelWidth >= panel.panelWidth * 2, 'UV focus mode is not materially larger than the paint panel');
+const focus = uvWorkspaceLayout(true, REGIONS.focusPanel.width);
+// FOCUS decides CONTENT, never width (req_4774) — the panel has ONE width and
+// only the user's drag changes it, so entering focus must not move the edge.
+assert(focus.panelWidth === panel.panelWidth, 'UV focus mode still changes the panel width — that is the churn req_4774 removed');
 assert(!focus.showIdentity && !focus.showPaintVariants && !focus.showScope, 'UV focus mode retained competing vertical chrome');
 assert(focus.panelTitle === 'UV WORKSPACE' && focus.toggleLabel === 'RETURN', 'UV focus mode has no obvious way home');
 assert(focus.emptyState === 'workspace', 'UV focus mode collapses to a one-line row when no atlas exists');
@@ -38,7 +39,8 @@ assert(
 );
 
 const authored = uvWorkspaceLayout(false, 812);
-assert(authored.panelWidth === 812, 'manual UV width was replaced by a hard-coded panel shape');
+assert(authored.panelWidth === 812, 'the dragged panel width was replaced by a hard-coded panel shape');
+assert(uvWorkspaceLayout(true, 812).panelWidth === 812, 'focus mode overrode the dragged width');
 assert(focusPanelWidthFromDrag(480, 1000, 800, 1920) === 680, 'dragging the left edge left did not grow the panel');
 assert(focusPanelWidthFromDrag(480, 1000, 1400, 1920) === REGIONS.focusPanel.resizeMinWidth, 'panel drag escaped its minimum width');
 assert(focusPanelWidthFromDrag(960, 1000, 0, 1280) === 720, 'panel drag failed to retain the minimum outside workspace');

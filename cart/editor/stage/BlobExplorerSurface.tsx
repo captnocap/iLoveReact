@@ -955,25 +955,10 @@ export default function BlobExplorerSurface(props: BlobExplorerSurfaceProps) {
             <Text noWrap style={{ color: tab === candidate ? COLORS.primary : COLORS.dim, fontSize: 10, fontWeight: 900, letterSpacing: 0.7 }}>{candidate.toUpperCase()}</Text>
           </Pressable>
         ))}
-        {(['compact', 'wide'] as const).map((preset) => (
-          <Pressable
-            key={preset}
-            tooltip={`${preset === 'wide' ? 'Widen' : 'Compact'} Blob Explorer`}
-            onPress={() => props.onWidthPreset(preset)}
-            style={{
-              width: 32,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: props.widthPreset === preset ? '#18304a' : COLORS.panelRaised,
-              borderLeftWidth: 1,
-              borderColor: COLORS.border,
-            }}
-          >
-            <Text noWrap style={{ color: props.widthPreset === preset ? COLORS.primary : COLORS.faint, fontSize: 9, fontWeight: 900 }}>
-              {preset === 'wide' ? 'W' : 'C'}
-            </Text>
-          </Pressable>
-        ))}
+        {/* The C/W width presets were retired by req_4774: the focus panel has ONE
+            width now and every pane wears the same left-edge drag, so a second,
+            pane-local width control would be two mechanisms disagreeing about
+            the same number. The capability moved, it did not disappear. */}
       </Row>
       <ScrollView style={{ width: '100%', height: Math.max(1, height - BLOB_EXPLORER_UI.chromeHeight) }} showScrollbar>
         {tab === 'faces' ? (

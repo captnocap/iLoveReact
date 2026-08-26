@@ -705,6 +705,14 @@ classifier({
   HW_OvResetIdle: { type: 'Box', style: { width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn } },
   HW_DropChip: { type: 'Box', style: { height: 21, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_SelectRow: { type: 'Box', style: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingBottom: 4 } },
+  // ── STACKED ROWS (req_4774) — what every panel row becomes below
+  // ROW_STACK_BELOW_WIDTH. The label leaves the fixed column, takes its own
+  // line and WRAPS; the controls take the full span underneath, still ending
+  // on the reserved reset column so the right edge does not move.
+  HW_RowStacked: { type: 'Box', hoverable: true, style: { flexDirection: 'column', alignItems: 'stretch', gap: 3, paddingLeft: REGIONS.grid.rowPaddingX, paddingRight: REGIONS.grid.rowPaddingX, paddingTop: 3, paddingBottom: 3 } },
+  HW_RowStackedControls: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: REGIONS.grid.columnGap, width: '100%' } },
+  HW_FormLabelStacked: wrapping(10, 'theme:textDim', { fontFamily: MONO, lineHeight: 13 }),
+  HW_ReadValueStacked: wrapping(10, 'theme:textSecondary', { flexGrow: 1, fontFamily: MONO, fontWeight: 700, lineHeight: 13 }),
   HW_SelectControl: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, height: 23, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_SelectMenu: { type: 'Box', style: { marginLeft: 94, marginRight: 12, marginBottom: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
   HW_SelectOption: { type: 'Pressable', style: { height: 23, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 8, paddingRight: 7, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },

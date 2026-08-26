@@ -1,4 +1,43 @@
 import { C, accentFor } from '../workspace.cls';
+import { useStackedRows } from './rowLayout';
+
+/** One fact: a label and its value.
+ *
+ *  Inline it sits on the shared column grid — 82px label, value flexed to the
+ *  panel's one right edge, the reserved reset column keeping that edge aligned
+ *  with the writable rows above it.
+ *
+ *  Stacked (narrow panel, req_4774) the label takes its own line and the value
+ *  WRAPS underneath at full width, because a fact like
+ *  "49 B · preserved, never interpreted" is a sentence, and squeezing a
+ *  sentence into 60px of a shared line is how the panel got called unusable. */
+function FactRow(props: { label: string; value: string; endColumn: boolean }) {
+  if (useStackedRows()) {
+    return (
+      <C.HW_RowStacked>
+        <C.HW_FormLabelStacked>{props.label}</C.HW_FormLabelStacked>
+        <C.HW_RowStackedControls>
+          <C.HW_ReadValueStacked>{props.value}</C.HW_ReadValueStacked>
+          {props.endColumn ? <C.HW_OvResetIdle /> : null}
+        </C.HW_RowStackedControls>
+      </C.HW_RowStacked>
+    );
+  }
+  return (
+    <C.HW_ReadRow>
+      <C.HW_FormLabel>{props.label}</C.HW_FormLabel>
+      <C.HW_Spacer />
+      <C.HW_ReadValue>{props.value}</C.HW_ReadValue>
+      {/* Reserved reset-column spacer (req_2626 II / req_2627): read-only rows sit on
+          the SAME column grid as OverrideField/PieceBody rows, whose end column is
+          always occupied (HW_OvReset or HW_OvResetIdle) — without it these values
+          landed endBtn+gap px right of every override value's edge. */}
+      {props.endColumn ? <C.HW_OvResetIdle /> : null}
+    </C.HW_ReadRow>
+  );
+}
+
+export { FactRow };
 
 export default function ReadOnlySection(props: {
   title: string;
@@ -14,16 +53,7 @@ export default function ReadOnlySection(props: {
         <C.HW_KeyText>{props.rows.length}</C.HW_KeyText>
       </C.HW_SectionHead>
       {props.rows.map(([label, value]) => (
-        <C.HW_ReadRow key={label}>
-          <C.HW_FormLabel>{label}</C.HW_FormLabel>
-          <C.HW_Spacer />
-          <C.HW_ReadValue>{value}</C.HW_ReadValue>
-          {/* Reserved reset-column spacer (req_2626 II / req_2627): read-only rows sit on
-              the SAME column grid as OverrideField/PieceBody rows, whose end column is
-              always occupied (HW_OvReset or HW_OvResetIdle) — without it these values
-              landed endBtn+gap px right of every override value's edge. */}
-          <C.HW_OvResetIdle />
-        </C.HW_ReadRow>
+        <FactRow key={label} label={label ?? ''} value={value ?? ''} endColumn />
       ))}
     </C.HW_Section>
   );

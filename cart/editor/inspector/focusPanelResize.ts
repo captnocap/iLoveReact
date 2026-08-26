@@ -1,14 +1,17 @@
-// inspector/focusPanelResize.ts — the focus panel's LEFT-EDGE DRAG, owned once
-// (req_4772).
+// inspector/focusPanelResize.ts — the focus panel's LEFT-EDGE DRAG, and its ONE
+// WIDTH (req_4772, unified by req_4774).
 //
-// The UV workspace was the first pane whose content could not live inside the
-// 326px prop-inspector default, so the drag gesture was written inside
-// Inspector.tsx with `uv` in every identifier. MODEL · STATS is the second: it
-// renders a label column, two select controls and the reserved reset column on
-// one row, which does not fit 326 at any font size. Nothing about the gesture
-// was ever specific to UV authoring — the math reads REGIONS.focusPanel, and
-// the pointer plumbing is the same three handlers — so it lives here and each
-// pane names the width it is dragging.
+// The gesture started life inside Inspector.tsx with `uv` in every identifier,
+// because the UV workspace was the first pane that could not live inside the
+// prop-inspector default. Then MODEL · STATS needed the same thing, and the
+// keyed-per-pane version this file first shipped was still wrong: a width that
+// belongs to a PANE makes the panel jump every time you switch tabs, and makes
+// "which tabs can be dragged" a list somebody has to maintain.
+//
+// So there is one width. Every pane wears it, every pane can drag it, and the
+// only thing that changes it is the user. It is seeded from the caller (the
+// restored session width, or REGIONS.focusPanel.width on a cold start) and
+// reported back on every settled drag so the session can persist it.
 //
 // The rAF queue is not decoration: a raw setState per mouse-move relayouts the
 // whole panel on every pointer sample, and the panel is the surface being
@@ -44,32 +47,39 @@ export type FocusPanelGrip = Readonly<{
   onMouseUp: (event: any) => void;
 }>;
 
-export type FocusPanelResize<K extends string> = Readonly<{
-  /** The live authored width per key; a key never dragged reads its initial. */
-  widths: Record<K, number>;
+export type FocusPanelResize = Readonly<{
+  /** The one live panel width. */
+  width: number;
   /** True for the duration of a drag, so the grip can light up. */
   resizing: boolean;
-  /** Handlers for the grip that drags `key`'s width. */
-  grip: (key: K) => FocusPanelGrip;
+  /** Handlers for the panel's left-edge grip. */
+  grip: FocusPanelGrip;
 }>;
 
 /**
- * Own the left-edge drag for one focus panel across every width it can wear.
+ * Own the focus panel's width and its left-edge drag.
  *
- * Widths are keyed because a pane may have more than one shape (the UV
- * workspace has a panel width and a focus width, and dragging one must not
- * move the other). Every key clamps to the same REGIONS.focusPanel policy, so
- * a pane cannot mint a private minimum by owning its own gesture.
+ * `initialWidth` is the width to open at — a restored session width, or the
+ * shared default. `onSettled` fires once per completed drag with the final
+ * width, which is the only moment worth persisting (every intermediate frame
+ * of a drag is not a decision).
  */
-export function useFocusPanelResize<K extends string>(initialWidths: Record<K, number>): FocusPanelResize<K> {
-  const [widths, setWidths] = useState(initialWidths);
+export function useFocusPanelResize(
+  initialWidth: number,
+  onSettled?: (width: number) => void,
+): FocusPanelResize {
+  const [width, setWidth] = useState(() => clamp(
+    Math.round(initialWidth),
+    REGIONS.focusPanel.resizeMinWidth,
+    REGIONS.focusPanel.resizeMaxWidth,
+  ));
   const [resizing, setResizing] = useState(false);
-  const gestureRef = useRef<null | { key: K; startX: number; startWidth: number; viewportWidth: number }>(null);
-  const pendingRef = useRef<null | { key: K; width: number }>(null);
+  const gestureRef = useRef<null | { startX: number; startWidth: number; viewportWidth: number }>(null);
+  const pendingRef = useRef<number | null>(null);
   const framePendingRef = useRef(false);
   const generationRef = useRef(0);
-  const widthsRef = useRef(widths);
-  widthsRef.current = widths;
+  const widthRef = useRef(width);
+  widthRef.current = width;
   const host = globalThis as any;
 
   const pointerX = (event: any): number => {
@@ -78,11 +88,8 @@ export function useFocusPanelResize<K extends string>(initialWidths: Record<K, n
     const hostX = Number(host.getMouseX?.());
     return Number.isFinite(hostX) ? hostX : 0;
   };
-  const apply = (key: K, width: number) => {
-    setWidths((current) => current[key] === width ? current : { ...current, [key]: width });
-  };
-  const queue = (key: K, width: number) => {
-    pendingRef.current = { key, width };
+  const queue = (next: number) => {
+    pendingRef.current = next;
     if (framePendingRef.current) return;
     framePendingRef.current = true;
     const generation = generationRef.current;
@@ -94,7 +101,7 @@ export function useFocusPanelResize<K extends string>(initialWidths: Record<K, n
       framePendingRef.current = false;
       const pending = pendingRef.current;
       pendingRef.current = null;
-      if (pending) apply(pending.key, pending.width);
+      if (pending !== null) setWidth(pending);
     });
   };
   const widthAt = (event: any, gesture: { startX: number; startWidth: number; viewportWidth: number }) =>
@@ -106,13 +113,12 @@ export function useFocusPanelResize<K extends string>(initialWidths: Record<K, n
     pendingRef.current = null;
   }, []);
 
-  const grip = (key: K): FocusPanelGrip => ({
+  const grip: FocusPanelGrip = {
     onMouseDown: (event: any) => {
       const reported = Number(host.__viewport_width?.());
       gestureRef.current = {
-        key,
         startX: pointerX(event),
-        startWidth: widthsRef.current[key],
+        startWidth: widthRef.current,
         viewportWidth: Number.isFinite(reported) && reported > 0
           ? reported
           : REGIONS.focusPanel.resizeMaxWidth + REGIONS.focusPanel.minimumOutsideWidth,
@@ -122,7 +128,7 @@ export function useFocusPanelResize<K extends string>(initialWidths: Record<K, n
     onMouseMove: (event: any) => {
       const gesture = gestureRef.current;
       if (!gesture) return;
-      queue(gesture.key, widthAt(event, gesture));
+      queue(widthAt(event, gesture));
     },
     onMouseUp: (event: any) => {
       const gesture = gestureRef.current;
@@ -130,10 +136,13 @@ export function useFocusPanelResize<K extends string>(initialWidths: Record<K, n
       generationRef.current += 1;
       framePendingRef.current = false;
       pendingRef.current = null;
-      if (gesture) apply(gesture.key, widthAt(event, gesture));
       setResizing(false);
+      if (!gesture) return;
+      const settled = widthAt(event, gesture);
+      setWidth(settled);
+      onSettled?.(settled);
     },
-  });
+  };
 
-  return { widths, resizing, grip };
+  return { width, resizing, grip };
 }

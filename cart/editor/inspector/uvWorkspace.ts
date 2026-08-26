@@ -24,11 +24,16 @@ const clamp = (value: number, low: number, high: number): number => Math.max(low
 
 /** One strict policy for the paint panel's two shapes. Focus mode spends its
  * entire body budget on UV authoring; leaving it restores every paint-panel
- * section without remounting the active model, atlas, or variant state. */
-export function uvWorkspaceLayout(focused: boolean, authoredWidth?: number): UvWorkspaceLayout {
-  const fallbackWidth = focused ? REGIONS.focusPanel.atlasFocusWidth : REGIONS.focusPanel.atlasWidth;
+ * section without remounting the active model, atlas, or variant state.
+ *
+ * FOCUS NO LONGER CHANGES THE WIDTH (req_4774). It used to jump the panel from
+ * 480 to 960, which is the same churn every other pane was producing — and it
+ * conflated "spend the whole panel on UV" with "make the panel bigger", which
+ * are the user's two separate decisions. Focus now decides CONTENT; the drag
+ * decides width, in this pane exactly as in every other one. */
+export function uvWorkspaceLayout(focused: boolean, panelWidthNow: number): UvWorkspaceLayout {
   const panelWidth = clamp(
-    Number.isFinite(authoredWidth) ? Math.round(authoredWidth!) : fallbackWidth,
+    Math.round(panelWidthNow),
     REGIONS.focusPanel.resizeMinWidth,
     REGIONS.focusPanel.resizeMaxWidth,
   );

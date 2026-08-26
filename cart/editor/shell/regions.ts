@@ -57,25 +57,27 @@ const CONTENT_BROWSER_WIDTH = 350; // content browser, left panel (HW_SidePanel)
 // omits the body entirely; the separate 48px rail remains.
 const CONTENT_BROWSER_WIDTH_EXPANDED = 680; // content browser, expanded (HW_SidePanelWide)
 const CONTENT_BROWSER_TREE_WIDTH = 218; // expanded mode: the fixed tree column (HW_LibTreeCol)
-const FOCUS_PANEL_WIDTH = 326; // open focus body + rail (HW_RightPanel)
-// Character bind inspection is a two-column diagnostic workspace. Keep its
-// width separate from the ordinary prop/model inspector so opting into a
-// character rig does not silently widen every focus surface.
-const FOCUS_PANEL_CHARACTER_RIG_WIDTH = 720;
-const FOCUS_PANEL_BLOB_COMPACT_WIDTH = 420;
-const FOCUS_PANEL_BLOB_WIDE_WIDTH = 720;
-// The blueprint stats form is a control GRID, not a fact list: every row spends
-// the 82px label column, the reserved 18px reset column, and then one or two
-// select controls that carry authored names (an audio clip is "speaker squawk",
-// not a number). That does not fit the 326 prop-inspector default at any font
-// size, so STATS declares its own width and wears the same drag grip as the UV
-// workspace (req_4772).
-const FOCUS_PANEL_STATS_WIDTH = 480;
-const FOCUS_PANEL_ATLAS_WIDTH = 480; // Blockbench-scale UV workspace + rail
-const FOCUS_PANEL_ATLAS_FOCUS_WIDTH = 960; // dedicated dense-mesh UV workspace + rail
+// THE FOCUS PANEL HAS ONE WIDTH (req_4774). Every pane wears it, every pane can
+// drag it, and switching panes never changes it — the width belongs to the
+// PANEL, not to whichever pane happens to be open. The seven per-pane widths
+// that used to live here (326 prop inspector, 420/720 blob presets, 480 stats,
+// 480/960 atlas, 720 character rig) are DELETED, not renamed: they were the
+// cause of the churn, and keeping any of them as a "default" reintroduces it
+// the moment a pane opens.
+//
+// 480 is the shared default because it is the narrowest width at which the
+// densest row shape in the panel — label + two select controls + the reserved
+// reset column — still reads inline. Narrower is legal and usable; see
+// ROW_STACK_BELOW_WIDTH.
+const FOCUS_PANEL_WIDTH = 480;
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
-const FOCUS_PANEL_BLOB_COLLAPSED_WIDTH = FOCUS_RAIL_WIDTH;
-const FOCUS_PANEL_RESIZE_MIN_WIDTH = 420; // smallest usable atlas authoring body + rail
+const FOCUS_PANEL_COLLAPSED_WIDTH = FOCUS_RAIL_WIDTH;
+// The drag floor is the rail plus the WIDEST minimum any pane declares — today
+// the Blob Explorer's 320px data column (BLOB_EXPLORER_UI.minimumDataWidth),
+// which `BlobExplorerSurface.test.ts` holds this number against. Below it the
+// panel is not narrow, it is broken, so the drag stops here and the collapse
+// button (rail only) is how you get the rest of the space back.
+const FOCUS_PANEL_RESIZE_MIN_WIDTH = 364;
 const FOCUS_PANEL_RESIZE_MAX_WIDTH = 1600; // prevents the panel from consuming ultra-wide windows
 const FOCUS_PANEL_MIN_OUTSIDE_WIDTH = 560; // stage + surrounding rails retained while dragging
 const FOCUS_PANEL_RESIZE_HANDLE_WIDTH = 9; // full-height pointer-capture strip on the panel's left edge
@@ -119,14 +121,9 @@ export const REGIONS = {
    * constant every focus-panel card/section lays out against.
    */
   focusPanel: {
+    /** The shared default. One width for every pane; the user's drag replaces it. */
     width: FOCUS_PANEL_WIDTH,
-    characterRigWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH,
-    blobCompactWidth: FOCUS_PANEL_BLOB_COMPACT_WIDTH,
-    blobWideWidth: FOCUS_PANEL_BLOB_WIDE_WIDTH,
-    blobCollapsedWidth: FOCUS_PANEL_BLOB_COLLAPSED_WIDTH,
-    statsWidth: FOCUS_PANEL_STATS_WIDTH,
-    atlasWidth: FOCUS_PANEL_ATLAS_WIDTH,
-    atlasFocusWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH,
+    collapsedWidth: FOCUS_PANEL_COLLAPSED_WIDTH,
     railWidth: FOCUS_RAIL_WIDTH,
     resizeMinWidth: FOCUS_PANEL_RESIZE_MIN_WIDTH,
     resizeMaxWidth: FOCUS_PANEL_RESIZE_MAX_WIDTH,
@@ -134,17 +131,13 @@ export const REGIONS = {
     resizeHandleWidth: FOCUS_PANEL_RESIZE_HANDLE_WIDTH,
     resizeStep: FOCUS_PANEL_RESIZE_STEP,
     resizePreviewIntervalMs: FOCUS_PANEL_RESIZE_PREVIEW_INTERVAL_MS,
-    bodyWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 285
-    characterRigBodyWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 679
-    statsBodyWidth: FOCUS_PANEL_STATS_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 439
-    atlasBodyWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
-    atlasFocusBodyWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH,
     gutter: PANEL_GUTTER,
-    innerWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 265
-    characterRigInnerWidth: FOCUS_PANEL_CHARACTER_RIG_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 659
-    statsInnerWidth: FOCUS_PANEL_STATS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 419
-    atlasInnerWidth: FOCUS_PANEL_ATLAS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
-    atlasFocusInnerWidth: FOCUS_PANEL_ATLAS_FOCUS_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
+    bodyWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH, // 439 at the default
+    innerWidth: FOCUS_PANEL_WIDTH - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2, // 419 at the default
+    /** Body width for ANY panel width — panes lay out against the live width,
+     *  never against the default, because the user can drag it. */
+    bodyWidthAt: (panelWidth: number) => panelWidth - BORDER - FOCUS_RAIL_WIDTH,
+    innerWidthAt: (panelWidth: number) => panelWidth - BORDER - FOCUS_RAIL_WIDTH - PANEL_GUTTER * 2,
   },
 
   /** STATUS BAR — the bottom strip (the build dock: undo/redo, coords, perf). */
@@ -159,6 +152,18 @@ export const REGIONS = {
   grid: {
     /** fixed label column for form/read rows (HW_FormLabel). */
     labelWidth: 82,
+    /** The gap every panel row puts between its columns (HW_ReadRow/CellRow). */
+    columnGap: 8,
+    /** Horizontal padding a panel row puts inside the inspector body. */
+    rowPaddingX: 12,
+    /**
+     * The narrowest a select / value control can be and still READ — an audio
+     * clip called "speaker squawk" is 14 mono glyphs at 11px plus the control's
+     * 15px of padding. Below this a control is a box with an ellipsis in it,
+     * which is why ROW_STACK_BELOW_WIDTH exists rather than letting rows keep
+     * shrinking (req_4774).
+     */
+    controlMinWidth: 110,
     /** square − / + stepper button (HW_OvBtn). */
     stepBtn: 20,
     /** numeric value cell between steppers (HW_OvVal). */

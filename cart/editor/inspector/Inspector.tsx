@@ -40,6 +40,7 @@ import type { Brush } from '../../../runtime/paint/model';
 import UvEditor from './UvEditor';
 import { UV_WORKSPACE_FLEX_STYLE, uvWorkspaceLayout, type UvWorkspaceLayout } from './uvWorkspace';
 import { useFocusPanelResize } from './focusPanelResize';
+import FocusPanelShell from './FocusPanelShell';
 import type { LightRig } from '../model/editMesh';
 import { blobViewportFaceSelection } from '../model/blobExplorerState';
 import { semanticHorizonLines, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
@@ -506,17 +507,10 @@ export default function Inspector(props: {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
   const [uvWorkspaceFocused, setUvWorkspaceFocused] = useState(false);
-  // Every focus-panel width that the user may drag, keyed by the shape it
-  // belongs to. The UV workspace carries two (its panel and its focus shape);
-  // MODEL · STATS carries one. They share one gesture so no pane can mint a
-  // private minimum (req_4772).
-  const panelResize = useFocusPanelResize({
-    uvPanel: REGIONS.focusPanel.atlasWidth,
-    uvFocus: REGIONS.focusPanel.atlasFocusWidth,
-    stats: REGIONS.focusPanel.statsWidth,
-  });
-  const uvWidthKey = uvWorkspaceFocused ? 'uvFocus' : 'uvPanel';
-  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused, panelResize.widths[uvWidthKey]);
+  // THE PANEL HAS ONE WIDTH (req_4774). It belongs to the panel, not to a pane,
+  // so switching tabs never moves it and every pane wears the same drag.
+  const panelResize = useFocusPanelResize(REGIONS.focusPanel.width);
+  const uvWorkspace = uvWorkspaceLayout(uvWorkspaceFocused, panelResize.width);
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   // EFFECTIVE package (req_2620 S): session renames + dupes resolve here, so the
   // card shows the name the next save writes — never a stale synthesized one.
@@ -559,7 +553,12 @@ export default function Inspector(props: {
   // inspector — DIALS/PALETTE from the top, FACTS + SAVE pinned to the bottom.
   if (labUiActive && props.lab.recipe) {
     return (
-      <C.HW_RightPanel>
+      <FocusPanelShell
+        width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+        ownsHead
+        onCollapse={props.onCollapse}
+        rail={<FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+      >
         <LabInspectorPanel
           state={props.state}
           recipe={props.lab.recipe}
@@ -567,16 +566,19 @@ export default function Inspector(props: {
           handlers={props.lab.handlers}
           onCollapse={props.onCollapse}
         />
-        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
-      </C.HW_RightPanel>
+      </FocusPanelShell>
     );
   }
   if (activeDocument?.kind === 'animation') {
     return (
-      <C.HW_RightPanel>
+      <FocusPanelShell
+        width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+        ownsHead
+        onCollapse={props.onCollapse}
+        rail={<FocusRail documentKind={documentKind} labActive={false} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+      >
         {props.animationPanel}
-        <FocusRail documentKind={documentKind} labActive={false} activePane={activePane} collapsed={false} onPane={props.onPane} />
-      </C.HW_RightPanel>
+      </FocusPanelShell>
     );
   }
   const fallbackKind = props.activeObject?.kind ?? 'TILE';
@@ -612,15 +614,12 @@ export default function Inspector(props: {
   // tune a field, the playtest viewport pushes it live, the micro-save locks it in.
   if (activeDocument?.kind === 'playtest') {
     return (
-      <C.HW_RightPanel>
-        <C.HW_Inspector>
-          <C.HW_PanelHead>
-            <C.HW_Kicker>GLOBALS · PHYSICS</C.HW_Kicker>
-            <C.HW_Spacer />
-            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
-              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
-            </C.HW_PanelHeadButton>
-          </C.HW_PanelHead>
+      <FocusPanelShell
+        width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+        title={"GLOBALS · PHYSICS"}
+        onCollapse={props.onCollapse}
+        rail={<FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+      >
           <C.HW_InspectorBody>
             <GlobalsSection
               physics={props.state.worldGlobals.physics}
@@ -629,9 +628,7 @@ export default function Inspector(props: {
             />
             <GcStressSection />
           </C.HW_InspectorBody>
-        </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
-      </C.HW_RightPanel>
+      </FocusPanelShell>
     );
   }
   // World OUTLINER pane (req_4737): everything placed on the map as one grouped
@@ -639,15 +636,12 @@ export default function Inspector(props: {
   // already render.
   if (activeDocument?.kind === 'world' && activePane === 'outliner') {
     return (
-      <C.HW_RightPanel>
-        <C.HW_Inspector>
-          <C.HW_PanelHead>
-            <C.HW_Kicker>WORLD · OUTLINER</C.HW_Kicker>
-            <C.HW_Spacer />
-            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
-              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
-            </C.HW_PanelHeadButton>
-          </C.HW_PanelHead>
+      <FocusPanelShell
+        width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+        title={"WORLD · OUTLINER"}
+        onCollapse={props.onCollapse}
+        rail={<FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+      >
           <C.HW_InspectorBodyFixed>
             <WorldOutliner
               architecture={props.state.architecture}
@@ -662,9 +656,7 @@ export default function Inspector(props: {
               handlers={props.worldOutliner}
             />
           </C.HW_InspectorBodyFixed>
-        </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
-      </C.HW_RightPanel>
+      </FocusPanelShell>
     );
   }
   // World surface (req_2563): the focus panel is PIECE-aware — the real placed
@@ -678,15 +670,12 @@ export default function Inspector(props: {
     // subject, so the panel says what it shows and how to fill it (req_4435).
     const worldFocusEmpty = !selectedPiece && !props.state.armedPieceId;
     return (
-      <C.HW_RightPanel>
-        <C.HW_Inspector>
-          <C.HW_PanelHead>
-            <C.HW_Kicker>{selectedPiece ? 'PIECE FOCUS' : worldFocusEmpty ? 'WORLD FOCUS' : 'BUILD'}</C.HW_Kicker>
-            <C.HW_Spacer />
-            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
-              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
-            </C.HW_PanelHeadButton>
-          </C.HW_PanelHead>
+      <FocusPanelShell
+        width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+        title={selectedPiece ? 'PIECE FOCUS' : worldFocusEmpty ? 'WORLD FOCUS' : 'BUILD'}
+        onCollapse={props.onCollapse}
+        rail={<FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+      >
           <C.HW_InspectorBody>
             {worldFocusEmpty ? (
               <FocusEmpty
@@ -709,9 +698,7 @@ export default function Inspector(props: {
             />}
             <WorldViewsSection handlers={props.worldViews} />
           </C.HW_InspectorBody>
-        </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
-      </C.HW_RightPanel>
+      </FocusPanelShell>
     );
   }
   if (activeModel) {
@@ -745,50 +732,23 @@ export default function Inspector(props: {
         : activePane === 'names' ? 'MODEL · NAMES'
           : activePane === 'recovery' ? 'MODEL · RECOVERY'
             : 'MODEL FOCUS';
-    // The panes whose content is a workspace, not a fact list, wear the drag
-    // grip. Everything else keeps the fixed prop-inspector width.
-    const resizableWidthKey = activePane === 'paint' ? uvWidthKey
-      : activePane === 'stats' ? 'stats' as const
-        : null;
     return (
-      <C.HW_RightPanel style={{ width: activePane === 'paint'
-        ? uvWorkspace.panelWidth
-        : activePane === 'stats'
-          ? panelResize.widths.stats
-          : activePane === 'rig' && hasCharacterRig
-            ? REGIONS.focusPanel.characterRigWidth
-            : activePane === 'recovery'
-              ? blobExplorer.widthPreset === 'wide'
-                ? REGIONS.focusPanel.blobWideWidth
-                : REGIONS.focusPanel.blobCompactWidth
-              : REGIONS.focusPanel.width }}>
-        {resizableWidthKey ? (
-          <C.HW_RightResizeGrip
-            tooltip={activePane === 'paint' ? 'Drag to resize the UV workspace' : 'Drag to resize the blueprint form'}
-            {...panelResize.grip(resizableWidthKey)}
-            style={panelResize.resizing ? { backgroundColor: accentFor('segActiveBg') } : undefined}
-          >
-            <C.HW_RightResizeLine />
-          </C.HW_RightResizeGrip>
-        ) : null}
-        <C.HW_Inspector>
-          <C.HW_PanelHead>
-            <C.HW_Kicker>{paneTitle}</C.HW_Kicker>
-            <C.HW_Spacer />
-            {activePane === 'paint' && uvWorkspace.focused ? (
-              <>
-                <C.HW_PanelHeadButton tooltip="Capture native-resident recovery snapshot (does not invoke Save)" onPress={quickRecoveryEnabled ? quickRecoverySnapshot : undefined}>
-                  <Icon name="DatabaseBackup" size={12} color={accentFor(quickRecoveryEnabled ? 'warning' : 'textFaint')} />
-                </C.HW_PanelHeadButton>
-                <C.HW_PanelHeadButton tooltip={`Save ${activeModel.name}`} onPress={props.onSaveModel}>
-                  <Icon name="Save" size={12} color={accentFor(modelDirty ? 'warning' : 'textFaint')} />
-                </C.HW_PanelHeadButton>
-              </>
-            ) : null}
-            <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
-              <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+      <FocusPanelShell
+        width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+        title={paneTitle}
+        onCollapse={props.onCollapse}
+        rail={<FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+        headExtras={activePane === 'paint' && uvWorkspace.focused ? (
+          <>
+            <C.HW_PanelHeadButton tooltip="Capture native-resident recovery snapshot (does not invoke Save)" onPress={quickRecoveryEnabled ? quickRecoverySnapshot : undefined}>
+              <Icon name="DatabaseBackup" size={12} color={accentFor(quickRecoveryEnabled ? 'warning' : 'textFaint')} />
             </C.HW_PanelHeadButton>
-          </C.HW_PanelHead>
+            <C.HW_PanelHeadButton tooltip={`Save ${activeModel.name}`} onPress={props.onSaveModel}>
+              <Icon name="Save" size={12} color={accentFor(modelDirty ? 'warning' : 'textFaint')} />
+            </C.HW_PanelHeadButton>
+          </>
+        ) : null}
+      >
           {/* Each model pane remains a fixed column of budgeted slices (req_2627).
               Lists carry their own bounded scrolling; switching panes replaces the
               body instead of stacking every authoring concern into one column. */}
@@ -942,9 +902,7 @@ export default function Inspector(props: {
               </>
             )}
           </C.HW_InspectorBodyFixed>
-        </C.HW_Inspector>
-        <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
-      </C.HW_RightPanel>
+      </FocusPanelShell>
     );
   }
   // The FALLBACK branch — a document kind with no focus panel of its own
@@ -955,15 +913,12 @@ export default function Inspector(props: {
   const fallbackObject = props.activeObject;
   const fallbackAsset = props.activeAsset;
   return (
-    <C.HW_RightPanel>
-      <C.HW_Inspector>
-        <C.HW_PanelHead>
-          <C.HW_Kicker>{`${documentKind.toUpperCase()} FOCUS`}</C.HW_Kicker>
-          <C.HW_Spacer />
-          <C.HW_PanelHeadButton tooltip="Collapse focus panel" onPress={props.onCollapse}>
-            <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
-          </C.HW_PanelHeadButton>
-        </C.HW_PanelHead>
+    <FocusPanelShell
+      width={panelResize.width} grip={panelResize.grip} resizing={panelResize.resizing}
+      title={`${documentKind.toUpperCase()} FOCUS`}
+      onCollapse={props.onCollapse}
+      rail={<FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />}
+    >
         {!fallbackObject ? (
           <FocusEmpty
             shows={`${documentKind} focus`}
@@ -1009,8 +964,6 @@ export default function Inspector(props: {
             <ReadOnlySection title="VISIBILITY" color="primary" rows={visibilityRows} />
           </>
         )}
-      </C.HW_Inspector>
-      <FocusRail documentKind={documentKind} labActive={labUiActive} activePane={activePane} collapsed={false} onPane={props.onPane} />
-    </C.HW_RightPanel>
+    </FocusPanelShell>
   );
 }
