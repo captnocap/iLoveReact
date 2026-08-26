@@ -45,6 +45,13 @@ import {
   type MeshSemanticTable as SemanticTable,
 } from '../model/meshSemantics';
 import { modelFocusSemantics, type ModelFocusSemantics } from '../model/modelSemanticsFocus';
+import {
+  commitResidentBlueprint,
+  residentBlueprintFromPercept,
+  type BlueprintCommitResult,
+  type ResidentBlueprintSnapshot,
+} from '../model/blueprintHost';
+import type { BlueprintTable } from '../model/blueprintTable';
 import { hydrateModelShapeCounts } from '../model/modelShapeHydration';
 import { parseModelSelectionSnapshot, type ModelSelectionSnapshot } from '../model/modelSelectionFocus';
 import { RETOPO_INTENTS, activeCorpusEntry, recordRetopoIntent, retractLastIntent } from '../data/retopoIntents';
@@ -254,7 +261,9 @@ export type ModelFocusUv = {
   h: number;
   detail: number;
   note: string | null;
-  scope: string;
+  /** What the atlas covers BEYOND the obvious. The atlas is always whole-model,
+   *  so that half was a constant and is gone; null means there is nothing to add. */
+  scope: string | null;
   atlasOriginX: number;
   atlasOriginY: number;
   workspace: UvTextureWorkspaceDoc | null;
@@ -303,8 +312,12 @@ export type ModelScopeTransformOp =
 export type ModelFocusBridge = {
   uv: ModelFocusUv | null;
   semantics: ModelFocusSemantics;
+  blueprint: BlueprintTable | null;
+  blueprintStatus: ResidentBlueprintSnapshot;
   readSelection: () => ModelSelectionSnapshot | null;
   refreshSemantics: () => void;
+  refreshBlueprint: () => void;
+  commitBlueprint: (next: BlueprintTable | null) => BlueprintCommitResult;
   refreshGeometry: () => void;
   paintLive: boolean;
   readUvHistory: () => Readonly<{ uv: ModelHistoryDepths; paint: ModelHistoryDepths }>;
@@ -2192,7 +2205,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       h,
       detail: d,
       note,
-      scope: 'whole model',
+      scope: null,
       atlasOriginX: 0,
       atlasOriginY: 0,
       workspace: null,
@@ -2267,7 +2280,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       h: o.h,
       detail: o.detail,
       note: islands.length ? null : 'atlas has no editable island metadata',
-      scope: `whole model · ${footprints} paint footprints · ${islands.length} logical islands`,
+      scope: `${footprints} paint footprints · ${islands.length} logical islands`,
       atlasOriginX,
       atlasOriginY,
       workspace,
@@ -4210,6 +4223,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const tDoc = Date.now();
     // One percept read serves both the semantics diagnosis and the geometry facts.
     const percept = readSeatPercept();
+    // Blueprint state belongs to this bridge rebuild. Keeping the read beside the
+    // percept it derives from prevents selection-only renders from becoming an
+    // accidental prerequisite for the Stats/Agent Seat blueprint door.
+    const blueprintStatus = residentBlueprintFromPercept(percept);
     const tPercept = Date.now();
     if (tPercept - tEffect > 100) console.warn(`[bevel-timing] focus-bridge effect: readMeshDoc=${tDoc - tEffect}ms percept=${tPercept - tDoc}ms`);
     const semantics = modelFocusSemantics({
@@ -4255,8 +4272,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const bridge: ModelFocusBridge = {
       uv: uvPanel,
       semantics,
+      blueprint: blueprintStatus.blueprint,
+      blueprintStatus,
       readSelection: readModelSelection,
       refreshSemantics: () => setSemanticRevision((value) => value + 1),
+      refreshBlueprint: () => setSemanticRevision((value) => value + 1),
+      commitBlueprint: (next) => {
+        const result = commitResidentBlueprint(next);
+        if (result.ok) {
+          onDocumentMutated?.();
+          setSemanticRevision((value) => value + 1);
+        }
+        return result;
+      },
       refreshGeometry: () => setSemanticRevision((value) => value + 1),
       paintLive: paintMode,
       readUvHistory: () => ({ uv: readMeshHistory(), paint: readPaintHistory() }),

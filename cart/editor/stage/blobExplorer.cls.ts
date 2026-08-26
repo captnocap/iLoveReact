@@ -24,7 +24,6 @@ classifier({
   // of whatever height the window gave it, which is one bug that reads as two:
   // dead space below it on a tall window, and overflow on a short one.
   HW_BSurface: { type: 'Box', style: { width: '100%', flexGrow: 1, minHeight: 0, flexDirection: 'column', backgroundColor: 'theme:bgAlt' } },
-  HW_BTabStrip: { type: 'Box', style: { width: '100%', flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_BScroll: { type: 'ScrollView', style: { width: '100%', flexGrow: 1, minHeight: 0 } },
 
   // ── query header (the four wrapping chip rows, curated) ──────────────────
@@ -59,8 +58,12 @@ classifier({
   HW_BBanner: { type: 'Box', style: { width: '100%', flexDirection: 'column', gap: 3, paddingLeft: 10, paddingRight: 10, paddingTop: 9, paddingBottom: 9, backgroundColor: 'theme:cardBg', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border', borderLeftWidth: 3, borderLeftColor: 'theme:success' } },
   HW_BBannerTitle: oneLine(12, 'theme:success', { fontFamily: MONO, fontWeight: 900, letterSpacing: 1 }),
   HW_BBannerCopy: wrapping(9, 'theme:textDim', { fontFamily: MONO, lineHeight: 12 }),
-  HW_BLogLine: wrapping(9, 'theme:textFaint', { fontFamily: MONO, lineHeight: 12 }),
-  HW_BCommandLine: wrapping(9, 'theme:primary', { fontFamily: MONO, lineHeight: 12 }),
+  // A log line is SCANNED, not read: one line each, elided at the edge, with the
+  // full text on the row's hover. Wrapping turned a service that logs its whole
+  // config as one debug struct into a forty-line wall (req_4776).
+  HW_BLogRow: { type: 'Box', hoverable: true, style: { width: '100%', flexDirection: 'row', minWidth: 0 } },
+  HW_BLogLine: oneLine(9, 'theme:textFaint', { fontFamily: MONO }),
+  HW_BCommandLine: oneLine(9, 'theme:primary', { fontFamily: MONO }),
 
   // ── inputs ───────────────────────────────────────────────────────────────
   HW_BInput: { type: 'TextInput', style: { width: '100%', height: 24, paddingLeft: 8, paddingRight: 7, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 10, fontFamily: MONO } },

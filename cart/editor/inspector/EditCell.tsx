@@ -24,6 +24,7 @@ import { Box, Pressable, Row, Text, TextInput } from '@reactjit/runtime/primitiv
 import { C, accentFor } from '../workspace.cls';
 import { REGIONS } from '../shell/regions';
 import { useStackedRows } from './rowLayout';
+import { claimCellEditor } from './cellEditor';
 
 const CELL_HEIGHT = 20;
 /** Pointer travel below this is a click (edit); at or past it, a scrub. */
@@ -82,6 +83,10 @@ export function NumberCell(props: {
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  /** The live draft, readable from the arbiter's close callback — that callback
+   *  is created once at open and would otherwise commit the opening value. */
+  const draftRef = useRef('');
+  draftRef.current = draft;
   const [scrubPreview, setScrubPreview] = useState<number | null>(null);
   const gesture = useRef<null | { startX: number; startValue: number; scrubbing: boolean }>(null);
   /** The value this edit session started from — the base every preview and the
@@ -91,6 +96,9 @@ export function NumberCell(props: {
    *  followup blur can never double-fire. */
   const closedRef = useRef(true);
   const previewedRef = useRef(false);
+  /** Stops this cell being the registered open editor. Set when it claims the
+   *  caret, called on every path that closes it (req_4776). */
+  const releaseRef = useRef<(() => void) | null>(null);
   const format = props.format ?? ((value: number) => fmtCellNumber(value));
   const scrubStep = props.scrubStep ?? 0.01;
   const flex = props.flex ?? !props.width;
@@ -105,6 +113,8 @@ export function NumberCell(props: {
     props.onPreview(clamp(value), baseRef.current);
   };
   const finishEdit = () => {
+    releaseRef.current?.();
+    releaseRef.current = null;
     setEditing(false);
     setScrubPreview(null);
   };
@@ -131,7 +141,11 @@ export function NumberCell(props: {
     baseRef.current = props.value;
     closedRef.current = false;
     previewedRef.current = false;
+    draftRef.current = format(props.value);
     setDraft(format(props.value));
+    // Claiming the caret closes whatever cell held it — the app owns "which
+    // cell is being edited", not each cell independently (req_4776).
+    releaseRef.current = claimCellEditor(() => commit(parseCellNumber(draftRef.current)));
     setEditing(true);
   };
   const pointerX = (event: any): number => {
@@ -147,6 +161,7 @@ export function NumberCell(props: {
         <TextInput
           value={draft}
           onChange={(value: string) => {
+            draftRef.current = value;
             setDraft(value);
             const parsed = parseCellNumber(value);
             if (parsed !== null) preview(parsed);

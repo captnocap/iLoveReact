@@ -15,11 +15,12 @@ import {
 } from '../../../runtime/model/faceTable';
 import {
   BLOB_EXPLORER_FACE_SOURCES,
-  BLOB_EXPLORER_TABS,
+  BLOB_EXPLORER_SECTIONS,
   BLOB_EXPLORER_UI,
   blobExplorerFaceRowView,
   blobExplorerFaceState,
   blobExplorerServiceLines,
+  recoveryHealth,
   faceFilterKey,
   faceSelectionForRow,
   formatBlobBytes,
@@ -120,7 +121,11 @@ const baseQuery = (): BlobExplorerFaceQuery => ({
 });
 
 test('the panel exposes Faces, Versions, Service and distinct resident/saved/preview/diff sources', () => {
-  assert(BLOB_EXPLORER_TABS.join(',') === 'faces,versions,service', 'tab contract drifted');
+  // req_4776 retired the three inner TABS: they made each subject responsible
+  // for filling the pane alone and none of them could. They are collapsible
+  // sections of one document now, and SNAPSHOTS leads because that is what
+  // recovery is for.
+  assert(BLOB_EXPLORER_SECTIONS.join(',') === 'snapshots,faces,service', 'recovery section contract drifted');
   assert(BLOB_EXPLORER_FACE_SOURCES.join(',') === 'resident,saved,preview,diff', 'face source contract drifted');
   assert(BLOB_EXPLORER_UI.minimumDataWidth === 320, 'data column dropped below the contract minimum');
 });
@@ -370,17 +375,43 @@ const blockedService = (): BlobExplorerServerStatusV1 => ({
 });
 
 test('service summary exposes blocked health, stores, and the hard 60-day retention truth', () => {
-  const lines = blobExplorerServiceLines(blockedService());
-  assert(lines[0]?.startsWith('BLOCKED') && lines[0]?.includes('unavailable'),
+  // req_4776 turned these from eight unlabelled sentences into labelled rows
+  // with their explanations on hover. Every FACT the old assertions guarded is
+  // still asserted; only where it lives moved.
+  const rows = blobExplorerServiceLines(blockedService());
+  const row = (label: string) => rows.find((entry) => entry.label === label);
+  const anywhere = (needle: string) => rows.some((entry) =>
+    entry.value.includes(needle) || entry.detail.includes(needle));
+
+  assert(row('library')?.value === 'UNAVAILABLE' && row('library')?.bad === true,
     'blocked library state was softened');
-  assert(lines.some((line) => line.includes('/data/lore')), 'repository path was hidden');
-  assert(lines.some((line) => line.includes('4.0 KiB local') && line.includes('UNKNOWN server')),
+  assert(anywhere('/data/lore'), 'repository path was hidden');
+  assert(row('store')?.value.includes('4.0 KiB here') && row('store')?.value.includes('UNKNOWN on the server'),
     'local/server store truth was flattened');
-  assert(lines.some((line) => line.includes('retention 60 days') && line.includes('pin does not extend')),
+  assert(row('kept for')?.value === '60 days' && row('kept for')!.detail.includes('does NOT extend'),
     'hard retention ceiling was absent');
-  assert(lines.some((line) => line.includes('legacy 6 pending') && line.includes('7 corrupt')),
+  assert(row('legacy')?.value.includes('6 pending') && row('legacy')?.value.includes('7 corrupt'),
     'legacy migration blockers were hidden');
+  assert(row('legacy')?.bad === true, 'a blocked legacy cutover no longer reads as a fault');
   assert(formatBlobBytes(1024 * 1024) === '1.0 MiB', 'byte formatter drifted');
+});
+
+test('recovery health does not call itself ready while a subsystem is failing', () => {
+  // The screenshot that prompted this: LORE READY / SERVICE HEALTHY / HTTP 200
+  // printed four rows above `prune error · LoreCallFailed`.
+  const readyButPruneFailing = {
+    ...blockedService(),
+    state: 'ready' as const,
+    library: { available: true, version: '0.8.6' },
+    repository: { ready: true, revision: 'abc123', path: '/data/lore' },
+    service: { ...blockedService().service, healthy: true, httpCode: 200 },
+    retention: { ...blockedService().retention, legacyCorruptPending: 0, legacyLayoutCutover: true, lastError: 'LoreCallFailed' },
+  };
+  const verdict = recoveryHealth(readyButPruneFailing as any);
+  assert(verdict.headline !== 'RECOVERY READY',
+    'the pane still calls itself ready while pruning is failing');
+  assert(verdict.reason?.includes('LoreCallFailed') === true,
+    'the verdict does not name the failure it is reporting');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

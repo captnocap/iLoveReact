@@ -32,8 +32,10 @@ import {
   type BlobGuardedFieldV1,
 } from '../model/blobExplorerState';
 
-export const BLOB_EXPLORER_TABS = ['faces', 'versions', 'service'] as const;
-export type BlobExplorerTab = typeof BLOB_EXPLORER_TABS[number];
+/** The recovery pane's three subjects. They were tabs; they are collapsible
+ *  sections of one document now (req_4776). */
+export const BLOB_EXPLORER_SECTIONS = ['snapshots', 'faces', 'service'] as const;
+export type BlobExplorerSection = typeof BLOB_EXPLORER_SECTIONS[number];
 
 export const BLOB_EXPLORER_FACE_SOURCES = ['resident', 'saved', 'preview', 'diff'] as const;
 export type BlobExplorerFaceSource = typeof BLOB_EXPLORER_FACE_SOURCES[number];
@@ -177,7 +179,8 @@ export type BlobExplorerSurfaceProps = {
   modelId: string;
   // `height` is gone (req_4775): the surface flexes into its container, so a
   // caller that supplied one was overriding the layout, not informing it.
-  initialTab?: BlobExplorerTab;
+  /** Which section opens expanded. Defaults to SNAPSHOTS. */
+  initialSection?: BlobExplorerSection;
   widthPreset: BlobExplorerWidthPreset;
   onWidthPreset: (preset: BlobExplorerWidthPreset) => void;
   faceQuery: BlobExplorerFaceQuery;
@@ -499,17 +502,160 @@ export function formatBlobTime(value: number | null): string {
   try { return new Date(value).toISOString(); } catch { return 'INVALID TIME'; }
 }
 
-export function blobExplorerServiceLines(status: BlobExplorerServerStatusV1): string[] {
+/** A row of counts where every count is zero says nothing eight times. Say it
+ *  once, in words (req_4776). */
+function countsOrNone(pairs: readonly (readonly [number, string])[], none: string): string {
+  const live = pairs.filter(([count]) => count > 0);
+  return live.length === 0 ? none : live.map(([count, name]) => `${count} ${name}`).join(' · ');
+}
+
+/**
+ * The service facts, each as a LABELLED row.
+ *
+ * These were eight unlabelled sentences dropped into a column where only the
+ * first got a label, so the pane read as a wall of prose. Each is a row now,
+ * and the sentences that were explaining a concept ("pin does not extend the
+ * hard age ceiling") moved to the row's tooltip, where an explanation belongs.
+ */
+export function blobExplorerServiceLines(status: BlobExplorerServerStatusV1): {
+  label: string; value: string; detail: string; bad?: boolean;
+}[] {
   return [
-    `${status.state.toUpperCase()} · library ${status.library.available ? status.library.version ?? 'available' : 'unavailable'}`,
-    `repository ${status.repository.ready ? status.repository.revision ?? 'ready' : 'not ready'} · ${status.repository.path}`,
-    `service ${status.service.healthy ? 'healthy' : 'unhealthy'} · HTTP ${status.service.httpCode ?? 'UNKNOWN'} · ${status.service.healthUrl} · unit ${status.service.active ? 'active' : 'inactive'}/${status.service.enabled ? 'enabled' : 'disabled'}`,
-    `store ${formatBlobBytes(status.stores.localBytes)} local · ${formatBlobBytes(status.stores.serverBytes)} server · ${status.stores.snapshotRoot}`,
-    `retention ${status.retention.days} days · pin does not extend the hard age ceiling`,
-    `tombstones ${status.retention.localTombstones} local · ${status.retention.remotePendingTombstones} remote pending · ${status.retention.immediatelyExpired} immediately expired`,
-    `removed ${status.retention.logicallyRemovedEntries} entries / ${formatBlobBytes(status.retention.logicallyRemovedBytes)} logical · ${formatBlobBytes(status.retention.physicallyReclaimedBytes)} reclaimed`,
-    `legacy ${status.retention.legacyUnexpiredPending} pending · ${status.retention.legacyCorruptPending} corrupt · cutover ${status.retention.legacyLayoutCutover ? 'complete' : 'blocked'}`,
+    {
+      label: 'library',
+      value: status.library.available ? status.library.version ?? 'available' : 'UNAVAILABLE',
+      detail: 'The Lore version-control library this editor links against.',
+      bad: !status.library.available,
+    },
+    {
+      label: 'repository',
+      value: status.repository.ready ? status.repository.revision ?? 'ready' : 'NOT READY',
+      detail: status.repository.path,
+      bad: !status.repository.ready,
+    },
+    {
+      label: 'service',
+      value: status.service.healthy
+        ? `healthy · HTTP ${status.service.httpCode ?? '—'}`
+        : `UNHEALTHY · HTTP ${status.service.httpCode ?? '—'}`,
+      detail: `${status.service.healthUrl} · unit ${status.service.active ? 'active' : 'inactive'}/${status.service.enabled ? 'enabled' : 'disabled'}`,
+      bad: !status.service.healthy,
+    },
+    {
+      label: 'store',
+      value: `${formatBlobBytes(status.stores.localBytes)} here · ${formatBlobBytes(status.stores.serverBytes)} on the server`,
+      detail: status.stores.snapshotRoot,
+    },
+    {
+      label: 'kept for',
+      value: `${status.retention.days} days`,
+      detail: 'How long a snapshot survives. Pinning protects a snapshot from ordinary pruning but does NOT extend this ceiling — past it, a pinned snapshot is removed like any other.',
+    },
+    {
+      label: 'tombstones',
+      value: countsOrNone([
+        [status.retention.localTombstones, 'local'],
+        [status.retention.remotePendingTombstones, 'awaiting the server'],
+        [status.retention.immediatelyExpired, 'expired on arrival'],
+      ], 'none'),
+      detail: 'Snapshots marked for deletion. A tombstone still occupies its slot until a prune reclaims it.',
+    },
+    {
+      label: 'reclaimed',
+      value: status.retention.logicallyRemovedEntries === 0
+        ? 'nothing removed yet'
+        : `${status.retention.logicallyRemovedEntries} entries · ${formatBlobBytes(status.retention.physicallyReclaimedBytes)} of ${formatBlobBytes(status.retention.logicallyRemovedBytes)} freed`,
+      detail: 'Entries pruning has removed, and how much of their disk it has actually handed back.',
+    },
+    {
+      label: 'legacy',
+      value: status.retention.legacyLayoutCutover
+        ? 'migrated'
+        : countsOrNone([
+          [status.retention.legacyUnexpiredPending, 'pending'],
+          [status.retention.legacyCorruptPending, 'corrupt'],
+        ], 'cutover blocked'),
+      detail: 'Snapshots still in the pre-cutover on-disk layout. Corrupt entries block the cutover completing.',
+      bad: !status.retention.legacyLayoutCutover,
+    },
   ];
+}
+
+/** One collapsible subject. The head always reads, so the pane tells you what
+ *  it has even while everything is folded — which is the difference between a
+ *  short pane and an empty one (req_4776). */
+function Fold({ title, count, open, onPress, children }: {
+  title: string;
+  count: number | null;
+  open: boolean;
+  onPress: () => void;
+  children: any;
+}) {
+  return (
+    <C.HW_Section>
+      <Pressable onPress={onPress} style={{ width: '100%' }} tooltip={open ? `Collapse ${title}` : `Expand ${title}`}>
+        <C.HW_SectionHead>
+          <C.HW_AccentBar style={{ backgroundColor: accentFor(open ? 'primary' : 'textDim') }} />
+          <C.HW_SectionTitle style={{ color: accentFor(open ? 'primary' : 'textDim') }}>{title}</C.HW_SectionTitle>
+          <C.HW_Spacer />
+          {count === null ? null : <C.HW_KeyText>{String(count)}</C.HW_KeyText>}
+          <Icon name={open ? 'ChevronUp' : 'ChevronDown'} size={11} color={accentFor(open ? 'primary' : 'textFaint')} />
+        </C.HW_SectionHead>
+      </Pressable>
+      {open ? children : null}
+    </C.HW_Section>
+  );
+}
+
+/**
+ * ONE verdict on whether recovery can be relied on.
+ *
+ * The pane used to headline `status.state` alone, which is how it managed to
+ * say LORE READY / SERVICE HEALTHY / HTTP 200 in the same breath as
+ * `prune error · LoreCallFailed`. A subsystem that is failing a call is not
+ * ready, whatever its state field says, so the failures are folded into the
+ * headline instead of being reported four rows below it (req_4776).
+ */
+export function recoveryHealth(status: BlobExplorerServerStatusV1): {
+  headline: string; reason: string | null; detail: string; tone: string;
+} {
+  const faults: string[] = [];
+  if (!status.library.available) faults.push('the Lore library is unavailable');
+  if (!status.repository.ready) faults.push('the repository is not ready');
+  if (!status.service.healthy) faults.push('the service is unhealthy');
+  if (status.retention.lastError) faults.push(`pruning failed (${status.retention.lastError})`);
+  if (status.retention.legacyCorruptPending > 0) faults.push(`${status.retention.legacyCorruptPending} corrupt legacy entries`);
+
+  if (status.state === 'blocked') {
+    return {
+      headline: 'RECOVERY BLOCKED',
+      reason: faults[0] ?? 'snapshot capture is unavailable',
+      detail: 'Nothing can be captured or restored until this is resolved.',
+      tone: 'error',
+    };
+  }
+  if (faults.length > 0) {
+    return {
+      headline: 'RECOVERY DEGRADED',
+      reason: faults.length === 1 ? faults[0]! : `${faults[0]} · and ${faults.length - 1} more`,
+      detail: faults.join(' · '),
+      tone: 'warning',
+    };
+  }
+  if (status.state === 'local') {
+    return {
+      headline: 'RECOVERY LOCAL ONLY',
+      reason: 'snapshots are captured on this machine; the server is not reachable',
+      detail: 'Local capture works. Nothing is being pushed off this machine.',
+      tone: 'warning',
+    };
+  }
+  return {
+    headline: 'RECOVERY READY',
+    reason: null,
+    detail: 'Library, repository, service and pruning are all healthy.',
+    tone: 'success',
+  };
 }
 
 /** A toggle chip. This used to be a private `TinyButton` with its own border,
@@ -923,70 +1069,83 @@ function VersionsView(props: BlobExplorerSurfaceProps & {
   );
 }
 
-/** A block of log lines under a section head — the shape both the journal tail
- *  and the restore commands wanted, written twice with different paddings. */
-function LogBlock({ title, lines, empty, command = false }: {
+/**
+ * A block of log lines.
+ *
+ * These used to WRAP, which turned a service that logs its whole config as one
+ * Rust debug struct into a forty-line wall nobody reads. One line per line,
+ * elided at the edge, full text on hover — a log is scanned, and you open the
+ * one line that looked wrong (req_4776).
+ */
+function LogBlock({ title, lines, empty, command = false, unit }: {
   title: string;
   lines: readonly string[];
   empty: string;
   command?: boolean;
+  unit?: string;
 }) {
   const Line = command ? C.HW_BCommandLine : C.HW_BLogLine;
   return (
-    <C.HW_Section>
-      <C.HW_SectionHead>
-        <C.HW_AccentBar />
-        <C.HW_SectionTitle>{title}</C.HW_SectionTitle>
+    <Col style={{ width: '100%', gap: 1, paddingLeft: 12, paddingRight: 12, paddingTop: 6 }}>
+      <C.HW_BRowTitle>
+        <C.HW_BDisclosureText>{title}</C.HW_BDisclosureText>
         <C.HW_Spacer />
         <C.HW_KeyText>{lines.length}</C.HW_KeyText>
-      </C.HW_SectionHead>
-      <Col style={{ width: '100%', gap: 1, paddingLeft: 12, paddingRight: 12 }}>
-        {lines.length
-          ? lines.map((line, index) => <Line key={`${title}-${index}`}>{line}</Line>)
-          : <C.HW_BLogLine>{empty}</C.HW_BLogLine>}
-      </Col>
-    </C.HW_Section>
+      </C.HW_BRowTitle>
+      {unit ? <C.HW_BRowAddress>{unit}</C.HW_BRowAddress> : null}
+      {lines.length
+        ? lines.map((line, index) => (
+          <C.HW_BLogRow key={`${title}-${index}`} tooltip={line}>
+            <Line>{line}</Line>
+          </C.HW_BLogRow>
+        ))
+        : <C.HW_BLogLine>{empty}</C.HW_BLogLine>}
+    </Col>
   );
 }
 
 function ServiceView({ status }: { status: BlobExplorerServerStatusV1 }) {
-  const blocked = status.state === 'blocked';
-  const tone = blocked ? 'error'
-    : status.state === 'local' ? 'warning'
-      : status.state === 'ready' ? 'success'
-        : 'textFaint';
   return (
     <Col style={{ width: '100%' }}>
-      <C.HW_BBanner style={{ borderLeftColor: accentFor(tone) }}>
-        <C.HW_BBannerTitle style={{ color: accentFor(tone) }}>{`LORE ${status.state.toUpperCase()}`}</C.HW_BBannerTitle>
-        {blocked ? <C.HW_BBannerCopy style={{ color: accentFor('error') }}>LOCAL RECOVERY CAPTURE IS BLOCKED — resolve library and repository failures before relying on snapshots.</C.HW_BBannerCopy> : null}
-        {status.state === 'local' ? <C.HW_BBannerCopy style={{ color: accentFor('warning') }}>Local capture remains available; the server is unhealthy or unreachable.</C.HW_BBannerCopy> : null}
-      </C.HW_BBanner>
-      <C.HW_Section>
-        <C.HW_SectionHead>
-          <C.HW_AccentBar />
-          <C.HW_SectionTitle>SERVICE</C.HW_SectionTitle>
-        </C.HW_SectionHead>
-        {blobExplorerServiceLines(status).map((line, index) => <Fact key={`${index}-${line}`} label={index === 0 ? 'status' : ''} value={line} tone={blocked && index < 2 ? 'danger' : index === 4 ? 'warning' : 'normal'} />)}
-        <Fact label="last prune" value={formatBlobTime(status.retention.lastPruneMs)} />
-        <Fact label="next prune" value={formatBlobTime(status.retention.nextPruneMs)} />
-        <Fact label="watermark" value={status.retention.remoteWatermark ?? 'UNKNOWN'} />
-        <Fact label="history" value={`${status.history.pushed} pushed · ${status.history.local} local · ${status.history.unknown} unknown`} />
-        <Fact label="probe" value={`completed ${formatBlobTime(status.probe.lastCompletedMs)} · transition ${formatBlobTime(status.probe.lastTransitionMs)}`} />
-        {status.retention.lastError ? <Fact label="prune error" value={status.retention.lastError} tone="danger" /> : null}
-      </C.HW_Section>
-      <LogBlock title={`JOURNAL · ${status.service.unitName}`} lines={status.service.journalTail} empty="No journal lines." />
+      {blobExplorerServiceLines(status).map((row) => (
+        <FactRow
+          key={row.label}
+          label={row.label}
+          value={row.value}
+          endColumn={false}
+          tone={row.bad ? 'danger' : 'normal'}
+          detail={row.detail}
+        />
+      ))}
+      <FactRow
+        label="last prune"
+        value={status.retention.lastError
+          ? `FAILED · ${status.retention.lastError}`
+          : formatBlobTime(status.retention.lastPruneMs)}
+        endColumn={false}
+        tone={status.retention.lastError ? 'danger' : 'normal'}
+        detail={status.retention.lastError
+          ? 'The most recent prune did not complete. Storage is not being reclaimed until this succeeds.'
+          : 'When pruning last removed expired snapshots.'}
+      />
+      <FactRow label="next prune" value={formatBlobTime(status.retention.nextPruneMs)} endColumn={false} detail="When pruning is scheduled to run again." />
+      <FactRow
+        label="pushed"
+        value={countsOrNone([
+          [status.history.pushed, 'on the server'],
+          [status.history.local, 'only here'],
+          [status.history.unknown, 'unknown'],
+        ], 'no snapshots yet')}
+        endColumn={false}
+        detail="Where this model's snapshots live. 'only here' means they have not reached the server and would not survive this machine."
+      />
+      <LogBlock title="SERVER LOG" lines={status.service.journalTail} empty="No log lines." unit={status.service.unitName} />
       <LogBlock title="RESTORE COMMANDS" lines={status.service.restoreCommands} empty="No restore commands published." command />
     </Col>
   );
 }
 
-/**
- * Right-pane recovery workspace. It never mounts a scene, reads a host global,
- * or mutates AppFrame state directly; every operation leaves through a prop.
- */
 export default function BlobExplorerSurface(props: BlobExplorerSurfaceProps) {
-  const [tab, setTab] = useState<BlobExplorerTab>(props.initialTab ?? 'faces');
   const [mode, setMode] = useState<BlobExplorerModeV1>('inspect');
   const [guardedField, setGuardedField] = useState<BlobGuardedFieldV1>('material');
   const [guardedValue, setGuardedValue] = useState('0');
@@ -994,33 +1153,56 @@ export default function BlobExplorerSurface(props: BlobExplorerSurfaceProps) {
   const [expandedHistory, setExpandedHistory] = useState<string[]>([]);
   const [snapshotLabel, setSnapshotLabel] = useState('');
   const [snapshotNote, setSnapshotNote] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  // THE THREE TABS ARE GONE (req_4776). Tabs made each section responsible for
+  // filling the pane on its own, and none of them could: FACES showed a query
+  // header and three rows above a thousand pixels of nothing, SERVICE showed one
+  // string. They are sections of ONE document now, so the content stacks and the
+  // space is spent on whatever there is. SNAPSHOTS opens by default because it
+  // is what you came to recovery for; the audit table and the plumbing are one
+  // click away instead of a tab away.
+  const [open, setOpen] = useState<readonly BlobExplorerSection[]>(
+    props.initialSection ? [props.initialSection] : ['snapshots'],
+  );
   const toggle = (rows: string[], key: string, write: (next: string[]) => void) =>
     write(rows.includes(key) ? rows.filter((row) => row !== key) : [...rows, key]);
-  // The surface FLEXES into whatever the focus panel gives it. It used to be a
-  // hardcoded 640px tall regardless of the window, which reads as dead space
-  // below on a tall window and overflow on a short one — the same bug wearing
-  // two faces (req_4775). The tab strip is fixed chrome; the scroll takes the
-  // remainder; nothing between them guesses a pixel height.
+  const foldOpen = (section: BlobExplorerSection) => open.includes(section);
+  const onFold = (section: BlobExplorerSection) => setOpen((rows) => rows.includes(section)
+    ? rows.filter((row) => row !== section)
+    : [...rows, section]);
+  const health = recoveryHealth(props.service);
   return (
     <C.HW_BSurface style={{ minWidth: BLOB_EXPLORER_UI.minimumDataWidth }}>
-      <C.HW_BTabStrip>
-        {BLOB_EXPLORER_TABS.map((candidate) => {
-          const on = tab === candidate;
-          const Tab = on ? C.HW_LensTabOn : C.HW_LensTab;
-          const Label = on ? C.HW_LensTabLabelOn : C.HW_LensTabLabel;
-          return (
-            <Tab key={candidate} onPress={() => setTab(candidate)} style={{ height: 22 }}>
-              <Label>{candidate.toUpperCase()}</Label>
-            </Tab>
-          );
-        })}
-        {/* The C/W width presets were retired by req_4774: the focus panel has ONE
-            width now and every pane wears the same left-edge drag, so a second,
-            pane-local width control would be two mechanisms disagreeing about
-            the same number. The capability moved, it did not disappear. */}
-      </C.HW_BTabStrip>
       <C.HW_BScroll showScrollbar>
-        {tab === 'faces' ? (
+        <C.HW_BBanner style={{ borderLeftColor: accentFor(health.tone) }} tooltip={health.detail}>
+          <C.HW_BBannerTitle style={{ color: accentFor(health.tone) }}>{health.headline}</C.HW_BBannerTitle>
+          {health.reason ? <C.HW_BBannerCopy style={{ color: accentFor(health.tone) }}>{health.reason}</C.HW_BBannerCopy> : null}
+        </C.HW_BBanner>
+
+        <Fold
+          title="SNAPSHOTS"
+          count={props.history.rows.length}
+          open={foldOpen('snapshots')}
+          onPress={() => onFold('snapshots')}
+        >
+          <VersionsView
+            {...props}
+            expanded={expandedHistory}
+            onToggleExpanded={(key) => toggle(expandedHistory, key, setExpandedHistory)}
+            label={snapshotLabel}
+            note={snapshotNote}
+            onLabel={setSnapshotLabel}
+            onNote={setSnapshotNote}
+          />
+        </Fold>
+
+        <Fold
+          title="FACE AUDIT"
+          count={props.facePage?.matchedRows ?? null}
+          open={foldOpen('faces')}
+          onPress={() => onFold('faces')}
+        >
           <FacesView
             {...props}
             expanded={expandedFaces}
@@ -1031,18 +1213,21 @@ export default function BlobExplorerSurface(props: BlobExplorerSurfaceProps) {
             onGuardedField={setGuardedField}
             guardedValue={guardedValue}
             onGuardedValue={setGuardedValue}
+            filtersOpen={filtersOpen}
+            onToggleFilters={() => setFiltersOpen((value) => !value)}
+            sortOpen={sortOpen}
+            onToggleSort={() => setSortOpen((value) => !value)}
           />
-        ) : tab === 'versions' ? (
-          <VersionsView
-            {...props}
-            expanded={expandedHistory}
-            onToggleExpanded={(key) => toggle(expandedHistory, key, setExpandedHistory)}
-            label={snapshotLabel}
-            note={snapshotNote}
-            onLabel={setSnapshotLabel}
-            onNote={setSnapshotNote}
-          />
-        ) : <ServiceView status={props.service} />}
+        </Fold>
+
+        <Fold
+          title="SERVICE"
+          count={null}
+          open={foldOpen('service')}
+          onPress={() => onFold('service')}
+        >
+          <ServiceView status={props.service} />
+        </Fold>
       </C.HW_BScroll>
     </C.HW_BSurface>
   );

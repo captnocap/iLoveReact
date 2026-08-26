@@ -18,13 +18,17 @@ function FactRow(props: {
   /** A fact that is a WARNING is still a fact — it belongs on this row grammar
    *  tinted, not in a bespoke row somebody wrote to get a colour (req_4775). */
   tone?: 'normal' | 'warning' | 'danger' | 'success';
+  /** What the fact MEANS, on hover. The row prints the value; an explanation
+   *  that shares the line is spending the panel on something the reader
+   *  usually already knows (req_4776). */
+  detail?: string;
 }) {
   const tinted = props.tone && props.tone !== 'normal'
     ? { color: accentFor(props.tone === 'danger' ? 'error' : props.tone) }
     : undefined;
   if (useStackedRows()) {
     return (
-      <C.HW_RowStacked>
+      <C.HW_RowStacked tooltip={props.detail}>
         <C.HW_FormLabelStacked>{props.label}</C.HW_FormLabelStacked>
         <C.HW_RowStackedControls>
           <C.HW_ReadValueStacked style={tinted}>{props.value}</C.HW_ReadValueStacked>
@@ -34,7 +38,7 @@ function FactRow(props: {
     );
   }
   return (
-    <C.HW_ReadRow>
+    <C.HW_ReadRow tooltip={props.detail}>
       <C.HW_FormLabel>{props.label}</C.HW_FormLabel>
       <C.HW_Spacer />
       <C.HW_ReadValue style={tinted}>{props.value}</C.HW_ReadValue>

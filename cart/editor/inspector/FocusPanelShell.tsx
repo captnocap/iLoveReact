@@ -16,9 +16,11 @@
 // Panes whose whole surface is its own component (the Lab inspector, the
 // animation panel) pass `ownsHead` and render their own head inside the body
 // slot. They still get the width, the grip and the rail from here.
-import type { ReactNode } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
+import { Pressable } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
+import { cellEditorOpen, closeCellEditor, subscribeCellEditor } from './cellEditor';
 import type { FocusPanelGrip } from './focusPanelResize';
 import { StackedRowsProvider, rowsStackAt } from './rowLayout';
 
@@ -40,6 +42,7 @@ export default function FocusPanelShell(props: {
   ownsHead?: boolean;
   children: ReactNode;
 }) {
+  const editingCell = useSyncExternalStore(subscribeCellEditor, cellEditorOpen, cellEditorOpen);
   const body = (
     <StackedRowsProvider value={rowsStackAt(props.width)}>
       {props.ownsHead ? props.children : (
@@ -57,8 +60,20 @@ export default function FocusPanelShell(props: {
       )}
     </StackedRowsProvider>
   );
+  // CLICKING OUTSIDE A CELL LETS GO OF IT (req_4776). A press on empty panel
+  // space hits no input and no handler, so nothing was ever going to blur the
+  // caret — the cell just kept it. This backdrop sits BEHIND the panel content
+  // (every real control is above it and wins the hit test) and exists only
+  // while a cell holds the caret, so it never swallows an ordinary press.
   return (
     <C.HW_RightPanel style={{ width: props.width }}>
+      {editingCell ? (
+        <Pressable
+          onPress={closeCellEditor}
+          hoverStyle={{}}
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+        />
+      ) : null}
       <C.HW_RightResizeGrip
         tooltip="Drag to resize the focus panel"
         {...props.grip}

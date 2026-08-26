@@ -186,10 +186,13 @@ function UvSection({
           <C.HW_ReadValue>none saved — use Paint to create one</C.HW_ReadValue>
         </C.HW_ReadRow>
       )}
-      {workspace.showScope ? (
-        <C.HW_ReadRow>
-          <C.HW_FormLabel>scope</C.HW_FormLabel>
-          <C.HW_ReadValue>{uv?.scope ?? 'whole model'}</C.HW_ReadValue>
+      {/* The atlas is ALWAYS whole-model, so a row reading "scope · whole model"
+          answered a question nobody asked and hid the two facts that do vary
+          (req_4776). It appears only when it has something to say. */}
+      {workspace.showScope && uv?.scope ? (
+        <C.HW_ReadRow tooltip="One atlas covers the whole model; its faces divide it by real-world size.">
+          <C.HW_FormLabel>atlas covers</C.HW_FormLabel>
+          <C.HW_ReadValue>{uv.scope}</C.HW_ReadValue>
         </C.HW_ReadRow>
       ) : null}
     </C.HW_Section>

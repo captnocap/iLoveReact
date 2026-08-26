@@ -475,14 +475,14 @@ export function ShapeSection({ shape, bridge, onSelectAudit }: {
         label="intersecting"
         shape={shape}
         count={shape?.intersecting ?? 0}
-        detail="tris through other tris"
+        detail="Triangles that pass through other triangles in this mesh."
         onSelect={() => onSelectAudit('intersecting')}
       />
       <GeometryFactRow
         label="unreachable"
         shape={shape}
         count={shape?.unreachable ?? 0}
-        detail="tris no camera can see"
+        detail="Triangles no camera can reach from any audited direction."
         onSelect={() => onSelectAudit('unreachable')}
       />
     </C.HW_Section>
@@ -494,7 +494,11 @@ export function ShapeSection({ shape, bridge, onSelectAudit }: {
 // "not measured", never a clean zero it did not earn.
 function GeometryFactRow(
   { label, shape, count, detail, onSelect }: {
-    label: string; shape: ModelFocusShape | null; count: number; detail: string;
+    label: string; shape: ModelFocusShape | null; count: number;
+    /** What the count MEANS. It is a tooltip, not a value: the row's job is to
+     *  report a number, and printing "0 · tris through other tris" spends the
+     *  whole row explaining a word to someone who already knows it (req_4776). */
+    detail: string;
     /** Select these exact triangles — a count you cannot locate is not actionable
      *  (req_3883). Offered only when the audit is real and found something. */
     onSelect: () => void;
@@ -506,12 +510,12 @@ function GeometryFactRow(
   const value = !shape ? '—'
     : !shape.audited ? 'not measured'
       : inconsistent ? `stale · ${fmtCount(count)} vs ${fmtCount(shape.tris)} tris`
-        : count === 0 ? `0 · ${detail}`
-          : `${fmtCount(count)} · ${detail}`;
+        : count === 0 ? 'none'
+          : `${fmtCount(count)} tris`;
   const tone = inconsistent ? 'error' : shape?.audited && count > 0 ? 'warning' : 'textDim';
   const locatable = !!shape && shape.audited && !inconsistent && count > 0;
   return (
-    <C.HW_ReadRow>
+    <C.HW_ReadRow tooltip={detail}>
       <C.HW_FormLabel>{label}</C.HW_FormLabel>
       <C.HW_ReadValue style={{ color: accentFor(tone) }}>{value}</C.HW_ReadValue>
       {locatable ? (
