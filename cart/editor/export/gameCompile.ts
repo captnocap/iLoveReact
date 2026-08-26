@@ -110,7 +110,13 @@ function meshBounds(vertices: Float32Array): { radius: number; width: number; de
     minZ = Math.min(minZ, vertices[index + 2]); maxZ = Math.max(maxZ, vertices[index + 2]);
   }
   if (!Number.isFinite(minX)) return { radius: 0, width: 0, depth: 0, height: 0, box: [0, 0, 0, 0, 0, 0] };
-  const radius = Math.max(Math.hypot(minX, minY, minZ), Math.hypot(maxX, maxY, maxZ));
+  // Origin-centered cull radius: |v| is maximized at an AABB corner, and only
+  // the full 8-corner sweep bounds every vertex — the two-corner shortcut
+  // under-covered mixed-sign meshes (the same blink class as req_4777).
+  let radius = 0;
+  for (const x of [minX, maxX]) for (const y of [minY, maxY]) for (const z of [minZ, maxZ]) {
+    radius = Math.max(radius, Math.hypot(x, y, z));
+  }
   return { radius, width: maxX - minX, depth: maxZ - minZ, height: maxY - minY, box: [minX, minY, minZ, maxX, maxY, maxZ] };
 }
 

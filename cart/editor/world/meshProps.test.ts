@@ -200,5 +200,20 @@ test('mesh refs carry one hash per authored face slot, including zero paint fall
   assert(v1dv.getUint32(20, true) === 3 && v1dv.getUint32(28, true) === 0, 'v1 slot fallback changed');
 });
 
+test('bounds radius spheres the MODEL-FRAME ORIGIN, not the AABB centre (req_4777)', () => {
+  // A world-space identity mesh (the architecture band lane): geometry far from
+  // the origin. The loader culls with a sphere at the node position — for these
+  // refs that is the origin — so the wire radius must reach the farthest vertex.
+  const far = new Float32Array(3 * 8);
+  const corners: [number, number, number][] = [[440, 0, 200], [470, 12, 230], [455, 6, 215]];
+  corners.forEach(([x, y, z], i) => { far[i * 8] = x; far[i * 8 + 1] = y; far[i * 8 + 2] = z; });
+  const bytes = encodeResidentMeshes([{ key: 'arch:wall:plain:s1', vertices: far, solid: false }]);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const keyLength = dv.getUint32(12, true);
+  const radius = dv.getFloat32(16 + keyLength + 12, true);
+  const need = Math.hypot(470, 12, 230);
+  assert(radius >= need - 1e-3, `radius ${radius} does not reach the farthest vertex ${need} — the loader would blink the whole band with sub-degree camera moves`);
+});
+
 log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} test(s) failed`);

@@ -68,15 +68,25 @@ export type ResidentCollisionBox = {
 
 function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: number } {
   let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  // The wire's radius is the loader's CULL SPHERE about the mesh's MODEL-FRAME
+  // ORIGIN (estimateMeshRadius spheres the node's position — for the identity
+  // refs the architecture/facade lanes push, that position is the world origin
+  // while the vertices live at world coordinates). A half-extent about the AABB
+  // center under-covers any off-center mesh, and the loader's draw-radius cull
+  // then blinks whole building groups in and out with sub-degree camera moves
+  // (req_4777). Track the exact farthest vertex from the origin instead.
+  let maxR2 = 0;
   for (let i = 0; i + 2 < v.length; i += 8) {
     const x = v[i]!, y = v[i + 1]!, z = v[i + 2]!;
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
     if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    const r2 = x * x + y * y + z * z;
+    if (r2 > maxR2) maxR2 = r2;
   }
   if (!Number.isFinite(minX)) return { radius: 1, w: 1, d: 1, h: 1 };
   const w = maxX - minX, h = maxY - minY, d = maxZ - minZ;
-  return { radius: Math.max(w, h, d) * 0.5 || 1, w: w || 1, d: d || 1, h: h || 1 };
+  return { radius: Math.sqrt(maxR2) || 1, w: w || 1, d: d || 1, h: h || 1 };
 }
 
 const MESH_PROPS_VERSION = 11;
