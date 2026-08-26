@@ -38,6 +38,7 @@ export type FartRacerTarget = Readonly<{
     minimumCollisionImpulse: number;
     collisionDamagePerImpulse: number;
     maximumStepSeconds: number;
+    boostBurnMultiplier: number;
   }>;
   world: Readonly<{
     walkableSlopeDegrees: number;
@@ -114,6 +115,7 @@ export function parseFartRacerTarget(input: unknown): FartRacerTarget {
     initialTankRatio: finite(simulation.initialTankRatio, 'simulation.initialTankRatio', 0, 1),
     bowelCapacity: finite(simulation.bowelCapacity, 'simulation.bowelCapacity', 0.001),
     minimumCollisionImpulse: finite(simulation.minimumCollisionImpulse, 'simulation.minimumCollisionImpulse', 0),
+    boostBurnMultiplier: finite(simulation.boostBurnMultiplier, 'simulation.boostBurnMultiplier', 1),
     collisionDamagePerImpulse: finite(simulation.collisionDamagePerImpulse, 'simulation.collisionDamagePerImpulse', 0),
     maximumStepSeconds: finite(simulation.maximumStepSeconds, 'simulation.maximumStepSeconds', 0.001, 0.25),
   };

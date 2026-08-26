@@ -30,10 +30,12 @@ test "fixed numeric prefix and trailing declarative catalog decode together" {
     writeNumber(&bytes, 46, 1.85);
     writeNumber(&bytes, 57, 1);
     writeNumber(&bytes, 58, 0.75);
+    writeNumber(&bytes, wire.NUMBER_COUNT - 1, 4);
     const decoded = try wire.decode(&bytes);
     try testing.expectApproxEqAbs(@as(f32, 0.25), decoded.target.rating_fallbacks.drive, 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 2.7), decoded.target.driving_bands.wheel_base, 1e-6);
     try testing.expectApproxEqAbs(@as(f32, 0.75), decoded.vehicle_blueprint.drive_rating.?, 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 4), decoded.target.sim.boost_burn_multiplier, 1e-6);
     try testing.expectEqualStrings(CATALOG, decoded.catalog_json);
 }
 

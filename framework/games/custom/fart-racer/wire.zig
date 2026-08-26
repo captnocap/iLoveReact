@@ -8,7 +8,7 @@ const sim = @import("sim.zig");
 
 pub const MAGIC: u32 = 0x31524746;
 pub const VERSION: u32 = 1;
-pub const NUMBER_COUNT: usize = 77;
+pub const NUMBER_COUNT: usize = 78;
 pub const MAX_MARKERS: usize = 256;
 
 pub const Decoded = struct {
@@ -332,6 +332,7 @@ pub fn decode(bytes: []const u8) Error!Decoded {
             .minimum_collision_impulse = try reader.number(),
             .collision_damage_per_impulse = try reader.number(),
             .maximum_step_seconds = try reader.number(),
+            .boost_burn_multiplier = 0, // appended at the tape's tail; read below
         },
     };
     const vehicle_fallbacks = sim.VehicleFallbacks{
@@ -353,9 +354,13 @@ pub fn decode(bytes: []const u8) Error!Decoded {
         .fill_efficiency = try reader.optional(),
         .leak_liters_per_damage_second = try reader.optional(),
     };
+    // Tail appendix: numbers added after v1 shipped live HERE, so every slot
+    // above keeps the position it has always had.
+    var tail_target = target;
+    tail_target.sim.boost_burn_multiplier = try reader.number();
     if (reader.index != NUMBER_COUNT) return error.BadNumberCount;
     return .{
-        .target = target,
+        .target = tail_target,
         .vehicle_fallbacks = vehicle_fallbacks,
         .vehicle_blueprint = vehicle_blueprint,
         .catalog_json = bytes[numbers_end .. numbers_end + catalog_length],

@@ -13,6 +13,8 @@ const flora_geometry = @import("../world/flora_geometry.zig");
 const instance_collider_policy = @import("../world/instance_collider_policy.zig");
 const streaming = @import("../world/streaming.zig");
 const game_physics = @import("../game/physics.zig");
+const game_camera = @import("../game/camera.zig");
+const world_emitters = @import("../audio/world_emitters.zig");
 const log = std.debug;
 const m_config = @import("config.zig");
 const m_state = @import("state.zig");
@@ -21,11 +23,14 @@ const m_physics = @import("physics.zig");
 const m_camera = @import("camera.zig");
 const m_animation = @import("animation.zig");
 const m_player_character_pose = @import("player_character_pose.zig");
+const m_animation_trajectory = @import("animation_trajectory.zig");
 const m_streaming_support = @import("streaming_support.zig");
 const runtime_live_scene = @import("runtime_live_scene.zig");
 const runtime_dynamics = @import("runtime_dynamics.zig");
 const runtime_interaction = @import("runtime_interaction.zig");
 const live_inputs = @import("live_inputs.zig");
+const player_stats = @import("../game/player_stats.zig");
+const fart_racer = @import("fart_racer_runtime.zig");
 
 const SCAN_A = m_config.SCAN_A;
 const SCAN_D = m_config.SCAN_D;
@@ -33,6 +38,7 @@ const SCAN_S = m_config.SCAN_S;
 const SCAN_W = m_config.SCAN_W;
 const SCAN_SPACE = m_config.SCAN_SPACE;
 const SCAN_LSHIFT = m_config.SCAN_LSHIFT;
+const SCAN_E = m_config.SCAN_E;
 const CAMERA_MIN_PITCH_DEGREES = m_config.CAMERA_MIN_PITCH_DEGREES;
 const CAMERA_MAX_PITCH_DEGREES = m_config.CAMERA_MAX_PITCH_DEGREES;
 const CAMERA_YAW_DEGREES_PER_PIXEL = m_config.CAMERA_YAW_DEGREES_PER_PIXEL;
@@ -62,8 +68,11 @@ const COLLIDER_WINDOW_CELLS = m_physics.COLLIDER_WINDOW_CELLS;
 const SpatialGrid = m_physics.SpatialGrid;
 const runPlayerPhysics = m_physics.runPlayerPhysics;
 const resolveMeshPropPlayer = m_physics.resolveMeshPropPlayer;
+const sceneTerrainTopAtOrBelow = m_physics.sceneTerrainTopAtOrBelow;
 const PitchLimits = m_camera.PitchLimits;
 const updateCameraNode = m_camera.updateCameraNode;
+const applyNativeCameraNode = m_camera.applyNativeCameraNode;
+const releaseNativeCamera = m_camera.releaseNativeCamera;
 const aimPitchLimitsInOrbitSpace = m_camera.aimPitchLimitsInOrbitSpace;
 const setAimMode = m_camera.setAimMode;
 const placeSinglePlayerCharacter = m_animation.placeSinglePlayerCharacter;
@@ -484,6 +493,17 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
     self.last_ns = ns;
 
+    // A WorldLoader's camera is an internal retained child, not a host-tree
+    // node. The loader root id therefore keys the shared V23 controller slot;
+    // native owns every frame after JS sends only changed parameters/deltas.
+    const native_camera_bound = game_camera.isBound(self.node_id);
+    if (native_camera_bound) {
+        self.camera.native_controller = true;
+        self.camera.external = true;
+    } else {
+        releaseNativeCamera(&self.camera);
+    }
+
     // req_0652: cars advance FIRST so this frame's physics step (and the
     // interact prompts) read the fresh car heights — /test's frame order.
     stepElevators(self, dt);
@@ -499,28 +519,94 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         if (keyDown(SCAN_A)) strafe -= 1;
         if (keyDown(SCAN_D)) strafe += 1;
     }
-    const intent = game_physics.movement.wasdDirection(forward, strafe, self.camera.yaw_degrees * std.math.pi / 180.0);
     const run_down = keyDown(SCAN_LSHIFT);
+    const cfg = self.physics_override orelse self.scene.physics_config;
+    if (fart_racer.active(&self.fart_racer) and self.windowed) rebuildWindow(self, self.player.x, self.player.z);
+    const prior_race_odometer = fart_racer.odometer(&self.fart_racer);
+    const prior_race_x = self.player.x;
+    const prior_race_z = self.player.z;
+    const racing = fart_racer.step(
+        &self.fart_racer,
+        &self.player,
+        forward,
+        strafe,
+        keyDown(SCAN_SPACE),
+        run_down,
+        keyDown(SCAN_E),
+        dt,
+    );
+    // A race camera is a chase camera: keep its orbit behind the authoritative
+    // movement heading. Leaving this at the spawn yaw made correct steering
+    // read backwards once the car turned away from the fixed camera.
+    if (racing) self.camera.yaw_degrees = self.player.yaw * 180.0 / std.math.pi;
+    if (racing and self.has_physics_colliders) {
+        const colliders = &self.physics_colliders;
+        const rect_base = colliders.rectBase();
+        const oriented_base = colliders.orientedBase();
+        const rects = colliders.values[rect_base .. rect_base + colliders.rect_count * game_physics.RECT_FLOATS];
+        const oriented = colliders.values[oriented_base .. oriented_base + colliders.oriented_count * game_physics.ORIENTED_FLOATS];
+        if (game_physics.sweepHorizontalCircle(
+            rects,
+            oriented,
+            prior_race_x,
+            prior_race_z,
+            self.player.x,
+            self.player.z,
+            self.player.y,
+            if (cfg) |value| value.player_height else m_config.PLAYER_HEIGHT_METERS,
+            fart_racer.collisionRadius(&self.fart_racer),
+        )) |hit| {
+            _ = fart_racer.applyWorldCollision(
+                &self.fart_racer,
+                &self.player,
+                prior_race_x,
+                prior_race_z,
+                self.player.x,
+                self.player.z,
+                hit.normal_x,
+                hit.normal_z,
+                hit.fraction,
+                if (cfg) |value| value.wall_restitution else m_config.PLAYER_WALL_RESTITUTION,
+                prior_race_odometer,
+            );
+        }
+        const maximum_rise = if (cfg) |value| value.step_height else m_config.PLAYER_STEP_HEIGHT_METERS;
+        if (sceneTerrainTopAtOrBelow(self.scene.heightfields, self.player.x, self.player.z, self.player.y + maximum_rise)) |terrain_y| {
+            self.player.y = terrain_y;
+            self.player.vy = 0;
+            self.player.grounded = true;
+        }
+    }
+    const intent = if (racing)
+        game_physics.movement.Direction{ .x = 0, .z = 0 }
+    else
+        game_physics.movement.wasdDirection(forward, strafe, self.camera.yaw_degrees * std.math.pi / 180.0);
     // Locomotion speed from the baked PHYSICS_CONFIG (the editor's walk/run),
     // falling back to the loader's built-in constants for pre-lump bakes.
     // A live Globals override (GLOBALS req_2770) outranks the baked lump.
-    const cfg = self.physics_override orelse self.scene.physics_config;
     const walk_speed = if (cfg) |cf| cf.walk_speed else PLAYER_WALK_SPEED_METERS_PER_SECOND;
     const run_speed = if (cfg) |cf| cf.run_speed else PLAYER_RUN_SPEED_METERS_PER_SECOND;
-    const speed: f32 = if (run_down) run_speed else walk_speed;
+    const sprinting = run_down and self.stats.canSprint();
+    const speed: f32 = if (sprinting) run_speed else walk_speed;
     // PROPUSE req_0624: a seated/lying player is pinned to the seat and the
     // movement step is skipped — WASD or Space stands up (/test parity:
     // the embodied loop owns the exit, the world keeps stepping).
     if (self.player.posture != .none and (@abs(forward) + @abs(strafe) > 0.001 or keyDown(SCAN_SPACE))) {
         self.player.posture = .none;
     }
-    if (self.player.posture == .none) {
+    if (self.player.posture == .none and !racing) {
         // Refresh the near-field collider window around the player (huge maps only).
         // Cheap — it touches only the spanning list + the cells around the player.
         if (self.windowed) rebuildWindow(self, self.player.x, self.player.z);
-        const jump_requested = keyDown(SCAN_SPACE) and !self.camera.external;
+        const wants_jump = keyDown(SCAN_SPACE) and !self.camera.external;
         const was_grounded = self.player.grounded;
+        const jump_requested = wants_jump and was_grounded and self.stats.tryChargeJump();
+        const prior_x = self.player.x;
+        const prior_z = self.player.z;
         runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, jump_requested, cfg, self.bodies);
+        const traveled_x = self.player.x - prior_x;
+        const traveled_z = self.player.z - prior_z;
+        self.stats.addWalkedMeters(@sqrt(traveled_x * traveled_x + traveled_z * traveled_z));
         const rect_step_launched = self.player.vy > 0;
         const grounded_on_exact_mesh = resolveExactMeshProps(self, cfg);
         // The packed rect step cannot see an exact mesh's triangle top, so it
@@ -538,13 +624,34 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         var ghost = self.player;
         runPlayerPhysics(&ghost, &self.physics_colliders, dt, .{ .x = 0, .z = 0 }, 0, false, cfg, self.bodies);
     }
-    if (self.camera.aiming) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
+    if (racing) self.stats.addVehicleMeters(fart_racer.traveledMeters(&self.fart_racer, prior_race_odometer));
+    if (fart_racer.visualPose(&self.fart_racer, self.player.y)) |pose| {
+        const last = @min(self.kid_list.items.len, self.fart_racer_vehicle_first_child + self.fart_racer_vehicle_child_count);
+        if (self.fart_racer_vehicle_has_part_schema) {
+            for (self.kid_list.items[self.fart_racer_vehicle_first_child..last], 0..) |*node, part_index| {
+                fart_racer.updateVehiclePartNode(node, part_index, self.fart_racer_vehicle_local_centers[part_index], pose);
+            }
+        } else {
+            for (self.kid_list.items[self.fart_racer_vehicle_first_child..last]) |*node| {
+                node.scene3d_pos_x = pose.x;
+                node.scene3d_pos_y = pose.y;
+                node.scene3d_pos_z = pose.z;
+                node.scene3d_rot_x = pose.pitch_degrees;
+                node.scene3d_rot_y = pose.yaw_degrees;
+                node.scene3d_rot_z = pose.roll_degrees;
+            }
+        }
+    }
+    if (self.camera.aiming and !racing) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
     const seated = self.player.posture != .none;
     // RJIT_FORCE_GAIT=1 drives the walk clip with no input — the headless
     // animation-repro hook (req_2781): `rjit shot` frames land mid-stride.
-    const moving = self.force_gait or (!seated and @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001);
+    const movement_input = !seated and @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
+    const moving = self.force_gait or movement_input;
     const airborne = !seated and (!self.player.grounded or @abs(self.player.vy) > 0.05);
-    updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
+    self.stats.stepEnergy(if (racing or !movement_input) player_stats.EnergyActivity.rest else if (sprinting) .run else .walk, dt);
+    self.stats.decayNotoriety(dt);
+    updatePlayerAnimationClock(&self.player, dt, moving, sprinting, airborne);
 
     // The saved character is always deformed by hierarchical FK. Capture owns
     // the palette only while its explicit session is active; otherwise these
@@ -556,7 +663,7 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
         const clip: m_player_character_pose.clips.ClipId = self.force_clip orelse switch (self.player.posture) {
             .sit => .sit,
             .lay => .lay,
-            .none => if (airborne) .jump else if (moving or run_down) .walk else .idle,
+            .none => if (airborne) .jump else if (moving or sprinting) .walk else .idle,
         };
         const clip_seconds: ?f32 = if (self.force_clip != null)
             self.force_clip_seconds orelse 0
@@ -590,24 +697,51 @@ pub fn stepNow(self: anytype, io: std.Io, environ: *const std.process.Environ.Ma
             }
         }
     }
+    // The marker follows the exact native mixer root sampled above. Static
+    // trajectory geometry remains untouched unless its semantic revision
+    // changes at the applyPending boundary.
+    m_animation_trajectory.updatePlayhead(self);
     self.npc_character_session.advance(dt);
     stepInteract(self, dt);
     stepCookedDoors(self, dt); // req_1908: swing custom doors toward their target
 
-    updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), propColliderSet(self), dt);
+    const now_ms: u32 = @truncate(@as(u64, @intCast(@max(ns, 0))) / std.time.ns_per_ms);
+    if (game_camera.stepNode(self.node_id, now_ms)) |solved| {
+        applyNativeCameraNode(&self.kid_list.items[0], &self.camera, solved);
+    } else {
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, cameraColliderSet(self), propColliderSet(self), dt);
+    }
+    // World audio is a native join: WorldLoader owns camera/player transforms,
+    // while the audio owner turns only changed spatial values into track
+    // controls. With no emitters this is an O(1) branch and allocates nothing.
+    if (world_emitters.registry.active_count > 0) {
+        _ = world_emitters.registry.setListener(self.node_id, .{
+            .x = self.camera.current_pos.x,
+            .y = self.camera.current_pos.y,
+            .z = self.camera.current_pos.z,
+        }, self.camera.yaw_degrees * std.math.pi / 180.0);
+        _ = world_emitters.registry.updateEntity(self.node_id, world_emitters.PLAYER_ENTITY_ID, .{
+            .x = self.player.x,
+            .y = self.player.y,
+            .z = self.player.z,
+        });
+    }
     if (self.fog_kid) |k| m_camera.updateFogNode(&self.kid_list.items[k], self.camera);
     if (self.scene.player_character) |*resident_character| {
         const facing_yaw = resident_character.facing_yaw_offset_degrees;
-        if (self.player_bind_specimen) |*bind| {
-            const specimen_anchor = if (self.player_target_active_owner.value() != null)
-                characterDiagnosticAnchor()
-            else
-                self.player;
+        if (self.player_target_active_owner.value() != null or self.animation_trajectory_active or self.preview_stage) {
+            placeSinglePlayerCharacter(
+                self.kid_list.items,
+                self.player_first_child,
+                characterDiagnosticAnchor(),
+                facing_yaw,
+            );
+        } else if (self.player_bind_specimen) |*bind| {
             placePlayerCharacterSpecimens(
                 self.kid_list.items,
                 self.player_first_child,
                 self.player_bind_child,
-                specimen_anchor,
+                self.player,
                 bind.separation_x,
                 facing_yaw,
             );

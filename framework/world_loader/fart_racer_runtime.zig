@@ -43,6 +43,8 @@ pub const State = if (enabled) struct {
     food_audio_adopted: bool = false,
     brake_lights_on: bool = false,
     reverse_lights_on: bool = false,
+    /// The overdrive that actually reached the road last step, 0..1.
+    boost_delivered: f32 = 0,
 } else struct {};
 
 pub fn init(logic: []const u8) ?State {
@@ -91,6 +93,7 @@ pub fn step(
     steer_axis: f32,
     handbrake: bool,
     foot_brake: bool,
+    boost: bool,
     dt_seconds: f32,
 ) bool {
     if (!enabled) return false;
@@ -111,11 +114,14 @@ pub fn step(
             .steer = steer_axis,
             .handbrake = handbrake,
             .foot_brake = foot_brake,
+            .boost = if (boost) 1 else 0,
         },
         state.application.config,
         state.target.sim,
         dt_seconds,
     );
+    state.boost_delivered = racer.driving.effectiveBoost(@max(0, throttle_axis), if (boost) 1 else 0) *
+        @as(f32, if (state.race.tank_liters > 0 and state.race.phase == .running) 1 else 0);
     const forward_speed = state.race.vehicle.velocity_x * @sin(state.race.vehicle.heading) +
         state.race.vehicle.velocity_z * @cos(state.race.vehicle.heading);
     const lights = vehicle_visual.lightState(throttle_axis, foot_brake, forward_speed, vehicle_visual.DEFAULT_TUNING);
@@ -289,6 +295,7 @@ pub fn telemetryAlloc(maybe_state: *const ?State, world_id: u32, allocator: std.
         .elapsedSeconds = state.race.elapsed_seconds,
         .speedMetersPerSecond = speed,
         .digestionCount = state.race.digestion_count,
+        .boost = state.boost_delivered,
         .worldId = world_id,
         .rpmNormalized = std.math.clamp(
             speed / @max(
