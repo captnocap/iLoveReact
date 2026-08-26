@@ -17,7 +17,12 @@
 // right in the source.
 import { classifiers } from '../../runtime/classifier';
 import { oneLine, oneLineColumn, wrapping } from './panelText';
+// Every sheet this test can vouch for. `workspace.cls` and `journalThreads.cls`
+// are fully policed; `editor.cls`, `play/surfaces.cls` and `worldBible.cls` are
+// NOT imported yet — see the gap note at the bottom of this file.
 import './workspace.cls';
+import './shell/journalThreads.cls';
+import './stage/blobExplorer.cls';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -73,5 +78,19 @@ assert(unpoliced.length === 0,
 // instead of painting over the control beside it.
 const formValue = (classifiers as Record<string, any>).HW_FormValue?.__def;
 assert(policyOf(formValue) === 'elided', 'HW_FormValue lost its elision policy — long clip names will paint over their neighbours again');
+
+// ── KNOWN GAP ──────────────────────────────────────────────────────────────
+// Three editor sheets are deliberately NOT imported here yet:
+//   cart/editor/editor.cls.ts          5 Text classes
+//   cart/editor/play/surfaces.cls.ts  57 Text classes
+//   cart/editor/worldBible/worldBible.cls.ts  26 Text classes
+// They are not simply unpoliced — most already carry `noWrap`/`numberOfLines`
+// inline, so they have the PROPS half of the policy and are missing the
+// `min-width: 0` style half, which is the half that actually lets a string
+// shrink. Converting them is a different transformation from the one that
+// finished workspace.cls, and doing it blind would change the /play HUD and the
+// world bible without anyone looking at them. Named here so it is a filed gap
+// rather than a silent hole: import them, and this test will tell you exactly
+// which classes need which half.
 
 console.log(`PASS overflow policy — ${counts.elided} elided, ${counts.column} column, ${counts.wrapping} wrapping, 0 unpoliced`);

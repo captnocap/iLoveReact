@@ -11,13 +11,23 @@ import { useStackedRows } from './rowLayout';
  *  WRAPS underneath at full width, because a fact like
  *  "49 B · preserved, never interpreted" is a sentence, and squeezing a
  *  sentence into 60px of a shared line is how the panel got called unusable. */
-function FactRow(props: { label: string; value: string; endColumn: boolean }) {
+function FactRow(props: {
+  label: string;
+  value: string;
+  endColumn: boolean;
+  /** A fact that is a WARNING is still a fact — it belongs on this row grammar
+   *  tinted, not in a bespoke row somebody wrote to get a colour (req_4775). */
+  tone?: 'normal' | 'warning' | 'danger' | 'success';
+}) {
+  const tinted = props.tone && props.tone !== 'normal'
+    ? { color: accentFor(props.tone === 'danger' ? 'error' : props.tone) }
+    : undefined;
   if (useStackedRows()) {
     return (
       <C.HW_RowStacked>
         <C.HW_FormLabelStacked>{props.label}</C.HW_FormLabelStacked>
         <C.HW_RowStackedControls>
-          <C.HW_ReadValueStacked>{props.value}</C.HW_ReadValueStacked>
+          <C.HW_ReadValueStacked style={tinted}>{props.value}</C.HW_ReadValueStacked>
           {props.endColumn ? <C.HW_OvResetIdle /> : null}
         </C.HW_RowStackedControls>
       </C.HW_RowStacked>
@@ -27,7 +37,7 @@ function FactRow(props: { label: string; value: string; endColumn: boolean }) {
     <C.HW_ReadRow>
       <C.HW_FormLabel>{props.label}</C.HW_FormLabel>
       <C.HW_Spacer />
-      <C.HW_ReadValue>{props.value}</C.HW_ReadValue>
+      <C.HW_ReadValue style={tinted}>{props.value}</C.HW_ReadValue>
       {/* Reserved reset-column spacer (req_2626 II / req_2627): read-only rows sit on
           the SAME column grid as OverrideField/PieceBody rows, whose end column is
           always occupied (HW_OvReset or HW_OvResetIdle) — without it these values

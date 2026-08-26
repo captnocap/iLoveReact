@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import {
-  Box,
   Col,
   Pressable,
-  Row,
-  ScrollView,
-  Text,
-  TextInput,
 } from '@reactjit/runtime/primitives';
+import { Icon } from '../../../runtime/icons/Icon';
+import { C, accentFor } from '../workspace.cls';
+import './blobExplorer.cls';
+import { FactRow } from '../inspector/ReadOnlySection';
 import {
   FACE_OPERATIONS,
   FACE_TABLE_SORT_COLUMNS,
@@ -176,7 +175,8 @@ export type BlobExplorerServerStatusV1 = {
 
 export type BlobExplorerSurfaceProps = {
   modelId: string;
-  height?: number;
+  // `height` is gone (req_4775): the surface flexes into its container, so a
+  // caller that supplied one was overriding the layout, not informing it.
   initialTab?: BlobExplorerTab;
   widthPreset: BlobExplorerWidthPreset;
   onWidthPreset: (preset: BlobExplorerWidthPreset) => void;
@@ -228,29 +228,11 @@ export type BlobExplorerSurfaceProps = {
 };
 
 export const BLOB_EXPLORER_UI = {
-  defaultHeight: 640,
-  chromeHeight: 42,
+  /** The narrowest the face table can render its columns. The focus panel's
+   *  drag floor is derived from this (req_4774). */
   minimumDataWidth: 320,
-  rowPadding: 9,
-  controlHeight: 25,
 } as const;
 
-const COLORS = {
-  panel: '#0d1119',
-  panelRaised: '#121925',
-  row: '#101720',
-  rowSelected: '#1b3553',
-  border: '#253044',
-  borderSoft: '#1b2534',
-  text: '#d8e4f3',
-  dim: '#93a3b8',
-  faint: '#657386',
-  primary: '#76b5e8',
-  success: '#82c7a0',
-  warning: '#e0b86b',
-  error: '#ee8a8a',
-  degraded: '#d59a68',
-} as const;
 
 const SORT_LABELS: Record<FaceTableSortColumnV1, string> = {
   address: 'ADDRESS',
@@ -530,58 +512,50 @@ export function blobExplorerServiceLines(status: BlobExplorerServerStatusV1): st
   ];
 }
 
-function TinyButton({ label, active = false, disabled = false, tone = 'normal', onPress }: {
+/** A toggle chip. This used to be a private `TinyButton` with its own border,
+ *  radius, height and hex palette — which is most of why the pane read as a
+ *  regurgitation of badges rather than as part of the editor. It is the shared
+ *  pill now, so a filter here looks like a filter anywhere else (req_4775). */
+function Chip({ label, active = false, disabled = false, tone = 'normal', onPress }: {
   label: string;
   active?: boolean;
   disabled?: boolean;
-  tone?: 'normal' | 'warning' | 'danger';
+  tone?: 'normal' | 'warning';
   onPress?: () => void;
 }) {
-  const color = tone === 'danger' ? COLORS.error : tone === 'warning' ? COLORS.warning : active ? COLORS.primary : COLORS.dim;
+  const Shell = active ? C.HW_PillOn : C.HW_Pill;
+  const Label = active ? C.HW_PillTextOn : C.HW_PillText;
   return (
-    <Pressable
+    <Shell
       onPress={disabled ? undefined : onPress}
       style={{
-        height: BLOB_EXPLORER_UI.controlHeight,
-        paddingLeft: 8,
-        paddingRight: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: active ? color : COLORS.border,
-        borderRadius: 5,
-        backgroundColor: active ? '#18304a' : COLORS.panelRaised,
-        opacity: disabled ? 0.4 : 1,
+        height: 21,
+        ...(disabled ? { opacity: 0.4 } : {}),
+        ...(tone === 'warning' && !active ? { borderColor: accentFor('warning') } : {}),
       }}
     >
-      <Text noWrap style={{ color, fontSize: 9, fontWeight: 800, fontFamily: 'ui-monospace' }}>{label}</Text>
-    </Pressable>
+      <Label style={tone === 'warning' && !active ? { color: accentFor('warning') } : undefined}>{label}</Label>
+    </Shell>
   );
 }
 
+/** One label/value fact. Delegates to the focus panel's shared row grammar, so
+ *  recovery facts sit on the same column grid as every other panel fact AND
+ *  stack with them when the panel is narrow (req_4774). */
 function Fact({ label, value, tone = 'normal' }: {
   label: string;
   value: string;
   tone?: 'normal' | 'warning' | 'danger' | 'success';
 }) {
-  const color = tone === 'danger' ? COLORS.error
-    : tone === 'warning' ? COLORS.warning
-      : tone === 'success' ? COLORS.success
-        : COLORS.text;
-  return (
-    <Row style={{ width: '100%', minHeight: 22, gap: 8, paddingLeft: 10, paddingRight: 10, alignItems: 'flex-start' }}>
-      <Text noWrap style={{ width: 88, color: COLORS.faint, fontSize: 9, fontWeight: 700, fontFamily: 'ui-monospace' }}>{label}</Text>
-      <Text style={{ flexGrow: 1, minWidth: 0, color, fontSize: 10, fontFamily: 'ui-monospace' }}>{value}</Text>
-    </Row>
-  );
+  return <FactRow label={label} value={value} endColumn={false} tone={tone} />;
 }
 
 function DegradationRows({ rows }: { rows: readonly RecoveryDegradationV1[] }) {
   if (!rows.length) return null;
   return (
-    <Col style={{ width: '100%', gap: 3, paddingTop: 4, paddingBottom: 5 }}>
+    <Col style={{ width: '100%', gap: 2, paddingTop: 3, paddingBottom: 4 }}>
       {recoveryDegradationLines(rows).map((line, index) => (
-        <Text key={`${line}-${index}`} style={{ color: COLORS.degraded, fontSize: 9, fontFamily: 'ui-monospace' }}>{line}</Text>
+        <C.HW_BNoticeBody key={`${line}-${index}`} style={{ paddingLeft: 12, paddingRight: 12, color: accentFor('warning') }}>{line}</C.HW_BNoticeBody>
       ))}
     </Col>
   );
@@ -590,7 +564,7 @@ function DegradationRows({ rows }: { rows: readonly RecoveryDegradationV1[] }) {
 function FaceIdentity({ page }: { page: BlobExplorerFacePage }) {
   if (page.source === 'diff') {
     return (
-      <Col style={{ width: '100%', paddingTop: 7, paddingBottom: 7, borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
+      <Col style={{ width: '100%', paddingTop: 5, paddingBottom: 5, borderBottomWidth: 1, borderColor: accentFor('borderSoft') }}>
         <Fact label="resident" value={`${page.resident.identityQuality.toUpperCase()} · ${page.resident.objectNamespaceHash}`} tone={page.resident.identityQuality === 'degraded' ? 'warning' : 'success'} />
         <Fact label="saved" value={`${page.saved.identityQuality.toUpperCase()} · ${page.saved.objectNamespaceHash}`} tone={page.saved.identityQuality === 'degraded' ? 'warning' : 'success'} />
         <Fact label="fingerprints" value={`topology ${page.fingerprints.topologyEqual ? 'equal' : 'different'} · semantics ${page.fingerprints.semanticEqual ? 'equal' : 'different'} · objects ${page.fingerprints.objectBindingsEqual ? 'equal' : 'different'} · build provenance ${page.fingerprints.buildIssueProvenanceEqual ? 'equal' : 'different'}`} />
@@ -604,7 +578,7 @@ function FaceIdentity({ page }: { page: BlobExplorerFacePage }) {
     ? `generation ${page.generation} · session ${page.sessionToken}`
     : `SHA ${page.artifact?.sha256 ?? 'UNKNOWN'} · RJMD v${page.artifact?.formatVersion ?? 'UNKNOWN'}`;
   return (
-    <Col style={{ width: '100%', paddingTop: 7, paddingBottom: 7, borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
+    <Col style={{ width: '100%', paddingTop: 7, paddingBottom: 7, borderBottomWidth: 1, borderColor: accentFor('borderSoft') }}>
       <Fact label="plane" value={`${page.source.toUpperCase()} · ${identity}`} />
       <Fact label="identity" value={`${page.identityQuality.toUpperCase()} · ${page.objectNamespaceHash}`} tone={page.identityQuality === 'degraded' ? 'warning' : 'success'} />
       <Fact label="fingerprint" value={`${page.fingerprint.topologyHash} · ${page.fingerprint.semanticHash} · ${page.fingerprint.objectBindingHash}`} />
@@ -623,6 +597,10 @@ function FacesView(props: BlobExplorerSurfaceProps & {
   onGuardedField: (field: BlobGuardedFieldV1) => void;
   guardedValue: string;
   onGuardedValue: (value: string) => void;
+  filtersOpen: boolean;
+  onToggleFilters: () => void;
+  sortOpen: boolean;
+  onToggleSort: () => void;
 }) {
   const { faceQuery: query, facePage: page, faceError: error } = props;
   const state = blobExplorerFaceState(page, error, props.faceLoading);
@@ -647,31 +625,28 @@ function FacesView(props: BlobExplorerSurfaceProps & {
   });
   return (
     <Col style={{ width: '100%' }}>
-      <Col style={{ width: '100%', gap: 5, padding: 8, borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
-        <Row style={{ width: '100%', gap: 5, flexWrap: 'wrap' }}>
-          <TinyButton label="INSPECT" active={props.mode === 'inspect'} onPress={() => props.onMode('inspect')} />
-          <TinyButton label="GUARDED FIELD EDIT" active={props.mode === 'guarded_field_edit'} onPress={() => props.onMode('guarded_field_edit')} />
-        </Row>
+      <C.HW_BQuery>
+        <C.HW_BQueryRow>
+          <Chip label="INSPECT" active={props.mode === 'inspect'} onPress={() => props.onMode('inspect')} />
+          <Chip label="GUARDED FIELD EDIT" tone="warning" active={props.mode === 'guarded_field_edit'} onPress={() => props.onMode('guarded_field_edit')} />
+        </C.HW_BQueryRow>
         {props.mode === 'guarded_field_edit' ? (
-          <Col style={{ width: '100%', gap: 5, padding: 7, backgroundColor: COLORS.panelRaised, borderWidth: 1, borderColor: COLORS.border, borderRadius: 5 }}>
-            <Text style={{ color: COLORS.warning, fontSize: 9, fontWeight: 800 }}>ONLY MATERIAL AND SEMANTIC TABLE IDS ARE WRITABLE HERE</Text>
-            <Row style={{ width: '100%', gap: 4, flexWrap: 'wrap' }}>
+          <C.HW_BGuardBox>
+            <C.HW_BGuardWarn>ONLY MATERIAL AND SEMANTIC TABLE IDS ARE WRITABLE HERE</C.HW_BGuardWarn>
+            <C.HW_BChipWrap>
               {BLOB_GUARDED_FIELDS.map((field) => (
-                <TinyButton key={field} label={field.replace('_', ' ').toUpperCase()} active={props.guardedField === field} onPress={() => props.onGuardedField(field)} />
+                <Chip key={field} label={field.replace('_', ' ').toUpperCase()} active={props.guardedField === field} onPress={() => props.onGuardedField(field)} />
               ))}
-            </Row>
-            <TextInput
-              value={props.guardedValue}
-              onChange={props.onGuardedValue}
-              placeholder="unsigned table id"
-              style={{ width: '100%', height: 25, paddingLeft: 8, paddingRight: 8, borderWidth: 1, borderColor: guardedDraft.ok ? COLORS.border : COLORS.error, borderRadius: 5, backgroundColor: COLORS.panel, color: COLORS.text, fontSize: 10 }}
-            />
-            {!guardedDraft.ok ? <Text style={{ color: COLORS.error, fontSize: 9 }}>{guardedDraft.detail}</Text> : null}
-            {!props.selectedAddress ? <Text style={{ color: COLORS.warning, fontSize: 9 }}>Select one resident authored face first.</Text> : null}
-            {props.activePreview ? <Text style={{ color: COLORS.warning, fontSize: 9 }}>Close the read-only historical preview before editing resident fields.</Text> : null}
-            {!props.guardedFieldEditEnabled ? <Text style={{ color: COLORS.faint, fontSize: 9 }}>Apply is locked until the native lease-backed transaction coordinator is ready.</Text> : null}
-            {props.guardedFieldEditStatus ? <Text style={{ color: COLORS.dim, fontSize: 9 }}>{props.guardedFieldEditStatus}</Text> : null}
-            <TinyButton
+            </C.HW_BChipWrap>
+            {guardedDraft.ok
+              ? <C.HW_BInput value={props.guardedValue} onChange={props.onGuardedValue} placeholder="unsigned table id" />
+              : <C.HW_BInputBad value={props.guardedValue} onChange={props.onGuardedValue} placeholder="unsigned table id" />}
+            {!guardedDraft.ok ? <C.HW_BGuardWarn style={{ color: accentFor('error') }}>{guardedDraft.detail}</C.HW_BGuardWarn> : null}
+            {!props.selectedAddress ? <C.HW_BGuardWarn>Select one resident authored face first.</C.HW_BGuardWarn> : null}
+            {props.activePreview ? <C.HW_BGuardWarn>Close the read-only historical preview before editing resident fields.</C.HW_BGuardWarn> : null}
+            {!props.guardedFieldEditEnabled ? <C.HW_BGuardNote>Apply is locked until the native lease-backed transaction coordinator is ready.</C.HW_BGuardNote> : null}
+            {props.guardedFieldEditStatus ? <C.HW_BGuardNote style={{ color: accentFor('textDim') }}>{props.guardedFieldEditStatus}</C.HW_BGuardNote> : null}
+            <Chip
               label="VALIDATE + APPLY"
               tone="warning"
               disabled={!guardedApplyEnabled}
@@ -684,52 +659,99 @@ function FacesView(props: BlobExplorerSurfaceProps & {
                 });
               }}
             />
-          </Col>
+          </C.HW_BGuardBox>
         ) : null}
-      </Col>
-      <Row style={{ width: '100%', gap: 5, padding: 8, flexWrap: 'wrap', borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
-        {BLOB_EXPLORER_FACE_SOURCES.map((source) => (
-          <TinyButton
-            key={source}
-            label={source.toUpperCase()}
-            active={query.source === source}
-            disabled={source === 'preview' && !props.activePreview}
-            onPress={() => props.onFaceQueryChange(sourceBlobExplorerFaces(query, source))}
-          />
-        ))}
-      </Row>
-      <Row style={{ width: '100%', gap: 4, padding: 8, flexWrap: 'wrap', borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
-        {filters.map(({ filter, label }) => {
-          const active = query.filters.some((row) => faceFilterKey(row) === faceFilterKey(filter));
-          return <TinyButton key={faceFilterKey(filter)} label={label} active={active} onPress={() => props.onFaceQueryChange(toggleBlobExplorerFaceFilter(query, filter))} />;
-        })}
-      </Row>
-      <Row style={{ width: '100%', gap: 4, padding: 8, flexWrap: 'wrap', borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
-        {FACE_TABLE_SORT_COLUMNS.map((column) => (
-          <TinyButton
-            key={column}
-            label={`${SORT_LABELS[column]}${query.sort.column === column ? query.sort.direction === 'asc' ? ' ↑' : ' ↓' : ''}`}
-            active={query.sort.column === column}
-            onPress={() => props.onFaceQueryChange(sortBlobExplorerFaces(query, column))}
-          />
-        ))}
-      </Row>
+      </C.HW_BQuery>
+      {/* THE QUERY HEADER. This was four stacked wrap-rows of chips — mode,
+          source, sixteen filters, eight sort columns — each with its own
+          padding and divider. At panel width that is five or six wrapped rows
+          of chrome standing between you and the face table, which is the dead
+          space the pane was called out for. The permanent header is now the
+          SOURCE (which plane you are reading) plus one line saying what is
+          filtered and how it is sorted; the full chip sets open on demand and
+          the ACTIVE ones stay visible either way, so nothing is hidden — only
+          the sixteen you are not using. */}
+      <C.HW_BQuery>
+        <C.HW_BQueryRow>
+          {BLOB_EXPLORER_FACE_SOURCES.map((source) => (
+            <Chip
+              key={source}
+              label={source.toUpperCase()}
+              active={query.source === source}
+              disabled={source === 'preview' && !props.activePreview}
+              onPress={() => props.onFaceQueryChange(sourceBlobExplorerFaces(query, source))}
+            />
+          ))}
+        </C.HW_BQueryRow>
+        <C.HW_BQueryRow>
+          {(() => {
+            const Disclosure = props.filtersOpen ? C.HW_BDisclosureOn : C.HW_BDisclosure;
+            const DisclosureText = props.filtersOpen ? C.HW_BDisclosureTextOn : C.HW_BDisclosureText;
+            return (
+              <Disclosure onPress={props.onToggleFilters} tooltip="Show every face filter">
+                <DisclosureText>{`FILTERS${query.filters.length ? ` · ${query.filters.length}` : ''}`}</DisclosureText>
+                <Icon name={props.filtersOpen ? 'ChevronUp' : 'ChevronDown'} size={9} color={accentFor(props.filtersOpen ? 'primary' : 'textDim')} />
+              </Disclosure>
+            );
+          })()}
+          {(() => {
+            const Disclosure = props.sortOpen ? C.HW_BDisclosureOn : C.HW_BDisclosure;
+            const DisclosureText = props.sortOpen ? C.HW_BDisclosureTextOn : C.HW_BDisclosureText;
+            return (
+              <Disclosure onPress={props.onToggleSort} tooltip="Choose the sort column">
+                <DisclosureText>{`SORT · ${SORT_LABELS[query.sort.column]} ${query.sort.direction === 'asc' ? '↑' : '↓'}`}</DisclosureText>
+                <Icon name={props.sortOpen ? 'ChevronUp' : 'ChevronDown'} size={9} color={accentFor(props.sortOpen ? 'primary' : 'textDim')} />
+              </Disclosure>
+            );
+          })()}
+        </C.HW_BQueryRow>
+        {/* Active filters stay on screen whether or not the set is open —
+            a filter you cannot see is a query you cannot explain. */}
+        {!props.filtersOpen && query.filters.length ? (
+          <C.HW_BChipWrap>
+            {query.filters.map((filter) => {
+              const label = filters.find((row) => faceFilterKey(row.filter) === faceFilterKey(filter))?.label ?? filter.kind.toUpperCase();
+              return <Chip key={faceFilterKey(filter)} label={label} active onPress={() => props.onFaceQueryChange(toggleBlobExplorerFaceFilter(query, filter))} />;
+            })}
+          </C.HW_BChipWrap>
+        ) : null}
+        {props.filtersOpen ? (
+          <C.HW_BChipWrap>
+            {filters.map(({ filter, label }) => {
+              const active = query.filters.some((row) => faceFilterKey(row) === faceFilterKey(filter));
+              return <Chip key={faceFilterKey(filter)} label={label} active={active} onPress={() => props.onFaceQueryChange(toggleBlobExplorerFaceFilter(query, filter))} />;
+            })}
+          </C.HW_BChipWrap>
+        ) : null}
+        {props.sortOpen ? (
+          <C.HW_BChipWrap>
+            {FACE_TABLE_SORT_COLUMNS.map((column) => (
+              <Chip
+                key={column}
+                label={`${SORT_LABELS[column]}${query.sort.column === column ? query.sort.direction === 'asc' ? ' ↑' : ' ↓' : ''}`}
+                active={query.sort.column === column}
+                onPress={() => props.onFaceQueryChange(sortBlobExplorerFaces(query, column))}
+              />
+            ))}
+          </C.HW_BChipWrap>
+        ) : null}
+      </C.HW_BQuery>
       {page ? <FaceIdentity page={page} /> : null}
       {state === 'loading' ? <Fact label="faces" value="LOADING FACE ANALYSIS…" /> : null}
       {state === 'pending' && error?.code === 'analysis_pending' ? (
-        <Col style={{ width: '100%', paddingTop: 12, paddingBottom: 12 }}>
+        <Col style={{ width: '100%', paddingTop: 6, paddingBottom: 6 }}>
           <Fact label="analysis" value={`${error.analysisId} · ${Math.round(error.progress * 100)}% · retry after ${error.retryAfterMs} ms`} tone="warning" />
           <Fact label="plane hash" value={error.planeIdentityHash} />
           <Fact label="detail" value={error.detail} />
         </Col>
       ) : null}
       {state === 'error' && error ? (
-        <Col style={{ width: '100%', paddingTop: 12, paddingBottom: 12, backgroundColor: '#30191d' }}>
+        <C.HW_BNoticeError>
           <Fact label={error.code.toUpperCase()} value={error.detail} tone="danger" />
           {'currentGeneration' in error && error.currentGeneration !== undefined
             ? <Fact label="generation" value={String(error.currentGeneration)} tone="warning" />
             : null}
-        </Col>
+        </C.HW_BNoticeError>
       ) : null}
       {state === 'empty' ? <Fact label="faces" value="NO AUTHORED FACES MATCH THIS QUERY" /> : null}
       {state === 'ready' ? rows.map((item) => {
@@ -740,55 +762,62 @@ function FacesView(props: BlobExplorerSurfaceProps & {
           : false;
         const expanded = props.expanded.includes(view.key);
         return (
-          <Col key={view.key} style={{ width: '100%', borderBottomWidth: 1, borderColor: COLORS.borderSoft, backgroundColor: selected ? COLORS.rowSelected : COLORS.row }}>
-            <Row style={{ width: '100%', alignItems: 'stretch' }}>
-              <Pressable
-                onPress={selection ? () => props.onSelectFace(selection) : undefined}
-                style={{ flexGrow: 1, minWidth: 0, padding: BLOB_EXPLORER_UI.rowPadding, opacity: selection ? 1 : 0.55 }}
-              >
-                <Row style={{ width: '100%', gap: 7, alignItems: 'center' }}>
-                  <Text style={{ flexGrow: 1, minWidth: 0, color: COLORS.text, fontSize: 11, fontWeight: 800 }}>{view.name}</Text>
-                  {view.presence ? <Text noWrap style={{ color: view.presence === 'incomparable' ? COLORS.warning : COLORS.primary, fontSize: 8, fontWeight: 800 }}>{view.presence.toUpperCase()}</Text> : null}
-                </Row>
-                <Text style={{ color: COLORS.faint, fontSize: 9, fontFamily: 'ui-monospace' }}>{view.address}</Text>
-                <Text style={{ color: COLORS.dim, fontSize: 9 }}>{`${view.object} · ${view.material} · ${view.semantic}`}</Text>
-                <Text style={{ color: COLORS.dim, fontSize: 9 }}>{`${view.surface} · ${view.geometry}`}</Text>
-                <Text style={{ color: COLORS.dim, fontSize: 9 }}>{view.topology}</Text>
-                <Text style={{ color: view.audit.startsWith('UNKNOWN') ? COLORS.warning : COLORS.dim, fontSize: 9 }}>{`AUDIT · ${view.audit}`}</Text>
-                {view.changes ? <Text style={{ color: view.changes === 'UNCHANGED' ? COLORS.faint : COLORS.warning, fontSize: 9 }}>{`DIFF · ${view.changes}`}</Text> : null}
-                {view.reason ? <Text style={{ color: COLORS.warning, fontSize: 9 }}>{`REASON · ${view.reason}`}</Text> : null}
-                <Text style={{ color: view.blockedBy === 'NONE' ? COLORS.faint : COLORS.warning, fontSize: 9 }}>{`BLOCKED BY · ${view.blockedBy}`}</Text>
-              </Pressable>
-              <Pressable onPress={() => props.onToggleExpanded(view.key)} style={{ width: 38, alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderColor: COLORS.borderSoft }}>
-                <Text style={{ color: COLORS.primary, fontSize: 10, fontWeight: 900 }}>{expanded ? '−' : `+${view.row?.triangleIds.length ?? 0}`}</Text>
-              </Pressable>
-            </Row>
+          <Col key={view.key} style={{ width: '100%' }}>
+            {(() => {
+              const RowShell = selected ? C.HW_BRowOn : C.HW_BRow;
+              return (
+                <RowShell>
+                  <C.HW_BRowBody
+                    onPress={selection ? () => props.onSelectFace(selection) : undefined}
+                    style={selection ? undefined : { opacity: 0.55 }}
+                  >
+                    <C.HW_BRowTitle>
+                      <C.HW_BRowName>{view.name}</C.HW_BRowName>
+                      {view.presence ? <C.HW_BRowLine style={{ color: accentFor(view.presence === 'incomparable' ? 'warning' : 'primary'), fontWeight: 800 }}>{view.presence.toUpperCase()}</C.HW_BRowLine> : null}
+                    </C.HW_BRowTitle>
+                    <C.HW_BRowAddress>{view.address}</C.HW_BRowAddress>
+                    <C.HW_BRowLine>{`${view.object} · ${view.material} · ${view.semantic}`}</C.HW_BRowLine>
+                    <C.HW_BRowLine>{`${view.surface} · ${view.geometry}`}</C.HW_BRowLine>
+                    <C.HW_BRowLine>{view.topology}</C.HW_BRowLine>
+                    {view.audit.startsWith('UNKNOWN')
+                      ? <C.HW_BRowLineWarn>{`AUDIT · ${view.audit}`}</C.HW_BRowLineWarn>
+                      : <C.HW_BRowLine>{`AUDIT · ${view.audit}`}</C.HW_BRowLine>}
+                    {view.changes && view.changes !== 'UNCHANGED' ? <C.HW_BRowLineWarn>{`DIFF · ${view.changes}`}</C.HW_BRowLineWarn> : null}
+                    {view.reason ? <C.HW_BRowLineWarn>{`REASON · ${view.reason}`}</C.HW_BRowLineWarn> : null}
+                    {view.blockedBy !== 'NONE' ? <C.HW_BRowLineWarn>{`BLOCKED BY · ${view.blockedBy}`}</C.HW_BRowLineWarn> : null}
+                  </C.HW_BRowBody>
+                  <C.HW_BRowExpander
+                    onPress={() => props.onToggleExpanded(view.key)}
+                    tooltip={expanded ? 'Hide triangle ids' : 'Show the triangle ids behind this face'}
+                  >
+                    <C.HW_BRowExpanderText>{expanded ? '−' : `+${view.row?.triangleIds.length ?? 0}`}</C.HW_BRowExpanderText>
+                  </C.HW_BRowExpander>
+                </RowShell>
+              );
+            })()}
             {expanded ? (
-              <Text style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 8, color: COLORS.primary, fontSize: 9, fontFamily: 'ui-monospace' }}>
-                {`TRIANGLES · ${view.row?.triangleIds.join(', ') || 'none'}`}
-              </Text>
+              <C.HW_BTriangles>{`TRIANGLES · ${view.row?.triangleIds.join(', ') || 'none'}`}</C.HW_BTriangles>
             ) : null}
           </Col>
         );
       }) : null}
       {page && page.source !== 'diff' && page.buildIssues.map((issue) => (
-        <Pressable
+        <C.HW_BNotice
           key={`${issue.objectId}:${issue.sourceGroup}:${issue.code}`}
           onPress={props.onSelectBuildIssue ? () => props.onSelectBuildIssue?.({ kind: 'build_issue', source: query.source === 'diff' ? 'resident' : query.source, issue, additive: false, frame: true }) : undefined}
-          style={{ width: '100%', padding: 9, backgroundColor: '#2b2116', borderBottomWidth: 1, borderColor: '#4b3520' }}
         >
-          <Text style={{ color: COLORS.warning, fontSize: 10, fontWeight: 800 }}>{`BUILD ISSUE · ${issue.code}`}</Text>
-          <Text style={{ color: COLORS.dim, fontSize: 9 }}>{`${issue.objectId} / source group ${issue.sourceGroup} · ${issue.sourceTriangles.length} source tris → groups ${issue.degradedToGroups.join(', ') || 'none'}`}</Text>
-          <Text style={{ color: COLORS.text, fontSize: 9 }}>{issue.detail}</Text>
-        </Pressable>
+          <C.HW_BNoticeTitle>{`BUILD ISSUE · ${issue.code}`}</C.HW_BNoticeTitle>
+          <C.HW_BNoticeBody>{`${issue.objectId} / source group ${issue.sourceGroup} · ${issue.sourceTriangles.length} source tris → groups ${issue.degradedToGroups.join(', ') || 'none'}`}</C.HW_BNoticeBody>
+          <C.HW_BNoticeBody style={{ color: accentFor('textSecondary') }}>{issue.detail}</C.HW_BNoticeBody>
+        </C.HW_BNotice>
       ))}
-      <Row style={{ width: '100%', gap: 6, alignItems: 'center', padding: 8, borderTopWidth: 1, borderColor: COLORS.border }}>
-        <TinyButton label="PREVIOUS" disabled={!props.canPageFacesBackward} onPress={props.onPreviousFacePage} />
-        <Text style={{ flexGrow: 1, minWidth: 0, color: COLORS.faint, fontSize: 9, fontFamily: 'ui-monospace' }}>
+      <C.HW_BPager>
+        <Chip label="PREVIOUS" disabled={!props.canPageFacesBackward} onPress={props.onPreviousFacePage} />
+        <C.HW_BPagerText>
           {page ? `${page.matchedRows}/${page.totalRows} matched · ${page.rows.length} on page${props.selectedTriangles != null ? ` · ${props.selectedTriangles} selected tris` : ''}` : 'no page'}
-        </Text>
-        <TinyButton label="NEXT" disabled={!page?.nextCursor} onPress={() => page?.nextCursor && props.onFaceQueryChange(pageBlobExplorerFaces(query, page.nextCursor))} />
-      </Row>
+        </C.HW_BPagerText>
+        <Chip label="NEXT" disabled={!page?.nextCursor} onPress={() => page?.nextCursor && props.onFaceQueryChange(pageBlobExplorerFaces(query, page.nextCursor))} />
+      </C.HW_BPager>
     </Col>
   );
 }
@@ -804,109 +833,140 @@ function VersionsView(props: BlobExplorerSurfaceProps & {
   const history = props.history;
   return (
     <Col style={{ width: '100%' }}>
-      <Col style={{ width: '100%', padding: 9, gap: 6, borderBottomWidth: 1, borderColor: COLORS.border }}>
-        <Text style={{ color: COLORS.text, fontSize: 10, fontWeight: 800 }}>Lore revision contains RJMD geometry and embedded mesh channels</Text>
-        <Text style={{ color: COLORS.faint, fontSize: 9 }}>Textures, RJSK, manifest, and package sidecars are outside this artifact scope.</Text>
+      <C.HW_BQuery>
+        <C.HW_BGuardNote>Lore revision contains RJMD geometry and embedded mesh channels. Textures, RJSK, manifest, and package sidecars are outside this artifact scope.</C.HW_BGuardNote>
         {props.activePreview ? (
-          <Col style={{ width: '100%', gap: 4, padding: 7, backgroundColor: '#17273a', borderWidth: 1, borderColor: COLORS.primary, borderRadius: 5 }}>
-            <Text style={{ color: COLORS.primary, fontSize: 10, fontWeight: 900 }}>HISTORICAL PREVIEW · READ ONLY</Text>
-            <Text style={{ color: COLORS.text, fontSize: 9, fontFamily: 'ui-monospace' }}>{`${props.activePreview.snapshotId} · ${props.activePreview.sha256.slice(0, 12)} · ${props.activePreview.triangleCount} tris`}</Text>
-            <Text style={{ color: COLORS.faint, fontSize: 9 }}>The resident document, selection, generation, and undo/redo remain parked and unchanged.</Text>
-            <TinyButton label="CLOSE PREVIEW" tone="warning" onPress={() => props.onClosePreview?.()} />
-          </Col>
+          <C.HW_BGuardBox style={{ borderColor: accentFor('primary') }}>
+            <C.HW_BGuardWarn style={{ color: accentFor('primary') }}>HISTORICAL PREVIEW · READ ONLY</C.HW_BGuardWarn>
+            <C.HW_BNoticeBody style={{ color: accentFor('textSecondary') }}>{`${props.activePreview.snapshotId} · ${props.activePreview.sha256.slice(0, 12)} · ${props.activePreview.triangleCount} tris`}</C.HW_BNoticeBody>
+            <C.HW_BGuardNote>The resident document, selection, generation, and undo/redo remain parked and unchanged.</C.HW_BGuardNote>
+            <C.HW_BQueryRow><Chip label="CLOSE PREVIEW" tone="warning" onPress={() => props.onClosePreview?.()} /></C.HW_BQueryRow>
+          </C.HW_BGuardBox>
         ) : null}
-        <TextInput value={props.label} onChange={props.onLabel} placeholder="Manual recovery snapshot" style={{ width: '100%', height: 25, paddingLeft: 8, paddingRight: 8, borderWidth: 1, borderColor: COLORS.border, borderRadius: 5, backgroundColor: COLORS.panelRaised, color: COLORS.text, fontSize: 10 }} />
-        <TextInput value={props.note} onChange={props.onNote} placeholder="optional recovery note" style={{ width: '100%', height: 25, paddingLeft: 8, paddingRight: 8, borderWidth: 1, borderColor: COLORS.border, borderRadius: 5, backgroundColor: COLORS.panelRaised, color: COLORS.text, fontSize: 10 }} />
-        <TinyButton
+        <C.HW_BInput value={props.label} onChange={props.onLabel} placeholder="Manual recovery snapshot" />
+        <C.HW_BInput value={props.note} onChange={props.onNote} placeholder="optional recovery note" />
+        <C.HW_BQueryRow><Chip
           label={props.recoverySnapshotInFlight ? 'CAPTURING RECOVERY SNAPSHOT…' : 'RECOVERY SNAPSHOT'}
           active={props.recoverySnapshotEnabled && !props.recoverySnapshotInFlight}
           disabled={!props.recoverySnapshotEnabled || props.recoverySnapshotInFlight}
           tone="warning"
           onPress={() => props.onRecoverySnapshot(recoverySnapshotDraft(props.label, props.note))}
-        />
-        {props.recoverySnapshotStatus ? <Text style={{ color: COLORS.warning, fontSize: 9, fontFamily: 'ui-monospace' }}>{props.recoverySnapshotStatus}</Text> : null}
-      </Col>
+        /></C.HW_BQueryRow>
+        {props.recoverySnapshotStatus ? <C.HW_BGuardWarn>{props.recoverySnapshotStatus}</C.HW_BGuardWarn> : null}
+      </C.HW_BQuery>
       {history.loading ? <Fact label="history" value="LOADING RECOVERY HISTORY…" /> : null}
       {history.error ? (
         <Col style={{ width: '100%', gap: 4 }}>
           <Fact label="history error" value={history.error} tone="danger" />
-          <TinyButton label="RETRY HISTORY" onPress={() => props.onHistoryPage(null)} />
+          <C.HW_BQueryRow style={{ paddingLeft: 12, paddingRight: 12 }}><Chip label="RETRY HISTORY" onPress={() => props.onHistoryPage(null)} /></C.HW_BQueryRow>
         </Col>
       ) : null}
       {!history.loading && !history.error && history.rows.length === 0 ? <Fact label="history" value="NO RECOVERY SNAPSHOTS" /> : null}
       {history.rows.map((entry) => {
         if ('state' in entry && entry.state === 'corrupt') {
           return (
-            <Col key={entry.snapshotId} style={{ width: '100%', padding: 10, gap: 3, backgroundColor: '#30191d', borderBottomWidth: 1, borderColor: '#61323a' }}>
-              <Text style={{ color: COLORS.error, fontSize: 10, fontWeight: 900 }}>{`NON-ACTIONABLE · ${entry.code.toUpperCase()}`}</Text>
-              <Text style={{ color: COLORS.text, fontSize: 9 }}>{entry.detail}</Text>
-              <Text style={{ color: COLORS.faint, fontSize: 9, fontFamily: 'ui-monospace' }}>{`${entry.snapshotId} · ${entry.revision ?? 'no revision'} · ${entry.legacyAddress ?? 'no legacy address'}`}</Text>
-            </Col>
+            <C.HW_BNoticeError key={entry.snapshotId}>
+              <C.HW_BNoticeTitle style={{ color: accentFor('error') }}>{`NON-ACTIONABLE · ${entry.code.toUpperCase()}`}</C.HW_BNoticeTitle>
+              <C.HW_BNoticeBody style={{ color: accentFor('textSecondary') }}>{entry.detail}</C.HW_BNoticeBody>
+              <C.HW_BNoticeBody>{`${entry.snapshotId} · ${entry.revision ?? 'no revision'} · ${entry.legacyAddress ?? 'no legacy address'}`}</C.HW_BNoticeBody>
+            </C.HW_BNoticeError>
           );
         }
         const action = stableHistoryAction(entry)!;
         const expanded = props.expanded.includes(entry.snapshotId);
-        const pushTone = entry.pushState === 'pushed' ? COLORS.success : entry.pushState === 'local' ? COLORS.warning : COLORS.faint;
+        const pushTone = entry.pushState === 'pushed' ? 'success' : entry.pushState === 'local' ? 'warning' : 'textFaint';
         return (
-          <Col key={entry.snapshotId} style={{ width: '100%', padding: 10, gap: 4, backgroundColor: COLORS.row, borderBottomWidth: 1, borderColor: COLORS.borderSoft }}>
-            <Row style={{ width: '100%', gap: 7, alignItems: 'center' }}>
-              <Text style={{ flexGrow: 1, minWidth: 0, color: COLORS.text, fontSize: 11, fontWeight: 900 }}>{entry.label}</Text>
-              <Text noWrap style={{ color: pushTone, fontSize: 9, fontWeight: 900 }}>{entry.pushState.toUpperCase()}</Text>
-              <Text noWrap style={{ color: entry.identityQuality === 'degraded' ? COLORS.degraded : COLORS.success, fontSize: 9, fontWeight: 900 }}>{entry.identityQuality.toUpperCase()}</Text>
-            </Row>
-            {entry.note ? <Text style={{ color: COLORS.dim, fontSize: 9 }}>{entry.note}</Text> : null}
-            <Text style={{ color: COLORS.faint, fontSize: 9, fontFamily: 'ui-monospace' }}>{`${formatBlobTime(entry.timestampMs)} · ${entry.kind} · revision ${entry.revisionNumber} / ${entry.revision}`}</Text>
-            <Text style={{ color: COLORS.dim, fontSize: 9 }}>{`${entry.sha256.slice(0, 12)} · ${formatBlobBytes(entry.bytes)} · ${entry.triangles} tris · ${entry.authoredFaces} faces · ${entry.parts} parts · ${entry.logicalVertices} logical verts`}</Text>
-            <Text style={{ color: COLORS.faint, fontSize: 9, fontFamily: 'ui-monospace' }}>{`snapshot ${entry.snapshotId} · namespace ${entry.objectNamespaceHash} · expires ${formatBlobTime(entry.expiresAtMs)}`}</Text>
-            {entry.warning ? <Text style={{ color: COLORS.degraded, fontSize: 9 }}>{entry.warning}</Text> : null}
+          <C.HW_BRow key={entry.snapshotId} style={{ flexDirection: 'column' }}>
+            <C.HW_BRowBody>
+              <C.HW_BRowTitle>
+                <C.HW_BRowName>{entry.label}</C.HW_BRowName>
+                <C.HW_BRowLine style={{ color: accentFor(pushTone), fontWeight: 900 }}>{entry.pushState.toUpperCase()}</C.HW_BRowLine>
+                <C.HW_BRowLine style={{ color: accentFor(entry.identityQuality === 'degraded' ? 'warning' : 'success'), fontWeight: 900 }}>{entry.identityQuality.toUpperCase()}</C.HW_BRowLine>
+              </C.HW_BRowTitle>
+              {entry.note ? <C.HW_BRowLine>{entry.note}</C.HW_BRowLine> : null}
+              <C.HW_BRowAddress>{`${formatBlobTime(entry.timestampMs)} · ${entry.kind} · revision ${entry.revisionNumber} / ${entry.revision}`}</C.HW_BRowAddress>
+              <C.HW_BRowLine>{`${entry.sha256.slice(0, 12)} · ${formatBlobBytes(entry.bytes)} · ${entry.triangles} tris · ${entry.authoredFaces} faces · ${entry.parts} parts · ${entry.logicalVertices} logical verts`}</C.HW_BRowLine>
+              <C.HW_BRowAddress>{`snapshot ${entry.snapshotId} · namespace ${entry.objectNamespaceHash} · expires ${formatBlobTime(entry.expiresAtMs)}`}</C.HW_BRowAddress>
+              {entry.warning ? <C.HW_BRowLineWarn>{entry.warning}</C.HW_BRowLineWarn> : null}
+            </C.HW_BRowBody>
             {entry.recoveryDegradations.length ? (
-              <Pressable onPress={() => props.onToggleExpanded(entry.snapshotId)} style={{ width: '100%', paddingTop: 3, paddingBottom: 3 }}>
-                <Text style={{ color: COLORS.degraded, fontSize: 9, fontWeight: 800 }}>{`${expanded ? 'HIDE' : 'SHOW'} ${entry.recoveryDegradations.length} DEGRADATION CHANNELS`}</Text>
+              <Pressable onPress={() => props.onToggleExpanded(entry.snapshotId)} style={{ width: '100%', paddingLeft: 10, paddingRight: 10, paddingBottom: 3 }}>
+                <C.HW_BRowLineWarn>{`${expanded ? 'HIDE' : 'SHOW'} ${entry.recoveryDegradations.length} DEGRADATION CHANNELS`}</C.HW_BRowLineWarn>
               </Pressable>
             ) : null}
             {expanded ? <DegradationRows rows={entry.recoveryDegradations} /> : null}
-            <Row style={{ width: '100%', gap: 5, flexWrap: 'wrap', paddingTop: 3 }}>
-              <TinyButton label={entry.pinned ? 'UNPIN' : 'PIN'} active={entry.pinned} onPress={() => props.onPin(action, !entry.pinned)} />
-              <TinyButton
+            <C.HW_BChipWrap style={{ paddingLeft: 10, paddingRight: 10, paddingBottom: 7 }}>
+              <Chip label={entry.pinned ? 'UNPIN' : 'PIN'} active={entry.pinned} onPress={() => props.onPin(action, !entry.pinned)} />
+              <Chip
                 label={props.activePreview?.snapshotId === entry.snapshotId ? 'CLOSE PREVIEW' : 'PREVIEW'}
                 active={props.activePreview?.snapshotId === entry.snapshotId}
                 onPress={() => props.activePreview?.snapshotId === entry.snapshotId ? props.onClosePreview?.() : props.onPreview(action)}
               />
-              <TinyButton
+              <Chip
                 label={props.restoreConfirmSnapshotId === entry.snapshotId ? 'CONFIRM RESTORE' : 'RESTORE'}
                 tone="warning"
                 active={props.restoreConfirmSnapshotId === entry.snapshotId}
                 disabled={!recoveryRestoreEnabled(entry, props.restoreEnabled, !!props.activePreview)}
                 onPress={() => props.onRestore(action)}
               />
-              {props.onCopySnapshotId ? <TinyButton label="COPY SNAPSHOT ID" onPress={() => props.onCopySnapshotId?.(entry.snapshotId)} /> : null}
-            </Row>
-          </Col>
+              {props.onCopySnapshotId ? <Chip label="COPY SNAPSHOT ID" onPress={() => props.onCopySnapshotId?.(entry.snapshotId)} /> : null}
+            </C.HW_BChipWrap>
+          </C.HW_BRow>
         );
       })}
-      <Row style={{ width: '100%', gap: 6, padding: 8, alignItems: 'center', borderTopWidth: 1, borderColor: COLORS.border }}>
-        <TinyButton label="PREVIOUS" disabled={!props.canPageHistoryBackward} onPress={props.onPreviousHistoryPage} />
-        <Text style={{ flexGrow: 1, minWidth: 0, color: COLORS.faint, fontSize: 9 }}>{`${history.rows.length} rows · index ${history.indexedRepair.replace('_', ' ')}`}</Text>
-        <TinyButton label="NEXT" disabled={history.nextCursor === null} onPress={() => history.nextCursor && props.onHistoryPage(history.nextCursor)} />
-      </Row>
+      <C.HW_BPager>
+        <Chip label="PREVIOUS" disabled={!props.canPageHistoryBackward} onPress={props.onPreviousHistoryPage} />
+        <C.HW_BPagerText>{`${history.rows.length} rows · index ${history.indexedRepair.replace('_', ' ')}`}</C.HW_BPagerText>
+        <Chip label="NEXT" disabled={history.nextCursor === null} onPress={() => history.nextCursor && props.onHistoryPage(history.nextCursor)} />
+      </C.HW_BPager>
     </Col>
+  );
+}
+
+/** A block of log lines under a section head — the shape both the journal tail
+ *  and the restore commands wanted, written twice with different paddings. */
+function LogBlock({ title, lines, empty, command = false }: {
+  title: string;
+  lines: readonly string[];
+  empty: string;
+  command?: boolean;
+}) {
+  const Line = command ? C.HW_BCommandLine : C.HW_BLogLine;
+  return (
+    <C.HW_Section>
+      <C.HW_SectionHead>
+        <C.HW_AccentBar />
+        <C.HW_SectionTitle>{title}</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_KeyText>{lines.length}</C.HW_KeyText>
+      </C.HW_SectionHead>
+      <Col style={{ width: '100%', gap: 1, paddingLeft: 12, paddingRight: 12 }}>
+        {lines.length
+          ? lines.map((line, index) => <Line key={`${title}-${index}`}>{line}</Line>)
+          : <C.HW_BLogLine>{empty}</C.HW_BLogLine>}
+      </Col>
+    </C.HW_Section>
   );
 }
 
 function ServiceView({ status }: { status: BlobExplorerServerStatusV1 }) {
   const blocked = status.state === 'blocked';
-  const stateColor = blocked ? COLORS.error
-    : status.state === 'local' ? COLORS.warning
-      : status.state === 'ready' ? COLORS.success
-        : COLORS.faint;
+  const tone = blocked ? 'error'
+    : status.state === 'local' ? 'warning'
+      : status.state === 'ready' ? 'success'
+        : 'textFaint';
   return (
     <Col style={{ width: '100%' }}>
-      <Col style={{ width: '100%', padding: 12, gap: 4, backgroundColor: blocked ? '#44191f' : COLORS.panelRaised, borderBottomWidth: 1, borderColor: blocked ? '#833642' : COLORS.border }}>
-        <Text style={{ color: stateColor, fontSize: blocked ? 15 : 13, fontWeight: 900 }}>{`LORE ${status.state.toUpperCase()}`}</Text>
-        {blocked ? <Text style={{ color: COLORS.error, fontSize: 10, fontWeight: 800 }}>LOCAL RECOVERY CAPTURE IS BLOCKED — resolve library and repository failures before relying on snapshots.</Text> : null}
-        {status.state === 'local' ? <Text style={{ color: COLORS.warning, fontSize: 10 }}>Local capture remains available; the server is unhealthy or unreachable.</Text> : null}
-      </Col>
-      <Col style={{ width: '100%', paddingTop: 9, paddingBottom: 9 }}>
+      <C.HW_BBanner style={{ borderLeftColor: accentFor(tone) }}>
+        <C.HW_BBannerTitle style={{ color: accentFor(tone) }}>{`LORE ${status.state.toUpperCase()}`}</C.HW_BBannerTitle>
+        {blocked ? <C.HW_BBannerCopy style={{ color: accentFor('error') }}>LOCAL RECOVERY CAPTURE IS BLOCKED — resolve library and repository failures before relying on snapshots.</C.HW_BBannerCopy> : null}
+        {status.state === 'local' ? <C.HW_BBannerCopy style={{ color: accentFor('warning') }}>Local capture remains available; the server is unhealthy or unreachable.</C.HW_BBannerCopy> : null}
+      </C.HW_BBanner>
+      <C.HW_Section>
+        <C.HW_SectionHead>
+          <C.HW_AccentBar />
+          <C.HW_SectionTitle>SERVICE</C.HW_SectionTitle>
+        </C.HW_SectionHead>
         {blobExplorerServiceLines(status).map((line, index) => <Fact key={`${index}-${line}`} label={index === 0 ? 'status' : ''} value={line} tone={blocked && index < 2 ? 'danger' : index === 4 ? 'warning' : 'normal'} />)}
         <Fact label="last prune" value={formatBlobTime(status.retention.lastPruneMs)} />
         <Fact label="next prune" value={formatBlobTime(status.retention.nextPruneMs)} />
@@ -914,19 +974,9 @@ function ServiceView({ status }: { status: BlobExplorerServerStatusV1 }) {
         <Fact label="history" value={`${status.history.pushed} pushed · ${status.history.local} local · ${status.history.unknown} unknown`} />
         <Fact label="probe" value={`completed ${formatBlobTime(status.probe.lastCompletedMs)} · transition ${formatBlobTime(status.probe.lastTransitionMs)}`} />
         {status.retention.lastError ? <Fact label="prune error" value={status.retention.lastError} tone="danger" /> : null}
-      </Col>
-      <Col style={{ width: '100%', padding: 10, gap: 4, borderTopWidth: 1, borderColor: COLORS.border }}>
-        <Text style={{ color: COLORS.dim, fontSize: 9, fontWeight: 800 }}>{`JOURNAL · ${status.service.unitName}`}</Text>
-        {status.service.journalTail.length
-          ? status.service.journalTail.map((line, index) => <Text key={`journal-${index}`} style={{ color: COLORS.faint, fontSize: 9, fontFamily: 'ui-monospace' }}>{line}</Text>)
-          : <Text style={{ color: COLORS.faint, fontSize: 9 }}>No journal lines.</Text>}
-      </Col>
-      <Col style={{ width: '100%', padding: 10, gap: 4, borderTopWidth: 1, borderColor: COLORS.border }}>
-        <Text style={{ color: COLORS.dim, fontSize: 9, fontWeight: 800 }}>RESTORE COMMANDS</Text>
-        {status.service.restoreCommands.length
-          ? status.service.restoreCommands.map((line, index) => <Text key={`command-${index}`} style={{ color: COLORS.primary, fontSize: 9, fontFamily: 'ui-monospace' }}>{line}</Text>)
-          : <Text style={{ color: COLORS.faint, fontSize: 9 }}>No restore commands published.</Text>}
-      </Col>
+      </C.HW_Section>
+      <LogBlock title={`JOURNAL · ${status.service.unitName}`} lines={status.service.journalTail} empty="No journal lines." />
+      <LogBlock title="RESTORE COMMANDS" lines={status.service.restoreCommands} empty="No restore commands published." command />
     </Col>
   );
 }
@@ -944,23 +994,32 @@ export default function BlobExplorerSurface(props: BlobExplorerSurfaceProps) {
   const [expandedHistory, setExpandedHistory] = useState<string[]>([]);
   const [snapshotLabel, setSnapshotLabel] = useState('');
   const [snapshotNote, setSnapshotNote] = useState('');
-  const height = props.height ?? BLOB_EXPLORER_UI.defaultHeight;
   const toggle = (rows: string[], key: string, write: (next: string[]) => void) =>
     write(rows.includes(key) ? rows.filter((row) => row !== key) : [...rows, key]);
+  // The surface FLEXES into whatever the focus panel gives it. It used to be a
+  // hardcoded 640px tall regardless of the window, which reads as dead space
+  // below on a tall window and overflow on a short one — the same bug wearing
+  // two faces (req_4775). The tab strip is fixed chrome; the scroll takes the
+  // remainder; nothing between them guesses a pixel height.
   return (
-    <Col style={{ width: '100%', minWidth: BLOB_EXPLORER_UI.minimumDataWidth, height, backgroundColor: COLORS.panel, borderLeftWidth: 1, borderColor: COLORS.border }}>
-      <Row style={{ width: '100%', height: BLOB_EXPLORER_UI.chromeHeight, alignItems: 'stretch', borderBottomWidth: 1, borderColor: COLORS.border }}>
-        {BLOB_EXPLORER_TABS.map((candidate) => (
-          <Pressable key={candidate} onPress={() => setTab(candidate)} style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: tab === candidate ? '#17273a' : COLORS.panelRaised, borderBottomWidth: 2, borderBottomColor: tab === candidate ? COLORS.primary : 'transparent' }}>
-            <Text noWrap style={{ color: tab === candidate ? COLORS.primary : COLORS.dim, fontSize: 10, fontWeight: 900, letterSpacing: 0.7 }}>{candidate.toUpperCase()}</Text>
-          </Pressable>
-        ))}
+    <C.HW_BSurface style={{ minWidth: BLOB_EXPLORER_UI.minimumDataWidth }}>
+      <C.HW_BTabStrip>
+        {BLOB_EXPLORER_TABS.map((candidate) => {
+          const on = tab === candidate;
+          const Tab = on ? C.HW_LensTabOn : C.HW_LensTab;
+          const Label = on ? C.HW_LensTabLabelOn : C.HW_LensTabLabel;
+          return (
+            <Tab key={candidate} onPress={() => setTab(candidate)} style={{ height: 22 }}>
+              <Label>{candidate.toUpperCase()}</Label>
+            </Tab>
+          );
+        })}
         {/* The C/W width presets were retired by req_4774: the focus panel has ONE
             width now and every pane wears the same left-edge drag, so a second,
             pane-local width control would be two mechanisms disagreeing about
             the same number. The capability moved, it did not disappear. */}
-      </Row>
-      <ScrollView style={{ width: '100%', height: Math.max(1, height - BLOB_EXPLORER_UI.chromeHeight) }} showScrollbar>
+      </C.HW_BTabStrip>
+      <C.HW_BScroll showScrollbar>
         {tab === 'faces' ? (
           <FacesView
             {...props}
@@ -984,7 +1043,7 @@ export default function BlobExplorerSurface(props: BlobExplorerSurfaceProps) {
             onNote={setSnapshotNote}
           />
         ) : <ServiceView status={props.service} />}
-      </ScrollView>
-    </Col>
+      </C.HW_BScroll>
+    </C.HW_BSurface>
   );
 }
