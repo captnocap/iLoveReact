@@ -185,9 +185,12 @@ export function surfacePackageDataLayout(paramCount: number): SurfacePackageData
   };
 }
 
-/** Pack a validated package's structural D section. Returns null (loudly) for
- *  an unknown module — callers never push a stream the shader would misread. */
-export function surfacePackageData(pkg: SurfacePackageV1): Float32Array | null {
+/** Pack a validated package's structural D section. `selector` is the session
+ *  composer's module selector for this instance (composeSurfaceSession
+ *  assigns them; single-package callers keep the default 1). Returns null
+ *  (loudly) for an unknown module — callers never push a stream the shader
+ *  would misread. */
+export function surfacePackageData(pkg: SurfacePackageV1, selector = 1): Float32Array | null {
   const module = SURFACE_BY_FN.get(pkg.surfaceFn);
   if (!module) {
     console.error(`[surfacePackage] unknown surface module '${pkg.surfaceFn}' — data not packed`);
@@ -196,7 +199,7 @@ export function surfacePackageData(pkg: SurfacePackageV1): Float32Array | null {
   const values = module.params.map((p) => pkg.params[p.key] ?? p.default);
   const layout = surfacePackageDataLayout(values.length);
   const out = new Float32Array(layout.totalFloats);
-  out[0] = 0; // materialId slot — unused by modules
+  out[0] = selector; // the session composer's sp_eval/sp_rgb dispatch arm
   out[1] = 0; // variant — modules are variant-free
   out[SURFACE_D_SEED_INDEX] = pkg.seed;
   out[3] = 0; // quality — unused
@@ -215,59 +218,105 @@ export function surfacePackageData(pkg: SurfacePackageV1): Float32Array | null {
   return out;
 }
 
-/** The composed WGSL the compute prepass consumes: shared prelude + the
- *  package's surface module (plus everything it calls, transitively) + the
- *  sp_eval entry the pipeline invokes per lattice point. The projected
- *  compute harness (framework/gpu/shaders.zig projected_compute_prefix) owns
- *  the D declaration, so D_DECL is replaced — the ground/region discipline.
- *  Derivative built-ins are FRAGMENT-ONLY in WGSL, and the shared prelude's
- *  helpers use fwidth for their AA windows: a compute module cannot carry
- *  them, so every fwidth call is rewritten to a constant-width stub (cs_fw).
- *  Structural evaluation never needs screen derivatives — the affected
- *  helpers are appearance AA conveniences that just have to COMPILE here. */
-export function surfaceEvalModule(pkg: SurfacePackageV1): string | null {
-  const need = resolveMaterialFns([pkg.surfaceFn]);
-  if (!need) return null;
+// ── the session composer ────────────────────────────────────────────────────
+// The host holds ONE (compute, render) formula pair for every installed
+// surface, so multiple packages dispatch INSIDE the composed module — the
+// exact region_mat discipline. The structural D section's [0] (unused by the
+// fill-row shape) carries each instance's MODULE SELECTOR, assigned here and
+// stamped into surfacePackageData. Params stay per-instance: every slot binds
+// its own D section, so two packages sharing a module still tune it apart.
+
+export type SurfaceSessionEntry = {
+  pkg: SurfacePackageV1;
+  /** Maps the chart coordinate into the appearance material's uv domain so
+   *  the color cells land EXACTLY on the geometry cells. For an adapter
+   *  material (brick), invert its internal cols/rows; for an art-only pairing
+   *  (rust_sheet over surface_corrugated), choose the scale that makes the
+   *  appearance's own frequency expression equal the module's rib phase. */
+  appearanceUvScale: [number, number];
+};
+
+export type ComposedSurfaceSession = {
+  computeWgsl: string;
+  renderWgsl: string;
+  /** package id → the selector its D section must carry at index 0. */
+  selectors: Map<string, number>;
+};
+
+const w32 = (v: number) => {
+  const s = String(v);
+  return /[.e]/.test(s) ? s : `${s}.0`;
+};
+
+/** Compose the session's two modules over a set of packages.
+ *
+ *  Compute module: structural bodies only, behind a selector-dispatched
+ *  `fn sp_eval(sp) -> SurfaceSample`. The projected compute harness
+ *  (framework/gpu/shaders.zig) owns the D declaration, so D_DECL is replaced.
+ *  Derivative built-ins are FRAGMENT-ONLY in WGSL and the shared prelude's
+ *  helpers use fwidth for AA windows — a compute module cannot carry them, so
+ *  every fwidth call is rewritten to a constant-width stub (cs_fw).
+ *  Structural evaluation never needs screen derivatives; the affected helpers
+ *  are appearance conveniences that just have to COMPILE here.
+ *
+ *  Render module: the appearance materials (plus transitive calls, including
+ *  the modules adapters shade) behind a selector-dispatched
+ *  `fn sp_rgb(sp, px) -> vec3f` — per-fragment re-evaluation is LAW (ruled
+ *  amendments): geometry density never blurs the appearance. An unmatched
+ *  selector returns the region path's loud magenta. */
+export function composeSurfaceSession(entries: readonly SurfaceSessionEntry[]): ComposedSurfaceSession | null {
+  if (entries.length === 0) return null;
+  const computeNeed = resolveMaterialFns(entries.map((e) => e.pkg.surfaceFn));
+  const renderNeed = resolveMaterialFns(entries.flatMap((e) => [e.pkg.appearanceFn, e.pkg.surfaceFn]));
+  if (!computeNeed || !renderNeed) return null;
   const { prelude } = splitFillDispatch();
-  return [
+  const selectors = new Map<string, number>();
+  entries.forEach((e, i) => selectors.set(e.pkg.id, i + 1));
+
+  const computeArms = entries
+    .map((e) => `  if (sel == ${selectors.get(e.pkg.id)}) { return ${e.pkg.surfaceFn}(sp, D[${SURFACE_D_SEED_INDEX}]); }`)
+    .join('\n');
+  const computeWgsl = [
     'fn cs_fw(v: f32) -> f32 { return 0.001; }',
     prelude,
-    ...need.map((fn) => fnBody(fn)!),
+    ...computeNeed.map((fn) => fnBody(fn)!),
     `fn sp_eval(sp: vec2f) -> SurfaceSample {
-  return ${pkg.surfaceFn}(sp, D[${SURFACE_D_SEED_INDEX}]);
+  let sel = i32(D[0]);
+${computeArms}
+  return SurfaceSample(0.0, vec2f(0.0), vec4f(0.0));
 }`,
   ].join('\n')
     .replace(D_DECL, '// (D is declared by the projected compute harness — framework/gpu/shaders.zig)')
     .replaceAll('fwidth(', 'cs_fw(');
-}
 
-/** The composed WGSL the projected RENDER pass consumes: the appearance
- *  material (plus its transitive calls — including the surface module an
- *  adapter shades) behind `fn sp_rgb(sp, px) -> vec3f`. `appearanceUvScale`
- *  maps the continuous chart coordinate into the material's uv domain so the
- *  color cells land EXACTLY on the geometry cells (for an adapter material
- *  like brick, the scale inverts its internal cols/rows so the module inside
- *  sees the same sp the compute prepass fed — one cell address everywhere).
- *  Per-fragment re-evaluation is LAW (ruled amendments): geometry density
- *  never blurs the appearance. */
-export function projectedRenderModule(
-  pkg: SurfacePackageV1,
-  appearanceUvScale: [number, number],
-): string | null {
-  const need = resolveMaterialFns([pkg.appearanceFn, pkg.surfaceFn]);
-  if (!need) return null;
-  const { prelude } = splitFillDispatch();
-  const w32 = (v: number) => {
-    const s = String(v);
-    return /[.e]/.test(s) ? s : `${s}.0`;
-  };
-  return [
+  const renderArms = entries
+    .map((e) => `  if (sel == ${selectors.get(e.pkg.id)}) { return ${e.pkg.appearanceFn}(sp * vec2f(${w32(e.appearanceUvScale[0])}, ${w32(e.appearanceUvScale[1])}), px, 0.0, D[${SURFACE_D_SEED_INDEX}]); }`)
+    .join('\n');
+  const renderWgsl = [
     prelude,
-    ...need.map((fn) => fnBody(fn)!),
+    ...renderNeed.map((fn) => fnBody(fn)!),
     `fn sp_rgb(sp: vec2f, px: vec2f) -> vec3f {
-  return ${pkg.appearanceFn}(sp * vec2f(${w32(appearanceUvScale[0])}, ${w32(appearanceUvScale[1])}), px, 0.0, D[${SURFACE_D_SEED_INDEX}]);
+  let sel = i32(D[0]);
+${renderArms}
+  return vec3f(1.0, 0.0, 1.0); // package not in this composed session — loud magenta
 }`,
   ].join('\n')
     .replace(D_DECL, '// (D is declared by the projected render harness — framework/gpu/shaders.zig)')
     .replace(/\bU\.time\b/g, 'S.time');
+
+  return { computeWgsl, renderWgsl, selectors };
+}
+
+/** Single-package conveniences (the test surface and simple callers) — one
+ *  arm of the session composer. The instance's D section must then carry
+ *  selector 1 (surfacePackageData's default). */
+export function surfaceEvalModule(pkg: SurfacePackageV1): string | null {
+  return composeSurfaceSession([{ pkg, appearanceUvScale: [1, 1] }])?.computeWgsl ?? null;
+}
+
+export function projectedRenderModule(
+  pkg: SurfacePackageV1,
+  appearanceUvScale: [number, number],
+): string | null {
+  return composeSurfaceSession([{ pkg, appearanceUvScale }])?.renderWgsl ?? null;
 }

@@ -1329,4 +1329,5 @@ export type RegistrySurface = { fn: string; name: string; tags: string[]; author
 
 export const SURFACES: RegistrySurface[] = [
   { fn: "surface_brick", name: "Brick Relief", tags: ["brick", "masonry", "environment", "structure"], author: "fable", params: [{ key: "relief", label: "Relief depth", default: 0.012, min: 0, max: 0.08 }, { key: "brick_length", label: "Brick length (sp units)", default: 1, min: 0.05, max: 2 }, { key: "course_height", label: "Course height (sp units)", default: 1, min: 0.05, max: 2 }] },
+  { fn: "surface_corrugated", name: "Corrugated Sheet", tags: ["corrugated", "metal", "sheet", "structure"], author: "fable", params: [{ key: "rib_pitch", label: "Rib pitch (sp units per rib)", default: 1, min: 0.02, max: 2 }, { key: "relief", label: "Corrugation depth", default: 0.012, min: 0, max: 0.08 }] },
 ];
