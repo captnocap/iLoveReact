@@ -1648,6 +1648,7 @@ pub const projActiveCount = @import("projected_surface.zig").projActiveCount;
 pub const ensureProjectedPipelines = @import("projected_surface.zig").ensureProjectedPipelines;
 pub const generateProjectedSurfaces = @import("projected_surface.zig").generateProjectedSurfaces;
 pub const drawProjectedSurfaces = @import("projected_surface.zig").drawProjectedSurfaces;
+pub const projInfoJsonAlloc = @import("projected_surface.zig").projInfoJsonAlloc;
 
 // Force analysis of every part so their comptime layout assertions keep firing
 // exactly as they did when the file was one unit.

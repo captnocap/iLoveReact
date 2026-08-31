@@ -61,7 +61,26 @@ pub const ProjSlot = struct {
     compute_bg: ?*wgpu.BindGroup = null,
     gen_dirty: bool = false,
     generated: bool = false,
+    // ── the collision view (slice 3): a NESTED subset of the Generated
+    // Surface Buffer, read back once per revision. Triangles are the
+    // game/mesh_collision.zig soup shape (9 floats per triangle, world
+    // space) — collision selects INDICES from the master surface; the
+    // formula is never evaluated a second time anywhere.
+    collision_triangles: ?[]f32 = null, // owned (c_allocator)
+    collision_cols: u32 = 0,
+    collision_rows: u32 = 0,
+    measured_min_disp: f32 = 0, // meters along n_axis, from the readback
+    measured_max_disp: f32 = 0,
+    collision_ok: bool = false, // false = bounds gate failed (fail closed)
 };
+
+fn releaseSlotHost(s: *ProjSlot) void {
+    if (s.collision_triangles) |old| std.heap.c_allocator.free(old);
+    s.collision_triangles = null;
+    s.collision_cols = 0;
+    s.collision_rows = 0;
+    s.collision_ok = false;
+}
 
 fn releaseSlotGpu(s: *ProjSlot) void {
     if (s.vbuf) |b| b.release();
@@ -173,6 +192,7 @@ pub fn setProjectedSurface(id: []const u8, plane: []const f32, data: []const f32
     s.active = true;
     s.gen_dirty = true;
     s.generated = false;
+    releaseSlotHost(s); // a re-install invalidates the collision view too
     return true;
 }
 
@@ -183,6 +203,7 @@ pub fn clearProjectedSurfaces(id: []const u8) void {
         if (!s.active) continue;
         if (id.len > 0 and s.id_hash != kh) continue;
         releaseSlotGpu(s);
+        releaseSlotHost(s);
         s.* = .{};
     }
 }
@@ -329,11 +350,12 @@ pub fn ensureProjectedPipelines(io: std.Io, environ: *const std.process.Environ.
     }
 
     z3d.g_proj_built_hash = combined;
-    // A new authority invalidates every generated surface.
+    // A new authority invalidates every generated surface AND its collision view.
     for (&z3d.g_proj_slots) |*s| {
         if (s.active) {
             s.gen_dirty = true;
             s.generated = false;
+            releaseSlotHost(s);
         }
     }
 }
@@ -454,7 +476,159 @@ pub fn generateProjectedSurfaces(io: std.Io, environ: *const std.process.Environ
         const command = e.finish(&.{ .label = wgpu.StringView.fromSlice("r3d_proj_gen_cmd") }) orelse return;
         queue.submit(&.{command});
         command.release();
+        // Slice 3: pull the collision view out of the freshly generated
+        // buffers. Install-time only — the blocking poll never runs on a
+        // steady-state frame.
+        for (&z3d.g_proj_slots) |*s| {
+            if (s.active and s.generated and s.collision_triangles == null) {
+                readbackCollisionView(device, queue, s);
+            }
+        }
     }
+}
+
+/// The structural D section's extras ride after the param table (mirrors
+/// surfacePackage.ts surfacePackageDataLayout): extrasBase = 7 + paramCount,
+/// then [captureTime, captureStep, metersPerUnit, periodicU, minDisplacement,
+/// maxDisplacement, renderSpacing, collisionSpacing].
+fn slotExtras(s: *const ProjSlot) ?struct { min_disp: f32, max_disp: f32, render_spacing: f32, collision_spacing: f32 } {
+    if (s.data_len < 7) return null;
+    const param_count: u32 = @intFromFloat(@max(0, s.data[6]));
+    const extras_base = 7 + param_count;
+    if (extras_base + 8 > s.data_len) return null;
+    return .{
+        .min_disp = s.data[extras_base + 4],
+        .max_disp = s.data[extras_base + 5],
+        .render_spacing = s.data[extras_base + 6],
+        .collision_spacing = s.data[extras_base + 7],
+    };
+}
+
+/// Read the Generated Surface Buffer back ONCE and derive the collision view:
+/// a nested lattice subset (collisionSpacing / renderSpacing stride) built
+/// into the game/mesh_collision.zig triangle-soup shape, plus the measured
+/// displacement envelope. The declared bounds are ENFORCED here — a formula
+/// escaping its conservative envelope is exactly the wrongness the bake must
+/// refuse (fail closed: the surface keeps rendering, collision is refused
+/// LOUDLY until the package's bounds or formula are fixed).
+fn readbackCollisionView(device: *wgpu.Device, queue: *wgpu.Queue, s: *ProjSlot) void {
+    const vb = s.vbuf orelse return;
+    const vbytes: u64 = @as(u64, s.vertex_count) * PROJ_VERTEX_FLOATS * @sizeOf(f32);
+    const staging = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("r3d_proj_readback"),
+        .size = vbytes,
+        .usage = wgpu.BufferUsages.copy_dst | wgpu.BufferUsages.map_read,
+        .mapped_at_creation = 0,
+    }) orelse return;
+    defer staging.release();
+    const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("r3d_proj_readback_cmd") }) orelse return;
+    encoder.copyBufferToBuffer(vb, 0, staging, 0, vbytes);
+    const cmd = encoder.finish(&.{ .label = wgpu.StringView.fromSlice("r3d_proj_readback_fin") }) orelse {
+        encoder.release();
+        return;
+    };
+    encoder.release();
+    queue.submit(&.{cmd});
+    cmd.release();
+
+    var done: bool = false;
+    const cb_struct = struct {
+        fn cb(status: wgpu.MapAsyncStatus, _: wgpu.StringView, userdata1: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+            _ = status;
+            const done_ptr: *bool = @ptrCast(@alignCast(userdata1.?));
+            done_ptr.* = true;
+        }
+    };
+    _ = staging.mapAsync(wgpu.MapModes.read, 0, @intCast(vbytes), .{ .callback = cb_struct.cb, .userdata1 = @ptrCast(&done) });
+    while (!done) {
+        _ = device.poll(true, null);
+    }
+    const mapped_ptr = staging.getConstMappedRange(0, @intCast(vbytes)) orelse return;
+    defer staging.unmap();
+    const verts: []const f32 = @as([*]const f32, @ptrCast(@alignCast(mapped_ptr)))[0 .. s.vertex_count * PROJ_VERTEX_FLOATS];
+
+    const extras = slotExtras(s) orelse {
+        log.print("[r3d-proj] collision REFUSED (hash {x}): structural D section carries no extras — repack with surfacePackageData\n", .{s.id_hash});
+        return;
+    };
+    const ratio = extras.collision_spacing / @max(extras.render_spacing, 0.000001);
+    const stride: u32 = @max(1, @as(u32, @intFromFloat(@round(ratio))));
+    const ccols: u32 = (s.params.cols - 1) / stride + 1;
+    const crows: u32 = (s.params.rows - 1) / stride + 1;
+
+    // Measured displacement envelope over the FULL lattice (the render truth,
+    // not just the subset): disp = dot(pos - plane_base(i,j), n_axis).
+    var min_disp: f32 = std.math.floatMax(f32);
+    var max_disp: f32 = -std.math.floatMax(f32);
+    var j: u32 = 0;
+    while (j < s.params.rows) : (j += 1) {
+        var i: u32 = 0;
+        while (i < s.params.cols) : (i += 1) {
+            const base = (j * s.params.cols + i) * PROJ_VERTEX_FLOATS;
+            const x_m = @as(f32, @floatFromInt(i)) * s.params.spacing;
+            const y_m = @as(f32, @floatFromInt(j)) * s.params.spacing;
+            var disp: f32 = 0;
+            inline for (0..3) |axis| {
+                const flat = s.params.origin[axis] + s.params.u_axis[axis] * x_m + s.params.v_axis[axis] * y_m;
+                disp += (verts[base + axis] - flat) * s.params.n_axis[axis];
+            }
+            if (disp < min_disp) min_disp = disp;
+            if (disp > max_disp) max_disp = disp;
+        }
+    }
+    s.measured_min_disp = min_disp;
+    s.measured_max_disp = max_disp;
+    const tolerance: f32 = 0.0005; // half a millimeter of f32 slack
+    if (min_disp < extras.min_disp - tolerance or max_disp > extras.max_disp + tolerance) {
+        log.print("[r3d-proj] collision REFUSED (hash {x}): measured displacement [{d:.4}, {d:.4}]m escapes the declared bounds [{d:.4}, {d:.4}]m — fix the package bounds or the formula (fail closed)\n", .{ s.id_hash, min_disp, max_disp, extras.min_disp, extras.max_disp });
+        s.collision_ok = false;
+        return;
+    }
+
+    // Build the nested-subset triangle soup (9 floats per triangle, world
+    // space, same winding as the render indices).
+    const tri_count: u64 = @as(u64, ccols - 1) * (crows - 1) * 2;
+    const soup = std.heap.c_allocator.alloc(f32, tri_count * 9) catch return;
+    var w: usize = 0;
+    var cj: u32 = 0;
+    while (cj + 1 < crows) : (cj += 1) {
+        var ci: u32 = 0;
+        while (ci + 1 < ccols) : (ci += 1) {
+            const ia = (@min(cj * stride, s.params.rows - 1) * s.params.cols + @min(ci * stride, s.params.cols - 1)) * PROJ_VERTEX_FLOATS;
+            const ib = (@min(cj * stride, s.params.rows - 1) * s.params.cols + @min((ci + 1) * stride, s.params.cols - 1)) * PROJ_VERTEX_FLOATS;
+            const ic = (@min((cj + 1) * stride, s.params.rows - 1) * s.params.cols + @min(ci * stride, s.params.cols - 1)) * PROJ_VERTEX_FLOATS;
+            const id = (@min((cj + 1) * stride, s.params.rows - 1) * s.params.cols + @min((ci + 1) * stride, s.params.cols - 1)) * PROJ_VERTEX_FLOATS;
+            inline for (.{ ia, ib, id, ia, id, ic }) |vi| {
+                soup[w] = verts[vi];
+                soup[w + 1] = verts[vi + 1];
+                soup[w + 2] = verts[vi + 2];
+                w += 3;
+            }
+        }
+    }
+    if (s.collision_triangles) |old| std.heap.c_allocator.free(old);
+    s.collision_triangles = soup;
+    s.collision_cols = ccols;
+    s.collision_rows = crows;
+    s.collision_ok = true;
+    log.print("[r3d-proj] collision view (hash {x}): {d}x{d} nested lattice (stride {d}) -> {d} triangles; measured displacement [{d:.4}, {d:.4}]m inside declared [{d:.4}, {d:.4}]m\n", .{ s.id_hash, ccols, crows, stride, tri_count, min_disp, max_disp, extras.min_disp, extras.max_disp });
+}
+
+/// __surface_package_info: JSON status of one installed surface — the
+/// verification door (the demo route and future tooling read it; the shot
+/// harness asserts through it). Caller frees.
+pub fn projInfoJsonAlloc(id: []const u8) ?[]u8 {
+    const kh = z3d.hashKey(id);
+    for (&z3d.g_proj_slots) |*s| {
+        if (!s.active or s.id_hash != kh) continue;
+        const tri_count: u64 = if (s.collision_triangles) |t| t.len / 9 else 0;
+        return std.fmt.allocPrint(
+            std.heap.c_allocator,
+            "{{\"generated\":{},\"vertices\":{d},\"indices\":{d},\"collisionOk\":{},\"collisionCols\":{d},\"collisionRows\":{d},\"collisionTriangles\":{d},\"measuredMinDisp\":{d:.5},\"measuredMaxDisp\":{d:.5}}}",
+            .{ s.generated, s.vertex_count, s.index_count, s.collision_ok, s.collision_cols, s.collision_rows, tri_count, s.measured_min_disp, s.measured_max_disp },
+        ) catch null;
+    }
+    return null;
 }
 
 /// Draw every generated surface into the scene's render pass (recorded after

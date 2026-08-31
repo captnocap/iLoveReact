@@ -75,7 +75,38 @@ export default function SurfaceDemoSurface() {
     const host = globalThis as any;
     const installed = installDemoSurfaces();
     if (!installed) console.error('[surface-demo] install failed — the plane will not appear');
+    // Assert through the verification door, not the picture alone: poll until
+    // the prepass has generated, then report the collision view + measured
+    // displacement envelope (console.warn reaches the shot terminal).
+    let polls = 0;
+    let pollTimer: any = null;
+    const poll = () => {
+      polls += 1;
+      const raw = typeof host.__surface_package_info === 'function'
+        ? host.__surface_package_info(BRICK_WALL_DEMO.id)
+        : '';
+      if (raw) {
+        try {
+          const status = JSON.parse(raw);
+          if (status.generated && status.collisionTriangles > 0) {
+            console.warn(`[surface-demo] VERIFIED ${BRICK_WALL_DEMO.id}: ${raw}`);
+            return;
+          }
+          if (status.generated && !status.collisionOk && polls > 5) {
+            console.error(`[surface-demo] collision REFUSED by the bounds gate: ${raw}`);
+            return;
+          }
+        } catch {
+          console.error(`[surface-demo] info door returned unparseable JSON: ${raw}`);
+          return;
+        }
+      }
+      if (polls < 40) pollTimer = setTimeout(poll, 100);
+      else console.error('[surface-demo] surface never reported generated — check [r3d-proj] host logs');
+    };
+    pollTimer = setTimeout(poll, 100);
     return () => {
+      if (pollTimer !== null) clearTimeout(pollTimer);
       if (typeof host.__surface_package_clear === 'function') host.__surface_package_clear('');
     };
   }, []);

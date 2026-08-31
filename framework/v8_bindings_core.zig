@@ -4020,6 +4020,26 @@ fn hostSurfacePackageSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __surface_package_info(id) → JSON | "". Status of one installed projected
+/// surface: generation state, lattice sizes, the collision view (nested
+/// triangle count + measured displacement envelope vs the declared bounds).
+/// This is the VERIFICATION door — the demo route and the shot harness assert
+/// through it instead of trusting the picture alone.
+fn hostSurfacePackageInfo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(id);
+    const json = scene3d.projInfoJsonAlloc(id) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(json);
+    setReturnString(info, json);
+}
+
 /// __surface_package_clear(id) → 1. Empty id clears every projected surface
 /// (route unmount / hot-reload teardown).
 fn hostSurfacePackageClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -5614,6 +5634,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
         v8_runtime.registerHostFn("__surface_package_formula", hostSurfacePackageFormula);
         v8_runtime.registerHostFn("__surface_package_set", hostSurfacePackageSet);
+        v8_runtime.registerHostFn("__surface_package_info", hostSurfacePackageInfo);
         v8_runtime.registerHostFn("__surface_package_clear", hostSurfacePackageClear);
         v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
         v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
@@ -5891,6 +5912,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
     v8_runtime.registerHostFn("__surface_package_formula", hostSurfacePackageFormula);
     v8_runtime.registerHostFn("__surface_package_set", hostSurfacePackageSet);
+    v8_runtime.registerHostFn("__surface_package_info", hostSurfacePackageInfo);
     v8_runtime.registerHostFn("__surface_package_clear", hostSurfacePackageClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
