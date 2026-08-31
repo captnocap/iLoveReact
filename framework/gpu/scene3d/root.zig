@@ -210,6 +210,11 @@ pub var g_curve_pull_topology_changed: bool = false;
 // silently freezing frame after frame (req_4671).
 pub var g_curve_pull_densify_blocked: bool = false;
 
+// ── Surface Slide arming (req_4731) ──────────────────────────────────────────
+// A MOVE drag redistributes selected logical vertices along their frozen
+// grab-time authored edges instead of pulling them across face interiors.
+pub var g_surface_slide_armed: bool = false;
+
 // ── Mesh-element selection (the host-native editor surface) ───────────────────────
 // ── Native mesh-editor input capture (modelview) ─────────────────────────────────
 // When capturing, the ENGINE owns the model-editor input loop (middle-drag orbit, left
@@ -435,6 +440,18 @@ pub var g_regions: [REGION_POOL]RegionSlot = [_]RegionSlot{.{}} ** REGION_POOL;
 pub var g_region_data_buf: [REGION_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** REGION_POOL;
 pub var g_region_data_bg: [REGION_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** REGION_POOL;
 pub var g_region_inst_buf: ?*wgpu.Buffer = null; // one InstanceData per drawn region mesh
+// ── Projected Surface Packages (req_4784/4785, projected_surface.zig): a
+// coarse plane displaced into real geometry by ONE cart-composed WGSL
+// authority. The compute prepass (the framework's first compute pipeline)
+// writes the Generated Surface Buffer once per install; the render pipeline
+// draws it with ground-pass lighting. Static by ruling (capture-frame).
+pub var g_proj_slots: [PROJ_POOL]ProjSlot = [_]ProjSlot{.{}} ** PROJ_POOL;
+pub var g_proj_compute_formula: ?[]u8 = null; // owned (c_allocator) — defines sp_eval
+pub var g_proj_render_formula: ?[]u8 = null; // owned (c_allocator) — defines sp_rgb
+pub var g_proj_built_hash: u64 = 0;
+pub var g_proj_compute_pipeline: ?*wgpu.ComputePipeline = null;
+pub var g_proj_pipeline: ?*wgpu.RenderPipeline = null;
+pub var g_proj_compute_bgl: ?*wgpu.BindGroupLayout = null;
 pub var g_vertex_buffer: ?*wgpu.Buffer = null;
 pub var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 pub var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
@@ -1010,6 +1027,8 @@ pub const curvePullAdaptiveCapture = @import("curve_pull.zig").curvePullAdaptive
 pub const curvePullAdaptiveRebuild = @import("curve_pull.zig").curvePullAdaptiveRebuild;
 pub const meshCurvePullArm = @import("curve_pull.zig").meshCurvePullArm;
 pub const meshCurvePullArmed = @import("curve_pull.zig").meshCurvePullArmed;
+pub const meshSurfaceSlideArm = @import("curve_pull.zig").meshSurfaceSlideArm;
+pub const meshSurfaceSlideArmed = @import("curve_pull.zig").meshSurfaceSlideArmed;
 pub const meshGizmoBegin = @import("curve_pull.zig").meshGizmoBegin;
 pub const meshGizmoGrabAt = @import("curve_pull.zig").meshGizmoGrabAt;
 pub const meshGizmoFinish = @import("curve_pull.zig").meshGizmoFinish;
@@ -1316,6 +1335,7 @@ pub const AuditKey = @import("edit_semantics.zig").AuditKey;
 pub const invalidateMeshAudit = @import("edit_semantics.zig").invalidateMeshAudit;
 pub const meshAuditFacts = @import("edit_semantics.zig").meshAuditFacts;
 pub const meshSemanticStateJson = @import("edit_semantics.zig").meshSemanticStateJson;
+pub const meshBlueprintSet = @import("edit_semantics.zig").meshBlueprintSet;
 pub const MeshSelectorKind = @import("edit_semantics.zig").MeshSelectorKind;
 pub const MeshSelectorQuery = @import("edit_semantics.zig").MeshSelectorQuery;
 pub const MeshSelectorResult = @import("edit_semantics.zig").MeshSelectorResult;
@@ -1616,9 +1636,23 @@ pub const findModelSession = @import("doc_sessions.zig").findModelSession;
 pub const modelSessionRecord = @import("doc_sessions.zig").modelSessionRecord;
 pub const modelSessionSelect = @import("doc_sessions.zig").modelSessionSelect;
 
+// Projected Surface Packages (req_4784/4785) — projected_surface.zig.
+pub const PROJ_POOL = @import("projected_surface.zig").PROJ_POOL;
+pub const PROJ_DATA_FLOATS = @import("projected_surface.zig").PROJ_DATA_FLOATS;
+pub const PROJ_VERTEX_FLOATS = @import("projected_surface.zig").PROJ_VERTEX_FLOATS;
+pub const ProjSlot = @import("projected_surface.zig").ProjSlot;
+pub const setProjectedFormulas = @import("projected_surface.zig").setProjectedFormulas;
+pub const setProjectedSurface = @import("projected_surface.zig").setProjectedSurface;
+pub const clearProjectedSurfaces = @import("projected_surface.zig").clearProjectedSurfaces;
+pub const projActiveCount = @import("projected_surface.zig").projActiveCount;
+pub const ensureProjectedPipelines = @import("projected_surface.zig").ensureProjectedPipelines;
+pub const generateProjectedSurfaces = @import("projected_surface.zig").generateProjectedSurfaces;
+pub const drawProjectedSurfaces = @import("projected_surface.zig").drawProjectedSurfaces;
+
 // Force analysis of every part so their comptime layout assertions keep firing
 // exactly as they did when the file was one unit.
 comptime {
+    _ = @import("projected_surface.zig");
     _ = @import("formats.zig");
     _ = @import("geometry_intern_cache.zig");
     _ = @import("mesh_stash.zig");

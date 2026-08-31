@@ -26,7 +26,7 @@
 // works INSIDE surface modules unmodified — the compute prepass binds this
 // section at mat_data_base and every knob is data-speed. Package extras ride
 // AFTER the shared sections, exactly like the region harness's domainScale.
-import { fnBody, resolveMaterialFns, splitFillDispatch } from './compose';
+import { D_DECL, fnBody, resolveMaterialFns, splitFillDispatch } from './compose';
 import { MATERIALS, SURFACES, type RegistrySurface } from './_generated/registry';
 
 export type SurfacePackageDomain = {
@@ -217,19 +217,57 @@ export function surfacePackageData(pkg: SurfacePackageV1): Float32Array | null {
 
 /** The composed WGSL the compute prepass consumes: shared prelude + the
  *  package's surface module (plus everything it calls, transitively) + the
- *  sp_eval entry the pipeline invokes per lattice point. The prepass binds the
- *  structural D section at base 0, so mat_param and the seed read directly.
- *  D_DECL is left INTACT — the harness that owns its own D binding applies the
- *  compose.ts replacement, exactly like the ground and region consumers. */
+ *  sp_eval entry the pipeline invokes per lattice point. The projected
+ *  compute harness (framework/gpu/shaders.zig projected_compute_prefix) owns
+ *  the D declaration, so D_DECL is replaced — the ground/region discipline.
+ *  Derivative built-ins are FRAGMENT-ONLY in WGSL, and the shared prelude's
+ *  helpers use fwidth for their AA windows: a compute module cannot carry
+ *  them, so every fwidth call is rewritten to a constant-width stub (cs_fw).
+ *  Structural evaluation never needs screen derivatives — the affected
+ *  helpers are appearance AA conveniences that just have to COMPILE here. */
 export function surfaceEvalModule(pkg: SurfacePackageV1): string | null {
   const need = resolveMaterialFns([pkg.surfaceFn]);
   if (!need) return null;
   const { prelude } = splitFillDispatch();
   return [
+    'fn cs_fw(v: f32) -> f32 { return 0.001; }',
     prelude,
     ...need.map((fn) => fnBody(fn)!),
     `fn sp_eval(sp: vec2f) -> SurfaceSample {
   return ${pkg.surfaceFn}(sp, D[${SURFACE_D_SEED_INDEX}]);
 }`,
-  ].join('\n');
+  ].join('\n')
+    .replace(D_DECL, '// (D is declared by the projected compute harness — framework/gpu/shaders.zig)')
+    .replaceAll('fwidth(', 'cs_fw(');
+}
+
+/** The composed WGSL the projected RENDER pass consumes: the appearance
+ *  material (plus its transitive calls — including the surface module an
+ *  adapter shades) behind `fn sp_rgb(sp, px) -> vec3f`. `appearanceUvScale`
+ *  maps the continuous chart coordinate into the material's uv domain so the
+ *  color cells land EXACTLY on the geometry cells (for an adapter material
+ *  like brick, the scale inverts its internal cols/rows so the module inside
+ *  sees the same sp the compute prepass fed — one cell address everywhere).
+ *  Per-fragment re-evaluation is LAW (ruled amendments): geometry density
+ *  never blurs the appearance. */
+export function projectedRenderModule(
+  pkg: SurfacePackageV1,
+  appearanceUvScale: [number, number],
+): string | null {
+  const need = resolveMaterialFns([pkg.appearanceFn, pkg.surfaceFn]);
+  if (!need) return null;
+  const { prelude } = splitFillDispatch();
+  const w32 = (v: number) => {
+    const s = String(v);
+    return /[.e]/.test(s) ? s : `${s}.0`;
+  };
+  return [
+    prelude,
+    ...need.map((fn) => fnBody(fn)!),
+    `fn sp_rgb(sp: vec2f, px: vec2f) -> vec3f {
+  return ${pkg.appearanceFn}(sp * vec2f(${w32(appearanceUvScale[0])}, ${w32(appearanceUvScale[1])}), px, 0.0, D[${SURFACE_D_SEED_INDEX}]);
+}`,
+  ].join('\n')
+    .replace(D_DECL, '// (D is declared by the projected render harness — framework/gpu/shaders.zig)')
+    .replace(/\bU\.time\b/g, 'S.time');
 }

@@ -1328,5 +1328,5 @@ export const ATOMS: RegistryAtom[] = [
 export type RegistrySurface = { fn: string; name: string; tags: string[]; author: string; params: RegistryParam[] };
 
 export const SURFACES: RegistrySurface[] = [
-  { fn: "surface_brick", name: "Brick Relief", tags: ["brick", "masonry", "environment", "structure"], author: "fable", params: [{ key: "relief", label: "Relief depth", default: 0.012, min: 0, max: 0.08 }] },
+  { fn: "surface_brick", name: "Brick Relief", tags: ["brick", "masonry", "environment", "structure"], author: "fable", params: [{ key: "relief", label: "Relief depth", default: 0.012, min: 0, max: 0.08 }, { key: "brick_length", label: "Brick length (sp units)", default: 1, min: 0.05, max: 2 }, { key: "course_height", label: "Course height (sp units)", default: 1, min: 0.05, max: 2 }] },
 ];

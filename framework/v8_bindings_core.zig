@@ -1071,6 +1071,20 @@ fn hostMeshSemanticState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, json);
 }
 
+/// __mesh_blueprint_set(json, remove) -> 1|0. This is deliberately narrower
+/// than whole semantic-table replacement: it preserves every sibling key and
+/// validates the blueprint before publishing one resident generation.
+fn hostMeshBlueprintSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const remove = (argToI32(info, 1) orelse 0) != 0;
+    var json: ?[]u8 = null;
+    if (!remove) json = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer if (json) |bytes| std.heap.c_allocator.free(bytes);
+    const ok = scene3d.meshBlueprintSet(if (remove) null else json.?);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __mesh_semantics_restore_from_rjmd(path) -> JSON receipt.
 ///
 /// Read one durable RJMD through the canonical native decoder and restore only
@@ -1308,6 +1322,16 @@ fn hostMeshCurvePullArm(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const on = (argToI32(info, 0) orelse 0) != 0;
     const armed = scene3d.meshCurvePullArm(on);
+    state.markDirty();
+    setReturnNumber(info, if (armed) 1 else 0);
+}
+
+/// __mesh_surface_slide_arm(on) → bool. Arm/disarm Surface Slide (req_4731):
+/// Move-gizmo targets are constrained to frozen grab-time authored edges.
+fn hostMeshSurfaceSlideArm(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const on = (argToI32(info, 0) orelse 0) != 0;
+    const armed = scene3d.meshSurfaceSlideArm(on);
     state.markDirty();
     setReturnNumber(info, if (armed) 1 else 0);
 }
@@ -3933,6 +3957,85 @@ fn hostModelRegionClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnNumber(info, 1);
 }
 
+/// __surface_package_formula(computeWgsl, renderWgsl) → 1|0. Install the two
+/// cart-composed Surface Package modules (PROJECTED_SURFACE_INTEGRATION.md):
+/// the compute module defines `fn sp_eval(sp: vec2f) -> SurfaceSample` (the
+/// structural authority the prepass evaluates), the render module defines
+/// `fn sp_rgb(sp: vec2f, px: vec2f) -> vec3f` (the appearance layer). Pushed
+/// once per run/hot-reload; instances arrive as DATA via __surface_package_set.
+fn hostSurfacePackageFormula(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const compute_wgsl = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(compute_wgsl);
+    const render_wgsl = argToStringAlloc(info, 1) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(render_wgsl);
+    if (compute_wgsl.len == 0 or render_wgsl.len == 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    scene3d.setProjectedFormulas(compute_wgsl, render_wgsl);
+    state.markDirty();
+    setReturnNumber(info, 1);
+}
+
+/// __surface_package_set(id, Float32Array plane, Float32Array data) → 1|0.
+/// Install (or update) one projected plane. `plane` = [origin.xyz, uAxis.xyz,
+/// vAxis.xyz, sizeU_m, sizeV_m, spacing_m, metersPerUnit] (13 floats); `data`
+/// is the package's structural D section (surfacePackageData — the
+/// mat_param-compatible row + extras). The compute prepass regenerates the
+/// surface once; rendering draws the generated buffer thereafter.
+fn hostSurfacePackageSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(id);
+    const plane_bytes = argBytes(info, 1) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (plane_bytes.len == 0 or plane_bytes.len % @sizeOf(f32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const plane: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, plane_bytes));
+    const data_bytes = argBytes(info, 2) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (data_bytes.len == 0 or data_bytes.len % @sizeOf(f32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const data: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, data_bytes));
+    const ok = scene3d.setProjectedSurface(id, plane, data);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __surface_package_clear(id) → 1. Empty id clears every projected surface
+/// (route unmount / hot-reload teardown).
+fn hostSurfacePackageClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var id: []const u8 = "";
+    var id_owned = false;
+    if (argToStringAlloc(info, 0)) |k| {
+        id = k;
+        id_owned = true;
+    }
+    defer if (id_owned) std.heap.c_allocator.free(id);
+    scene3d.clearProjectedSurfaces(id);
+    state.markDirty();
+    setReturnNumber(info, 1);
+}
+
 /// __model_set_paint_detail(density) → the ACTUAL density after the change. `density`
 /// is texels-per-METER (Blockbench 16x semantics: 16/32/64/128, plus 256/512; 1 =
 /// fill-only look). Rebuilds the island atlas and re-uploads the mesh (see
@@ -5342,6 +5445,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
         v8_runtime.registerHostFn("__mesh_semantic_stamp_part_ranges", hostMeshSemanticStampPartRanges);
         v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
+        v8_runtime.registerHostFn("__mesh_blueprint_set", hostMeshBlueprintSet);
         v8_runtime.registerHostFn("__mesh_semantics_restore_from_rjmd", hostMeshSemanticsRestoreFromRjmd);
         v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
         v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
@@ -5378,6 +5482,7 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
         v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
         v8_runtime.registerHostFn("__mesh_curve_pull_arm", hostMeshCurvePullArm);
+        v8_runtime.registerHostFn("__mesh_surface_slide_arm", hostMeshSurfaceSlideArm);
         v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
         v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
         v8_runtime.registerHostFn("__mesh_circularize_loop", hostMeshCircularizeLoop);
@@ -5507,6 +5612,9 @@ pub fn registerCore(host: *HostContext) void {
         v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
         v8_runtime.registerHostFn("__model_region_bind_slot", hostModelRegionBindSlot);
         v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
+        v8_runtime.registerHostFn("__surface_package_formula", hostSurfacePackageFormula);
+        v8_runtime.registerHostFn("__surface_package_set", hostSurfacePackageSet);
+        v8_runtime.registerHostFn("__surface_package_clear", hostSurfacePackageClear);
         v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
         v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
         v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
@@ -5616,6 +5724,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_semantic_name_primitive", hostMeshSemanticNamePrimitive);
     v8_runtime.registerHostFn("__mesh_semantic_stamp_part_ranges", hostMeshSemanticStampPartRanges);
     v8_runtime.registerHostFn("__mesh_semantic_state", hostMeshSemanticState);
+    v8_runtime.registerHostFn("__mesh_blueprint_set", hostMeshBlueprintSet);
     v8_runtime.registerHostFn("__mesh_semantics_restore_from_rjmd", hostMeshSemanticsRestoreFromRjmd);
     v8_runtime.registerHostFn("__mesh_semantic_region_edit", hostMeshSemanticRegionEdit);
     v8_runtime.registerHostFn("__mesh_select_query", hostMeshSelectQuery);
@@ -5652,6 +5761,7 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
     v8_runtime.registerHostFn("__mesh_curve_pull_arm", hostMeshCurvePullArm);
+    v8_runtime.registerHostFn("__mesh_surface_slide_arm", hostMeshSurfaceSlideArm);
     v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
     v8_runtime.registerHostFn("__mesh_align_loop", hostMeshAlignLoop);
     v8_runtime.registerHostFn("__mesh_circularize_loop", hostMeshCircularizeLoop);
@@ -5779,6 +5889,9 @@ pub fn registerScene3D(_: *HostContext) void {
     v8_runtime.registerHostFn("__model_region_set", hostModelRegionSet);
     v8_runtime.registerHostFn("__model_region_bind_slot", hostModelRegionBindSlot);
     v8_runtime.registerHostFn("__model_region_clear", hostModelRegionClear);
+    v8_runtime.registerHostFn("__surface_package_formula", hostSurfacePackageFormula);
+    v8_runtime.registerHostFn("__surface_package_set", hostSurfacePackageSet);
+    v8_runtime.registerHostFn("__surface_package_clear", hostSurfacePackageClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
     v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);

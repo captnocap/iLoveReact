@@ -638,6 +638,12 @@ pub fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
 
+    // Projected Surface Packages (req_4785): run the compute prepass for any
+    // dirty installed surface before this frame's render encoder exists. A
+    // static package generates exactly once per install/param/formula change —
+    // steady state records nothing here.
+    z3d.generateProjectedSurfaces(io, environ, device, queue);
+
     // ── Extract camera, lights, meshes from children ──
     var cam_pos = math.Vec3{ .x = 0, .y = 5, .z = 10 };
     var cam_look = math.Vec3{ .x = 0, .y = 0, .z = 0 };
@@ -1846,6 +1852,13 @@ pub fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node
             }
         }
     }
+    // ── Projected Surface Packages pass (req_4785): draw every generated
+    //    surface buffer — opaque, ground-style lighting, so it lands with the
+    //    ground pass, before the region overlay and the transparent pass. ──
+    if (z3d.projActiveCount() > 0) {
+        z3d.drawProjectedSurfaces(pass);
+    }
+
     if (z3d.censusOn() and z3d.g_dbg_frame % 120 == 1) {
         log.print("[ground-pass] seen={d} collected(gcount)={d} drawn={d} pool_cap={d} (dedicated inst buffer — foliage can't starve it)\n", .{ dbg_ground_seen, gcount, dbg_ground_drawn, z3d.GROUND_POOL });
         var dbg_regions_active: u32 = 0;

@@ -84,6 +84,7 @@ import ModelContextMenu from '../stage/ModelContextMenu';
 import WorldContextMenu from '../stage/WorldContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
+import SurfaceDemoSurface from '../stage/SurfaceDemoSurface';
 import { useNavigate, useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
@@ -92,7 +93,7 @@ import { busOn } from '../../../runtime/hooks/useIFTTT';
 import { subscribe } from '../../../runtime/ffi';
 import type { EditorState, Command, Asset, HomeFilter, Menu, WorldObject, ContentFolderId, ContentNode, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole, ModelTextureSlot, WorkspaceDocument } from '../data/types';
 import { NO_SEMANTIC_ID, meshSemanticBlueprint, parseMeshSemanticTable, type MeshEdgeSemanticRole } from '../model/meshSemantics';
-import { blueprintTableByteLength, validateBlueprintTable } from '../model/blueprintTable';
+import { jsonUtf8ByteLength, validateBlueprintTable } from '../model/blueprintTable';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
@@ -9686,7 +9687,7 @@ export default function AppFrame() {
             ...identity,
             verdict: raw === undefined ? 'absent' : parsed ? 'valid' : 'invalid',
             blueprint: parsed ?? (raw === undefined ? null : raw),
-            bytes: parsed ? blueprintTableByteLength(parsed) : raw === undefined ? 0 : new TextEncoder().encode(JSON.stringify(raw)).length,
+            bytes: raw === undefined ? 0 : jsonUtf8ByteLength(parsed ?? raw),
             error,
           });
         }
@@ -12345,7 +12346,11 @@ export default function AppFrame() {
           onClose={closeEditor}
         />
       </RenderProbe>
-      {playing ? (
+      {path === '/surface-demo' ? (
+        <C.HW_PlayBody>
+          <SurfaceDemoSurface />
+        </C.HW_PlayBody>
+      ) : playing ? (
         <C.HW_PlayBody>
           <PlayRoute fartRacerReady={gameExport?.phase === 'complete'} />
         </C.HW_PlayBody>

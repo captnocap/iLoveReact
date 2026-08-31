@@ -6,6 +6,7 @@
 import {
   SURFACE_D_PARAM_COUNT_INDEX,
   SURFACE_D_SEED_INDEX,
+  projectedRenderModule,
   surfaceEvalModule,
   surfacePackageData,
   surfacePackageDataLayout,
@@ -123,8 +124,20 @@ test('surfaceEvalModule composes one authority behind sp_eval', () => {
   assert(src.includes('fn surface_brick(sp: vec2f, seed: f32) -> SurfaceSample {'), 'surface module body missing');
   assert(src.includes(`fn sp_eval(sp: vec2f) -> SurfaceSample {`), 'sp_eval entry missing');
   assert(src.includes(`D[${SURFACE_D_SEED_INDEX}]`), 'sp_eval must read the seed from the packed section');
-  assert(src.split(D_DECL).length === 2, 'exactly one D declaration (harness replaces it when it owns the binding)');
+  assert(!src.includes(D_DECL), 'the compute harness owns the D declaration — the module must not carry one');
+  assert(!src.includes('fwidth('), 'fwidth is fragment-only — the compute module must carry only cs_fw stubs');
+  assert(src.includes('fn cs_fw(v: f32) -> f32'), 'the cs_fw stub must be defined');
   assert(!src.includes('fn fill_pick'), 'the eval module must not drag the fill dispatch along');
+});
+
+test('projectedRenderModule shades through sp_rgb over the same cells', () => {
+  const src = projectedRenderModule(BRICK_WALL, [1 / 3.2, 1 / 6.0])!;
+  assert(src !== null, 'render module not composed');
+  assert(src.includes('fn sp_rgb(sp: vec2f, px: vec2f) -> vec3f {'), 'sp_rgb entry missing');
+  assert(src.includes('fn brick(') && src.includes('fn surface_brick('), 'adapter and module must both ride along');
+  assert(src.includes('0.3125'), 'the appearance uv scale must invert the adapter cols exactly');
+  assert(!src.includes(D_DECL), 'the render harness owns the D declaration');
+  assert(!/\bU\.time\b/.test(src), 'U.time must be rewritten to S.time for the scene harness');
 });
 
 test('brick the material resolves its module transitively everywhere', () => {

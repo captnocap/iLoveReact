@@ -1047,12 +1047,12 @@ const scene3d_fs =
 pub const scene3d_wgsl = oct_decode_wgsl ++ scene3d_decls ++ scene3d_vs_input ++ scene3d_common ++ scene3d_vs_main ++ scene3d_fs;
 
 // SKINNED vertex input (SKIN-3499): the standard layout plus a bone palette.
-// Each palette entry is a column-major MODEL-SPACE matrix (the inverse-bind
-// translation is folded in host-side by skeleton/pose.zig) + an rgba tint —
+// Each palette entry is a column-major MODEL-SPACE skin matrix (hierarchical
+// global pose × inverse bind from skeleton/fk_pose.zig) + an rgba tint —
 // 80 bytes std430 (mat4x4f + vec4f), matching the 20-float wire rows the
 // world loader writes. Weights arrive unorm8-quantized, so the vertex stage
 // renormalizes by the weight sum — rigid exports (w = 1,0,0,0) pass through
-// exactly and reproduce today's per-part transforms bit-for-visual-bit.
+// exactly.
 const scene3d_skinned_vs_input =
     \\struct BoneData {
     \\    m: mat4x4f,
@@ -2261,5 +2261,156 @@ pub const poly_wgsl =
     \\        discard;
     \\    }
     \\    return vec4f(in.color.rgb * in.color.a, in.color.a);
+    \\}
+;
+
+/// ── Projected Surface Packages (v1, req_4784/4785) ─────────────────────────
+/// A Surface Package projects a coarse plane into real displaced geometry from
+/// ONE WGSL surface module (cart/editor/render3d/shaders/surfaces/*.wgsl, the
+/// structural authority — PROJECTED_SURFACE_INTEGRATION.md). The cart composes
+/// two modules from the same catalog dispatch and pushes them through
+/// __surface_package_formula:
+///   compute module — defines `fn sp_eval(sp: vec2f) -> SurfaceSample`
+///   render module  — defines `fn sp_rgb(sp: vec2f, px: vec2f) -> vec3f`
+/// The COMPUTE PREPASS is the only evaluator of the structural formula: it
+/// writes displaced position + reconstructed normal + the chart coordinate
+/// into the Generated Surface Buffer once per install/param change (static
+/// packages, capture-frame ruling req_4782 — nothing re-evaluates per frame).
+/// The render pass draws that buffer with the ground pass's exact lighting;
+/// collision (next slice) reads the same buffer back. Zig never carries a
+/// translated copy of the surface formula — the twin-formula ban.
+pub const projected_compute_prefix =
+    \\struct ProjParams {
+    \\    origin: vec3f,
+    \\    cols: u32,
+    \\    u_axis: vec3f,
+    \\    rows: u32,
+    \\    v_axis: vec3f,
+    \\    spacing: f32,          // meters between lattice points
+    \\    n_axis: vec3f,
+    \\    meters_per_unit: f32,  // meters of world per one sp unit
+    \\    sp_origin: vec2f,      // chart coordinate of lattice (0,0)
+    \\    _pad: vec2f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> P: ProjParams;
+    \\@group(0) @binding(1) var<storage, read> D: array<f32>;
+    \\// 8 floats per lattice vertex: pos.xyz, nrm.xyz, sp.xy
+    \\@group(0) @binding(2) var<storage, read_write> OUT: array<f32>;
+    \\
+;
+
+pub const projected_compute_epilogue =
+    \\fn proj_height_m(sp: vec2f) -> f32 {
+    \\    return sp_eval(sp).height * P.meters_per_unit;
+    \\}
+    \\@compute @workgroup_size(8, 8, 1)
+    \\fn cs_main(@builtin(global_invocation_id) gid: vec3u) {
+    \\    if (gid.x >= P.cols || gid.y >= P.rows) { return; }
+    \\    let du = P.spacing / P.meters_per_unit;   // one lattice step in sp units
+    \\    let sp = P.sp_origin + vec2f(f32(gid.x), f32(gid.y)) * du;
+    \\    let h = proj_height_m(sp);
+    \\    // Reconstructed normal from the same authority: central differences one
+    \\    // lattice step out, in METERS, on the plane frame (the ground path's
+    \\    // hf_grid_normal discipline, generalized to an arbitrary chart frame).
+    \\    let hl = proj_height_m(sp - vec2f(du, 0.0));
+    \\    let hr = proj_height_m(sp + vec2f(du, 0.0));
+    \\    let hd = proj_height_m(sp - vec2f(0.0, du));
+    \\    let hu = proj_height_m(sp + vec2f(0.0, du));
+    \\    let tu = P.u_axis + P.n_axis * ((hr - hl) / (2.0 * P.spacing));
+    \\    let tv = P.v_axis + P.n_axis * ((hu - hd) / (2.0 * P.spacing));
+    \\    let nrm = normalize(cross(tu, tv));
+    \\    let pos = P.origin
+    \\        + P.u_axis * (f32(gid.x) * P.spacing)
+    \\        + P.v_axis * (f32(gid.y) * P.spacing)
+    \\        + P.n_axis * h;
+    \\    let base = (gid.y * P.cols + gid.x) * 8u;
+    \\    OUT[base + 0u] = pos.x;
+    \\    OUT[base + 1u] = pos.y;
+    \\    OUT[base + 2u] = pos.z;
+    \\    OUT[base + 3u] = nrm.x;
+    \\    OUT[base + 4u] = nrm.y;
+    \\    OUT[base + 5u] = nrm.z;
+    \\    OUT[base + 6u] = sp.x;
+    \\    OUT[base + 7u] = sp.y;
+    \\}
+;
+
+/// Render prefix: same SceneUniforms as every scene3d pipeline (group 0), the
+/// package's structural D section through the ground BGL (group 1), and the
+/// Generated Surface Buffer as an ordinary vertex stream — positions are
+/// already world-space (the plane placement was baked by the prepass), so
+/// vs_main is a straight VP transform.
+pub const projected_render_prefix =
+    \\struct SceneUniforms {
+    \\    vp: mat4x4f,
+    \\    light_dir: vec3f,
+    \\    specular_power: f32,
+    \\    light_color: vec3f,
+    \\    _pad1: f32,
+    \\    ambient_color: vec3f,
+    \\    _pad2: f32,
+    \\    camera_pos: vec3f,
+    \\    time: f32,
+    \\    fog_color: vec3f,
+    \\    fog_near: f32,
+    \\    fog_far: f32,
+    \\    fog_sky: f32,
+    \\    wire: f32,
+    \\    matcap: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
+    \\@group(1) @binding(0) var<storage, read> D: array<f32>;
+    \\struct VertexInput {
+    \\    @location(0) position: vec3f,
+    \\    @location(1) normal: vec3f,
+    \\    @location(2) sp: vec2f,
+    \\};
+    \\struct VertexOutput {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) world_pos: vec3f,
+    \\    @location(1) world_normal: vec3f,
+    \\    @location(2) sp: vec2f,
+    \\    @location(3) @interpolate(linear) screen_y: f32,
+    \\};
+    \\@vertex
+    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\    var out: VertexOutput;
+    \\    out.clip_pos = S.vp * vec4f(in.position, 1.0);
+    \\    out.world_pos = in.position;
+    \\    out.world_normal = in.normal;
+    \\    out.sp = in.sp;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    return out;
+    \\}
+    \\
+;
+
+/// fs_main: appearance from the composed sp_rgb over the SAME chart coordinate
+/// the geometry was generated from (per-fragment re-evaluation is LAW —
+/// interpolated features would blur brick mortar), then the ground pass's
+/// exact Blinn-Phong + aerial fog so a projected wall lights like everything.
+pub const projected_render_epilogue =
+    \\@fragment
+    \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    \\    let N = normalize(in.world_normal);
+    \\    let L = normalize(S.light_dir);
+    \\    let V = normalize(S.camera_pos - in.world_pos);
+    \\    let diff = max(dot(N, L), 0.0);
+    \\    let H = normalize(L + V);
+    \\    let spec = pow(max(dot(N, H), 0.0), S.specular_power);
+    \\    let base = sp_rgb(in.sp, in.sp * 64.0);
+    \\    let ambient = S.ambient_color * base;
+    \\    let diffuse = S.light_color * base * diff;
+    \\    let specular = S.light_color * spec * 0.4;
+    \\    let lit = ambient + diffuse + specular;
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    let final_rgb = mix(lit, fog_target, fog_t);
+    \\    return vec4f(final_rgb, 1.0);
     \\}
 ;
