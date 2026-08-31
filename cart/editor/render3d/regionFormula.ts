@@ -31,18 +31,17 @@
 // Materials whose look depends on the [0,1] uv frame (edge vignettes, framed
 // compositions) will read differently here — pick surface materials that are
 // happy continuous (the lava_plasma four-wave sine is the reference case).
-import { splitFillDispatch, resolveMaterialFns, D_DECL } from './shaders/compose';
+import { splitFillDispatch, resolveMaterialFns, fnBody, D_DECL } from './shaders/compose';
 import { MATERIALS, type RegistryMaterial } from './shaders/_generated/registry';
 import type { ModelLiveMaterial } from '../data/types';
 
 /** The shared compose.ts split (req_3473), with the region harness's D
  *  substitution applied — the region pipeline declares D itself
  *  (framework/gpu/shaders.zig). */
-function splitDispatch(): { prelude: string; bodies: Map<string, string> } {
-  const { prelude, bodies } = splitFillDispatch();
+function splitDispatch(): { prelude: string } {
+  const { prelude } = splitFillDispatch();
   return {
     prelude: prelude.replace(D_DECL, '// (D is declared by the region harness — framework/gpu/shaders.zig)'),
-    bodies,
   };
 }
 
@@ -56,11 +55,12 @@ const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
  *  is missing from the generated dispatch, so callers never push a formula
  *  the shader would miscompile. */
 export function buildRegionFormula(fns: readonly string[]): string | null {
-  const { prelude, bodies } = splitDispatch();
+  const { prelude } = splitDispatch();
   const wanted = [...new Set(fns)].sort();
   if (wanted.length === 0) return null;
-  // Shared transitive resolution (compose.ts): wanted fns plus every material
-  // fn their bodies call (compositions layering surfaces).
+  // Shared transitive resolution (compose.ts): wanted fns plus every material,
+  // atom, and surface-module fn their bodies call (compositions layering
+  // surfaces; adapters like brick calling surface_brick).
   const need = resolveMaterialFns(wanted);
   if (!need) return null;
   const dispatch = wanted
@@ -72,7 +72,7 @@ export function buildRegionFormula(fns: readonly string[]): string | null {
     .join('\n');
   return `
 ${prelude}
-${need.map((fn) => bodies.get(fn)!).join('\n')}
+${need.map((fn) => fnBody(fn)!).join('\n')}
 fn region_mat(mat: i32, board: i32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 ${dispatch}
   return vec3f(1.0, 0.0, 1.0); // material not in this composed set — loud magenta

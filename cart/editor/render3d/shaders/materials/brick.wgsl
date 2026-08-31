@@ -6,18 +6,20 @@
 // @kind surface
 // @tags environment, brick
 // @author legacy
+//
+// Appearance adapter over surface_brick (Surface Packages v1): the structural
+// cell/mortar/tone math lives in surfaces/surface_brick.wgsl and this fn
+// shades its features — pixel-identical to the pre-extraction inline version
+// (same ops, same order, same values), with soot/chips staying appearance-side.
 fn brick(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let rows = 6.0 + variant;
   let cols = 3.2 + variant * 0.55;
-  let row = floor(uv.y * rows);
-  let offset = (row - floor(row * 0.5) * 2.0) * 0.5;
-  let buv = vec2f(uv.x * cols + offset, uv.y * rows);
-  let cell = floor(buv);
-  let local = fract(buv);
-  let near_x = min(local.x, 1.0 - local.x);
-  let near_y = min(local.y, 1.0 - local.y);
-  let mortar = max(1.0 - smoothstep(0.030, 0.055, near_x), 1.0 - smoothstep(0.035, 0.065, near_y));
-  let tone = rand(cell + vec2f(seed, seed * 2.0));
+  let s = surface_brick(vec2f(uv.x * cols, uv.y * rows), seed);
+  let cell = s.cell;
+  let mortar = s.feat.x;
+  let tone = s.feat.y;
+  let near_x = s.feat.z;
+  let near_y = s.feat.w;
   let soot = fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5;
   var a = vec3f(0.45, 0.13, 0.075);
   var b = vec3f(0.82, 0.31, 0.16);

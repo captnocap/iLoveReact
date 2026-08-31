@@ -2048,5 +2048,10 @@
     "fn": "quartz_rain",
     "board": 14,
     "index": 28
+  },
+  {
+    "fn": "milky_way_lab",
+    "board": 14,
+    "index": 29
   }
 ]

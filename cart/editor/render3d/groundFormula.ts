@@ -37,7 +37,7 @@
 // (WGSL: no unary +, no backticks in comments.)
 import { hexToRgb01 } from '@reactjit/runtime/paint';
 import { FILL_FUNCS } from './shaders/_generated/dispatch';
-import { splitFillDispatch, resolveMaterialFns, fillPickFor, D_DECL } from './shaders/compose';
+import { splitFillDispatch, resolveMaterialFns, fillPickFor, fnBody, D_DECL } from './shaders/compose';
 import { MATERIALS, type RegistryMaterial } from './shaders/_generated/registry';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
@@ -145,7 +145,7 @@ const MAT_PAL_COUNT_LINE = 'let n = i32(D[mat_data_base + 5u] + 0.5);';
 const MAT_PARAM_COUNT_LINE = 'let pn = i32(D[p_base] + 0.5);';
 
 function composedFillFuncsFor(fns: readonly string[]): string {
-  const { prelude, bodies } = splitFillDispatch();
+  const { prelude } = splitFillDispatch();
   if (!prelude.includes(MAT_PAL_COUNT_LINE)) {
     throw new Error('[groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output');
   }
@@ -157,9 +157,13 @@ function composedFillFuncsFor(fns: readonly string[]): string {
   // chain. An unknown binding fn falls back to the FULL catalog — the console
   // error from resolveMaterialFns names the drift while every ground look
   // stays correct.
+  // fnBody spans materials AND atoms AND surface modules — a binding to a
+  // Lab-promoted recipe material (atom calls) or a surface-adapter material
+  // (brick → surface_brick) resolves transitively; joining through the
+  // material map alone would stringify `undefined` into the WGSL.
   const resolved = resolveMaterialFns(fns);
   const src = resolved
-    ? [prelude, ...resolved.map((fn) => bodies.get(fn)!), fillPickFor(resolved)].join('\n')
+    ? [prelude, ...resolved.map((fn) => fnBody(fn)!), fillPickFor(resolved)].join('\n')
     : FILL_FUNCS;
   // Catalog fills are authored for the EFFECT pipeline, whose uniform struct is
   // bound as `U` (U.time drives water waves, neon flicker, CRT scan …). The

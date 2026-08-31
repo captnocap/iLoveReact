@@ -28,10 +28,13 @@ const ROOT = __cwd();
 const SHADERS_DIR = ROOT + '/cart/editor/render3d/shaders';
 const MATERIALS_DIR = SHADERS_DIR + '/materials';
 const ATOMS_DIR = SHADERS_DIR + '/atoms';
+const SURFACES_DIR = SHADERS_DIR + '/surfaces';
 const GENERATED_DIR = SHADERS_DIR + '/_generated';
 const IDS_PATH = GENERATED_DIR + '/ids.json';
 const HELPERS_PATH = SHADERS_DIR + '/helpers.wgsl';
 const BOARDS_PATH = SHADERS_DIR + '/boards.ts';
+const THUMBNAIL_MANIFEST_PATH = GENERATED_DIR + '/thumbnails/manifest.json';
+const THUMBNAIL_BAKE_VERSION = 1;
 
 function statParse(raw) {
   if (raw === null) return null;
@@ -92,7 +95,7 @@ const HEADER_FIELD_RE = /^\/\/ @([\w-]+) (.*)$/;
 // with ZERO recompile, and absent data returns the baked default —
 // pixel-identical, the exact mat_pal discipline.
 const PARAM_LINE_RE = /^\/\/ @param ([A-Za-z_]\w*): f32 = (-?\d*\.?\d+) range\((-?\d*\.?\d+), (-?\d*\.?\d+)\) "([^"]+)"$/;
-const RESERVED_PARAM_KEYS = new Set(['uv', 'px', 'variant', 'seed', 'col', 'amount']);
+const RESERVED_PARAM_KEYS = new Set(['uv', 'px', 'variant', 'seed', 'col', 'amount', 'sp']);
 
 function parseParamLine(line, fileName) {
   const m = PARAM_LINE_RE.exec(line);
@@ -234,6 +237,62 @@ function parseAtom(path, fileName) {
   const tags = fields['tags'].split(',').map((s) => s.trim()).filter(Boolean);
   const raw = rewriteParams(src.replace(/\n+$/, ''), params, fileName);
   return { fn, name: fields['name'], kind, tags, author: fields['author'], raw, params };
+}
+
+// ── parse one surface module's header (Surface Packages v1) ─────────────────
+// A surface module is the STRUCTURAL field authority of a Surface Package
+// (PROJECTED_SURFACE_INTEGRATION.md): one WGSL function defining cell
+// addressing, displacement height, and private feature signals over a
+// CONTINUOUS chart coordinate `sp` (never a wrapped [0,1] preview tile — cell
+// hashes must continue across a whole wall run). Like atoms, modules are
+// addressed by fn name alone: no board, no variants, no stable (board, index)
+// id. One exact signature so the compute prepass, an appearance adapter, and
+// the Surface Lab can call any module interchangeably. The material that
+// shades a module's geometry calls it and reads SurfaceSample — there is never
+// a second copy of the structural math anywhere (the twin-formula ban).
+const SURFACE_PREFIX = 'surface_';
+const SURFACE_SIGNATURE = '(sp: vec2f, seed: f32) -> SurfaceSample';
+
+function parseSurface(path, fileName) {
+  const src = __fs_read(path);
+  if (src === null) die('cannot read ' + path);
+  const lines = src.split('\n');
+  const fields = {};
+  const params = [];
+  let bodyStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('// @param ')) {
+      params.push(parseParamLine(line, fileName));
+      continue;
+    }
+    const m = HEADER_FIELD_RE.exec(line);
+    if (m) {
+      fields[m[1]] = m[2].trim();
+      continue;
+    }
+    if (line.startsWith('fn ')) { bodyStart = i; break; }
+    if (line.trim() === '' || line.startsWith('//')) continue;
+    die(fileName + ': unexpected line before fn declaration: ' + line);
+  }
+  if (bodyStart === -1) die(fileName + ': no `fn <name>(...)` found');
+  const required = ['surface', 'name', 'tags', 'author'];
+  for (const key of required) {
+    if (!(key in fields)) die(fileName + ': missing header field @' + key);
+  }
+  const fn = fields['surface'];
+  const expectedFile = fn + '.wgsl';
+  if (fileName !== expectedFile) die(fileName + ': filename must match @surface (' + expectedFile + ')');
+  if (!fn.startsWith(SURFACE_PREFIX)) {
+    die(fileName + ': a surface module fn must be prefixed "' + SURFACE_PREFIX + '" (got "' + fn + '")');
+  }
+  const requiredSig = 'fn ' + fn + SURFACE_SIGNATURE + ' {';
+  if (lines[bodyStart] !== requiredSig) {
+    die(fileName + ': a surface module must declare exactly `' + requiredSig + '` — got `' + lines[bodyStart] + '`');
+  }
+  const tags = fields['tags'].split(',').map((s) => s.trim()).filter(Boolean);
+  const raw = rewriteParams(src.replace(/\n+$/, ''), params, fileName);
+  return { fn, name: fields['name'], tags, author: fields['author'], raw, params };
 }
 
 // ── load / update the stable id table ───────────────────────────────────────
@@ -519,6 +578,25 @@ fn mat_param(i_in: i32, baked: f32) -> f32 {
 }
 `;
 
+// The structural field contract (Surface Packages v1) — lives in the emitted
+// PRELUDE (before the first material fn) so every composed module carries it:
+// appearance adapters read SurfaceSample in the fill/region/ground harnesses,
+// and the compute prepass reads it in the projected-surface pipeline. An
+// unused struct costs nothing in modules whose set includes no surface module.
+const SURFACE_SAMPLE_WGSL = `
+// ── surface modules (Surface Packages v1): the structural field contract ──
+// height: normal displacement in DOMAIN units (0 = the base face plane).
+// cell:   integer cell address, continuous across the whole chart — hashes
+//         read CELL so repetition never restarts at a preview-tile boundary.
+// feat:   package-private structural signals; a module and its appearance
+//         adapter agree on their meaning, nothing else may interpret them.
+struct SurfaceSample {
+  height: f32,
+  cell: vec2f,
+  feat: vec4f,
+}
+`;
+
 // ── main ─────────────────────────────────────────────────────────────────
 const boards = loadBoards();
 const boardBySlug = new Map(boards.map((b) => [b.slug, b]));
@@ -543,6 +621,18 @@ atoms.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.fn < b.fn ?
   const materialFns = new Set(materials.map((m) => m.fn));
   for (const a of atoms) {
     if (materialFns.has(a.fn)) die(a.fn + ': atom fn collides with a material fn');
+  }
+}
+
+// Surface modules sweep (Surface Packages v1) — tolerate a missing dir, same
+// as atoms. Sorted by fn for deterministic output.
+const surfaceFiles = __fs_exists(SURFACES_DIR) ? listWgslFiles(SURFACES_DIR) : [];
+const surfaces = surfaceFiles.map((fileName) => parseSurface(SURFACES_DIR + '/' + fileName, fileName));
+surfaces.sort((a, b) => (a.fn < b.fn ? -1 : 1));
+{
+  const takenFns = new Set([...materials.map((m) => m.fn), ...atoms.map((a) => a.fn)]);
+  for (const s of surfaces) {
+    if (takenFns.has(s.fn)) die(s.fn + ': surface module fn collides with a material or atom fn');
   }
 }
 
@@ -629,6 +719,18 @@ for (const a of atoms) {
 }
 registryOut += '];\n';
 
+// ── surface modules (Surface Packages v1 structural fields) ──────────────
+registryOut += '\n';
+registryOut += '// Surface modules: the structural field authorities of Surface Packages\n';
+registryOut += '// (PROJECTED_SURFACE_INTEGRATION.md). Addressed by fn name, like atoms.\n';
+registryOut += 'export type RegistrySurface = { fn: string; name: string; tags: string[]; author: string; params: RegistryParam[] };\n\n';
+registryOut += 'export const SURFACES: RegistrySurface[] = [\n';
+for (const s of surfaces) {
+  registryOut += '  { fn: ' + JSON.stringify(s.fn) + ', name: ' + JSON.stringify(s.name)
+    + ', tags: ' + tsStringArray(s.tags) + ', author: ' + JSON.stringify(s.author) + ', params: ' + paramsTs(s.params) + ' },\n';
+}
+registryOut += '];\n';
+
 if (!__fs_write(GENERATED_DIR + '/registry.ts', registryOut)) die('failed to write registry.ts');
 
 // ── dispatch.ts ──────────────────────────────────────────────────────────
@@ -663,6 +765,8 @@ dispatchOut += helpersSrc.replace(/\n+$/, '');
 dispatchOut += '\n';
 dispatchOut += MAT_PAL_WGSL;
 dispatchOut += '\n';
+dispatchOut += SURFACE_SAMPLE_WGSL;
+dispatchOut += '\n';
 dispatchOut += materialBodies;
 dispatchOut += '\n\n';
 // Atoms land AFTER the material bodies and BEFORE fill_pick: compose.ts's
@@ -674,9 +778,51 @@ if (atoms.length > 0) {
   dispatchOut += atoms.map((a) => a.raw).join('\n\n');
   dispatchOut += '\n\n';
 }
+// Surface modules land after the atoms, before fill_pick — compose.ts splits
+// them out of the tail region by the enforced surface signature, exactly like
+// atom kinds. An appearance adapter (materials/brick.wgsl calling
+// surface_brick) resolves its module transitively through the same maps.
+if (surfaces.length > 0) {
+  dispatchOut += '// ── surface modules: structural fields (Surface Packages v1) ──\n\n';
+  dispatchOut += surfaces.map((s) => s.raw).join('\n\n');
+  dispatchOut += '\n\n';
+}
 dispatchOut += dispatchFn;
 dispatchOut += '`;\n';
 
 if (!__fs_write(GENERATED_DIR + '/dispatch.ts', dispatchOut)) die('failed to write dispatch.ts');
 
-__writeStderr('[build-shaders] ' + materials.length + ' materials across ' + boards.length + ' boards + ' + atoms.length + ' atoms -> registry.ts + dispatch.ts\n');
+__writeStderr('[build-shaders] ' + materials.length + ' materials across ' + boards.length + ' boards + ' + atoms.length + ' atoms + ' + surfaces.length + ' surface modules -> registry.ts + dispatch.ts\n');
+
+// Recognizable catalog previews are authoring artifacts, never runtime work.
+// The dedicated GPU cart compiles only stale one-material modules, captures all
+// three takes at once, and content-addresses the PNGs. Generator success means
+// every live registry material has a complete current manifest entry.
+function spawnChecked(cmd, args, label) {
+  if (typeof __spawnSync !== 'function') die(label + ' requires the __spawnSync authoring host');
+  let result;
+  try { result = JSON.parse(__spawnSync(cmd, JSON.stringify(args), '')); }
+  catch { die(label + ' returned an unreadable process result'); }
+  if (!result || result.code !== 0) {
+    const detail = [result?.stdout, result?.stderr].filter(Boolean).join('\n').trim();
+    die(label + ' failed with code ' + String(result?.code ?? 'unknown') + (detail ? '\n' + detail : ''));
+  }
+}
+
+__writeStderr('[build-shaders] baking stale material thumbnails…\n');
+spawnChecked('env', ['SHIP_RUN_PACKAGE=0', ROOT + '/tools/rjit', 'ship', 'material-thumbnail-baker'], 'thumbnail baker build');
+spawnChecked(ROOT + '/zig-out/bin/material-thumbnail-baker', [], 'thumbnail bake');
+const thumbnailRaw = __fs_read(THUMBNAIL_MANIFEST_PATH);
+if (thumbnailRaw === null) die('thumbnail baker did not write ' + THUMBNAIL_MANIFEST_PATH);
+let thumbnailManifest;
+try { thumbnailManifest = JSON.parse(thumbnailRaw); }
+catch { die('thumbnail manifest is not valid JSON'); }
+if (thumbnailManifest.version !== THUMBNAIL_BAKE_VERSION) die('thumbnail manifest version mismatch');
+for (const material of resolved) {
+  const entry = thumbnailManifest.entries?.[material.fn];
+  if (!entry || !Array.isArray(entry.takes) || entry.takes.length !== 3) die('thumbnail manifest missing ' + material.fn);
+  for (const take of entry.takes) {
+    if (typeof take.path !== 'string' || !__fs_exists(ROOT + '/' + take.path)) die('thumbnail artifact missing for ' + material.fn);
+  }
+}
+__writeStderr('[build-shaders] thumbnail manifest complete for ' + resolved.length + ' materials\n');

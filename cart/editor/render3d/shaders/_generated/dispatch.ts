@@ -320,6 +320,19 @@ fn mat_param(i_in: i32, baked: f32) -> f32 {
   return D[at];
 }
 
+
+// ── surface modules (Surface Packages v1): the structural field contract ──
+// height: normal displacement in DOMAIN units (0 = the base face plane).
+// cell:   integer cell address, continuous across the whole chart — hashes
+//         read CELL so repetition never restarts at a preview-tile boundary.
+// feat:   package-private structural signals; a module and its appearance
+//         adapter agree on their meaning, nothing else may interpret them.
+struct SurfaceSample {
+  height: f32,
+  cell: vec2f,
+  feat: vec4f,
+}
+
 // @material road
 // @slug road
 // @name Road
@@ -467,18 +480,20 @@ fn concrete(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @kind surface
 // @tags environment, brick
 // @author legacy
+//
+// Appearance adapter over surface_brick (Surface Packages v1): the structural
+// cell/mortar/tone math lives in surfaces/surface_brick.wgsl and this fn
+// shades its features — pixel-identical to the pre-extraction inline version
+// (same ops, same order, same values), with soot/chips staying appearance-side.
 fn brick(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let rows = 6.0 + variant;
   let cols = 3.2 + variant * 0.55;
-  let row = floor(uv.y * rows);
-  let offset = (row - floor(row * 0.5) * 2.0) * 0.5;
-  let buv = vec2f(uv.x * cols + offset, uv.y * rows);
-  let cell = floor(buv);
-  let local = fract(buv);
-  let near_x = min(local.x, 1.0 - local.x);
-  let near_y = min(local.y, 1.0 - local.y);
-  let mortar = max(1.0 - smoothstep(0.030, 0.055, near_x), 1.0 - smoothstep(0.035, 0.065, near_y));
-  let tone = rand(cell + vec2f(seed, seed * 2.0));
+  let s = surface_brick(vec2f(uv.x * cols, uv.y * rows), seed);
+  let cell = s.cell;
+  let mortar = s.feat.x;
+  let tone = s.feat.y;
+  let near_x = s.feat.z;
+  let near_y = s.feat.w;
   let soot = fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5;
   var a = mat_pal(0, vec3f(0.45, 0.13, 0.075));
   var b = mat_pal(1, vec3f(0.82, 0.31, 0.16));
@@ -15442,6 +15457,90 @@ fn quartz_rain(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+// @material milky_way_lab
+// @slug milky-way-lab
+// @name Milky Way Lab
+// @board gradients
+// @variant-labels Summer Core, Winter Arm, Desert Clear
+// @kind composition
+// @tags lab, gradients, milkyway, stars, night
+// @author lab
+// @param p_layer_0_opacity: f32 = 0.6315739329268293 range(0.0, 1.0) "Layer 1 opacity"
+// @param p_layer_0_amount: f32 = 1.0787919207317072 range(-1.0, 2.0) "Layer 1 amount"
+// @param p_layer_0_mask_threshold: f32 = 0.8331030868902439 range(0.0, 1.0) "Layer 1 mask threshold"
+// @param p_layer_0_mask_softness: f32 = 0.3814219911156631 range(0.0001, 0.5) "Layer 1 mask softness"
+// @param p_layer_0_mask_field_speckle_sparsity: f32 = 0.9199791587271341 range(0.5, 0.99) "Layer 1 mask · Speckle sparsity"
+// @param p_layer_0_warp_amount: f32 = 1.5555926067073171 range(0.0, 2.0) "Layer 1 warp"
+// @param p_layer_0_warp_warp_ripple_frequency: f32 = 22.0 range(4.0, 60.0) "Layer 1 warp · Wave frequency"
+// @param p_layer_1_opacity: f32 = 1.0 range(0.0, 1.0) "Layer 2 opacity"
+// @param p_layer_1_mask_threshold: f32 = 0.5 range(0.0, 1.0) "Layer 2 mask threshold"
+// @param p_layer_1_mask_softness: f32 = 0.25 range(0.0001, 0.5) "Layer 2 mask softness"
+// @param p_layer_1_mask_field_fbm_scale: f32 = 6.0 range(1.0, 24.0) "Layer 2 mask · Noise scale"
+// @param p_layer_1_warp_amount: f32 = 1.1433284108231707 range(0.0, 2.0) "Layer 2 warp"
+// @param p_layer_1_warp_warp_ripple_frequency: f32 = 22.0 range(4.0, 60.0) "Layer 2 warp · Wave frequency"
+fn milky_way_lab(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  let lab_slot_0 = mat_pal(0, vec3f(0.02, 0.03, 0.07)); // base · night
+  let lab_slot_1 = mat_pal(1, vec3f(0.72, 0.68, 0.62)); // base · bandCol
+  let lab_slot_2 = mat_pal(2, vec3f(0.95, 0.8, 0.58)); // base · coreCol
+  let lab_slot_3 = mat_pal(3, vec3f(0.02, 0.02, 0.06)); // base · night 2
+  let lab_slot_4 = mat_pal(4, vec3f(0.55, 0.6, 0.72)); // base · bandCol 2
+  let lab_slot_5 = mat_pal(5, vec3f(0.7, 0.75, 0.88)); // base · coreCol 2
+  let lab_slot_6 = mat_pal(6, vec3f(0.03, 0.02, 0.05)); // base · night 3
+  let lab_slot_7 = mat_pal(7, vec3f(0.78, 0.66, 0.72)); // base · bandCol 3
+  let lab_slot_8 = mat_pal(8, vec3f(0.98, 0.85, 0.65)); // base · coreCol 3
+  let lab_slot_9 = mat_pal(9, vec3f(0.02, 0.02, 0.05)); // base · color
+  let lab_slot_10 = mat_pal(10, vec3f(0.45, 0.47, 0.55)); // base · color 2
+  let lab_slot_11 = mat_pal(11, vec3f(0.72, 0.7, 0.66)); // base · color 3
+  let lab_slot_12 = mat_pal(12, vec3f(0.95, 0.95, 0.99)); // base · color 4
+  let lab_slot_13 = mat_pal(13, vec3f(0.38, 0.18, 0.07)); // layer 2 · low
+  let lab_slot_14 = mat_pal(14, vec3f(0.8, 0.47, 0.2)); // layer 2 · high
+  let lab_slot_15 = mat_pal(15, vec3f(0.18, 0.095, 0.055)); // layer 2 · low 2
+  let lab_slot_16 = mat_pal(16, vec3f(0.52, 0.3, 0.15)); // layer 2 · high 2
+  let lab_slot_17 = mat_pal(17, vec3f(0.52, 0.34, 0.16)); // layer 2 · low 3
+  let lab_slot_18 = mat_pal(18, vec3f(0.92, 0.72, 0.4)); // layer 2 · high 3
+  let lab_slot_19 = mat_pal(19, vec3f(0.1, 0.07, 0.035)); // layer 2 · color
+  let lab_knob_p_layer_0_mask_field_speckle_sparsity = mat_param(4, 0.9199791587271341); // callee knob anchor
+  let lab_knob_p_layer_0_warp_warp_ripple_frequency = mat_param(6, 22.0); // callee knob anchor
+  let lab_knob_p_layer_1_mask_field_fbm_scale = mat_param(10, 6.0); // callee knob anchor
+  let lab_knob_p_layer_1_warp_warp_ripple_frequency = mat_param(12, 22.0); // callee knob anchor
+  var col = vec3f(0.0, 0.0, 0.0);
+  col = milky_way(uv, px, variant, seed);
+  {
+    var layer_uv = uv;
+    mat_param_offset = 6;
+    layer_uv = warp_ripple(uv, seed + 7.0, mat_param(5, 1.5555926067073171));
+    mat_param_offset = 0;
+    var factor = mat_param(0, 0.6315739329268293);
+    mat_param_offset = 4;
+    let mask_v = field_speckle(uv, px, seed + 7.0);
+    mat_param_offset = 0;
+    let mask_t = mat_param(2, 0.8331030868902439);
+    let mask_s = max(mat_param(3, 0.3814219911156631), 0.0001);
+    factor = factor * smoothstep(mask_t - mask_s, mask_t + mask_s, mask_v);
+    let filtered = colormod_hue(col, layer_uv, px, seed + 7.0, mat_param(1, 1.0787919207317072));
+    col = mix(col, filtered, factor);
+  }
+  {
+    var layer_uv = uv;
+    mat_param_offset = 12;
+    layer_uv = warp_ripple(uv, seed + 14.0, mat_param(11, 1.1433284108231707));
+    mat_param_offset = 0;
+    var factor = mat_param(7, 1.0);
+    mat_param_offset = 10;
+    let mask_v = field_fbm(uv, px, seed + 14.0);
+    mat_param_offset = 0;
+    let mask_t = mat_param(8, 0.5);
+    let mask_s = max(mat_param(9, 0.25), 0.0001);
+    factor = factor * smoothstep(mask_t - mask_s, mask_t + mask_s, mask_v);
+    mat_slot_offset = 13;
+    let over = wood(layer_uv, px, 0.0, seed + 14.0);
+    mat_slot_offset = 0;
+    col = surface_blend(0, col, over, factor);
+  }
+  return sat3(col);
+}
+// @recipe-json {"version":1,"id":"milky-way-lab","name":"Milky Way Lab","base":{"fn":"milky_way"},"layers":[{"atom":"colormod_hue","opacity":0.6315739329268293,"amount":1.0787919207317072,"mask":{"field":"field_speckle","threshold":0.8331030868902439,"softness":0.3814219911156631},"warp":{"atom":"warp_ripple","amount":1.5555926067073171}},{"atom":"wood","blend":0,"opacity":1,"warp":{"atom":"warp_ripple","amount":1.1433284108231707},"mask":{"field":"field_fbm","threshold":0.5,"softness":0.25}}],"params":{"layer.0.mask.field_speckle.sparsity":0.9199791587271341}}
+
 // ── atoms: field/warp/colormod building blocks (Material Lab) ──
 
 // @atom colormod_contrast
@@ -15606,6 +15705,53 @@ fn warp_swirl(uv: vec2f, seed: f32, amount: f32) -> vec2f {
   let s = sin(angle);
   let c = cos(angle);
   return center + vec2f(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// ── surface modules: structural fields (Surface Packages v1) ──
+
+// @surface surface_brick
+// @name Brick Relief
+// @tags brick, masonry, environment, structure
+// @author fable
+// @param relief: f32 = 0.012 range(0.0, 0.08) "Relief depth"
+//
+// The structural field behind the Brick material (Surface Packages v1,
+// PROJECTED_SURFACE_INTEGRATION.md). The cell/mortar/tone math here is the
+// EXACT structure materials/brick.wgsl computed inline before extraction —
+// the material now calls this module and shades its features, so the color
+// preview and any projected geometry can never disagree about where a brick
+// ends and mortar begins.
+//
+// sp is a CONTINUOUS brick-grid coordinate: one unit = one course vertically,
+// one brick length horizontally. The 2D material adapter feeds
+// (uv.x * cols, uv.y * rows) — identical values to its old inline math. A
+// Surface Package feeds real run meters divided by course sizes, so the cell
+// address (and every hash) continues across an entire wall run.
+//
+// feat = (mortar, tone, near_x, near_y). height projects brick faces from a
+// recessed mortar plane in the same DOMAIN units as sp; the default relief is
+// meters-minded (12mm faces over raked joints) for the package consumer, and
+// the 2D adapter simply never reads height.
+fn surface_brick(sp: vec2f, seed: f32) -> SurfaceSample {
+  let row = floor(sp.y);
+  let offset = (row - floor(row * 0.5) * 2.0) * 0.5;
+  let buv = vec2f(sp.x + offset, sp.y);
+  let cell = floor(buv);
+  let local = fract(buv);
+  let near_x = min(local.x, 1.0 - local.x);
+  let near_y = min(local.y, 1.0 - local.y);
+  let mortar = max(1.0 - smoothstep(0.030, 0.055, near_x), 1.0 - smoothstep(0.035, 0.065, near_y));
+  let tone = rand(cell + vec2f(seed, seed * 2.0));
+
+  // Structural mat_param(0, 0.012) (new signal — invisible to the 2D adapter): each brick
+  // face rises from the mortar plane through the same smoothstep windows the
+  // color mortar uses, with a hashed per-brick projection and a gentle bow.
+  let face = smoothstep(0.030, 0.055, near_x) * smoothstep(0.035, 0.065, near_y);
+  let face_depth = 0.76 + rand(cell + vec2f(seed * 1.3, seed * 2.9)) * 0.30;
+  let bow = sin(3.14159265 * local.x) * sin(3.14159265 * local.y);
+  let height = mat_param(0, 0.012) * face * (face_depth + bow * 0.09) - mat_param(0, 0.012) * 0.075;
+
+  return SurfaceSample(height, cell, vec4f(mortar, tone, near_x, near_y));
 }
 
 fn fill_pick(material: i32, board: f32, uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
@@ -16034,7 +16180,8 @@ fn fill_pick(material: i32, board: f32, uv: vec2f, px: vec2f, variant: f32, seed
     else if (material == 25) { col = twilight_band(uv, px, variant, seed); }
     else if (material == 26) { col = cobalt_frost(uv, px, variant, seed); }
     else if (material == 27) { col = mercury_pool(uv, px, variant, seed); }
-    else { col = quartz_rain(uv, px, variant, seed); }
+    else if (material == 28) { col = quartz_rain(uv, px, variant, seed); }
+    else { col = milky_way_lab(uv, px, variant, seed); }
   }
   return col;
 }
