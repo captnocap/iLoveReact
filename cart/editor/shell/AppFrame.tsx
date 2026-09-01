@@ -13201,6 +13201,7 @@ export default function AppFrame() {
                 a: assetByIdOrNull(archQuick.edge.sideA.materialId, state.assetOverrides),
                 b: assetByIdOrNull(archQuick.edge.sideB.materialId, state.assetOverrides),
               }}
+              sideFinishIds={{ a: archQuick.edge.sideA.materialId, b: archQuick.edge.sideB.materialId }}
               materials={archQuick.materials}
               recentIds={state.recentMaterialIds}
               onAssignSide={(side, assetId) => setWallSideMaterial(archQuick.target.edgeId, side, assetId)}

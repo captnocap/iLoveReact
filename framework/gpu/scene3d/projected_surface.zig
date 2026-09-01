@@ -23,7 +23,11 @@ const compile_progress = @import("../compile_progress.zig");
 
 const z3d = @import("root.zig");
 
-pub const PROJ_POOL = 8;
+// A wall with openings splits into multiple face bands, each its own surface —
+// a real building wants dozens. Sized for a block of finished walls; the
+// elastic-pool follow-up (grow, never cap — the machine is the wall) is named
+// in PROJECTED_SURFACE_INTEGRATION.md.
+pub const PROJ_POOL = 64;
 pub const PROJ_DATA_FLOATS = 256;
 /// Fail-closed lattice ceiling: a package demanding more vertices than this is
 /// refused loudly (evaluation density is a declared budget, never a surprise).
@@ -184,7 +188,13 @@ pub fn setProjectedSurface(id: []const u8, plane: []const f32, data: []const f32
         .spacing = spacing,
         .n_axis = n,
         .meters_per_unit = meters_per_unit,
-        .sp_origin = .{ 0, 0 },
+        // Optional chart origin (plane[13..14], sp units): a wall band that
+        // starts mid-run hands its columnStart/rowBottom here so courses
+        // continue seamlessly across opening-split bands and run segments.
+        .sp_origin = .{
+            if (plane.len >= 15) plane[13] else 0,
+            if (plane.len >= 15) plane[14] else 0,
+        },
     };
     s.vertex_count = cols * rows;
     s.index_count = (cols - 1) * (rows - 1) * 6;

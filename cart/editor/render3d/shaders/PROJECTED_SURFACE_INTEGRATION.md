@@ -526,3 +526,37 @@ proposal above disagree, this section wins.
    heightfield / exact-triangle lanes; sphere-cannot-clip proof.
 3. Wall-side-finish binding + capture UI (rack scrub in the world editor).
 4. Far-LOD bake + Surface Lab authoring integration.
+
+### Built in the req_4785 run (2026-08-31, autonomous)
+
+Slices 2–4 landed and shot-verified (`rjit shot editor --route /surface-demo`):
+
+- **Compute prepass + Generated Surface Buffer + projected draw** —
+  `framework/gpu/scene3d/projected_surface.zig` (the framework's first compute
+  pipeline), harness WGSL in `framework/gpu/shaders.zig`, doors
+  `__surface_package_formula/set/info/clear` in v8_bindings_core.
+- **The collision view** — install-time readback of the nested lattice into
+  the `game/mesh_collision.zig` soup shape; declared bounds ENFORCED at
+  readback (fail closed); `__surface_package_info` is the verification door.
+- **The session composer** — multiple packages dispatch through one composed
+  module pair by a D[0] selector (the region_mat discipline);
+  `render3d/surfaceSession.ts` is the ONE union owner every pusher routes
+  through (the liveRegions law).
+- **The wall-tool binding (the ruled consumer)** — `world/surfaceFinishes.ts`:
+  a side finish id `surface:<packageId>` turns that side's FACE render bands
+  into projected surfaces; the band's columnStartU/rowBottomU become the
+  chart origin, so courses CONTINUE through openings and across run segments
+  (req_4501 realized in the projection domain). The wall menu gained SURFACE
+  chips (Brick Wall, Corrugated Rust). The engine's semantic collide rows stay
+  authoritative for gameplay (V24); non-face roles keep sealed wall meshes.
+- **Second pilot** — `surface_corrugated` under an art-only rust_sheet
+  appearance, ribs phase-aligned through the appearance uv scale.
+
+Named follow-ups, in rough order:
+1. Per-view draw filtering — projected slots currently draw in EVERY Scene3D;
+   wall surfaces belong to the world view (and /play) only.
+2. Feed each surface's collision soup into the world's placed-piece collision
+   path so the player rolls over brick faces, not just the semantic box.
+3. Elastic slot pool (grow, never cap) + shadow-pass participation.
+4. The Surface Lab authoring mode + capture UI (rack scrub → freeze).
+5. Far-LOD bake from the generated buffer (normal/feature texture).

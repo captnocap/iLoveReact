@@ -24,6 +24,7 @@ import type { PaintSkin } from '../data/paintVariants';
 export type { ArchitectureContextTarget } from '../world/architecture';
 import AssetPreview from '../library/AssetPreview';
 import MaterialPickGrid, { QUICK_EMPTY_SLOT_BG, QUICK_MENU_W, QUICK_TILE_H, QUICK_TILE_W, SectionHead } from './MaterialPickGrid';
+import { SURFACE_FINISH_CATALOG, SURFACE_FINISH_PREFIX } from '../world/surfaceFinishes';
 
 function VerbRow({ icon, label, keyHint, onPress }: { icon: string; label: string; keyHint?: string; onPress: () => void }) {
   return (
@@ -49,13 +50,16 @@ function Header({ icon, label, readout }: { icon: string; label: string; readout
 
 /** The wall menu (req_4739): side chips target A or B; the picker dresses the
  * targeted side through the engine's setSideFinish. */
-export function WallEdgeContextMenu({ edgeLabel, hitSide, sideMaterials, materials, recentIds, onAssignSide, onClearSide, onDelete, onClose }: {
+export function WallEdgeContextMenu({ edgeLabel, hitSide, sideMaterials, sideFinishIds, materials, recentIds, onAssignSide, onClearSide, onDelete, onClose }: {
   edgeLabel: string;
   /** the side the right-click hit — the FACES target starts there. */
   hitSide: WallSide;
   /** what each side wears now: a Skins asset when the finish resolves to one,
    *  else null = the style's default look. */
   sideMaterials: { a: Asset | null; b: Asset | null };
+  /** the RAW engine finish ids — a `surface:` id is a Surface Package (worn
+   *  detection for the SURFACE chips; it resolves to no Skins asset). */
+  sideFinishIds?: { a: string; b: string };
   materials: Asset[];
   recentIds: readonly string[];
   onAssignSide: (side: WallSide, assetId: string) => void;
@@ -83,6 +87,24 @@ export function WallEdgeContextMenu({ edgeLabel, hitSide, sideMaterials, materia
                   {asset ? <SidePreview asset={asset} /> : <C.HW_KeyText>default</C.HW_KeyText>}
                 </Box>
                 <C.HW_KeyText style={{ color: active ? accentFor('primary') : undefined }}>{`side ${side.toUpperCase()}`}</C.HW_KeyText>
+              </Box>
+            </Pressable>
+          );
+        })}
+      </Box>
+      {/* Surface Packages (req_4783): projected GEOMETRY finishes — grab one
+          and the flat side grows real bricks/ribs. Chips, not tiles: a
+          package's look is its projected preview, not a 2D swatch. */}
+      <SectionHead>SURFACE</SectionHead>
+      <Box style={{ flexDirection: 'row', gap: 6, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, flexWrap: 'wrap' }}>
+        {SURFACE_FINISH_CATALOG.map((entry) => {
+          const finishId = `${SURFACE_FINISH_PREFIX}${entry.pkg.id}`;
+          const wornId = targetSide === 'a' ? sideFinishIds?.a : sideFinishIds?.b;
+          const wornNow = wornId === finishId;
+          return (
+            <Pressable key={entry.pkg.id} tooltip={`${entry.label} — projected geometry on side ${targetSide.toUpperCase()}${wornNow ? ' · worn now' : ''}`} onPress={() => { if (!wornNow) onAssignSide(targetSide, finishId); }}>
+              <Box style={{ paddingLeft: 8, paddingRight: 8, height: 20, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: wornNow ? 2 : 1, borderColor: wornNow ? accentFor('primary') : '#2a3442', backgroundColor: QUICK_EMPTY_SLOT_BG }}>
+                <C.HW_KeyText style={{ color: wornNow ? accentFor('primary') : undefined }}>{entry.label}</C.HW_KeyText>
               </Box>
             </Pressable>
           );

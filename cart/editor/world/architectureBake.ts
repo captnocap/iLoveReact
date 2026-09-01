@@ -16,6 +16,7 @@ import { liveMaterialForId, type LiveMaterial } from './pieceSkins';
 import { skinnedPieceId } from './authoredRegistry';
 import { EMPTY_WORLD_FINISHES, type WorldFinishes } from './worldFinishes';
 import { pickFloorTriangleHit } from './floorPick';
+import { pushWallSurfaceFinishes, surfaceFinishForId } from './surfaceFinishes';
 
 /** Wall-clock ms. NOT performance.now(): the runtime shims it to the host's
  * __jsTick timestamp, which is FROZEN for the whole tick — every intra-tick
@@ -405,6 +406,7 @@ export function setLiveArchitecture(
       console.warn(`[architecture] live bake SKIPPED — host capability absent; ${source.walls.edges.length} edge(s) will not render live`);
     }
     LIVE = { source, openingDepthsU, finishes, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
+    pushWallSurfaceFinishes([]);
     return;
   }
   try {
@@ -428,6 +430,12 @@ export function setLiveArchitecture(
     const byRole = new Map<WallRenderBand['role'], WallRenderBand[]>();
     const byRoleMaterial = new Map<string, { role: WallRenderBand['role']; material: LiveMaterial; bands: WallRenderBand[] }>();
     for (const band of bands) {
+      // Surface Packages (req_4783/4785): a face band wearing a `surface:`
+      // finish becomes PROJECTED GEOMETRY (pushWallSurfaceFinishes below) —
+      // the projected pipeline replaces its base draw, never overlays it.
+      // Non-face roles (reveal/jamb/cap/end) keep their ordinary meshes so
+      // the wall body stays sealed behind the displaced face.
+      if (band.role === 'face' && surfaceFinishForId(band.materialId)) continue;
       const material = resolveFinish(band.materialId);
       if (material) {
         materials.set(material.hash, material);
@@ -552,6 +560,11 @@ export function setLiveArchitecture(
       }
     }
     if (mounted) console.warn(`[architecture] ${mounted} opening kit model(s) mounted in their cuts`);
+    // Surface Packages: install/refresh the projected surfaces for every face
+    // band wearing a surface finish (and clear the lane's stale ones). The
+    // engine's collide rows above stay authoritative for gameplay collision —
+    // author by semantic piece, bake by gameplay contract (V24).
+    pushWallSurfaceFinishes(bands);
     const tMesh = nowMs();
     LIVE = { source, openingDepthsU, finishes, meshes, refs, collideRows: collideRows(source, bands), floors, materials: [...materials.values()] };
     const tDone = nowMs();
@@ -561,11 +574,13 @@ export function setLiveArchitecture(
   } catch (error) {
     console.error(`[architecture] live wall bake FAILED — walls not rendered: ${error instanceof Error ? error.message : String(error)}`);
     LIVE = { source, openingDepthsU, finishes, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
+    pushWallSurfaceFinishes([]);
   }
 }
 
 export function clearLiveArchitecture(): void {
   LIVE = { source: null, openingDepthsU: {}, finishes: EMPTY_WORLD_FINISHES, meshes: [], refs: [], collideRows: [], floors: [], materials: [] };
+  pushWallSurfaceFinishes([]);
 }
 
 export function liveArchitectureResidentMeshes(): ResidentMesh[] {

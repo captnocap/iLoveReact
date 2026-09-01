@@ -8,12 +8,12 @@
 import { useEffect } from 'react';
 import { Box, Scene3D, Text } from '../../../runtime/primitives';
 import {
-  composeSurfaceSession,
   surfacePackageData,
   validateSurfacePackage,
   type SurfacePackageV1,
   type SurfaceSessionEntry,
 } from '../render3d/shaders/surfacePackage';
+import { ensureSurfaceSession } from '../render3d/surfaceSession';
 
 // Real-world brick sizing (measured size IS scale): 45cm x 15cm units with
 // 2cm relief — reads clearly at demo distance while staying wall-plausible.
@@ -77,17 +77,15 @@ function installDemoSurfaces(): boolean {
       return false;
     }
   }
-  const session = composeSurfaceSession(SESSION);
-  if (!session) {
+  // Through the ONE session owner (surfaceSession.ts), so this demo and the
+  // wall-finish lane never clobber each other's composed formulas.
+  const selectors = ensureSurfaceSession(SESSION);
+  if (!selectors) {
     console.error('[surface-demo] session composition failed — surfaces not installed');
     return false;
   }
-  if (host.__surface_package_formula(session.computeWgsl, session.renderWgsl) !== 1) {
-    console.error('[surface-demo] host refused the composed formulas');
-    return false;
-  }
   for (const entry of SESSION) {
-    const data = surfacePackageData(entry.pkg, session.selectors.get(entry.pkg.id)!);
+    const data = surfacePackageData(entry.pkg, selectors.get(entry.pkg.id)!);
     const plane = WALL_PLANES[entry.pkg.id];
     if (!data || !plane) {
       console.error(`[surface-demo] ${entry.pkg.id} has no packed data/plane — skipped`);
@@ -138,7 +136,10 @@ export default function SurfaceDemoSurface() {
     pollTimer = setTimeout(poll, 100);
     return () => {
       if (pollTimer !== null) clearTimeout(pollTimer);
-      if (typeof host.__surface_package_clear === 'function') host.__surface_package_clear('');
+      // Clear ONLY this route's surfaces — the wall-finish lane owns its own.
+      if (typeof host.__surface_package_clear === 'function') {
+        for (const entry of SESSION) host.__surface_package_clear(entry.pkg.id);
+      }
     };
   }, []);
 
