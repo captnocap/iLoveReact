@@ -46,7 +46,10 @@ pub const ProjParams = extern struct {
     n_axis: [3]f32,
     meters_per_unit: f32,
     sp_origin: [2]f32,
-    _pad: [2]f32 = .{ 0, 0 },
+    /// 1 when the chart frame is left-handed (cross(u,v) opposes n_axis) —
+    /// the compute normal and the index winding both flip to face n_axis.
+    winding_flip: f32 = 0,
+    _pad: f32 = 0,
 };
 
 pub const ProjSlot = struct {
@@ -159,7 +162,13 @@ pub fn setProjectedSurface(id: []const u8, plane: []const f32, data: []const f32
         return false;
     };
     const s = &z3d.g_proj_slots[si];
-    // normal = u × v, normalized: the projection axis of the chart frame.
+    // The chart frame's projection axis. cross(u,v) gives the frame's own
+    // handedness; a caller with an AUTHORITATIVE outward normal (a wall
+    // band's engine-emitted normal, plane[15..17]) supplies it, and when the
+    // frame is left-handed relative to it (one side of every wall — band
+    // quads wind by EDGE direction, not by side) the projection axis follows
+    // the supplied normal and the geometry/winding flip to face it
+    // (req_4786: the inward-projected invisible wall face).
     const u = plane[3..6];
     const v = plane[6..9];
     var n: [3]f32 = .{
@@ -173,6 +182,14 @@ pub fn setProjectedSurface(id: []const u8, plane: []const f32, data: []const f32
         return false;
     }
     n = .{ n[0] / nlen, n[1] / nlen, n[2] / nlen };
+    var winding_flip: f32 = 0;
+    if (plane.len >= 18) {
+        const dot_ref = n[0] * plane[15] + n[1] * plane[16] + n[2] * plane[17];
+        if (dot_ref < 0) {
+            n = .{ -n[0], -n[1], -n[2] };
+            winding_flip = 1;
+        }
+    }
     if (data.len > PROJ_DATA_FLOATS) {
         log.print("[r3d-proj] '{s}' data is {d} floats, cap {d} — TRUNCATED\n", .{ id, data.len, PROJ_DATA_FLOATS });
     }
@@ -195,6 +212,7 @@ pub fn setProjectedSurface(id: []const u8, plane: []const f32, data: []const f32
             if (plane.len >= 15) plane[13] else 0,
             if (plane.len >= 15) plane[14] else 0,
         },
+        .winding_flip = winding_flip,
     };
     s.vertex_count = cols * rows;
     s.index_count = (cols - 1) * (rows - 1) * 6;
@@ -416,6 +434,9 @@ pub fn generateProjectedSurfaces(io: std.Io, environ: *const std.process.Environ
             const rows = s.params.rows;
             const idx = std.heap.c_allocator.alloc(u32, s.index_count) catch continue;
             defer std.heap.c_allocator.free(idx);
+            // A left-handed chart frame (winding_flip — see setProjectedSurface)
+            // reverses the winding so the front faces follow n_axis.
+            const flipped = s.params.winding_flip > 0.5;
             var w: usize = 0;
             var j: u32 = 0;
             while (j + 1 < rows) : (j += 1) {
@@ -425,12 +446,21 @@ pub fn generateProjectedSurfaces(io: std.Io, environ: *const std.process.Environ
                     const b = j * cols + i + 1;
                     const c = (j + 1) * cols + i;
                     const d = (j + 1) * cols + i + 1;
-                    idx[w] = a;
-                    idx[w + 1] = b;
-                    idx[w + 2] = d;
-                    idx[w + 3] = a;
-                    idx[w + 4] = d;
-                    idx[w + 5] = c;
+                    if (flipped) {
+                        idx[w] = a;
+                        idx[w + 1] = d;
+                        idx[w + 2] = b;
+                        idx[w + 3] = a;
+                        idx[w + 4] = c;
+                        idx[w + 5] = d;
+                    } else {
+                        idx[w] = a;
+                        idx[w + 1] = b;
+                        idx[w + 2] = d;
+                        idx[w + 3] = a;
+                        idx[w + 4] = d;
+                        idx[w + 5] = c;
+                    }
                     w += 6;
                 }
             }

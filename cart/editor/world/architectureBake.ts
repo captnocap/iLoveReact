@@ -16,7 +16,7 @@ import { liveMaterialForId, type LiveMaterial } from './pieceSkins';
 import { skinnedPieceId } from './authoredRegistry';
 import { EMPTY_WORLD_FINISHES, type WorldFinishes } from './worldFinishes';
 import { pickFloorTriangleHit } from './floorPick';
-import { pushWallSurfaceFinishes, surfaceFinishForId } from './surfaceFinishes';
+import { bandSurfaceId, pushWallSurfaceFinishes, surfaceFinishForId } from './surfaceFinishes';
 
 /** Wall-clock ms. NOT performance.now(): the runtime shims it to the host's
  * __jsTick timestamp, which is FROZEN for the whole tick — every intra-tick
@@ -429,13 +429,21 @@ export function setLiveArchitecture(
     const materials = new Map<number, LiveMaterial>();
     const byRole = new Map<WallRenderBand['role'], WallRenderBand[]>();
     const byRoleMaterial = new Map<string, { role: WallRenderBand['role']; material: LiveMaterial; bands: WallRenderBand[] }>();
+    // Surface Packages (req_4783/4785): install/refresh the projected
+    // surfaces FIRST — the returned claim set tells the mesh grouping which
+    // face bands the projected pipeline actually replaced. An unclaimed band
+    // (host refused, pool full, degenerate quad) KEEPS its flat mesh, so a
+    // failure degrades to the ordinary wall instead of a hole in the shell
+    // (req_4786 — the silent dark face). Engine collide rows below stay
+    // authoritative for gameplay either way (V24).
+    const claimedSurfaceBands = pushWallSurfaceFinishes(bands);
     for (const band of bands) {
-      // Surface Packages (req_4783/4785): a face band wearing a `surface:`
-      // finish becomes PROJECTED GEOMETRY (pushWallSurfaceFinishes below) —
-      // the projected pipeline replaces its base draw, never overlays it.
-      // Non-face roles (reveal/jamb/cap/end) keep their ordinary meshes so
-      // the wall body stays sealed behind the displaced face.
-      if (band.role === 'face' && surfaceFinishForId(band.materialId)) continue;
+      // A CLAIMED face band's base draw is replaced by projected geometry —
+      // never overlaid. Non-face roles (reveal/jamb/cap/end) keep their
+      // ordinary meshes so the wall body stays sealed behind the displaced
+      // face; an unclaimed surface-finish band falls through to the role
+      // placeholder (a `surface:` id resolves to no live material).
+      if (band.role === 'face' && surfaceFinishForId(band.materialId) && claimedSurfaceBands.has(bandSurfaceId(band))) continue;
       const material = resolveFinish(band.materialId);
       if (material) {
         materials.set(material.hash, material);
@@ -560,11 +568,6 @@ export function setLiveArchitecture(
       }
     }
     if (mounted) console.warn(`[architecture] ${mounted} opening kit model(s) mounted in their cuts`);
-    // Surface Packages: install/refresh the projected surfaces for every face
-    // band wearing a surface finish (and clear the lane's stale ones). The
-    // engine's collide rows above stay authoritative for gameplay collision —
-    // author by semantic piece, bake by gameplay contract (V24).
-    pushWallSurfaceFinishes(bands);
     const tMesh = nowMs();
     LIVE = { source, openingDepthsU, finishes, meshes, refs, collideRows: collideRows(source, bands), floors, materials: [...materials.values()] };
     const tDone = nowMs();

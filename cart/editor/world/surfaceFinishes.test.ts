@@ -58,22 +58,35 @@ test('finish ids resolve through the prefix and nothing else', () => {
   assert(surfaceFinishForId(`${SURFACE_FINISH_PREFIX}unknown`) === null, 'unknown package ids resolve to null');
 });
 
-test('bandToProjectedPlane derives axes, size, and the mortar lift', () => {
+test('bandToProjectedPlane derives axes, size, lift, and the band normal', () => {
   const entry = surfaceFinishForId(`${SURFACE_FINISH_PREFIX}brick-wall`)!;
-  const plane = bandToProjectedPlane(faceBand(), entry)!;
-  assert(plane !== null && plane.length === 15, 'plane must be the 15-float extended shape');
+  const fit = bandToProjectedPlane(faceBand(), entry)!;
+  assert(fit !== null && fit.plane.length === 18, 'plane must be the 18-float shape (chart origin + band normal)');
+  const plane = fit.plane;
   const lift = Math.max(0, -entry.pkg.bounds.minDisplacement) + 0.001;
   assert(near(plane[0]!, 1) && near(plane[1]!, 0) && near(plane[2]!, lift), `origin must sit q0 lifted by ${lift} along +z (got ${plane[0]},${plane[1]},${plane[2]})`);
   assert(near(plane[3]!, 1) && near(plane[4]!, 0) && near(plane[5]!, 0), 'u axis must normalize q1-q0');
   assert(near(plane[6]!, 0) && near(plane[7]!, 1) && near(plane[8]!, 0), 'v axis must normalize q3-q0');
   assert(near(plane[9]!, 2) && near(plane[10]!, 3), 'size must be the quad extents in meters');
   assert(near(plane[11]!, entry.pkg.evaluation.renderSpacing), 'spacing must ride the package');
+  assert(near(plane[15]!, 0) && near(plane[16]!, 0) && near(plane[17]!, 1), 'the band normal must ride as the authoritative outward direction');
+  assert(!fit.coarsened && near(fit.renderSpacing, entry.pkg.evaluation.renderSpacing), 'a small band never coarsens');
+});
+
+test('a left-handed band frame still carries the ENGINE normal (req_4786)', () => {
+  // Edge drawn right-to-left: u = q1-q0 points -x, so cross(u,v) = -z while
+  // the engine's outward normal is +z — the host flips by this supplied ref.
+  const entry = surfaceFinishForId(`${SURFACE_FINISH_PREFIX}brick-wall`)!;
+  const fit = bandToProjectedPlane(faceBand({ quad: [[3, 0, 0], [1, 0, 0], [1, 3, 0], [3, 3, 0]] }), entry)!;
+  const plane = fit.plane;
+  assert(near(plane[3]!, -1), 'u axis follows the edge direction verbatim');
+  assert(near(plane[17]!, 1), 'the supplied normal must stay the engine outward +z, NOT cross(u,v)');
 });
 
 test('the chart origin carries the band column/row so courses continue', () => {
   const entry = surfaceFinishForId(`${SURFACE_FINISH_PREFIX}brick-wall`)!;
-  const left = bandToProjectedPlane(faceBand(), entry)!;
-  const right = bandToProjectedPlane(faceBand({ columnStartU: 20, quad: [[5, 0, 0], [7, 0, 0], [7, 3, 0], [5, 3, 0]] }), entry)!;
+  const left = bandToProjectedPlane(faceBand(), entry)!.plane;
+  const right = bandToProjectedPlane(faceBand({ columnStartU: 20, quad: [[5, 0, 0], [7, 0, 0], [7, 3, 0], [5, 3, 0]] }), entry)!.plane;
   const metersPerU = 1 / ARCHITECTURE_UNITS_PER_METER;
   assert(near(left[13]!, 4 * metersPerU), 'left band chart U origin must be columnStartU in meters');
   assert(near(right[13]!, 20 * metersPerU), 'right band chart U origin must continue the run');
@@ -84,6 +97,18 @@ test('a degenerate band quad refuses a plane', () => {
   const entry = surfaceFinishForId(`${SURFACE_FINISH_PREFIX}brick-wall`)!;
   const degenerate = bandToProjectedPlane(faceBand({ quad: [[1, 0, 0], [1, 0, 0], [1, 3, 0], [1, 3, 0]] }), entry);
   assert(degenerate === null, 'zero-width quads must return null');
+});
+
+test('an over-budget band coarsens spacing instead of refusing (req_4786)', () => {
+  // 30m x 4m at 6mm spacing = ~3.3M verts — far past the budget. The lane
+  // widens spacing just enough and reports it, so a long wall still bricks.
+  const entry = surfaceFinishForId(`${SURFACE_FINISH_PREFIX}brick-wall`)!;
+  const fit = bandToProjectedPlane(faceBand({ quad: [[0, 0, 0], [30, 0, 0], [30, 4, 0], [0, 4, 0]] }), entry)!;
+  assert(fit.coarsened, 'a 30m band must coarsen');
+  assert(fit.renderSpacing > entry.pkg.evaluation.renderSpacing, 'coarsened spacing must widen');
+  const verts = (Math.floor(30 / fit.renderSpacing) + 1) * (Math.floor(4 / fit.renderSpacing) + 1);
+  assert(verts <= 1_050_000, `coarsened lattice must fit the host ceiling (got ${verts})`);
+  assert(near(fit.plane[11]!, fit.renderSpacing), 'the plane must carry the EFFECTIVE spacing');
 });
 
 test('band surface ids are stable and band-window distinct', () => {

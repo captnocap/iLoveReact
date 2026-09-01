@@ -70,12 +70,28 @@ export function surfaceFinishForId(materialId: string): SurfaceFinishEntry | nul
   return CATALOG_BY_ID.get(materialId) ?? null;
 }
 
+/** The host refuses lattices above its ceiling (PROJ_MAX_VERTS, mirrored
+ *  here with margin). A long wall at the package's declared spacing can
+ *  exceed it, so the lane COARSENS spacing just enough to fit — the declared
+ *  spacing is the finest the package wants, never a hard promise. Loud. */
+const PROJ_VERT_BUDGET = 1_000_000;
+
+export type ProjectedPlaneFit = {
+  plane: Float32Array;
+  /** the spacing actually used — the declared one, or coarsened to budget. */
+  renderSpacing: number;
+  coarsened: boolean;
+};
+
 /** Derive one projected plane from an engine face band. The plane sits the
  *  package's |minDisplacement| proud of the band (plus a hair) so recessed
  *  mortar never dips into the sealed wall body and z-fights it; the chart
  *  origin carries the band's column/row start so the field CONTINUES across
- *  bands. Returns null for a degenerate quad. */
-export function bandToProjectedPlane(band: WallRenderBand, entry: SurfaceFinishEntry): Float32Array | null {
+ *  bands; the band's engine-emitted normal rides along as the AUTHORITATIVE
+ *  outward direction (band quads wind by edge direction, so one side of
+ *  every wall is a left-handed frame — the host flips projection and winding
+ *  to face the supplied normal, req_4786). Returns null for a degenerate quad. */
+export function bandToProjectedPlane(band: WallRenderBand, entry: SurfaceFinishEntry): ProjectedPlaneFit | null {
   const [q0, q1, , q3] = [band.quad[0]!, band.quad[1]!, band.quad[2]!, band.quad[3]!];
   const u = [q1[0] - q0[0], q1[1] - q0[1], q1[2] - q0[2]];
   const v = [q3[0] - q0[0], q3[1] - q0[1], q3[2] - q0[2]];
@@ -89,14 +105,24 @@ export function bandToProjectedPlane(band: WallRenderBand, entry: SurfaceFinishE
   const mpu = entry.pkg.domain.metersPerUnit;
   const spOriginU = band.columnStartU / ARCHITECTURE_UNITS_PER_METER / mpu;
   const spOriginV = band.rowBottomU / ARCHITECTURE_UNITS_PER_METER / mpu;
-  return new Float32Array([
+  let renderSpacing = entry.pkg.evaluation.renderSpacing;
+  const vertsAt = (s: number) => (Math.floor(sizeU / s) + 1) * (Math.floor(sizeV / s) + 1);
+  let coarsened = false;
+  if (vertsAt(renderSpacing) > PROJ_VERT_BUDGET) {
+    renderSpacing = Math.sqrt((sizeU * sizeV) / PROJ_VERT_BUDGET) * 1.02;
+    coarsened = true;
+    console.warn(`[surfaceFinishes] ${entry.pkg.id} on a ${sizeU.toFixed(1)}x${sizeV.toFixed(1)}m band: declared ${entry.pkg.evaluation.renderSpacing}m spacing exceeds the ${PROJ_VERT_BUDGET}-vert budget — coarsened to ${renderSpacing.toFixed(4)}m`);
+  }
+  const plane = new Float32Array([
     q0[0] + n[0] * lift, q0[1] + n[1] * lift, q0[2] + n[2] * lift,
     un[0]!, un[1]!, un[2]!,
     vn[0]!, vn[1]!, vn[2]!,
     sizeU, sizeV,
-    entry.pkg.evaluation.renderSpacing, mpu,
+    renderSpacing, mpu,
     spOriginU, spOriginV,
+    n[0], n[1], n[2],
   ]);
+  return { plane, renderSpacing, coarsened };
 }
 
 /** A stable install id for one band's surface — edge + side + band window. */
@@ -110,11 +136,15 @@ export function bandSurfaceId(band: WallRenderBand): string {
 let installedIds = new Set<string>();
 
 /** Install/refresh the projected surfaces for every face band wearing a
- *  surface finish, and clear the ones that no longer exist. Safe to call with
- *  an empty list (clears the lane). */
-export function pushWallSurfaceFinishes(bands: readonly WallRenderBand[]): void {
+ *  surface finish, and clear the ones that no longer exist. Returns the ids
+ *  (bandSurfaceId) of the bands whose surfaces are ACTUALLY installed — the
+ *  bake keeps the flat face mesh for every unclaimed band, so a refused or
+ *  failed install degrades to the ordinary wall look instead of a hole in
+ *  the shell (fail OPEN for rendering; the refusal itself stays loud). Safe
+ *  to call with an empty list (clears the lane). */
+export function pushWallSurfaceFinishes(bands: readonly WallRenderBand[]): Set<string> {
   const host = globalThis as any;
-  if (typeof host.__surface_package_set !== 'function') return;
+  if (typeof host.__surface_package_set !== 'function') return new Set();
   const wanted = new Map<string, { band: WallRenderBand; entry: SurfaceFinishEntry }>();
   const entries: SurfaceFinishEntry[] = [];
   for (const band of bands) {
@@ -129,20 +159,37 @@ export function pushWallSurfaceFinishes(bands: readonly WallRenderBand[]): void 
   }
   if (wanted.size === 0) {
     installedIds = new Set();
-    return;
+    return installedIds;
   }
   const sel = ensureSurfaceSession(entries);
   if (!sel) {
     console.error('[surfaceFinishes] session compose/push failed — wall surface finishes not installed');
     installedIds = new Set();
-    return;
+    return installedIds;
   }
   const nextInstalled = new Set<string>();
   for (const [id, { band, entry }] of wanted) {
-    const plane = bandToProjectedPlane(band, entry);
-    const data = surfacePackageData(entry.pkg, sel.get(entry.pkg.id)!);
-    if (!plane || !data) continue;
-    if (host.__surface_package_set(id, plane, data) === 1) nextInstalled.add(id);
+    const fit = bandToProjectedPlane(band, entry);
+    if (!fit) continue;
+    // A coarsened lattice repacks the D extras with the EFFECTIVE spacings so
+    // the host's collision view derives its nested stride from the truth.
+    const pkg = fit.coarsened
+      ? {
+        ...entry.pkg,
+        evaluation: {
+          renderSpacing: fit.renderSpacing,
+          collisionSpacing: fit.renderSpacing * Math.max(1, Math.round(entry.pkg.evaluation.collisionSpacing / entry.pkg.evaluation.renderSpacing)),
+        },
+      }
+      : entry.pkg;
+    const data = surfacePackageData(pkg, sel.get(entry.pkg.id)!);
+    if (!data) continue;
+    if (host.__surface_package_set(id, fit.plane, data) === 1) {
+      nextInstalled.add(id);
+    } else {
+      console.error(`[surfaceFinishes] host refused surface '${id}' (${entry.pkg.id}) — its band keeps the flat wall look; see [r3d-proj] host logs`);
+    }
   }
   installedIds = nextInstalled;
+  return installedIds;
 }

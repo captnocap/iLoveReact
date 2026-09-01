@@ -14,6 +14,8 @@ import {
   type SurfaceSessionEntry,
 } from '../render3d/shaders/surfacePackage';
 import { ensureSurfaceSession } from '../render3d/surfaceSession';
+import { SURFACE_FINISH_PREFIX, bandSurfaceId, pushWallSurfaceFinishes } from '../world/surfaceFinishes';
+import type { WallRenderBand } from '../world/architectureBake';
 
 // Real-world brick sizing (measured size IS scale): 45cm x 15cm units with
 // 2cm relief — reads clearly at demo distance while staying wall-plausible.
@@ -67,6 +69,27 @@ const WALL_PLANES: Record<string, number[]> = {
   'rust-wall-demo': [3, 0, 0, 0, 0, 1, 0, 1, 0, 4, 3, 0.008, 1],
 };
 
+// The wall-lane proof band (req_4786 regression): a 14m x 4.5m wall whose
+// edge was drawn RIGHT-TO-LEFT, so the band frame is LEFT-HANDED — cross(u,v)
+// opposes the engine normal. This is the exact orientation that rendered as
+// an invisible dark face on the user's wall; the host now flips projection
+// and winding to face the band's authoritative normal. Pushed through the
+// REAL lane (pushWallSurfaceFinishes), catalog brick at true 215mm scale.
+const LANE_PROOF_BAND: WallRenderBand = {
+  floor: 0,
+  edgeId: 'demo-lane-edge',
+  role: 'face',
+  side: 'a',
+  materialId: `${SURFACE_FINISH_PREFIX}brick-wall`,
+  columnStartU: 0,
+  columnEndU: 224,
+  rowBottomU: 0,
+  rowTopU: 72,
+  quad: [[7, 0, -2.5], [-7, 0, -2.5], [-7, 4.5, -2.5], [7, 4.5, -2.5]],
+  normal: [0, 0, 1],
+  uv: [[0, 0], [14, 0], [14, 4.5], [0, 4.5]],
+};
+
 function installDemoSurfaces(): boolean {
   const host = globalThis as any;
   if (typeof host.__surface_package_formula !== 'function') return false;
@@ -92,6 +115,11 @@ function installDemoSurfaces(): boolean {
       continue;
     }
     host.__surface_package_set(entry.pkg.id, new Float32Array(plane), data);
+  }
+  // The wall-lane proof: through the REAL finish lane, left-handed frame.
+  const claimed = pushWallSurfaceFinishes([LANE_PROOF_BAND]);
+  if (!claimed.has(bandSurfaceId(LANE_PROOF_BAND))) {
+    console.error('[surface-demo] lane proof band was NOT claimed — the wall lane is broken');
   }
   return true;
 }
@@ -129,17 +157,33 @@ export default function SurfaceDemoSurface() {
           verified.add(entry.pkg.id);
         }
       }
-      if (verified.size >= SESSION.length) return;
+      // The lane proof band verifies through the same door, by its band id.
+      const laneId = bandSurfaceId(LANE_PROOF_BAND);
+      if (!verified.has(laneId)) {
+        const raw = typeof host.__surface_package_info === 'function' ? host.__surface_package_info(laneId) : '';
+        if (raw) {
+          try {
+            const status = JSON.parse(raw);
+            if (status.generated && status.collisionTriangles > 0) {
+              verified.add(laneId);
+              console.warn(`[surface-demo] VERIFIED wall-lane band (left-handed frame): ${raw}`);
+            }
+          } catch { verified.add(laneId); }
+        }
+      }
+      if (verified.size >= SESSION.length + 1) return;
       if (polls < 40) pollTimer = setTimeout(poll, 100);
       else console.error('[surface-demo] some surfaces never reported generated — check [r3d-proj] host logs');
     };
     pollTimer = setTimeout(poll, 100);
     return () => {
       if (pollTimer !== null) clearTimeout(pollTimer);
-      // Clear ONLY this route's surfaces — the wall-finish lane owns its own.
+      // Clear ONLY this route's surfaces — and release the lane proof band
+      // through the lane's own empty push.
       if (typeof host.__surface_package_clear === 'function') {
         for (const entry of SESSION) host.__surface_package_clear(entry.pkg.id);
       }
+      pushWallSurfaceFinishes([]);
     };
   }, []);
 

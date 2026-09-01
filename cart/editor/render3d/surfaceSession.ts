@@ -33,7 +33,13 @@ export function ensureSurfaceSession(entries: readonly SurfaceSessionEntry[]): M
     if (!union.has(entry.pkg.id)) union.set(entry.pkg.id, entry);
   }
   if (union.size === 0) return null;
-  const all = [...union.values()].sort((a, b) => (a.pkg.id < b.pkg.id ? -1 : 1));
+  // INSERTION order, never sorted: a selector is stamped into every installed
+  // surface's D section, so it must stay stable for the session's lifetime.
+  // Sorting here re-assigned selectors when a new package joined mid-session
+  // and every already-installed surface dispatched into the WRONG module —
+  // the rust wall rendered 76mm-relief brick, caught by the bounds gate
+  // (req_4786). Map iteration preserves insertion; entries only append.
+  const all = [...union.values()];
   const sig = all.map((e) => e.pkg.id).join('|');
   if (sig === pushedSig) return selectors;
   if (typeof host.__surface_package_formula !== 'function') return null;

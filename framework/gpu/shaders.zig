@@ -2290,7 +2290,8 @@ pub const projected_compute_prefix =
     \\    n_axis: vec3f,
     \\    meters_per_unit: f32,  // meters of world per one sp unit
     \\    sp_origin: vec2f,      // chart coordinate of lattice (0,0)
-    \\    _pad: vec2f,
+    \\    winding_flip: f32,     // 1 = left-handed frame: normals + winding flip to face n_axis
+    \\    _pad: f32,
     \\};
     \\@group(0) @binding(0) var<uniform> P: ProjParams;
     \\@group(0) @binding(1) var<storage, read> D: array<f32>;
@@ -2318,7 +2319,9 @@ pub const projected_compute_epilogue =
     \\    let hu = proj_height_m(sp + vec2f(0.0, du));
     \\    let tu = P.u_axis + P.n_axis * ((hr - hl) / (2.0 * P.spacing));
     \\    let tv = P.v_axis + P.n_axis * ((hu - hd) / (2.0 * P.spacing));
-    \\    let nrm = normalize(cross(tu, tv));
+    \\    // cross(tu, tv) follows the frame's own handedness; a left-handed
+    \\    // frame (winding_flip) negates it so the normal faces n_axis.
+    \\    let nrm = normalize(cross(tu, tv)) * select(1.0, -1.0, P.winding_flip > 0.5);
     \\    let pos = P.origin
     \\        + P.u_axis * (f32(gid.x) * P.spacing)
     \\        + P.v_axis * (f32(gid.y) * P.spacing)
